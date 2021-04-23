@@ -4,17 +4,21 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/linesmerrill/police-cad-api/logging"
-
 	"github.com/linesmerrill/police-cad-api/api"
+
+	"github.com/linesmerrill/police-cad-api/config"
+
+	"github.com/linesmerrill/police-cad-api/logging"
 )
 
 func main() {
-	r := api.New()
-	sugar := logging.New()
+	logger := logging.New()
 
-	sugar.Info("police-cad-api is up and running on port 8080")
-	err := http.ListenAndServe("localhost:8080", r)
+	p := config.Processor{Logger: logger}
+	r := api.New(p)
+
+	logger.Info("police-cad-api is up and running on port 8081")
+	err := http.ListenAndServe("localhost:8081", r)
 	if err != nil {
 		log.Fatal(err)
 	}
