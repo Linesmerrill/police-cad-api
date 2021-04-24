@@ -24,5 +24,5 @@ func main() {
 		"port", port,
 		"url", baseURL,
 	)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf("%v:%v", baseURL, port), a.Router))
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), a.Router))
 }
