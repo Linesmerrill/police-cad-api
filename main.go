@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,8 @@ func main() {
 
 	a.Initialize(os.Getenv("DB_URI"), os.Getenv("DB_NAME")) //initialize database and router
 
-	zap.S().Info("police-cad-api is up and running on port 8081")
-	log.Fatal(http.ListenAndServe("localhost:8081", a.Router))
+	port := os.Getenv("PORT")
+	baseURL := os.Getenv("BASE_URL")
+	zap.S().Infof("police-cad-api is up and running on port %v", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf("%v:%v", baseURL, port), a.Router))
 }
