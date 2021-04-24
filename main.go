@@ -20,6 +20,9 @@ func main() {
 
 	port := os.Getenv("PORT")
 	baseURL := os.Getenv("BASE_URL")
-	zap.S().Infof("police-cad-api is up and running on port %v", port)
+	zap.S().Infow("police-cad-api is up and running",
+		"port", port,
+		"url", baseURL,
+	)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%v:%v", baseURL, port), a.Router))
 }
