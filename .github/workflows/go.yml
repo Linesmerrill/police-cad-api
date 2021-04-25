@@ -33,4 +33,12 @@ jobs:
           go-version: 1.16
 
       - name: Test and Coverage
-        run: go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out
+        run: go test ./... -coverprofile=coverage.txt -covermode=atomic
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v1.0.2
+        with:
+          token: env.CODECOV_TOKEN
+          file: ./coverage.txt
+          flags: unittests
+          name: codecov-umbrella
