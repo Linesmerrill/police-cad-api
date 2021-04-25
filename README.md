@@ -1,7 +1,6 @@
 # Police CAD API
 
 [![Actions Status](https://github.com/linesmerrill/police-cad-api/workflows/build/badge.svg)](https://github.com/linesmerrill/police-cad-api/actions)
-
 [![codecov](https://codecov.io/gh/linesmerrill/police-cad-api/branch/master/graph/badge.svg)](https://codecov.io/gh/linesmerrill/police-cad-api)
 
 Built as a simple backend API to serve all routes associated with
