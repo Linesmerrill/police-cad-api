@@ -32,8 +32,5 @@ jobs:
         with:
           go-version: 1.16
 
-      - name: Test
-        run: go test -v ./...
-
-      - name: Coverage
+      - name: Test and Coverage
         run: go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out
