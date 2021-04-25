@@ -28,6 +28,7 @@ func (a *App) New() *mux.Router {
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 
 	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(a.CommunityHandler))).Methods("GET")
+	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(a.CommunityByOwnerHandler))).Methods("GET")
 
 	return r
 }
