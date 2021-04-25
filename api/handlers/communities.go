@@ -38,3 +38,29 @@ func (a *App) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+func (a *App) CommunityByOwnerHandler(w http.ResponseWriter, r *http.Request) {
+	commID := mux.Vars(r)["community_id"]
+	ownerID := mux.Vars(r)["owner_id"]
+
+	zap.S().Debugf("community_id: %v, owner_id: %v", commID, ownerID)
+
+	comm := models.Community{ID: commID, OwnerID: ownerID}
+	dbResp, err := comm.GetCommunityByOwner(context.Background(), a.DB)
+	if err != nil {
+		zap.S().With(err).Error("failed to get community by ID and ownerID")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(fmt.Sprintf(`{"response": "failed to get community by ID and ownerID, %v"}`, err)))
+		return
+	}
+
+	b, err := json.Marshal(dbResp)
+	if err != nil {
+		zap.S().With(err).Error("failed to marshal response")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf(`{"error": "failed to marshal response, %v"}`, err)))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
