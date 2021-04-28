@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,16 +43,33 @@ func TestHealthCheckRoute(t *testing.T) {
 	}
 }
 
-//func TestApp_CommunityHandler(t *testing.T) {
-//	a.Router = a.New()
-//	req, _ := http.NewRequest("GET", "/health", nil)
-//	response := executeRequest(req)
-//
-//	checkResponseCode(t, http.StatusNotFound, response.Code)
-//
-//	var m map[string]string
-//	json.Unmarshal(response.Body.Bytes(), &m)
-//	if m["error"] != "Product not found" {
-//		t.Errorf("Expected the 'error' key of the reponse to be set to 'Product not found'. Got '%s'", m["error"])
-//	}
-//}
+func TestApp_CommunityHandlerInvalidRoute(t *testing.T) {
+	a.Router = a.New()
+	req, _ := http.NewRequest("GET", "api/v1/community", nil)
+	response := executeRequest(req)
+
+	checkResponseCode(t, http.StatusMovedPermanently, response.Code)
+}
+
+func TestApp_CommunityHandlerUnauthorized(t *testing.T) {
+	a.Router = a.New()
+	req, _ := http.NewRequest("GET", "/api/v1/community/1234", nil)
+	response := executeRequest(req)
+
+	checkResponseCode(t, http.StatusUnauthorized, response.Code)
+}
+
+func TestApp_CommunityHandlerInvalidToken(t *testing.T) {
+	a.Router = a.New()
+	req, _ := http.NewRequest("GET", "/api/v1/community/1234", nil)
+	req.Header.Add("Authorization", "Bearer asdfasdf")
+	response := executeRequest(req)
+
+	checkResponseCode(t, http.StatusInternalServerError, response.Code)
+
+	var m map[string]string
+	json.Unmarshal(response.Body.Bytes(), &m)
+	if m["error"] != "failed to parse token, token contains an invalid number of segments" {
+		t.Errorf("Expected the 'error' key of the reponse to be set to 'failed to parse token, token contains an invalid number of segments'. Got '%s'", m["error"])
+	}
+}
