@@ -14,9 +14,9 @@ import (
 
 func main() {
 	a := handlers.App{}
-	config.New()
+	a.Config = *config.New()
 
-	a.Initialize(os.Getenv("DB_URI"), os.Getenv("DB_NAME")) //initialize database and router
+	a.Initialize() //initialize database and router
 
 	port := os.Getenv("PORT")
 	baseURL := os.Getenv("BASE_URL")
