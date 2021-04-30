@@ -3,23 +3,30 @@ package config
 import (
 	"fmt"
 	"net/http"
+	"os"
 
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
 // Config holds the project config values
 type Config struct {
-	MongoClient mongo.Client
+	Url          string
+	DatabaseName string
 }
 
 // New sets up all config related services
-func New() {
+func New() *Config {
 
 	//setup zap logger and replace default logger
 	logger := zap.NewExample()
 	defer logger.Sync()
 	_ = zap.ReplaceGlobals(logger)
+
+	return &Config{
+		Url:          os.Getenv("DB_URI"),
+		DatabaseName: os.Getenv("DB_NAME"),
+	}
+
 }
 
 // ErrorStatus is a useful function that will log, write http headers and body for a

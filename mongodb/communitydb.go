@@ -1,11 +1,11 @@
 package collections
 
+//go generate: mockery --name CommunityDatabase
+
 import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
-
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 const collectionName = "communities"
@@ -16,11 +16,11 @@ type CommunityDatabase interface {
 }
 
 type communityDatabase struct {
-	db *mongo.Database
+	db DatabaseHelper
 }
 
 // NewCommunityDatabase initializes a new instance of community database with the provided db connection
-func NewCommunityDatabase(db *mongo.Database) CommunityDatabase {
+func NewCommunityDatabase(db DatabaseHelper) CommunityDatabase {
 	return &communityDatabase{
 		db: db,
 	}
