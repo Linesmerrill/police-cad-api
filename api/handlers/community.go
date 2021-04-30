@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/linesmerrill/police-cad-api/mongodb"
+	"github.com/linesmerrill/police-cad-api/databases"
 
 	"github.com/linesmerrill/police-cad-api/config"
 
@@ -24,7 +24,7 @@ func (a *App) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 
 	zap.S().Debugf("community_id: %v", commID)
 
-	collectionDba := collections.NewCommunityDatabase(a.dbHelper)
+	collectionDba := databases.NewCommunityDatabase(a.dbHelper)
 	cID, err := primitive.ObjectIDFromHex(commID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
@@ -51,7 +51,7 @@ func (a *App) CommunityByOwnerHandler(w http.ResponseWriter, r *http.Request) {
 
 	zap.S().Debugf("community_id: %v, owner_id: %v", commID, ownerID)
 
-	collectionDba := collections.NewCommunityDatabase(a.dbHelper)
+	collectionDba := databases.NewCommunityDatabase(a.dbHelper)
 	cID, err := primitive.ObjectIDFromHex(commID)
 	if err != nil {
 		zap.S().With(err).Error("failed to get objectID from Hex")

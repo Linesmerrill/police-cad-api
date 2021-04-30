@@ -1,26 +1,43 @@
-package tests
+package databases_test
 
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/bson"
 
+	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/linesmerrill/police-cad-api/models"
-	"github.com/linesmerrill/police-cad-api/mongodb"
-	"github.com/linesmerrill/police-cad-api/mongodb/mocks"
 )
+
+func TestNewCommunityDatabase(t *testing.T) {
+	os.Setenv("DB_URI", "mongodb://127.0.0.1:27017")
+	os.Setenv("DB_NAME", "test")
+	conf := config.New()
+
+	dbClient, err := databases.NewClient(conf)
+	assert.NoError(t, err)
+
+	db := databases.NewDatabase(conf, dbClient)
+
+	userDB := databases.NewCommunityDatabase(db)
+
+	assert.NotEmpty(t, userDB)
+}
 
 func TestCommunityDatabase_FindOne(t *testing.T) {
 
 	// define variables for interfaces
-	var dbHelper collections.DatabaseHelper
-	var collectionHelper collections.CollectionHelper
-	var srHelperErr collections.SingleResultHelper
-	var srHelperCorrect collections.SingleResultHelper
+	var dbHelper databases.DatabaseHelper
+	var collectionHelper databases.CollectionHelper
+	var srHelperErr databases.SingleResultHelper
+	var srHelperCorrect databases.SingleResultHelper
 
 	// set interfaces implementation to mocked structures
 	dbHelper = &mocks.DatabaseHelper{}
@@ -51,7 +68,7 @@ func TestCommunityDatabase_FindOne(t *testing.T) {
 		On("Collection", "communities").Return(collectionHelper)
 
 	// Create new database with mocked Database interface
-	userDba := collections.NewCommunityDatabase(dbHelper)
+	userDba := databases.NewCommunityDatabase(dbHelper)
 
 	// Call method with defined filter, that in our mocked function returns
 	// mocked-error

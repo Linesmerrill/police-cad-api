@@ -5,8 +5,7 @@ package mocks
 import (
 	context "context"
 
-	collections "github.com/linesmerrill/police-cad-api/mongodb"
-
+	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -16,15 +15,15 @@ type CollectionHelper struct {
 }
 
 // FindOne provides a mock function with given fields: _a0, _a1
-func (_m *CollectionHelper) FindOne(_a0 context.Context, _a1 interface{}) collections.SingleResultHelper {
+func (_m *CollectionHelper) FindOne(_a0 context.Context, _a1 interface{}) databases.SingleResultHelper {
 	ret := _m.Called(_a0, _a1)
 
-	var r0 collections.SingleResultHelper
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) collections.SingleResultHelper); ok {
+	var r0 databases.SingleResultHelper
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) databases.SingleResultHelper); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(collections.SingleResultHelper)
+			r0 = ret.Get(0).(databases.SingleResultHelper)
 		}
 	}
 

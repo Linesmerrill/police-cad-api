@@ -6,9 +6,10 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/linesmerrill/police-cad-api/api/handlers"
+
 	"go.uber.org/zap"
 
-	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/config"
 )
 

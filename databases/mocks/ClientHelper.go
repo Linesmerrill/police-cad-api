@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	collections "github.com/linesmerrill/police-cad-api/mongodb"
+	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 
 	mongo "go.mongodb.org/mongo-driver/mongo"
@@ -29,15 +29,15 @@ func (_m *ClientHelper) Connect() error {
 }
 
 // Database provides a mock function with given fields: _a0
-func (_m *ClientHelper) Database(_a0 string) collections.DatabaseHelper {
+func (_m *ClientHelper) Database(_a0 string) databases.DatabaseHelper {
 	ret := _m.Called(_a0)
 
-	var r0 collections.DatabaseHelper
-	if rf, ok := ret.Get(0).(func(string) collections.DatabaseHelper); ok {
+	var r0 databases.DatabaseHelper
+	if rf, ok := ret.Get(0).(func(string) databases.DatabaseHelper); ok {
 		r0 = rf(_a0)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(collections.DatabaseHelper)
+			r0 = ret.Get(0).(databases.DatabaseHelper)
 		}
 	}
 

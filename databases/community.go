@@ -1,4 +1,4 @@
-package collections
+package databases
 
 //go generate: mockery --name CommunityDatabase
 
