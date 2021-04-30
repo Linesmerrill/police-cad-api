@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 
@@ -19,11 +17,6 @@ func main() {
 
 	a.Initialize() //initialize database and router
 
-	port := os.Getenv("PORT")
-	baseURL := os.Getenv("BASE_URL")
-	zap.S().Infow("police-cad-api is up and running",
-		"port", port,
-		"url", baseURL,
-	)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), a.Router))
+	zap.S().Infow("police-cad-api is up and running", "url", a.Config.BaseUrl, "port", a.Config.Port)
+	log.Fatal(http.ListenAndServe(":"+a.Config.Port, a.Router))
 }

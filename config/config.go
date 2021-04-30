@@ -12,6 +12,8 @@ import (
 type Config struct {
 	Url          string
 	DatabaseName string
+	BaseUrl      string
+	Port         string
 }
 
 // New sets up all config related services
@@ -25,6 +27,8 @@ func New() *Config {
 	return &Config{
 		Url:          os.Getenv("DB_URI"),
 		DatabaseName: os.Getenv("DB_NAME"),
+		BaseUrl:      os.Getenv("BASE_URL"),
+		Port:         os.Getenv("PORT"),
 	}
 
 }
