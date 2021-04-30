@@ -1,4 +1,4 @@
-package collections
+package databases
 
 import (
 	"context"
@@ -9,19 +9,24 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// DatabaseHelper contains the collection and client to be used to access the methods
+// defined below
 type DatabaseHelper interface {
 	Collection(name string) CollectionHelper
 	Client() ClientHelper
 }
 
+// CollectionHelper contains all the methods defined for collections in this project
 type CollectionHelper interface {
 	FindOne(context.Context, interface{}) SingleResultHelper
 }
 
+// SingleResultHelper contains a single method to decode the result
 type SingleResultHelper interface {
 	Decode(v interface{}) error
 }
 
+// ClientHelper defined to help at client creation inside main.go
 type ClientHelper interface {
 	Database(string) DatabaseHelper
 	Connect() error
@@ -48,12 +53,14 @@ type mongoSession struct {
 	mongo.Session
 }
 
+// NewClient uses the values from the config and returns a mongo client
 func NewClient(conf *config.Config) (ClientHelper, error) {
 	c, err := mongo.NewClient(options.Client().ApplyURI(conf.Url))
 
 	return &mongoClient{cl: c}, err
 }
 
+// NewDatabase uses the client from NewClient and sets the database name
 func NewDatabase(conf *config.Config, client ClientHelper) DatabaseHelper {
 	return client.Database(conf.DatabaseName)
 }

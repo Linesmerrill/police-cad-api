@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	collections "github.com/linesmerrill/police-cad-api/mongodb"
+	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -13,15 +13,15 @@ type DatabaseHelper struct {
 }
 
 // Client provides a mock function with given fields:
-func (_m *DatabaseHelper) Client() collections.ClientHelper {
+func (_m *DatabaseHelper) Client() databases.ClientHelper {
 	ret := _m.Called()
 
-	var r0 collections.ClientHelper
-	if rf, ok := ret.Get(0).(func() collections.ClientHelper); ok {
+	var r0 databases.ClientHelper
+	if rf, ok := ret.Get(0).(func() databases.ClientHelper); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(collections.ClientHelper)
+			r0 = ret.Get(0).(databases.ClientHelper)
 		}
 	}
 
@@ -29,15 +29,15 @@ func (_m *DatabaseHelper) Client() collections.ClientHelper {
 }
 
 // Collection provides a mock function with given fields: name
-func (_m *DatabaseHelper) Collection(name string) collections.CollectionHelper {
+func (_m *DatabaseHelper) Collection(name string) databases.CollectionHelper {
 	ret := _m.Called(name)
 
-	var r0 collections.CollectionHelper
-	if rf, ok := ret.Get(0).(func(string) collections.CollectionHelper); ok {
+	var r0 databases.CollectionHelper
+	if rf, ok := ret.Get(0).(func(string) databases.CollectionHelper); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(collections.CollectionHelper)
+			r0 = ret.Get(0).(databases.CollectionHelper)
 		}
 	}
 
