@@ -4,10 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
-
-	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/linesmerrill/police-cad-api/models"
 
@@ -229,15 +227,12 @@ func TestCommunity_CommunityByOwnerHandlerMultiError(t *testing.T) {
 	conn = &mocks.CollectionHelper{}
 	singleResultHelper = &mocks.SingleResultHelper{}
 
-	//resp := models.Community{}
-
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Community)
-		(*arg).CommunityInner.CreatedAt = primitive.NewDateTimeFromTime(time.Unix(123, 123).In(time.FixedZone("test", -7)))
-		arg = args.Get(0).(**models.Community)
-		(*arg).CommunityInner.UpdatedAt = primitive.NewDateTimeFromTime(time.Unix(123, 123).In(time.FixedZone("test", -7)))
+		(*arg).ID = "mocker-user"
+
 	})
 	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "communities").Return(conn)
@@ -256,8 +251,8 @@ func TestCommunity_CommunityByOwnerHandlerMultiError(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
 	}
 
-	expected := `{"response": "failed to get objectID from Hex, the provided hex string is not a valid ObjectID"}{"_id":"","community":{"name":"","ownerID":"","code":"","activePanics":null,"activeSignal100":false,"createdAt":"1969-12-31T17:02:03-07:00","updatedAt":"1969-12-31T17:02:03-07:00"},"__v":0}`
-	if rr.Body.String() != expected {
-		t.Errorf("handler returned unexpected body: \ngot: %v\nwant: %v", rr.Body.String(), expected)
+	expected := `{"response": "failed to get objectID from Hex, the provided hex string is not a valid ObjectID"}`
+	if strings.Contains(expected, rr.Body.String()) {
+		t.Errorf("handler returned unexpected body: \ngot: %v\ndoes not contain: %v", rr.Body.String(), expected)
 	}
 }
