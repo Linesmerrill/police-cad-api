@@ -14,6 +14,22 @@ type CollectionHelper struct {
 	mock.Mock
 }
 
+// Find provides a mock function with given fields: _a0, _a1
+func (_m *CollectionHelper) Find(_a0 context.Context, _a1 interface{}) databases.CursorHelper {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 databases.CursorHelper
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) databases.CursorHelper); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(databases.CursorHelper)
+		}
+	}
+
+	return r0
+}
+
 // FindOne provides a mock function with given fields: _a0, _a1
 func (_m *CollectionHelper) FindOne(_a0 context.Context, _a1 interface{}) databases.SingleResultHelper {
 	ret := _m.Called(_a0, _a1)

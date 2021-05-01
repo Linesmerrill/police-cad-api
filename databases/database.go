@@ -19,10 +19,15 @@ type DatabaseHelper interface {
 // CollectionHelper contains all the methods defined for collections in this project
 type CollectionHelper interface {
 	FindOne(context.Context, interface{}) SingleResultHelper
+	Find(context.Context, interface{}) CursorHelper
 }
 
 // SingleResultHelper contains a single method to decode the result
 type SingleResultHelper interface {
+	Decode(v interface{}) error
+}
+
+type CursorHelper interface {
 	Decode(v interface{}) error
 }
 
@@ -47,6 +52,10 @@ type mongoCollection struct {
 
 type mongoSingleResult struct {
 	sr *mongo.SingleResult
+}
+
+type mongoCursor struct {
+	cr *mongo.Cursor
 }
 
 type mongoSession struct {
@@ -94,6 +103,19 @@ func (mc *mongoCollection) FindOne(ctx context.Context, filter interface{}) Sing
 	return &mongoSingleResult{sr: singleResult}
 }
 
+func (mc *mongoCollection) Find(ctx context.Context, filter interface{}) CursorHelper {
+	cursor, _ := mc.coll.Find(ctx, filter)
+	return &mongoCursor{cr: cursor}
+}
+
 func (sr *mongoSingleResult) Decode(v interface{}) error {
 	return sr.sr.Decode(v)
+}
+
+func (cr *mongoCursor) Decode(v interface{}) error {
+	return cr.All(context.Background(), v)
+}
+
+func (cr *mongoCursor) All(ctx context.Context, results interface{}) error {
+	return cr.cr.All(ctx, results)
 }
