@@ -25,6 +25,11 @@ type App struct {
 // New creates a new mux router and all the routes
 func (a *App) New() *mux.Router {
 	r := mux.NewRouter()
+
+	u := User{
+		DB: databases.NewUserDatabase(a.dbHelper),
+	}
+
 	//healthchex
 	r.HandleFunc("/health", healthCheckHandler)
 
@@ -32,6 +37,7 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(a.CommunityHandler))).Methods("GET")
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(a.CommunityByOwnerHandler))).Methods("GET")
+	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
 
 	return r
 }
