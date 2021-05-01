@@ -26,17 +26,16 @@ type App struct {
 func (a *App) New() *mux.Router {
 	r := mux.NewRouter()
 
-	u := User{
-		DB: databases.NewUserDatabase(a.dbHelper),
-	}
+	u := User{DB: databases.NewUserDatabase(a.dbHelper)}
+	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper)}
 
 	//healthchex
 	r.HandleFunc("/health", healthCheckHandler)
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 
-	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(a.CommunityHandler))).Methods("GET")
-	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(a.CommunityByOwnerHandler))).Methods("GET")
+	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(c.CommunityHandler))).Methods("GET")
+	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByOwnerHandler))).Methods("GET")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
 
 	return r

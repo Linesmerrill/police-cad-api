@@ -24,7 +24,6 @@ func (u User) UserHandler(w http.ResponseWriter, r *http.Request) {
 
 	zap.S().Debugf("user_id: %v", commID)
 
-	//collectionDba := databases.NewUserDatabase(a.dbHelper)
 	cID, err := primitive.ObjectIDFromHex(commID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
