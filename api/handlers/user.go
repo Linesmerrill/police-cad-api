@@ -27,16 +27,19 @@ func (u User) UserHandler(w http.ResponseWriter, r *http.Request) {
 	cID, err := primitive.ObjectIDFromHex(commID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
 	}
 
 	dbResp, err := u.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
+		return
 	}
 
 	b, err := json.Marshal(dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
