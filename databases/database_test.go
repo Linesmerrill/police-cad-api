@@ -126,24 +126,5 @@ func TestRestOfInternalCode(t *testing.T) {
 	// call and we use incorrect call method
 	timeoutCtx, _ := context.WithTimeout(context.Background(), 1*time.Microsecond)
 	db.Collection("non-fake-existing-collection").FindOne(timeoutCtx, "incorrect-value").Decode(&result)
-
-	// insert and delete functions seems to panic instead of returning and error.
-	// I did not investigate anything in this case as this is not our main goal.
-	// Just define assert panic function and use this panicing function in it.
-	//var mongoPanics assert.PanicTestFunc
-
-	//mongoPanics = func() {
-	//	db.Collection("non-fake-existing-collection").InsertOne(timeoutCtx, result)
-	//}
-	//assert.Panics(t, mongoPanics)
-
-	//mongoPanics = func() {
-	//	db.Collection("non-fake-existing-collection").DeleteOne(timeoutCtx, result)
-	//}
-	//assert.Panics(t, mongoPanics)
-
-	// And it is done. We do not need to have mongo running and our code is
-	// covered 100%. Well the actual implementation is faked, but it should be
-	// tested via integration tests, not unit tests.
-
+	db.Collection("non-fake-existing-collection").Find(timeoutCtx, "incorrect-value").Decode(&result)
 }

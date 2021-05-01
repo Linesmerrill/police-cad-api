@@ -84,3 +84,57 @@ func TestUserDatabase_FindOne(t *testing.T) {
 	assert.Equal(t, &models.User{ID: "mocked-user"}, user)
 	assert.NoError(t, err)
 }
+
+func TestUserDatabase_Find(t *testing.T) {
+
+	// define variables for interfaces
+	var dbHelper databases.DatabaseHelper
+	var collectionHelper databases.CollectionHelper
+	var srHelperErr databases.SingleResultHelper
+	var srHelperCorrect databases.SingleResultHelper
+
+	// set interfaces implementation to mocked structures
+	dbHelper = &mocks.DatabaseHelper{}
+	collectionHelper = &mocks.CollectionHelper{}
+	srHelperErr = &mocks.SingleResultHelper{}
+	srHelperCorrect = &mocks.SingleResultHelper{}
+
+	srHelperErr.(*mocks.SingleResultHelper).
+		On("Decode", mock.Anything).
+		Return(errors.New("mocked-error"))
+
+	srHelperCorrect.(*mocks.SingleResultHelper).
+		On("Decode", mock.Anything).
+		Return(nil).Run(func(args mock.Arguments) {
+		arg := args.Get(0).(*[]models.User)
+		(*arg) = []models.User{{ID: "mocked-user"}}
+	})
+
+	collectionHelper.(*mocks.CollectionHelper).
+		On("Find", context.Background(), bson.M{"error": true}).
+		Return(srHelperErr)
+
+	collectionHelper.(*mocks.CollectionHelper).
+		On("Find", context.Background(), bson.M{"error": false}).
+		Return(srHelperCorrect)
+
+	dbHelper.(*mocks.DatabaseHelper).
+		On("Collection", "users").Return(collectionHelper)
+
+	// Create new database with mocked Database interface
+	userDba := databases.NewUserDatabase(dbHelper)
+
+	// Call method with defined filter, that in our mocked function returns
+	// mocked-error
+	user, err := userDba.Find(context.Background(), bson.M{"error": true})
+
+	assert.Empty(t, user)
+	assert.EqualError(t, err, "mocked-error")
+
+	// Now call the same function with different different filter for correct
+	// result
+	user, err = userDba.Find(context.Background(), bson.M{"error": false})
+
+	assert.Equal(t, []models.User{{ID: "mocked-user"}}, user)
+	assert.NoError(t, err)
+}
