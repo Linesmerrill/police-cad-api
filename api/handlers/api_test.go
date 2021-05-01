@@ -80,12 +80,19 @@ func TestApp_CommunityHandlerInvalidToken(t *testing.T) {
 	}
 }
 
-func TestApp_Initialize(t *testing.T) {
+func TestApp_InitializeInvalidURI(t *testing.T) {
 	a.Router = a.New()
-
 	err := a.Initialize()
 
 	assert.EqualErrorf(t, err, "error parsing uri: scheme must be \"mongodb\" or \"mongodb+srv\"", "")
+}
+
+func TestApp_InitializeSuccess(t *testing.T) {
+	a.Router = a.New()
+	a.Config.Url = "mongodb://localhost/knoldus"
+	err := a.Initialize()
+
+	assert.NoError(t, err, "")
 }
 
 func TestApp_InitializeRoutes(t *testing.T) {
