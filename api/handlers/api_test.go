@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -78,15 +80,18 @@ func TestApp_CommunityHandlerInvalidToken(t *testing.T) {
 	}
 }
 
-//func TestApp_CommunityHandlerValidToken(t *testing.T) {
-//	os.Setenv("SECRET_KEY", "test")
-//	a.DB = MockDB
-//	a.Router = a.New()
-//	req, _ := http.NewRequest("GET", "/api/v1/community/1234", nil)
-//	req.Header.Add("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.5mhBHqs5_DTLdINd9p5m7ZJ6XD0Xc55kIaCRY5r6HRA")
-//	response := executeRequest(req)
-//
-//	checkResponseCode(t, http.StatusOK, response.Code)
-//
-//	assert.Contains(t, response.Body.String(), "this stuff")
-//}
+func TestApp_Initialize(t *testing.T) {
+	a.Router = a.New()
+
+	err := a.Initialize()
+
+	assert.EqualErrorf(t, err, "error parsing uri: scheme must be \"mongodb\" or \"mongodb+srv\"", "")
+}
+
+func TestApp_InitializeRoutes(t *testing.T) {
+	a := App{}
+	a.initializeRoutes()
+
+	assert.NotEmpty(t, a.Router)
+
+}

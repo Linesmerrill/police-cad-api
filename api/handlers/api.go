@@ -43,24 +43,27 @@ func (a *App) New() *mux.Router {
 }
 
 // Initialize is invoked by main to connect with the database and create a router
-func (a *App) Initialize() {
+func (a *App) Initialize() error {
 
 	client, err := databases.NewClient(&a.Config)
 	if err != nil {
 		//if we fail to create a new database client, then kill the pod
-		zap.S().With(err).Fatal("failed to create new client")
+		zap.S().With(err).Error("failed to create new client")
+		return err
 	}
 
 	a.dbHelper = databases.NewDatabase(&a.Config, client)
 	err = client.Connect()
 	if err != nil {
 		//if we fail to connect to the database, then kill the pod
-		zap.S().With(err).Fatal("failed to connect to database")
+		zap.S().With(err).Error("failed to connect to database")
+		return err
 	}
 	zap.S().Info("police-cad-api has connected to the database")
 
 	//initialize api router
 	a.initializeRoutes()
+	return nil
 
 }
 
