@@ -235,10 +235,9 @@ func TestCommunity_CommunityByOwnerHandlerMultiError(t *testing.T) {
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Community)
-		(*arg).CommunityInner.CreatedAt = primitive.NewDateTimeFromTime(time.Date(2020, 1, 1, 12, 00, 00, 00, time.Local))
+		(*arg).CommunityInner.CreatedAt = primitive.NewDateTimeFromTime(time.Date(2020, 1, 1, 12, 00, 00, 00, time.UTC))
 		arg = args.Get(0).(**models.Community)
-		(*arg).CommunityInner.UpdatedAt = primitive.NewDateTimeFromTime(time.Date(2020, 1, 1, 12, 00, 00, 00, time.Local))
-
+		(*arg).CommunityInner.UpdatedAt = primitive.NewDateTimeFromTime(time.Date(2020, 1, 1, 12, 00, 00, 00, time.UTC))
 	})
 	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "communities").Return(conn)
@@ -257,8 +256,8 @@ func TestCommunity_CommunityByOwnerHandlerMultiError(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
 	}
 
-	expected := `{"response": "failed to get objectID from Hex, the provided hex string is not a valid ObjectID"}{"_id":"","community":{"name":"","ownerID":"","code":"","activePanics":null,"activeSignal100":false,"createdAt":"2020-01-01T12:00:00-07:00","updatedAt":"2020-01-01T12:00:00-07:00"},"__v":0}`
+	expected := `{"response": "failed to get objectID from Hex, the provided hex string is not a valid ObjectID"}{"_id":"","community":{"name":"","ownerID":"","code":"","activePanics":null,"activeSignal100":false,"createdAt":"2020-01-01T05:00:00-07:00","updatedAt":"2020-01-01T05:00:00-07:00"},"__v":0}`
 	if rr.Body.String() != expected {
-		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
+		t.Errorf("handler returned unexpected body: got %v\nwant %v", rr.Body.String(), expected)
 	}
 }
