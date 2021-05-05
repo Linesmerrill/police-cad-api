@@ -429,7 +429,7 @@ func TestUser_UsersFindAllHandlerSuccess(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	testUser := []models.User{}
+	var testUser []models.User
 	json.Unmarshal(rr.Body.Bytes(), &testUser)
 
 	assert.Equal(t, "608cafd695eb9dc05379b7f3", testUser[0].ID)

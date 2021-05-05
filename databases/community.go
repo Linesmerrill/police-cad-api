@@ -13,6 +13,7 @@ const collectionName = "communities"
 // CommunityDatabase contains the methods to use with the community database
 type CommunityDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Community, error)
+	Find(ctx context.Context, filter interface{}) ([]models.Community, error)
 }
 
 type communityDatabase struct {
@@ -33,4 +34,13 @@ func (c *communityDatabase) FindOne(ctx context.Context, filter interface{}) (*m
 		return nil, err
 	}
 	return community, nil
+}
+
+func (c *communityDatabase) Find(ctx context.Context, filter interface{}) ([]models.Community, error) {
+	var communities []models.Community
+	err := c.db.Collection(collectionName).Find(ctx, filter).Decode(&communities)
+	if err != nil {
+		return nil, err
+	}
+	return communities, nil
 }

@@ -27,20 +27,20 @@ func NewUserDatabase(db DatabaseHelper) UserDatabase {
 	}
 }
 
-func (c *userDatabase) FindOne(ctx context.Context, filter interface{}) (*models.User, error) {
+func (u *userDatabase) FindOne(ctx context.Context, filter interface{}) (*models.User, error) {
 	user := &models.User{}
-	err := c.db.Collection(userName).FindOne(ctx, filter).Decode(&user)
+	err := u.db.Collection(userName).FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		return nil, err
 	}
 	return user, nil
 }
 
-func (c *userDatabase) Find(ctx context.Context, filter interface{}) ([]models.User, error) {
-	var user []models.User
-	err := c.db.Collection(userName).Find(ctx, filter).Decode(&user)
+func (u *userDatabase) Find(ctx context.Context, filter interface{}) ([]models.User, error) {
+	var users []models.User
+	err := u.db.Collection(userName).Find(ctx, filter).Decode(&users)
 	if err != nil {
 		return nil, err
 	}
-	return user, nil
+	return users, nil
 }
