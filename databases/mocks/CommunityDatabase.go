@@ -15,6 +15,29 @@ type CommunityDatabase struct {
 	mock.Mock
 }
 
+// Find provides a mock function with given fields: ctx, filter
+func (_m *CommunityDatabase) Find(ctx context.Context, filter interface{}) ([]models.Community, error) {
+	ret := _m.Called(ctx, filter)
+
+	var r0 []models.Community
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) []models.Community); ok {
+		r0 = rf(ctx, filter)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.Community)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
+		r1 = rf(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // FindOne provides a mock function with given fields: ctx, filter
 func (_m *CommunityDatabase) FindOne(ctx context.Context, filter interface{}) (*models.Community, error) {
 	ret := _m.Called(ctx, filter)
