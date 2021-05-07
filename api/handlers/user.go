@@ -3,8 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
+
+	"github.com/linesmerrill/police-cad-api/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
@@ -57,12 +58,11 @@ func (u User) UsersFindAllHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
 	}
-
-	if len(dbResp) < 1 {
-		config.ErrorStatus("no matching results found", http.StatusNotFound, w, errors.New("mongo: no documents found with matching query"))
-		return
+	// Because the frontend requires that the data elements inside models.User exist, if
+	// len == 0 then we will just return an empty data object
+	if len(dbResp) == 0 {
+		dbResp = []models.User{}
 	}
-
 	b, err := json.Marshal(dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)

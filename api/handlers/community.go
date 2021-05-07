@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -87,11 +86,6 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 	dbResp, err := c.DB.Find(context.Background(), bson.M{"community.ownerID": ownerID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ownerID", http.StatusNotFound, w, err)
-		return
-	}
-
-	if len(dbResp) < 1 {
-		config.ErrorStatus("no matching results found", http.StatusNotFound, w, errors.New("mongo: no documents found with matching query"))
 		return
 	}
 

@@ -551,7 +551,7 @@ func TestCommunity_CommunitiesByOwnerIDHandlerSuccess(t *testing.T) {
 	assert.Equal(t, "608cafe595eb9dc05379b7f4", testCommunity[0].ID)
 }
 
-func TestUser_UCommunitiesByOwnerIDHandlerEmptyResponse(t *testing.T) {
+func TestUser_CommunitiesByOwnerIDHandlerEmptyResponse(t *testing.T) {
 	req, err := http.NewRequest("GET", "/api/v1/communities/608cafd695eb9dc05379bddd", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -589,11 +589,11 @@ func TestUser_UCommunitiesByOwnerIDHandlerEmptyResponse(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	if status := rr.Code; status != http.StatusNotFound {
+	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"response": "no matching results found, mongo: no documents found with matching query"}`
+	expected := "null"
 	if rr.Body.String() != expected {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
