@@ -473,11 +473,11 @@ func TestUser_UsersFindAllHandlerEmptyResponse(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	if status := rr.Code; status != http.StatusNotFound {
+	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"response": "no matching results found, mongo: no documents found with matching query"}`
+	expected := "[]"
 	if rr.Body.String() != expected {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
