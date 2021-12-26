@@ -7,18 +7,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/gorilla/mux"
-
-	"github.com/linesmerrill/police-cad-api/models"
-
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
-
-	"github.com/linesmerrill/police-cad-api/api/handlers"
+	"github.com/linesmerrill/police-cad-api/models"
 )
 
 type MockDatabaseHelper struct {
