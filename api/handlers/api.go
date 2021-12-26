@@ -4,16 +4,13 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/linesmerrill/police-cad-api/api/handlers/search"
-
-	"github.com/linesmerrill/police-cad-api/api"
-
-	"github.com/linesmerrill/police-cad-api/databases"
-
-	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
-	"github.com/gorilla/mux"
+	"github.com/linesmerrill/police-cad-api/api"
+	"github.com/linesmerrill/police-cad-api/api/handlers/search"
+	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/linesmerrill/police-cad-api/databases"
 )
 
 // App stores the router and db connection so it can be reused
