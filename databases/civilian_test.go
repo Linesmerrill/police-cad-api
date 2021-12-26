@@ -16,7 +16,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
-func TestNewCommunityDatabase(t *testing.T) {
+func TestNewCivilianDatabase(t *testing.T) {
 	os.Setenv("DB_URI", "mongodb://127.0.0.1:27017")
 	os.Setenv("DB_NAME", "test")
 	conf := config.New()
@@ -26,12 +26,12 @@ func TestNewCommunityDatabase(t *testing.T) {
 
 	db := databases.NewDatabase(conf, dbClient)
 
-	userDB := databases.NewCommunityDatabase(db)
+	userDB := databases.NewCivilianDatabase(db)
 
 	assert.NotEmpty(t, userDB)
 }
 
-func TestCommunityDatabase_FindOne(t *testing.T) {
+func TestCivilianDatabase_FindOne(t *testing.T) {
 
 	// define variables for interfaces
 	var dbHelper databases.DatabaseHelper
@@ -52,7 +52,7 @@ func TestCommunityDatabase_FindOne(t *testing.T) {
 	srHelperCorrect.(*mocks.SingleResultHelper).
 		On("Decode", mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		arg := args.Get(0).(**models.Community)
+		arg := args.Get(0).(**models.Civilian)
 		(*arg).ID = "mocked-user"
 	})
 
@@ -65,10 +65,10 @@ func TestCommunityDatabase_FindOne(t *testing.T) {
 		Return(srHelperCorrect)
 
 	dbHelper.(*mocks.DatabaseHelper).
-		On("Collection", "communities").Return(collectionHelper)
+		On("Collection", "civilians").Return(collectionHelper)
 
 	// Create new database with mocked Database interface
-	userDba := databases.NewCommunityDatabase(dbHelper)
+	userDba := databases.NewCivilianDatabase(dbHelper)
 
 	// Call method with defined filter, that in our mocked function returns
 	// mocked-error
@@ -81,11 +81,11 @@ func TestCommunityDatabase_FindOne(t *testing.T) {
 	// result
 	user, err = userDba.FindOne(context.Background(), bson.M{"error": false})
 
-	assert.Equal(t, &models.Community{ID: "mocked-user"}, user)
+	assert.Equal(t, &models.Civilian{ID: "mocked-user"}, user)
 	assert.NoError(t, err)
 }
 
-func TestCommunityDatabase_Find(t *testing.T) {
+func TestCivilianDatabase_Find(t *testing.T) {
 
 	// define variables for interfaces
 	var dbHelper databases.DatabaseHelper
@@ -106,8 +106,8 @@ func TestCommunityDatabase_Find(t *testing.T) {
 	srHelperCorrect.(*mocks.SingleResultHelper).
 		On("Decode", mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		arg := args.Get(0).(*[]models.Community)
-		*arg = []models.Community{{ID: "mocked-user"}}
+		arg := args.Get(0).(*[]models.Civilian)
+		*arg = []models.Civilian{{ID: "mocked-user"}}
 	})
 
 	collectionHelper.(*mocks.CollectionHelper).
@@ -119,10 +119,10 @@ func TestCommunityDatabase_Find(t *testing.T) {
 		Return(srHelperCorrect)
 
 	dbHelper.(*mocks.DatabaseHelper).
-		On("Collection", "communities").Return(collectionHelper)
+		On("Collection", "civilians").Return(collectionHelper)
 
 	// Create new database with mocked Database interface
-	userDba := databases.NewCommunityDatabase(dbHelper)
+	userDba := databases.NewCivilianDatabase(dbHelper)
 
 	// Call method with defined filter, that in our mocked function returns
 	// mocked-error
@@ -135,6 +135,6 @@ func TestCommunityDatabase_Find(t *testing.T) {
 	// result
 	user, err = userDba.Find(context.Background(), bson.M{"error": false})
 
-	assert.Equal(t, []models.Community{{ID: "mocked-user"}}, user)
+	assert.Equal(t, []models.Civilian{{ID: "mocked-user"}}, user)
 	assert.NoError(t, err)
 }
