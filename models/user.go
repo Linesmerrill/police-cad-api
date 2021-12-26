@@ -1,13 +1,14 @@
 package models
 
-// User holds the structure for the community collection in mongo
+// User holds the structure for the user collection in mongo
 type User struct {
-	ID        string    `json:"_id" bson:"_id"`
-	UserInner UserInner `json:"user" bson:"user"`
-	Version   int32     `json:"__v" bson:"__v"`
+	ID      string      `json:"_id" bson:"_id"`
+	Details UserDetails `json:"user" bson:"user"`
+	Version int32       `json:"__v" bson:"__v"`
 }
 
-type UserInner struct {
+// UserDetails holds the structure for the inner user structure as defined in the user collection in mongo
+type UserDetails struct {
 	Address              string      `json:"address" bson:"address"`
 	ActiveCommunity      string      `json:"activeCommunity" bson:"activeCommunity"`
 	CallSign             string      `json:"callSign" bson:"callSign"`
