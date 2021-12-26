@@ -9,3 +9,7 @@ the official [Lines Police CAD](https://github.com/Linesmerrill/police-cad).
 ## Routes
 
 To view the routes, check our swagger [here](#routes)
+
+## Generate Mocks before committing code
+
+`$ make mocks`
