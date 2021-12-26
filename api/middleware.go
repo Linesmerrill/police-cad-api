@@ -8,9 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/form3tech-oss/jwt-go"
+	"go.uber.org/zap"
 )
 
 type key int
@@ -19,11 +18,12 @@ const (
 	keyPrincipalID key = iota
 )
 
+// Middleware adds some basic header authentication around accessing the routes
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		authHeader := strings.Split(r.Header.Get("Authorization"), "Bearer ")
-		// we dont really care about the error here, if it fails then oh well :shrug:
+		// we don't really care about the error here, if it fails then oh well :shrug:
 		dump, _ := httputil.DumpRequest(r, true)
 		zap.S().Debugw("incoming request",
 			"request body", string(dump))

@@ -5,18 +5,16 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/linesmerrill/police-cad-api/databases"
-
-	"github.com/linesmerrill/police-cad-api/config"
-
+	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-
 	"go.uber.org/zap"
 
-	"github.com/gorilla/mux"
+	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/linesmerrill/police-cad-api/databases"
 )
 
+// Community struct mostly used for mocking tests
 type Community struct {
 	DB databases.CommunityDatabase
 }

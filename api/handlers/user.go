@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/linesmerrill/police-cad-api/models"
-
-	"go.mongodb.org/mongo-driver/bson/primitive"
-
 	"github.com/gorilla/mux"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.uber.org/zap"
+
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.uber.org/zap"
+	"github.com/linesmerrill/police-cad-api/models"
 )
 
 type User struct {

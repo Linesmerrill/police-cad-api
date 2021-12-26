@@ -3,10 +3,10 @@ package databases
 import (
 	"context"
 
-	"github.com/linesmerrill/police-cad-api/config"
-
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"github.com/linesmerrill/police-cad-api/config"
 )
 
 // DatabaseHelper contains the collection and client to be used to access the methods
