@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/linesmerrill/police-cad-api/api/handlers/search"
+
 	"github.com/linesmerrill/police-cad-api/api"
 
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -28,6 +30,8 @@ func (a *App) New() *mux.Router {
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper)}
+	n := search.Name{DB: databases.NewCivilianDatabase(a.dbHelper)}
+	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 
 	//healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -39,6 +43,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
 	apiCreate.Handle("/users/{active_community_id}", api.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET")
+	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
+	apiCreate.Handle("/civilians", api.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
+	apiCreate.Handle("/name-search", api.Middleware(http.HandlerFunc(n.NameSearchHandler))).Methods("GET")
 
 	return r
 }
