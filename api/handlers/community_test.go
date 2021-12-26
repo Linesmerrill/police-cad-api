@@ -93,7 +93,7 @@ func TestCommunity_CommunityHandlerJsonMarshalError(t *testing.T) {
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Community)
-		(*arg).CommunityInner.ActivePanics = x
+		(*arg).Details.ActivePanics = x
 
 	})
 	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -285,7 +285,7 @@ func TestCommunity_CommunityByOwnerHandlerJsonMarshalError(t *testing.T) {
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Community)
-		(*arg).CommunityInner.ActivePanics = x
+		(*arg).Details.ActivePanics = x
 
 	})
 	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -432,7 +432,7 @@ func TestCommunity_CommunitiesByOwnerIDHandlerJsonMarshalError(t *testing.T) {
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Community)
-		*arg = []models.Community{{CommunityInner: models.CommunityInner{ActivePanics: x}}}
+		*arg = []models.Community{{Details: models.CommunityDetails{ActivePanics: x}}}
 	})
 	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "communities").Return(conn)

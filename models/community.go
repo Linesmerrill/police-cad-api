@@ -6,12 +6,13 @@ import (
 
 // Community holds the structure for the community collection in mongo
 type Community struct {
-	ID             string         `json:"_id" bson:"_id"`
-	CommunityInner CommunityInner `json:"community" bson:"community"`
-	Version        int32          `json:"__v" bson:"__v"`
+	ID      string           `json:"_id" bson:"_id"`
+	Details CommunityDetails `json:"community" bson:"community"`
+	Version int32            `json:"__v" bson:"__v"`
 }
 
-type CommunityInner struct {
+// CommunityDetails holds the structure for the inner community collection in mongo
+type CommunityDetails struct {
 	Name            string                 `json:"name"`
 	OwnerID         string                 `json:"ownerID"`
 	Code            string                 `json:"code"`

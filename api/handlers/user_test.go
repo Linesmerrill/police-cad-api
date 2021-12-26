@@ -128,7 +128,7 @@ func TestUser_UserHandlerJsonMarshalError(t *testing.T) {
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.User)
-		(*arg).UserInner.CreatedAt = x
+		(*arg).Details.CreatedAt = x
 	})
 	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
@@ -317,7 +317,7 @@ func TestUser_UsersFindAllHandlerJsonMarshalError(t *testing.T) {
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.User)
-		(*arg) = []models.User{{UserInner: models.UserInner{CreatedAt: x}}}
+		(*arg) = []models.User{{Details: models.UserDetails{CreatedAt: x}}}
 	})
 	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
