@@ -17,8 +17,8 @@ import (
 )
 
 func TestNewCivilianDatabase(t *testing.T) {
-	os.Setenv("DB_URI", "mongodb://127.0.0.1:27017")
-	os.Setenv("DB_NAME", "test")
+	_ = os.Setenv("DB_URI", "mongodb://127.0.0.1:27017")
+	_ = os.Setenv("DB_NAME", "test")
 	conf := config.New()
 
 	dbClient, err := databases.NewClient(conf)
@@ -77,7 +77,7 @@ func TestCivilianDatabase_FindOne(t *testing.T) {
 	assert.Empty(t, user)
 	assert.EqualError(t, err, "mocked-error")
 
-	// Now call the same function with different different filter for correct
+	// Now call the same function with different filter for correct
 	// result
 	user, err = userDba.FindOne(context.Background(), bson.M{"error": false})
 

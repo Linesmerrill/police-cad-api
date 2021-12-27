@@ -29,6 +29,7 @@ func (a *App) New() *mux.Router {
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper)}
 	n := search.Name{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
+	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 
 	//healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -43,6 +44,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilians", api.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
 	apiCreate.Handle("/name-search", api.Middleware(http.HandlerFunc(n.NameSearchHandler))).Methods("GET")
+	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
+	apiCreate.Handle("/vehicles", api.Middleware(http.HandlerFunc(v.VehicleHandler))).Methods("GET")
 
 	return r
 }
