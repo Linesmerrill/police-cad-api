@@ -46,8 +46,7 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
-// CommunityByCommunityAndOwnerIDHandler creates a route that will return a community that contains the specified
-// ownerID
+// CommunityByCommunityAndOwnerIDHandler returns a community that contains the specified ownerID
 func (c Community) CommunityByCommunityAndOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
 	commID := mux.Vars(r)["community_id"]
 	ownerID := mux.Vars(r)["owner_id"]
@@ -74,8 +73,7 @@ func (c Community) CommunityByCommunityAndOwnerIDHandler(w http.ResponseWriter, 
 	w.Write(b)
 }
 
-// CommunitiesByOwnerIDHandler creates a route that will return all communities that contain the specified
-// ownerID
+// CommunitiesByOwnerIDHandler returns all communities that contain the specified ownerID
 func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
 	ownerID := mux.Vars(r)["owner_id"]
 
