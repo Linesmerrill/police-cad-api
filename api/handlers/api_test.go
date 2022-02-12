@@ -88,7 +88,7 @@ func TestApp_InitializeInvalidURI(t *testing.T) {
 
 func TestApp_InitializeSuccess(t *testing.T) {
 	a.Router = a.New()
-	a.Config.Url = "mongodb://localhost/knoldus"
+	a.Config.URL = "mongodb://localhost/knoldus"
 	err := a.Initialize()
 
 	assert.NoError(t, err, "")
