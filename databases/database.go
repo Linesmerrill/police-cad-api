@@ -27,6 +27,7 @@ type SingleResultHelper interface {
 	Decode(v interface{}) error
 }
 
+// CursorHelper contains a method to decode the cursor
 type CursorHelper interface {
 	Decode(v interface{}) error
 }
@@ -64,7 +65,7 @@ type mongoSession struct {
 
 // NewClient uses the values from the config and returns a mongo client
 func NewClient(conf *config.Config) (ClientHelper, error) {
-	c, err := mongo.NewClient(options.Client().ApplyURI(conf.Url))
+	c, err := mongo.NewClient(options.Client().ApplyURI(conf.URL))
 
 	return &mongoClient{cl: c}, err
 }
