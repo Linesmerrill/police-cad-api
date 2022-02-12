@@ -20,6 +20,6 @@ func main() {
 		return
 	}
 
-	zap.S().Infow("police-cad-api is up and running", "url", a.Config.BaseUrl, "port", a.Config.Port)
+	zap.S().Infow("police-cad-api is up and running", "url", a.Config.BaseURL, "port", a.Config.Port)
 	log.Fatal(http.ListenAndServe(":"+a.Config.Port, a.Router))
 }

@@ -10,9 +10,9 @@ import (
 
 // Config holds the project config values
 type Config struct {
-	Url          string
+	URL          string
 	DatabaseName string
-	BaseUrl      string
+	BaseURL      string
 	Port         string
 }
 
@@ -20,14 +20,18 @@ type Config struct {
 func New() *Config {
 
 	//setup zap logger and replace default logger
-	logger := zap.NewExample()
+	logger, err := setLogger(os.Getenv("ENV"))
+	if err != nil {
+		// if we get an error, we will just set the default to debug and move on
+		zap.S().With(err).Warn("issue setting logger")
+	}
 	defer logger.Sync()
 	_ = zap.ReplaceGlobals(logger)
 
 	return &Config{
-		Url:          os.Getenv("DB_URI"),
+		URL:          os.Getenv("DB_URI"),
 		DatabaseName: os.Getenv("DB_NAME"),
-		BaseUrl:      os.Getenv("BASE_URL"),
+		BaseURL:      os.Getenv("BASE_URL"),
 		Port:         os.Getenv("PORT"),
 	}
 
@@ -40,4 +44,17 @@ func ErrorStatus(message string, httpStatusCode int, w http.ResponseWriter, err 
 	w.WriteHeader(httpStatusCode)
 	w.Write([]byte(fmt.Sprintf(`{"response": "%s, %v"}`, message, err)))
 	return
+}
+
+// setLogger is a helper function to set the logger based on the environment
+func setLogger(env string) (*zap.Logger, error) {
+	if env == "production" {
+		return zap.NewProduction()
+	} else if env == "development" {
+		return zap.NewDevelopment()
+	} else if env == "local" {
+		return zap.NewExample(), nil
+	} else {
+		return zap.NewExample(), fmt.Errorf("cannot find ENV var so defaulting to debug level logging")
+	}
 }
