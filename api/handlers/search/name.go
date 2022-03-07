@@ -16,7 +16,8 @@ import (
 
 // Name ...
 type Name struct {
-	DB databases.CivilianDatabase
+	DB                databases.CivilianDatabase
+	VerifyInCommunity func(string, string) bool
 }
 
 // NameSearchHandler ...
@@ -25,11 +26,17 @@ func (n Name) NameSearchHandler(w http.ResponseWriter, r *http.Request) {
 	firstName := r.URL.Query().Get("first_name")
 	lastName := r.URL.Query().Get("last_name")
 	dob := r.URL.Query().Get("dob")
+	userID := r.URL.Query().Get("user_id")
 	communityID := r.URL.Query().Get("community_id")
 
 	zap.S().Debugf("first_name: %v, last_name: %v, dob: %v, community_id: %v", firstName, lastName, dob, communityID)
 
 	//TODO need to check if user is in community before searching just the name
+	if inCommunity := n.VerifyInCommunity(userID, communityID); !inCommunity {
+		// I guess if this is the case in here, you want to search the name with the 'dob'
+		// Otherwise, you could search just the name as they are in the same community
+	}
+
 	dbResp, err := n.DB.Find(context.TODO(), bson.M{
 		"$and": []bson.M{
 			bson.M{
