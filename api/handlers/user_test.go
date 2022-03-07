@@ -91,8 +91,9 @@ func TestUser_UserHandlerInvalidID(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
 	}
 
-	expected := `{"response": "failed to get objectID from Hex, the provided hex string is not a valid ObjectID"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get objectID from Hex", Error: "the provided hex string is not a valid ObjectID"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }
@@ -143,8 +144,9 @@ func TestUser_UserHandlerJsonMarshalError(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusInternalServerError)
 	}
 
-	expected := `{"response": "failed to marshal response, json: unsupported type: chan int"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to marshal response", Error: "json: unsupported type: chan int"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }
@@ -188,8 +190,9 @@ func TestUser_UserHandlerFailedToFindOne(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
 	}
 
-	expected := `{"response": "failed to get user by ID, mongo: no documents in result"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get user by ID", Error: "mongo: no documents in result"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }
@@ -280,8 +283,9 @@ func TestUser_UsersFindAllHandlerInvalidID(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
 	}
 
-	expected := `{"response": "failed to get user by ID, mocked-error"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get user by ID", Error: "mocked-error"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }
@@ -332,8 +336,9 @@ func TestUser_UsersFindAllHandlerJsonMarshalError(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusInternalServerError)
 	}
 
-	expected := `{"response": "failed to marshal response, json: unsupported type: chan int"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to marshal response", Error: "json: unsupported type: chan int"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }
@@ -377,8 +382,9 @@ func TestUser_UsersFindAllHandlerFailedToFindOne(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
 	}
 
-	expected := `{"response": "failed to get user by ID, mongo: no documents in result"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get user by ID", Error: "mongo: no documents in result"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }

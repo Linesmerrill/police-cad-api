@@ -1,11 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 
 	"go.uber.org/zap"
+
+	"github.com/linesmerrill/police-cad-api/models"
 )
 
 // Config holds the project config values
@@ -42,7 +45,8 @@ func New() *Config {
 func ErrorStatus(message string, httpStatusCode int, w http.ResponseWriter, err error) {
 	zap.S().With(err).Error(message)
 	w.WriteHeader(httpStatusCode)
-	w.Write([]byte(fmt.Sprintf(`{"response": "%s, %v"}`, message, err)))
+	b, _ := json.Marshal(models.ErrorMessageResponse{Response: models.MessageError{Message: message, Error: err.Error()}})
+	w.Write(b)
 	return
 }
 

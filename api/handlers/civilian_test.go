@@ -56,8 +56,9 @@ func TestCivilian_CivilianByIDHandler(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"response": "failed to get objectID from Hex, the provided hex string is not a valid ObjectID"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get objectID from Hex", Error: "the provided hex string is not a valid ObjectID"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }
@@ -109,8 +110,9 @@ func TestCivilian_CivilianByIDHandlerJsonMarshalError(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"response": "failed to marshal response, json: unsupported type: chan int"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to marshal response", Error: "json: unsupported type: chan int"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
 }
@@ -154,8 +156,9 @@ func TestCivilian_CivilianByIDHandlerFailedToFindOne(t *testing.T) {
 		t.Errorf("handler returned wrong status code:\ngot %v\nwant %v", status, http.StatusBadRequest)
 	}
 
-	expected := `{"response": "failed to get civilian by ID, mongo: no documents in result"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilian by ID", Error: "mongo: no documents in result"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 	}
 }
@@ -253,8 +256,9 @@ func TestCivilian_CivilianHandlerJsonMarshalError(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
 	}
 
-	expected := `{"response": "failed to marshal response, json: unsupported type: chan int"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to marshal response", Error: "json: unsupported type: chan int"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 	}
 }
@@ -297,8 +301,9 @@ func TestCivilian_CivilianHandlerFailedToFindOne(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
 	}
 
-	expected := `{"response": "failed to get civilians, mongo: no documents in result"}`
-	if rr.Body.String() != expected {
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilians", Error: "mongo: no documents in result"}}
+	b, _ := json.Marshal(expected)
+	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
 	}
 }
