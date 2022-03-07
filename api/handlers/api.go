@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
+
+	"github.com/linesmerrill/police-cad-api/models"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
@@ -47,6 +50,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/vehicles", api.Middleware(http.HandlerFunc(v.VehicleHandler))).Methods("GET")
 
+	// swagger docs hosted at "/"
+	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
 	return r
 }
 
@@ -82,5 +87,8 @@ func (a *App) initializeRoutes() {
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, `{"alive": true}`)
+	b, _ := json.Marshal(models.HealthCheckResponse{
+		Alive: true,
+	})
+	_, _ = io.WriteString(w, string(b))
 }

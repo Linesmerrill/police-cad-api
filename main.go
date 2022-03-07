@@ -8,6 +8,8 @@ import (
 
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/config"
+
+	_ "github.com/linesmerrill/police-cad-api/docs" // This line is necessary for go-swagger to find the docs
 )
 
 func main() {
