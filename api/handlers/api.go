@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/linesmerrill/police-cad-api/models"
+
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
@@ -20,10 +22,6 @@ type App struct {
 	DB       databases.CollectionHelper
 	Config   config.Config
 	dbHelper databases.DatabaseHelper
-}
-
-type HealthCheckResponse struct {
-	Alive bool `json:"alive"`
 }
 
 // New creates a new mux router and all the routes
@@ -89,12 +87,8 @@ func (a *App) initializeRoutes() {
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	b, err := json.Marshal(HealthCheckResponse{
+	b, _ := json.Marshal(models.HealthCheckResponse{
 		Alive: true,
 	})
-	if err != nil {
-		_, _ = io.WriteString(w, `{"error": "failed to parse health check response"}`)
-	} else {
-		_, _ = io.WriteString(w, string(b))
-	}
+	_, _ = io.WriteString(w, string(b))
 }
