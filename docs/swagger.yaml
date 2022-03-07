@@ -1,0 +1,497 @@
+basePath: /
+consumes:
+- application/json
+definitions:
+  Civilian:
+    description: Civilian holds the structure for the civilian collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      civilian:
+        $ref: '#/definitions/CivilianDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  CivilianDetails:
+    description: |-
+      CivilianDetails holds the structure for the inner user structure as
+      defined in the civilian collection in mongo
+    properties:
+      Gender:
+        type: string
+      activeCommunityID:
+        type: string
+        x-go-name: ActiveCommunityID
+      address:
+        type: string
+        x-go-name: Address
+      birthday:
+        type: string
+        x-go-name: Birthday
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      email:
+        type: string
+        x-go-name: Email
+      eyeColor:
+        type: string
+        x-go-name: EyeColor
+      firearmLicense:
+        type: string
+        x-go-name: FirearmLicense
+      firstName:
+        type: string
+        x-go-name: FirstName
+      hairColor:
+        type: string
+        x-go-name: HairColor
+      height:
+        type: string
+        x-go-name: Height
+      heightClassification:
+        type: string
+        x-go-name: HeightClassification
+      image:
+        type: string
+        x-go-name: Image
+      lastName:
+        type: string
+        x-go-name: LastName
+      licenseStatus:
+        type: string
+        x-go-name: LicenseStatus
+      occupation:
+        type: string
+        x-go-name: Occupation
+      organDonor:
+        type: boolean
+        x-go-name: OrganDonor
+      race:
+        type: string
+        x-go-name: Race
+      ticketCount:
+        type: string
+        x-go-name: TicketCount
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      userID:
+        type: string
+        x-go-name: UserID
+      veteran:
+        type: boolean
+        x-go-name: Veteran
+      warrants:
+        items:
+          type: object
+        type: array
+        x-go-name: Warrants
+      weight:
+        type: string
+        x-go-name: Weight
+      weightClassification:
+        type: string
+        x-go-name: WeightClassification
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  Community:
+    description: Community holds the structure for the community collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      community:
+        $ref: '#/definitions/CommunityDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  CommunityDetails:
+    description: CommunityDetails holds the structure for the inner community collection
+      in mongo
+    properties:
+      activePanics:
+        additionalProperties:
+          type: object
+        type: object
+        x-go-name: ActivePanics
+      activeSignal100:
+        type: boolean
+        x-go-name: ActiveSignal100
+      code:
+        type: string
+        x-go-name: Code
+      createdAt:
+        $ref: '#/definitions/DateTime'
+      name:
+        type: string
+        x-go-name: Name
+      ownerID:
+        type: string
+        x-go-name: OwnerID
+      updatedAt:
+        $ref: '#/definitions/DateTime'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  DateTime:
+    format: int64
+    title: DateTime represents the BSON datetime value.
+    type: integer
+    x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
+  ErrorMessageResponse:
+    description: ErrorMessageResponse returns the error message response struct
+    properties:
+      Response:
+        $ref: '#/definitions/MessageError'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  HealthCheckResponse:
+    description: HealthCheckResponse returns the health check response duh
+    properties:
+      alive:
+        type: boolean
+        x-go-name: Alive
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  MessageError:
+    description: MessageError contains the inner details for the error message response
+    properties:
+      Error:
+        type: string
+      Message:
+        type: string
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  User:
+    description: User holds the structure for the user collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      user:
+        $ref: '#/definitions/UserDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  UserDetails:
+    description: UserDetails holds the structure for the inner user structure as defined
+      in the user collection in mongo
+    properties:
+      activeCommunity:
+        type: string
+        x-go-name: ActiveCommunity
+      address:
+        type: string
+        x-go-name: Address
+      callSign:
+        type: string
+        x-go-name: CallSign
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      dispatchStatus:
+        type: string
+        x-go-name: DispatchStatus
+      dispatchStatusSetBy:
+        type: string
+        x-go-name: DispatchStatusSetBy
+      email:
+        type: string
+        x-go-name: Email
+      name:
+        type: string
+        x-go-name: Name
+      password:
+        type: string
+        x-go-name: Password
+      resetPasswordExpires:
+        type: object
+        x-go-name: ResetPasswordExpires
+      resetPasswordToken:
+        type: string
+        x-go-name: ResetPasswordToken
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      username:
+        type: string
+        x-go-name: Username
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  Vehicle:
+    description: Vehicle holds the structure for the vehicle collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      vehicle:
+        $ref: '#/definitions/VehicleDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  VehicleDetails:
+    description: |-
+      VehicleDetails holds the structure for the inner user structure as
+      defined in the vehicle collection in mongo
+    properties:
+      activeCommunityID:
+        type: string
+        x-go-name: ActiveCommunityID
+      color:
+        type: string
+        x-go-name: Color
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      email:
+        type: string
+        x-go-name: Email
+      isStolen:
+        type: string
+        x-go-name: IsStolen
+      model:
+        type: string
+        x-go-name: Model
+      plate:
+        type: string
+        x-go-name: Plate
+      registeredOwner:
+        type: string
+        x-go-name: RegisteredOwner
+      registeredOwnerID:
+        type: string
+        x-go-name: RegisteredOwnerID
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      userID:
+        type: string
+        x-go-name: UserID
+      validInsurance:
+        type: string
+        x-go-name: ValidInsurance
+      validRegistration:
+        type: string
+        x-go-name: ValidRegistration
+      vin:
+        type: string
+        x-go-name: Vin
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+host: https://police-cad-api.herokuapp.com
+info:
+  description: Documentation of Lines Police CAD API.
+  title: Lines Police CAD API.
+  version: 1.0.0
+paths:
+  /api/v1/civilian/{civilian_id}:
+    get:
+      operationId: civilianByID
+      responses:
+        "200":
+          $ref: '#/responses/civilianByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get a civilian by civilian ID.
+      tags:
+      - civilian
+  /api/v1/civilians:
+    get:
+      operationId: civilians
+      responses:
+        "200":
+          $ref: '#/responses/civiliansResponse'
+      summary: Get all civilians.
+      tags:
+      - civilian
+  /api/v1/communities/{owner_id}:
+    get:
+      operationId: communitiesByOwnerID
+      responses:
+        "200":
+          $ref: '#/responses/communitiesByOwnerIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Gets all communities by owner ID.
+      tags:
+      - community
+  /api/v1/community/{community_id}:
+    get:
+      operationId: communityByID
+      responses:
+        "200":
+          $ref: '#/responses/communityByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Gets a single community by ID.
+      tags:
+      - community
+  /api/v1/community/{community_id}/{owner_id}:
+    get:
+      operationId: communityByCommunityIDAndOwnerID
+      responses:
+        "200":
+          $ref: '#/responses/communityByCommunityIDAndOwnerIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Gets a single community by community ID and owner ID.
+      tags:
+      - community
+  /api/v1/name-search:
+    get:
+      operationId: nameSearchID
+      parameters:
+      - in: query
+        name: first_name
+        type: string
+        x-go-name: FirstName
+      - in: query
+        name: last_name
+        type: string
+        x-go-name: LastName
+      - in: query
+        name: dob
+        type: string
+        x-go-name: DateOfBirth
+      - in: query
+        name: community_id
+        type: string
+        x-go-name: CommunityID
+      responses:
+        "200":
+          $ref: '#/responses/nameSearchResponse'
+      summary: Get a civilian by firstname, lastname, date-of-birth and communityID.
+      tags:
+      - name-search
+  /api/v1/user/{user_id}:
+    get:
+      operationId: userByID
+      responses:
+        "200":
+          $ref: '#/responses/userByIDResponse'
+      summary: Get user by ID.
+      tags:
+      - user
+  /api/v1/users/{community_id}:
+    get:
+      operationId: userByCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/usersByCommunityIDResponse'
+      summary: Get all users by community ID.
+      tags:
+      - user
+  /api/v1/vehicle/{vehicle_id}:
+    get:
+      operationId: vehicleByID
+      responses:
+        "200":
+          $ref: '#/responses/vehicleByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get a vehicle by ID.
+      tags:
+      - vehicle
+  /api/v1/vehicles:
+    get:
+      operationId: vehicles
+      responses:
+        "200":
+          $ref: '#/responses/vehiclesResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get all vehicles.
+      tags:
+      - vehicle
+  /health:
+    get:
+      operationId: healthEndpointID
+      responses:
+        "200":
+          $ref: '#/responses/healthResponse'
+      summary: Lists the healthchex of the web service api.
+      tags:
+      - health
+produces:
+- application/json
+responses:
+  civilianByIDResponse:
+    description: Shows a civilian by the given civilianID {civilian_id}
+    schema:
+      $ref: '#/definitions/Civilian'
+  civiliansResponse:
+    description: Shows all civilians
+    schema:
+      items:
+        $ref: '#/definitions/Civilian'
+      type: array
+  communitiesByOwnerIDResponse:
+    description: Shows all communities by the given owner {owner_id}
+    schema:
+      items:
+        $ref: '#/definitions/Community'
+      type: array
+  communityByCommunityIDAndOwnerIDResponse:
+    description: Shows a single community by the given {community_id} and by owner
+      {owner_id}
+    schema:
+      $ref: '#/definitions/Community'
+  communityByIDResponse:
+    description: Shows a single community by the given {community_id}
+    schema:
+      $ref: '#/definitions/Community'
+  errorMessageResponse:
+    description: Error message response
+    schema:
+      $ref: '#/definitions/ErrorMessageResponse'
+  healthResponse:
+    description: Shows the current health of the api. true means it is alive, false
+      means it is not.
+    schema:
+      $ref: '#/definitions/HealthCheckResponse'
+  nameSearchResponse:
+    description: Shows a civilian by the given firstname, lastname, date-of-birth
+      and communityID
+    schema:
+      items:
+        $ref: '#/definitions/Civilian'
+      type: array
+  userByIDResponse:
+    description: Shows the user by the given userID {user_id}
+    schema:
+      $ref: '#/definitions/User'
+  usersByCommunityIDResponse:
+    description: Shows all the users by the given communityID {community_id}
+    schema:
+      items:
+        $ref: '#/definitions/User'
+      type: array
+  vehicleByIDResponse:
+    description: Shows a vehicle by the given vehicle ID {vehicle_id}
+    schema:
+      $ref: '#/definitions/Vehicle'
+  vehiclesResponse:
+    description: Shows all vehicles
+    schema:
+      items:
+        $ref: '#/definitions/Vehicle'
+      type: array
+schemes:
+- https
+securityDefinitions:
+  basic:
+    type: basic
+swagger: "2.0"
