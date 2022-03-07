@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -19,6 +20,10 @@ type App struct {
 	DB       databases.CollectionHelper
 	Config   config.Config
 	dbHelper databases.DatabaseHelper
+}
+
+type HealthCheckResponse struct {
+	Alive bool `json:"alive"`
 }
 
 // New creates a new mux router and all the routes
@@ -47,6 +52,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/vehicles", api.Middleware(http.HandlerFunc(v.VehicleHandler))).Methods("GET")
 
+	// swagger docs hosted at "/"
+	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
 	return r
 }
 
@@ -82,5 +89,12 @@ func (a *App) initializeRoutes() {
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, `{"alive": true}`)
+	b, err := json.Marshal(HealthCheckResponse{
+		Alive: true,
+	})
+	if err != nil {
+		_, _ = io.WriteString(w, `{"error": "failed to parse health check response"}`)
+	} else {
+		_, _ = io.WriteString(w, string(b))
+	}
 }
