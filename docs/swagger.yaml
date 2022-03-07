@@ -1,0 +1,99 @@
+basePath: /
+consumes:
+- application/json
+definitions:
+  Community:
+    description: Community holds the structure for the community collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      community:
+        $ref: '#/definitions/CommunityDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  CommunityDetails:
+    description: CommunityDetails holds the structure for the inner community collection
+      in mongo
+    properties:
+      activePanics:
+        additionalProperties:
+          type: object
+        type: object
+        x-go-name: ActivePanics
+      activeSignal100:
+        type: boolean
+        x-go-name: ActiveSignal100
+      code:
+        type: string
+        x-go-name: Code
+      createdAt:
+        $ref: '#/definitions/DateTime'
+      name:
+        type: string
+        x-go-name: Name
+      ownerID:
+        type: string
+        x-go-name: OwnerID
+      updatedAt:
+        $ref: '#/definitions/DateTime'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  DateTime:
+    format: int64
+    title: DateTime represents the BSON datetime value.
+    type: integer
+    x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
+  HealthCheckResponse:
+    properties:
+      alive:
+        type: boolean
+        x-go-name: Alive
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/api/handlers
+host: https://police-cad-api.herokuapp.com
+info:
+  description: Documentation of Lines Police CAD API.
+  title: Lines Police CAD API.
+  version: 1.0.0
+paths:
+  /api/v1/community:
+    get:
+      operationId: communityByID
+      responses:
+        "200":
+          $ref: '#/responses/communityByIDResponse'
+      summary: Gets a single community by ID.
+      tags:
+      - community
+  /health:
+    get:
+      operationId: healthEndpointID
+      responses:
+        "200":
+          $ref: '#/responses/healthResponse'
+      summary: Lists the healthchex of the web service api.
+      tags:
+      - health
+produces:
+- application/json
+responses:
+  communityByIDResponse:
+    description: Shows a single community by the given {ID}
+    schema:
+      $ref: '#/definitions/Community'
+  healthResponse:
+    description: Shows the current health of the api. true means it is alive, false
+      means it is not.
+    schema:
+      $ref: '#/definitions/HealthCheckResponse'
+schemes:
+- https
+securityDefinitions:
+  basic:
+    type: basic
+swagger: "2.0"
