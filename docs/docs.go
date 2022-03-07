@@ -24,7 +24,6 @@
 package docs
 
 import (
-	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
@@ -37,7 +36,7 @@ import (
 // swagger:response healthResponse
 type healthResponseWrapper struct {
 	// in:body
-	Body handlers.HealthCheckResponse
+	Body models.HealthCheckResponse
 }
 
 // swagger:route GET /api/v1/community community communityByID
