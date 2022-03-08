@@ -1,0 +1,628 @@
+{
+	"info": {
+		"_postman_id": "527138cf-803a-401c-ba78-ea2e235fe36d",
+		"name": "police-cad-api",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "/health",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{URL}}/health",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"health"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "/health",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/health",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"health"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Server",
+							"value": "Cowboy"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 28 Sep 2021 01:47:29 GMT"
+						},
+						{
+							"key": "Content-Length",
+							"value": "15"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 vegur"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"alive\": true\n}"
+				}
+			]
+		},
+		{
+			"name": "/community",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/community/{{COMMUNITY_ID}}",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"community",
+						"{{COMMUNITY_ID}}"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "/community",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{URL}}/api/v1/community/{{COMMUNITY_ID}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"community",
+								"{{COMMUNITY_ID}}"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Server",
+							"value": "Cowboy"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 28 Sep 2021 01:38:42 GMT"
+						},
+						{
+							"key": "Content-Length",
+							"value": "260"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 vegur"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"_id\": \"61526712f75ff000043b6140\",\n    \"community\": {\n        \"name\": \"lines police community\",\n        \"ownerID\": \"5fc517ab56567e00041badbf\",\n        \"code\": \"JTPNEKM\",\n        \"activePanics\": null,\n        \"activeSignal100\": false,\n        \"createdAt\": \"2021-09-28T00:51:30.144Z\",\n        \"updatedAt\": \"1970-01-01T00:00:00Z\"\n    },\n    \"__v\": 0\n}"
+				}
+			]
+		},
+		{
+			"name": "/communityOwner",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/community/{{COMMUNITY_ID}}/{{OWNER_ID}}",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"community",
+						"{{COMMUNITY_ID}}",
+						"{{OWNER_ID}}"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "/communityOwner",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{URL}}/api/v1/community/{{COMMUNITY_ID}}/{{OWNER_ID}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"community",
+								"{{COMMUNITY_ID}}",
+								"{{OWNER_ID}}"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Server",
+							"value": "Cowboy"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 28 Sep 2021 01:40:47 GMT"
+						},
+						{
+							"key": "Content-Length",
+							"value": "260"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 vegur"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"_id\": \"61526712f75ff000043b6140\",\n    \"community\": {\n        \"name\": \"lines police community\",\n        \"ownerID\": \"5fc517ab56567e00041badbf\",\n        \"code\": \"JTPNEKM\",\n        \"activePanics\": null,\n        \"activeSignal100\": false,\n        \"createdAt\": \"2021-09-28T00:51:30.144Z\",\n        \"updatedAt\": \"1970-01-01T00:00:00Z\"\n    },\n    \"__v\": 0\n}"
+				}
+			]
+		},
+		{
+			"name": "/communities",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/communities/{{OWNER_ID}}",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"communities",
+						"{{OWNER_ID}}"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "/communities",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{URL}}/api/v1/communities/{{OWNER_ID}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"communities",
+								"{{OWNER_ID}}"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Server",
+							"value": "Cowboy"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 28 Sep 2021 01:46:26 GMT"
+						},
+						{
+							"key": "Content-Length",
+							"value": "262"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 vegur"
+						}
+					],
+					"cookie": [],
+					"body": "[\n    {\n        \"_id\": \"61526712f75ff000043b6140\",\n        \"community\": {\n            \"name\": \"lines police community\",\n            \"ownerID\": \"5fc517ab56567e00041badbf\",\n            \"code\": \"JTPNEKM\",\n            \"activePanics\": null,\n            \"activeSignal100\": false,\n            \"createdAt\": \"2021-09-28T00:51:30.144Z\",\n            \"updatedAt\": \"1970-01-01T00:00:00Z\"\n        },\n        \"__v\": 0\n    }\n]"
+				}
+			]
+		},
+		{
+			"name": "/user",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"type": "text",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/user/{{OWNER_ID}}",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"user",
+						"{{OWNER_ID}}"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "/user",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"type": "text",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+							}
+						],
+						"url": {
+							"raw": "{{URL}}/api/v1/user/{{OWNER_ID}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"user",
+								"{{OWNER_ID}}"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Server",
+							"value": "Cowboy"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 28 Sep 2021 01:41:20 GMT"
+						},
+						{
+							"key": "Content-Length",
+							"value": "411"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 vegur"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"_id\": \"5fc517ab56567e00041badbf\",\n    \"user\": {\n        \"address\": \"\",\n        \"activeCommunity\": \"61526712f75ff000043b6140\",\n        \"callSign\": \"\",\n        \"dispatchStatus\": \"\",\n        \"dispatchStatusSetBy\": \"\",\n        \"email\": \"linesmerrill@gmail.com\",\n        \"name\": \"\",\n        \"username\": \"1r44\",\n        \"password\": \"$2a$08$svaGqFiWWzg.mFevLd9OXeEgocwsk6kLZUvcM01QiY9Qh3/yHwkka\",\n        \"resetPasswordToken\": \"\",\n        \"resetPasswordExpires\": null,\n        \"createdAt\": \"2020-11-30T16:02:51.787Z\",\n        \"updatedAt\": null\n    },\n    \"__v\": 0\n}"
+				}
+			]
+		},
+		{
+			"name": "/users",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"type": "text",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/users/{{COMMUNITY_ID}}",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"users",
+						"{{COMMUNITY_ID}}"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "/users",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"type": "text",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+							}
+						],
+						"url": {
+							"raw": "{{URL}}/api/v1/users/{{COMMUNITY_ID}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"{{COMMUNITY_ID}}"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Server",
+							"value": "Cowboy"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Date",
+							"value": "Tue, 28 Sep 2021 01:42:23 GMT"
+						},
+						{
+							"key": "Content-Length",
+							"value": "413"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 vegur"
+						}
+					],
+					"cookie": [],
+					"body": "[\n    {\n        \"_id\": \"5fc517ab56567e00041badbf\",\n        \"user\": {\n            \"address\": \"\",\n            \"activeCommunity\": \"61526712f75ff000043b6140\",\n            \"callSign\": \"\",\n            \"dispatchStatus\": \"\",\n            \"dispatchStatusSetBy\": \"\",\n            \"email\": \"linesmerrill@gmail.com\",\n            \"name\": \"\",\n            \"username\": \"1r44\",\n            \"password\": \"$2a$08$svaGqFiWWzg.mFevLd9OXeEgocwsk6kLZUvcM01QiY9Qh3/yHwkka\",\n            \"resetPasswordToken\": \"\",\n            \"resetPasswordExpires\": null,\n            \"createdAt\": \"2020-11-30T16:02:51.787Z\",\n            \"updatedAt\": null\n        },\n        \"__v\": 0\n    }\n]"
+				}
+			]
+		},
+		{
+			"name": "/civilianByID",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"type": "text",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/civilian/{{CIVILIAN_ID}}",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"civilian",
+						"{{CIVILIAN_ID}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "/civilians",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"type": "text",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/civilians",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"civilians"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "/name-search",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"type": "text",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/name-search?first_name=John&last_name=Yelp",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"name-search"
+					],
+					"query": [
+						{
+							"key": "first_name",
+							"value": "John"
+						},
+						{
+							"key": "last_name",
+							"value": "Yelp"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "/vehicleByID",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"type": "text",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/vehicle/{{VEHICLE_ID}}",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"vehicle",
+						"{{VEHICLE_ID}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "/vehicles",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"type": "text",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+					}
+				],
+				"url": {
+					"raw": "{{URL}}/api/v1/civilians",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"civilians"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
