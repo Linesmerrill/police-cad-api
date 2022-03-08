@@ -21,4 +21,4 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 
 ## Rest Request Examples:
 
-Import our Postman collection here: [Postman Collection]()
+Import our Postman collection here: [Postman Collection](https://github.com/Linesmerrill/police-cad-api/blob/master/docs/postman/police-cad-api.postman_collection.json)
