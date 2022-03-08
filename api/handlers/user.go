@@ -19,6 +19,30 @@ type User struct {
 	DB databases.UserDatabase
 }
 
+/*
+This funciton is passed on into the search handlers via the api
+handler, so there is the ability to verify a user is in a given
+community, as I saw your TODO comment in there.
+*/
+func (u User) VerifyInCommunity() func(string, string) bool {
+	return func(userID, communityID string) bool {
+		cID, err := primitive.ObjectIDFromHex(userID)
+		if err != nil {
+			return false
+		}
+
+		dbResp, err := u.DB.FindOne(context.Background(), bson.M{"_id": cID})
+		if err != nil {
+			return false
+		}
+
+		if dbResp.Details.ActiveCommunity != communityID {
+			return false
+		}
+		return true
+	}
+}
+
 // UserHandler returns a user given a userID
 func (u User) UserHandler(w http.ResponseWriter, r *http.Request) {
 	commID := mux.Vars(r)["user_id"]

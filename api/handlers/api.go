@@ -30,7 +30,8 @@ func (a *App) New() *mux.Router {
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper)}
-	n := search.Name{DB: databases.NewCivilianDatabase(a.dbHelper)}
+	n := search.Name{DB: databases.NewCivilianDatabase(a.dbHelper), VerifyInCommunity: u.VerifyInCommunity()}
+	p := search.Plate{DB: databases.NewVehicleDatabase(a.dbHelper), VerifyInCommunity: u.VerifyInCommunity()}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 
@@ -49,6 +50,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/name-search", api.Middleware(http.HandlerFunc(n.NameSearchHandler))).Methods("GET")
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/vehicles", api.Middleware(http.HandlerFunc(v.VehicleHandler))).Methods("GET")
+	apiCreate.Handle("/plate-search", api.Middleware(http.HandlerFunc(p.PlateSearchHandler))).Methods("GET")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
