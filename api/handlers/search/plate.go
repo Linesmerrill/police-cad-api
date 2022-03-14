@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,27 +15,47 @@ import (
 )
 
 type Plate struct {
-	DB                databases.VehicleDatabase
-	VerifyInCommunity func(string, string) bool
+	DB databases.VehicleDatabase
 }
 
 // Plate Search Handler ...
 func (p Plate) PlateSearchHandler(w http.ResponseWriter, r *http.Request) {
 	plateNumber := r.URL.Query().Get("plate")
 	communityID := r.URL.Query().Get("community_id")
-	userID := r.URL.Query().Get("user_id")
-
-	if inCommunity := p.VerifyInCommunity(userID, communityID); !inCommunity {
-		// Whatever should happen if they aren't in the communtity
-		// In this case, return because you can't search
-		return
-	}
 
 	zap.S().Debugf("plate: %v, community_id: %v", plateNumber, communityID)
 
-	dbResp, err := p.DB.Find(context.TODO(), bson.M{
-		"vehicle.plate": plateNumber,
-	})
+	var dbResp []models.Vehicle
+	var err error
+	if communityID != "" {
+		dbResp, err = p.DB.Find(context.TODO(), bson.M{
+			"$and": []bson.M{
+				bson.M{
+					"$text": bson.M{
+						"$search": fmt.Sprintf("%v", plateNumber),
+					},
+				},
+				bson.M{
+					"vehicle.activeCommunityID": communityID,
+				},
+			},
+		})
+	} else {
+		dbResp, err = p.DB.Find(context.TODO(), bson.M{
+			"$and": []bson.M{
+				bson.M{
+					"$text": bson.M{
+						"$search": fmt.Sprintf("%v", plateNumber),
+					},
+				},
+				bson.M{"$or": []bson.M{
+					bson.M{"civilian.activeCommunityID": ""},
+					bson.M{"civilian.activeCommunityID": nil},
+				}},
+			},
+		})
+	}
+
 	if err != nil {
 		config.ErrorStatus("failed to get vehicle", http.StatusNotFound, w, err)
 		return

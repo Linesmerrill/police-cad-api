@@ -30,8 +30,8 @@ func (a *App) New() *mux.Router {
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper)}
-	n := search.Name{DB: databases.NewCivilianDatabase(a.dbHelper), VerifyInCommunity: u.VerifyInCommunity()}
-	p := search.Plate{DB: databases.NewVehicleDatabase(a.dbHelper), VerifyInCommunity: u.VerifyInCommunity()}
+	n := search.Name{DB: databases.NewCivilianDatabase(a.dbHelper)}
+	p := search.Plate{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 

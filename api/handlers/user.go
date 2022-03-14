@@ -20,26 +20,26 @@ type User struct {
 }
 
 /*
-This funciton is passed on into the search handlers via the api
+This function is passed on into the search handlers via the api
 handler, so there is the ability to verify a user is in a given
-community, as I saw your TODO comment in there.
+community.
 */
-func (u User) VerifyInCommunity() func(string, string) bool {
-	return func(userID, communityID string) bool {
+func (u User) VerifyInCommunity() func(string, string) (bool, error) {
+	return func(userID, communityID string) (bool, error) {
 		cID, err := primitive.ObjectIDFromHex(userID)
 		if err != nil {
-			return false
+			return false, err
 		}
 
 		dbResp, err := u.DB.FindOne(context.Background(), bson.M{"_id": cID})
 		if err != nil {
-			return false
+			return false, err
 		}
 
 		if dbResp.Details.ActiveCommunity != communityID {
-			return false
+			return false, nil
 		}
-		return true
+		return true, nil
 	}
 }
 
