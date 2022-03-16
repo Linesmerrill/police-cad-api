@@ -13,3 +13,12 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 ## Generate Mocks before committing code
 
 `$ make mocks`
+
+## Run
+
+1. Duplicate `.env.example` and rename the new file to `.env`. Edit to your configurations.
+2. `$ make run`
+
+## Rest Request Examples:
+
+Import our Postman collection here: [Postman Collection](https://github.com/Linesmerrill/police-cad-api/blob/master/docs/postman/police-cad-api.postman_collection.json)
