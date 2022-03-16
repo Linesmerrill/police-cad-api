@@ -5,13 +5,14 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/linesmerrill/police-cad-api/api/handlers/search"
+
 	"github.com/linesmerrill/police-cad-api/models"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/api"
-	"github.com/linesmerrill/police-cad-api/api/handlers/search"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 )
@@ -30,7 +31,7 @@ func (a *App) New() *mux.Router {
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper)}
-	n := search.Name{DB: databases.NewCivilianDatabase(a.dbHelper)}
+	n := search.NameSearch{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 
