@@ -14,13 +14,13 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
-// Name ...
-type Name struct {
+// NameSearch ...
+type NameSearch struct {
 	DB databases.CivilianDatabase
 }
 
 // NameSearchHandler ...
-func (n Name) NameSearchHandler(w http.ResponseWriter, r *http.Request) {
+func (n NameSearch) NameSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	firstName := r.URL.Query().Get("first_name")
 	lastName := r.URL.Query().Get("last_name")
@@ -29,7 +29,6 @@ func (n Name) NameSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	zap.S().Debugf("first_name: %v, last_name: %v, dob: %v, community_id: %v", firstName, lastName, dob, communityID)
 
-	//TODO need to check if user is in community before searching just the name
 	dbResp, err := n.DB.Find(context.TODO(), bson.M{
 		"$and": []bson.M{
 			bson.M{
