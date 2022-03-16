@@ -14,12 +14,14 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
-// NameSearch ...
+// NameSearch holds the database object
 type NameSearch struct {
 	DB databases.CivilianDatabase
 }
 
-// NameSearchHandler ...
+// NameSearchHandler contains the logic to handle basic name searches given
+// a first name, last name, date-of-birth and communityID. This is the main
+// search route for trying to locate a name in the database.
 func (n NameSearch) NameSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	firstName := r.URL.Query().Get("first_name")
