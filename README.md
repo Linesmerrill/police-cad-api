@@ -22,3 +22,14 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 ## Rest Request Examples:
 
 Import our Postman collection here: [Postman Collection](https://github.com/Linesmerrill/police-cad-api/blob/master/docs/postman/police-cad-api.postman_collection.json)
+
+## Docs
+
+To build the docs run:
+`$make swagger`
+
+To run the docs locally:
+`$make serve-swagger`
+
+To update the docs navigate to `/docs/docs.go` and follow along with the swagger annotations and comments to
+document your routes and parameters
