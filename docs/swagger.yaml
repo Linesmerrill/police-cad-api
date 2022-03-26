@@ -152,6 +152,54 @@ definitions:
         $ref: '#/definitions/MessageError'
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Firearm:
+    description: Firearm holds the structure for the firearm collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      firearm:
+        $ref: '#/definitions/FirearmDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  FirearmDetails:
+    description: |-
+      FirearmDetails holds the structure for the inner user structure as
+      defined in the firearm collection in mongo
+    properties:
+      activeCommunityID:
+        type: string
+        x-go-name: ActiveCommunityID
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      isStolen:
+        type: string
+        x-go-name: IsStolen
+      registeredOwner:
+        type: string
+        x-go-name: RegisteredOwner
+      registeredOwnerID:
+        type: string
+        x-go-name: RegisteredOwnerID
+      serialNumber:
+        type: string
+        x-go-name: SerialNumber
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      userID:
+        type: string
+        x-go-name: UserID
+      weaponType:
+        type: string
+        x-go-name: WeaponType
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   HealthCheckResponse:
     description: HealthCheckResponse returns the health check response duh
     properties:
@@ -364,6 +412,42 @@ paths:
       summary: Gets a single community by community ID and owner ID.
       tags:
       - community
+  /api/v1/firearm/{firearm_id}:
+    get:
+      operationId: firearmByID
+      responses:
+        "200":
+          $ref: '#/responses/firearmByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get a firearm by ID.
+      tags:
+      - firearm
+  /api/v1/firearms:
+    get:
+      operationId: firearms
+      responses:
+        "200":
+          $ref: '#/responses/firearmsResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get all firearms.
+      tags:
+      - firearm
+  /api/v1/firearms/user/{user_id}:
+    get:
+      operationId: firearmsByUserID
+      parameters:
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/firearmsResponse'
+      summary: Get all firearms by userID.
+      tags:
+      - firearm
   /api/v1/name-search:
     get:
       operationId: nameSearchID
@@ -485,6 +569,16 @@ responses:
     description: Error message response
     schema:
       $ref: '#/definitions/ErrorMessageResponse'
+  firearmByIDResponse:
+    description: Shows a firearm by the given firearm ID {firearm_id}
+    schema:
+      $ref: '#/definitions/Firearm'
+  firearmsResponse:
+    description: Shows all firearms by userID
+    schema:
+      items:
+        $ref: '#/definitions/Firearm'
+      type: array
   healthResponse:
     description: Shows the current health of the api. true means it is alive, false
       means it is not.
