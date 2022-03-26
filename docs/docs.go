@@ -198,3 +198,21 @@ type vehiclesResponseWrapper struct {
 	// in:body
 	Body []models.Vehicle
 }
+
+// swagger:route GET /api/v1/vehicles/user/{user_id} vehicle vehiclesByUserID
+// Get all vehicles by userID.
+// responses:
+//   200: vehiclesResponse
+
+// Shows all vehicles by userID
+// swagger:response vehiclesResponse
+type vehiclesByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.Vehicle
+}
+
+// swagger:parameters vehiclesByUserID
+type vehiclesByUserIDParamsWrapper struct {
+	// in:query
+	ActiveCommunityID string `json:"active_community_id"`
+}
