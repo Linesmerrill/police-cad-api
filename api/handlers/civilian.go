@@ -85,7 +85,7 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	// Likewise, if the user is not in a community, then we will display only the civilians
 	// that are not in a community
 	var err error
-	if activeCommunityID != "" {
+	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = c.DB.Find(context.TODO(), bson.M{
 			"civilian.userID":            userID,
 			"civilian.activeCommunityID": activeCommunityID,

@@ -85,7 +85,7 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	// Likewise, if the user is not in a community, then we will display only the vehicles
 	// that are not in a community
 	var err error
-	if activeCommunityID != "" {
+	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = v.DB.Find(context.TODO(), bson.M{
 			"vehicle.userID":            userID,
 			"vehicle.activeCommunityID": activeCommunityID,
