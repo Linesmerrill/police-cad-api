@@ -67,3 +67,57 @@ func (v Vehicle) VehicleByIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// VehiclesByUserIDHandler returns all vehicles that contain the given userID
+func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+	activeCommunityID := r.URL.Query().Get("active_community_id")
+
+	zap.S().Debugf("user_id: '%v'", userID)
+	zap.S().Debugf("active_community: '%v'", activeCommunityID)
+
+	var dbResp []models.Vehicle
+
+	// If the user is in a community then we want to search for vehicles that
+	// are in that same community. This way each user can have different vehicles
+	// across different communities.
+	//
+	// Likewise, if the user is not in a community, then we will display only the vehicles
+	// that are not in a community
+	var err error
+	if activeCommunityID != "" {
+		dbResp, err = v.DB.Find(context.TODO(), bson.M{
+			"vehicle.userID":            userID,
+			"vehicle.activeCommunityID": activeCommunityID,
+		})
+		if err != nil {
+			config.ErrorStatus("failed to get vehicles with active community id", http.StatusNotFound, w, err)
+			return
+		}
+	} else {
+		dbResp, err = v.DB.Find(context.TODO(), bson.M{
+			"vehicle.userID": userID,
+			"$or": []bson.M{
+				{"vehicle.activeCommunityID": nil},
+				{"vehicle.activeCommunityID": ""},
+			},
+		})
+		if err != nil {
+			config.ErrorStatus("failed to get vehicles with empty active community id", http.StatusNotFound, w, err)
+			return
+		}
+	}
+
+	// Because the frontend requires that the data elements inside models.Vehicles exist, if
+	// len == 0 then we will just return an empty data object
+	if len(dbResp) == 0 {
+		dbResp = []models.Vehicle{}
+	}
+	b, err := json.Marshal(dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
