@@ -317,6 +317,20 @@ paths:
       summary: Get all civilians.
       tags:
       - civilian
+  /api/v1/civilians/user/{user_id}:
+    get:
+      operationId: civiliansByUserID
+      parameters:
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/civiliansResponse'
+      summary: Get all civilians by userID.
+      tags:
+      - civilian
   /api/v1/communities/{owner_id}:
     get:
       operationId: communitiesByOwnerID
@@ -433,7 +447,7 @@ responses:
     schema:
       $ref: '#/definitions/Civilian'
   civiliansResponse:
-    description: Shows all civilians
+    description: Shows all civilians by userID
     schema:
       items:
         $ref: '#/definitions/Civilian'
