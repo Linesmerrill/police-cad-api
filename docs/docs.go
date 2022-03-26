@@ -134,6 +134,24 @@ type civiliansResponseWrapper struct {
 	Body []models.Civilian
 }
 
+// swagger:route GET /api/v1/civilians/user/{user_id} civilian civiliansByUserID
+// Get all civilians by userID.
+// responses:
+//   200: civiliansResponse
+
+// Shows all civilians by userID
+// swagger:response civiliansResponse
+type civiliansByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.Civilian
+}
+
+// swagger:parameters civiliansByUserID
+type civiliansByUserIDParamsWrapper struct {
+	// in:query
+	ActiveCommunityID string `json:"active_community_id"`
+}
+
 // swagger:route GET /api/v1/name-search name-search nameSearchID
 // Get a civilian by firstname, lastname, date-of-birth and communityID.
 // responses:
