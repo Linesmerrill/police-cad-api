@@ -216,3 +216,47 @@ type vehiclesByUserIDParamsWrapper struct {
 	// in:query
 	ActiveCommunityID string `json:"active_community_id"`
 }
+
+// swagger:route GET /api/v1/firearm/{firearm_id} firearm firearmByID
+// Get a firearm by ID.
+// responses:
+//   200: firearmByIDResponse
+//   404: errorMessageResponse
+
+// Shows a firearm by the given firearm ID {firearm_id}
+// swagger:response firearmByIDResponse
+type firearmByIDResponseWrapper struct {
+	// in:body
+	Body models.Firearm
+}
+
+// swagger:route GET /api/v1/firearms firearm firearms
+// Get all firearms.
+// responses:
+//   200: firearmsResponse
+//   404: errorMessageResponse
+
+// Shows all firearms.
+// swagger:response firearmsResponse
+type firearmsResponseWrapper struct {
+	// in:body
+	Body []models.Firearm
+}
+
+// swagger:route GET /api/v1/firearms/user/{user_id} firearm firearmsByUserID
+// Get all firearms by userID.
+// responses:
+//   200: firearmsResponse
+
+// Shows all firearms by userID
+// swagger:response firearmsResponse
+type firearmsByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.Firearm
+}
+
+// swagger:parameters firearmsByUserID
+type firearmsByUserIDParamsWrapper struct {
+	// in:query
+	ActiveCommunityID string `json:"active_community_id"`
+}
