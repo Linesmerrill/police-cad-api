@@ -430,6 +430,20 @@ paths:
       summary: Get all vehicles.
       tags:
       - vehicle
+  /api/v1/vehicles/user/{user_id}:
+    get:
+      operationId: vehiclesByUserID
+      parameters:
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/vehiclesResponse'
+      summary: Get all vehicles by userID.
+      tags:
+      - vehicle
   /health:
     get:
       operationId: healthEndpointID
@@ -498,7 +512,7 @@ responses:
     schema:
       $ref: '#/definitions/Vehicle'
   vehiclesResponse:
-    description: Shows all vehicles
+    description: Shows all vehicles by userID
     schema:
       items:
         $ref: '#/definitions/Vehicle'

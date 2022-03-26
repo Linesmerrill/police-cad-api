@@ -51,6 +51,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/name-search", api.Middleware(http.HandlerFunc(n.NameSearchHandler))).Methods("GET")
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/vehicles", api.Middleware(http.HandlerFunc(v.VehicleHandler))).Methods("GET")
+	apiCreate.Handle("/vehicles/user/{user_id}", api.Middleware(http.HandlerFunc(v.VehiclesByUserIDHandler))).Methods("GET")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
