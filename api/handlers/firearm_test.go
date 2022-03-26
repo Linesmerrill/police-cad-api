@@ -640,6 +640,54 @@ func TestFirearm_FirearmsByUserIDHandlerSuccessWithActiveCommunityID(t *testing.
 	assert.Equal(t, "5fc51f36c72ff10004dca381", testFirearm[0].ID)
 }
 
+func TestFirearm_FirearmsByUserIDHandlerSuccessWithNullCommunityID(t *testing.T) {
+	req, err := http.NewRequest("GET", "/api/v1/firearms/user/61be0ebf22cfea7e7550f00e?active_community_id=null", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Set("Authorization", "Bearer abc123")
+
+	var db databases.DatabaseHelper
+	var client databases.ClientHelper
+	var conn databases.CollectionHelper
+	var singleResultHelper databases.SingleResultHelper
+
+	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
+	client = &mocks.ClientHelper{}
+	conn = &mocks.CollectionHelper{}
+	singleResultHelper = &mocks.SingleResultHelper{}
+
+	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	db.(*MockDatabaseHelper).On("Client").Return(client)
+	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		arg := args.Get(0).(*[]models.Firearm)
+		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
+
+	})
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
+
+	firearmDatabase := databases.NewFirearmDatabase(db)
+	u := handlers.Firearm{
+		DB: firearmDatabase,
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(u.FirearmsByUserIDHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
+	}
+
+	var testFirearm []models.Firearm
+	_ = json.Unmarshal(rr.Body.Bytes(), &testFirearm)
+
+	assert.Equal(t, "5fc51f36c72ff10004dca381", testFirearm[0].ID)
+}
+
 func TestFirearm_FirearmsByUserIDHandlerEmptyResponse(t *testing.T) {
 	req, err := http.NewRequest("GET", "/api/v1/firearms/user/1234", nil)
 	if err != nil {
