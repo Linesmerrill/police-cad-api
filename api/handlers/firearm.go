@@ -85,7 +85,7 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	// Likewise, if the user is not in a community, then we will display only the firearms
 	// that are not in a community
 	var err error
-	if activeCommunityID != "" {
+	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = v.DB.Find(context.TODO(), bson.M{
 			"firearm.userID":            userID,
 			"firearm.activeCommunityID": activeCommunityID,
