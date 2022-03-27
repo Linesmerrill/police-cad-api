@@ -199,6 +199,66 @@ definitions:
         x-go-name: UserID
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  EmsVehicle:
+    description: EmsVehicle holds the structure for the emsVehicle collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      emsVehicle:
+        $ref: '#/definitions/EmsVehicleDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  EmsVehicleDetails:
+    description: |-
+      EmsVehicleDetails holds the structure for the inner user structure as
+      defined in the emsVehicle collection in mongo
+    properties:
+      activeCommunityID:
+        type: string
+        x-go-name: ActiveCommunityID
+      color:
+        type: string
+        x-go-name: Color
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      dispatchOnDuty:
+        type: string
+        x-go-name: DispatchOnDuty
+      dispatchStatus:
+        type: string
+        x-go-name: DispatchStatus
+      dispatchStatusSetBy:
+        type: string
+        x-go-name: DispatchStatusSetBy
+      email:
+        type: string
+        x-go-name: Email
+      engineNumber:
+        type: string
+        x-go-name: EngineNumber
+      model:
+        type: string
+        x-go-name: Model
+      plate:
+        type: string
+        x-go-name: Plate
+      registeredOwner:
+        type: string
+        x-go-name: RegisteredOwner
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      userID:
+        type: string
+        x-go-name: UserID
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   ErrorMessageResponse:
     description: ErrorMessageResponse returns the error message response struct
     properties:
@@ -502,6 +562,42 @@ paths:
       summary: Get all ems by userID.
       tags:
       - ems
+  /api/v1/emsVehicle/{ems_vehicle_id}:
+    get:
+      operationId: emsVehicleByID
+      responses:
+        "200":
+          $ref: '#/responses/emsVehicleByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get an emsVehicle by ID.
+      tags:
+      - emsVehicle
+  /api/v1/emsVehicles:
+    get:
+      operationId: emsVehicle
+      responses:
+        "200":
+          $ref: '#/responses/emsVehicleResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get all emsVehicles.
+      tags:
+      - emsVehicle
+  /api/v1/emsVehicles/user/{user_id}:
+    get:
+      operationId: emsVehicleByUserID
+      parameters:
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/emsVehicleResponse'
+      summary: Get all emsVehicles by userID.
+      tags:
+      - emsVehicle
   /api/v1/firearm/{firearm_id}:
     get:
       operationId: firearmByID
@@ -664,6 +760,16 @@ responses:
     schema:
       items:
         $ref: '#/definitions/Ems'
+      type: array
+  emsVehicleByIDResponse:
+    description: Shows an emsVehicle by the given emsVehicle ID {ems_vehicle_id}
+    schema:
+      $ref: '#/definitions/EmsVehicle'
+  emsVehicleResponse:
+    description: Shows all emsVehicles by userID
+    schema:
+      items:
+        $ref: '#/definitions/EmsVehicle'
       type: array
   errorMessageResponse:
     description: Error message response
