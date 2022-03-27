@@ -14,16 +14,16 @@ type CivilianDetails struct {
 	FirstName            string        `json:"firstName" bson:"firstName"`
 	LastName             string        `json:"lastName" bson:"lastName"`
 	LicenseStatus        string        `json:"licenseStatus" bson:"licenseStatus"`
-	TicketCount          string        `json:"ticketCount" bson:"ticketCount"` //TODO may need to change the database definition
+	TicketCount          string        `json:"ticketCount" bson:"ticketCount"` // TODO may need to change the database definition
 	Birthday             string        `json:"birthday" bson:"birthday"`
-	Warrants             []interface{} `json:"warrants" bson:"warrants"` //TODO replace with a concrete type
+	Warrants             []interface{} `json:"warrants" bson:"warrants"` // TODO replace with a concrete type
 	Gender               string        `json:"Gender" bson:"gender"`
 	Address              string        `json:"address" bson:"address"`
 	Race                 string        `json:"race" bson:"race"`
 	HairColor            string        `json:"hairColor" bson:"hairColor"`
-	Weight               string        `json:"weight" bson:"weight"` //TODO may need to change the database definition
+	Weight               string        `json:"weight" bson:"weight"` // TODO may need to change the database definition
 	WeightClassification string        `json:"weightClassification" bson:"weightClassification"`
-	Height               string        `json:"height" bson:"height"` //TODO may need to change the database definition
+	Height               string        `json:"height" bson:"height"` // TODO may need to change the database definition
 	HeightClassification string        `json:"heightClassification" bson:"heightClassification"`
 	EyeColor             string        `json:"eyeColor" bson:"eyeColor"`
 	OrganDonor           bool          `json:"organDonor" bson:"organDonor"`
