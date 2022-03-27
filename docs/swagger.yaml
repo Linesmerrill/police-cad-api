@@ -2,6 +2,77 @@ basePath: /
 consumes:
 - application/json
 definitions:
+  Call:
+    description: Call holds the structure for the call collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      call:
+        $ref: '#/definitions/CallDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  CallDetails:
+    description: |-
+      CallDetails holds the structure for the inner user structure as
+      defined in the call collection in mongo
+    properties:
+      assignedFireEms:
+        items:
+          type: object
+        type: array
+        x-go-name: AssignedFireEms
+      assignedOfficers:
+        items:
+          type: object
+        type: array
+        x-go-name: AssignedOfficers
+      callNotes:
+        items:
+          type: object
+        type: array
+        x-go-name: CallNotes
+      classifier:
+        items:
+          type: object
+        type: array
+        x-go-name: Classifier
+      clearingOfficerID:
+        type: string
+        x-go-name: ClearingOfficerID
+      clearingOfficerUsername:
+        type: string
+        x-go-name: ClearingOfficerUsername
+      communityID:
+        type: string
+        x-go-name: CommunityID
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      createdAtReadable:
+        type: string
+        x-go-name: CreatedAtReadable
+      createdByID:
+        type: string
+        x-go-name: CreatedByID
+      createdByUsername:
+        type: string
+        x-go-name: CreatedByUsername
+      shortDescription:
+        type: string
+        x-go-name: ShortDescription
+      status:
+        type: boolean
+        x-go-name: Status
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   Civilian:
     description: Civilian holds the structure for the civilian collection in mongo
     properties:
@@ -459,6 +530,42 @@ info:
   title: Lines Police CAD API.
   version: 1.0.0
 paths:
+  /api/v1/call/{call_id}:
+    get:
+      operationId: callByID
+      responses:
+        "200":
+          $ref: '#/responses/callByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get a call by ID.
+      tags:
+      - call
+  /api/v1/calls:
+    get:
+      operationId: call
+      responses:
+        "200":
+          $ref: '#/responses/callResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get all calls.
+      tags:
+      - call
+  /api/v1/calls/community/{community_id}:
+    get:
+      operationId: callByCommunityID
+      parameters:
+      - in: query
+        name: status
+        type: boolean
+        x-go-name: Status
+      responses:
+        "200":
+          $ref: '#/responses/callResponse'
+      summary: Get all calls by communityID.
+      tags:
+      - call
   /api/v1/civilian/{civilian_id}:
     get:
       operationId: civilianByID
@@ -726,6 +833,16 @@ paths:
 produces:
 - application/json
 responses:
+  callByIDResponse:
+    description: Shows a call by the given call ID {call_id}
+    schema:
+      $ref: '#/definitions/Call'
+  callResponse:
+    description: Shows all calls by communityID
+    schema:
+      items:
+        $ref: '#/definitions/Call'
+      type: array
   civilianByIDResponse:
     description: Shows a civilian by the given civilianID {civilian_id}
     schema:
