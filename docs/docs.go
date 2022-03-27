@@ -304,3 +304,47 @@ type emsByUserIDParamsWrapper struct {
 	// in:query
 	ActiveCommunityID string `json:"active_community_id"`
 }
+
+// swagger:route GET /api/v1/emsVehicle/{ems_vehicle_id} emsVehicle emsVehicleByID
+// Get an emsVehicle by ID.
+// responses:
+//   200: emsVehicleByIDResponse
+//   404: errorMessageResponse
+
+// Shows an emsVehicle by the given emsVehicle ID {ems_vehicle_id}
+// swagger:response emsVehicleByIDResponse
+type emsVehicleByIDResponseWrapper struct {
+	// in:body
+	Body models.EmsVehicle
+}
+
+// swagger:route GET /api/v1/emsVehicles emsVehicle emsVehicle
+// Get all emsVehicles.
+// responses:
+//   200: emsVehicleResponse
+//   404: errorMessageResponse
+
+// Shows all emsVehicles.
+// swagger:response emsVehicleResponse
+type emsVehicleResponseWrapper struct {
+	// in:body
+	Body []models.EmsVehicle
+}
+
+// swagger:route GET /api/v1/emsVehicles/user/{user_id} emsVehicle emsVehicleByUserID
+// Get all emsVehicles by userID.
+// responses:
+//   200: emsVehicleResponse
+
+// Shows all emsVehicles by userID
+// swagger:response emsVehicleResponse
+type emsVehiclesByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.EmsVehicle
+}
+
+// swagger:parameters emsVehicleByUserID
+type emsVehicleByUserIDParamsWrapper struct {
+	// in:query
+	ActiveCommunityID string `json:"active_community_id"`
+}
