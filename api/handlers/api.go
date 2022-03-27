@@ -37,8 +37,9 @@ func (a *App) New() *mux.Router {
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
 	ev := EmsVehicle{DB: databases.NewEmsVehicleDatabase(a.dbHelper)}
+	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
 
-	//healthchex
+	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
@@ -64,6 +65,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/emsVehicle/{ems_vehicle_id}", api.Middleware(http.HandlerFunc(ev.EmsVehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/emsVehicles", api.Middleware(http.HandlerFunc(ev.EmsVehicleHandler))).Methods("GET")
 	apiCreate.Handle("/emsVehicles/user/{user_id}", api.Middleware(http.HandlerFunc(ev.EmsVehiclesByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.CallByIDHandler))).Methods("GET")
+	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
+	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
@@ -75,7 +79,7 @@ func (a *App) Initialize() error {
 
 	client, err := databases.NewClient(&a.Config)
 	if err != nil {
-		//if we fail to create a new database client, then kill the pod
+		// if we fail to create a new database client, then kill the pod
 		zap.S().With(err).Error("failed to create new client")
 		return err
 	}
@@ -83,13 +87,13 @@ func (a *App) Initialize() error {
 	a.dbHelper = databases.NewDatabase(&a.Config, client)
 	err = client.Connect()
 	if err != nil {
-		//if we fail to connect to the database, then kill the pod
+		// if we fail to connect to the database, then kill the pod
 		zap.S().With(err).Error("failed to connect to database")
 		return err
 	}
 	zap.S().Info("police-cad-api has connected to the database")
 
-	//initialize api router
+	// initialize api router
 	a.initializeRoutes()
 	return nil
 

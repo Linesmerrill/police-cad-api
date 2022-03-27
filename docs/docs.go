@@ -348,3 +348,47 @@ type emsVehicleByUserIDParamsWrapper struct {
 	// in:query
 	ActiveCommunityID string `json:"active_community_id"`
 }
+
+// swagger:route GET /api/v1/call/{call_id} call callByID
+// Get a call by ID.
+// responses:
+//   200: callByIDResponse
+//   404: errorMessageResponse
+
+// Shows a call by the given call ID {call_id}
+// swagger:response callByIDResponse
+type callByIDResponseWrapper struct {
+	// in:body
+	Body models.Call
+}
+
+// swagger:route GET /api/v1/calls call call
+// Get all calls.
+// responses:
+//   200: callResponse
+//   404: errorMessageResponse
+
+// Shows all calls.
+// swagger:response callResponse
+type callResponseWrapper struct {
+	// in:body
+	Body []models.Call
+}
+
+// swagger:route GET /api/v1/calls/community/{community_id} call callByCommunityID
+// Get all calls by communityID.
+// responses:
+//   200: callResponse
+
+// Shows all calls by communityID
+// swagger:response callResponse
+type callsByCommunityIDResponseWrapper struct {
+	// in:body
+	Body []models.Call
+}
+
+// swagger:parameters callByCommunityID
+type callByCommunityIDParamsWrapper struct {
+	// in:query
+	Status bool `json:"status"`
+}
