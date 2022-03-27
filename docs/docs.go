@@ -260,3 +260,47 @@ type firearmsByUserIDParamsWrapper struct {
 	// in:query
 	ActiveCommunityID string `json:"active_community_id"`
 }
+
+// swagger:route GET /api/v1/ems/{ems_id} ems emsByID
+// Get a ems by ID.
+// responses:
+//   200: emsByIDResponse
+//   404: errorMessageResponse
+
+// Shows an ems by the given ems ID {ems_id}
+// swagger:response emsByIDResponse
+type emsByIDResponseWrapper struct {
+	// in:body
+	Body models.Ems
+}
+
+// swagger:route GET /api/v1/ems ems ems
+// Get all ems.
+// responses:
+//   200: emsResponse
+//   404: errorMessageResponse
+
+// Shows all ems.
+// swagger:response emsResponse
+type emsResponseWrapper struct {
+	// in:body
+	Body []models.Ems
+}
+
+// swagger:route GET /api/v1/ems/user/{user_id} ems emsByUserID
+// Get all ems by userID.
+// responses:
+//   200: emsResponse
+
+// Shows all ems by userID
+// swagger:response emsResponse
+type emsByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.Ems
+}
+
+// swagger:parameters emsByUserID
+type emsByUserIDParamsWrapper struct {
+	// in:query
+	ActiveCommunityID string `json:"active_community_id"`
+}
