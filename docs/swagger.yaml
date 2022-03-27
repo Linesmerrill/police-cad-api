@@ -145,6 +145,60 @@ definitions:
     title: DateTime represents the BSON datetime value.
     type: integer
     x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
+  Ems:
+    description: Ems holds the structure for the ems collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      ems:
+        $ref: '#/definitions/EmsDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  EmsDetails:
+    description: |-
+      EmsDetails holds the structure for the inner user structure as
+      defined in the ems collection in mongo
+    properties:
+      activeCommunityID:
+        type: string
+        x-go-name: ActiveCommunityID
+      assignmentArea:
+        type: string
+        x-go-name: AssignmentArea
+      callSign:
+        type: string
+        x-go-name: CallSign
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      department:
+        type: string
+        x-go-name: Department
+      email:
+        type: string
+        x-go-name: Email
+      firstName:
+        type: string
+        x-go-name: FirstName
+      lastName:
+        type: string
+        x-go-name: LastName
+      station:
+        type: string
+        x-go-name: Station
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      userID:
+        type: string
+        x-go-name: UserID
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   ErrorMessageResponse:
     description: ErrorMessageResponse returns the error message response struct
     properties:
@@ -412,6 +466,42 @@ paths:
       summary: Gets a single community by community ID and owner ID.
       tags:
       - community
+  /api/v1/ems:
+    get:
+      operationId: ems
+      responses:
+        "200":
+          $ref: '#/responses/emsResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get all ems.
+      tags:
+      - ems
+  /api/v1/ems/{ems_id}:
+    get:
+      operationId: emsByID
+      responses:
+        "200":
+          $ref: '#/responses/emsByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get a ems by ID.
+      tags:
+      - ems
+  /api/v1/ems/user/{user_id}:
+    get:
+      operationId: emsByUserID
+      parameters:
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/emsResponse'
+      summary: Get all ems by userID.
+      tags:
+      - ems
   /api/v1/firearm/{firearm_id}:
     get:
       operationId: firearmByID
@@ -565,6 +655,16 @@ responses:
     description: Shows a single community by the given {community_id}
     schema:
       $ref: '#/definitions/Community'
+  emsByIDResponse:
+    description: Shows an ems by the given ems ID {ems_id}
+    schema:
+      $ref: '#/definitions/Ems'
+  emsResponse:
+    description: Shows all ems by userID
+    schema:
+      items:
+        $ref: '#/definitions/Ems'
+      type: array
   errorMessageResponse:
     description: Error message response
     schema:
