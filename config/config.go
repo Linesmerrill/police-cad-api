@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 
 	"go.uber.org/zap"
 
+	"github.com/joho/godotenv"
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
@@ -21,6 +23,10 @@ type Config struct {
 
 // New sets up all config related services
 func New() *Config {
+
+	if runtime.GOOS == "windows" {
+		_ = godotenv.Load()
+	}
 
 	//setup zap logger and replace default logger
 	logger, err := setLogger(os.Getenv("ENV"))
