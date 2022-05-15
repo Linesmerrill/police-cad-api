@@ -20,11 +20,11 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 ## Run
 
 1. Duplicate `.env.example` and rename the new file to `.env`. Edit to your configurations.
-2. `$ make run`
+2. ```make run```
 
 ## Generate Mocks before committing code
 
-`$ make mocks`
+```make mocks```
 
 ## Rest Request Examples:
 
@@ -34,11 +34,11 @@ Import our Postman collection here: [Postman Collection](https://github.com/Line
 
 To build the docs run:
 
-`$ make swagger`
+```make swagger```
 
 To run the docs locally:
 
-`$ make serve-swagger`
+```make serve-swagger```
 
 To update the docs navigate to `/docs/docs.go` and follow along with the swagger annotations and comments to
 document your routes and parameters.
@@ -81,7 +81,7 @@ Copy and paste this into your environment variables in `police-cad` application.
 
 ## How to attach an Auth Bearer Token
 
-Attach a header with this jwt created with the 256-bit-secret to your api requests
+Attach a header with this [JWT](#how-to-generate-a-jwt) created with the 256-bit-secret to your api requests
 
 **Example:** 
 
