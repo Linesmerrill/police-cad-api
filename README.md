@@ -20,11 +20,15 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 ## Run
 
 1. Duplicate `.env.example` and rename the new file to `.env`. Edit to your configurations.
-2. ```make run```
+```
+make run
+```
 
 ## Generate Mocks before committing code
 
-```make mocks```
+```
+make mocks
+```
 
 ## Rest Request Examples:
 
@@ -34,11 +38,15 @@ Import our Postman collection here: [Postman Collection](https://github.com/Line
 
 To build the docs run:
 
-```make swagger```
+```
+make swagger
+```
 
 To run the docs locally:
 
-```make serve-swagger```
+```
+make serve-swagger
+```
 
 To update the docs navigate to `/docs/docs.go` and follow along with the swagger annotations and comments to
 document your routes and parameters.
