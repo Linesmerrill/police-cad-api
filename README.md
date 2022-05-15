@@ -71,3 +71,7 @@ We recommend visiting [https://passwordsgenerator.net/](https://passwordsgenerat
 6. Click Generate and copy the password back into [https://jwt.io/](https://jwt.io/)
 
 This 256-bit-secret will also be used to decrypt/encrypt the jwt in `police-cad-api` environment variables
+
+**Encoded:** (The encoded JWT you can use to now communicate between the backend and frontend)
+
+Copy and paste this into your environment variables in `police-cad` application.
