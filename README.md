@@ -14,6 +14,9 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 
 1. Go 1.17+ installed. See [download and install Go](https://go.dev/doc/install) to get started.
 2. Generate jwt token to communicate with front-end web server. See [How to Generate a JWT](#how-to-generate-a-jwt) for more details.
+3. Attach the jwt header as an `Authorization: Bearer` token. See [How to attach an Auth Bearer Token](#how-to-attach-an-auth-bearer-token) for more details.
+
+
 ## Run
 
 1. Duplicate `.env.example` and rename the new file to `.env`. Edit to your configurations.
@@ -75,3 +78,13 @@ This 256-bit-secret will also be used to decrypt/encrypt the jwt in `police-cad-
 **Encoded:** (The encoded JWT you can use to now communicate between the backend and frontend)
 
 Copy and paste this into your environment variables in `police-cad` application.
+
+## How to attach an Auth Bearer Token
+
+Attach a header with this jwt created with the 256-bit-secret to your api requests
+
+**Example:** 
+
+```
+Authorization:Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+```
