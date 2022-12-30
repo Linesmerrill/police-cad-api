@@ -33,7 +33,7 @@ func Middleware(next http.Handler) http.Handler {
 				"auth header", r.Header.Get("Authorization"),
 			)
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error:" "malformed token"}`))
+			w.Write([]byte(`{"error": "malformed authorization token, see https://github.com/Linesmerrill/police-cad-api#requirements for help"}`))
 			return
 		}
 		jwtToken := authHeader[1]
@@ -64,7 +64,7 @@ func Middleware(next http.Handler) http.Handler {
 				"token", jwtToken,
 			)
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error:" "unauthorized"}"`))
+			w.Write([]byte(`{"error": "unauthorized"}"`))
 			return
 		}
 	})
