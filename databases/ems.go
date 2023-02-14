@@ -1,6 +1,6 @@
 package databases
 
-//go generate: mockery --name EmsDatabase
+// go generate: mockery --name EmsDatabase
 
 import (
 	"context"
