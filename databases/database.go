@@ -18,8 +18,8 @@ type DatabaseHelper interface {
 
 // CollectionHelper contains all the methods defined for collections in this project
 type CollectionHelper interface {
-	FindOne(context.Context, interface{}) SingleResultHelper
-	Find(context.Context, interface{}) CursorHelper
+	FindOne(context.Context, interface{}, ...*options.FindOneOptions) SingleResultHelper
+	Find(context.Context, interface{}, ...*options.FindOptions) CursorHelper
 }
 
 // SingleResultHelper contains a single method to decode the result
@@ -99,13 +99,13 @@ func (md *mongoDatabase) Client() ClientHelper {
 	return &mongoClient{cl: client}
 }
 
-func (mc *mongoCollection) FindOne(ctx context.Context, filter interface{}) SingleResultHelper {
-	singleResult := mc.coll.FindOne(ctx, filter)
+func (mc *mongoCollection) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper {
+	singleResult := mc.coll.FindOne(ctx, filter, opts...)
 	return &mongoSingleResult{sr: singleResult}
 }
 
-func (mc *mongoCollection) Find(ctx context.Context, filter interface{}) CursorHelper {
-	cursor, _ := mc.coll.Find(ctx, filter)
+func (mc *mongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) CursorHelper {
+	cursor, _ := mc.coll.Find(ctx, filter, opts...)
 	return &mongoCursor{cr: cursor}
 }
 
