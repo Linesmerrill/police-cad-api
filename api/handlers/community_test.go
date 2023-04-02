@@ -436,7 +436,7 @@ func TestCommunity_CommunitiesByOwnerIDHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Community)
 		*arg = []models.Community{{Details: models.CommunityDetails{ActivePanics: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "communities").Return(conn)
 
 	communityDatabase := databases.NewCommunityDatabase(db)
@@ -482,7 +482,7 @@ func TestCommunity_CommunitiesByOwnerIDHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "communities").Return(conn)
 
 	communityDatabase := databases.NewCommunityDatabase(db)
@@ -532,7 +532,7 @@ func TestCommunity_CommunitiesByOwnerIDHandlerSuccess(t *testing.T) {
 		*arg = []models.Community{{ID: "608cafe595eb9dc05379b7f4"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "communities").Return(conn)
 
 	communityDatabase := databases.NewCommunityDatabase(db)
@@ -580,7 +580,7 @@ func TestUser_CommunitiesByOwnerIDHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Community)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "communities").Return(conn)
 
 	communityDatabase := databases.NewCommunityDatabase(db)

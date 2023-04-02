@@ -239,7 +239,7 @@ func TestCivilian_CivilianHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Civilian)
 		*arg = []models.Civilian{{Details: models.CivilianDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -284,7 +284,7 @@ func TestCivilian_CivilianHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -333,7 +333,7 @@ func TestCivilian_CivilianHandlerSuccess(t *testing.T) {
 		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -380,7 +380,7 @@ func TestCivilian_CivilianHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Civilian)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -430,7 +430,7 @@ func TestCivilian_CiviliansByUserIDHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Civilian)
 		*arg = []models.Civilian{{Details: models.CivilianDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -475,7 +475,7 @@ func TestCivilian_CiviliansByUserIDHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -520,7 +520,7 @@ func TestCivilian_CiviliansByUserIDHandlerActiveCommunityIDFailedToFindOne(t *te
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -569,7 +569,7 @@ func TestCivilian_CiviliansByUserIDHandlerSuccess(t *testing.T) {
 		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -617,7 +617,7 @@ func TestCivilian_CiviliansByUserIDHandlerSuccessWithActiveCommunityID(t *testin
 		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -665,7 +665,7 @@ func TestCivilian_CiviliansByUserIDHandlerSuccessWithNullCommunityID(t *testing.
 		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)
@@ -712,7 +712,7 @@ func TestCivilian_CiviliansByUserIDHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Civilian)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "civilians").Return(conn)
 
 	civilianDatabase := databases.NewCivilianDatabase(db)

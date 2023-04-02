@@ -239,7 +239,7 @@ func TestVehicle_VehicleHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Vehicle)
 		*arg = []models.Vehicle{{Details: models.VehicleDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -284,7 +284,7 @@ func TestVehicle_VehicleHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -333,7 +333,7 @@ func TestVehicle_VehicleHandlerSuccess(t *testing.T) {
 		*arg = []models.Vehicle{{ID: "5fc51f58c72ff10004dca382"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -380,7 +380,7 @@ func TestVehicle_VehicleHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Vehicle)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -430,7 +430,7 @@ func TestVehicle_VehiclesByUserIDHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Vehicle)
 		*arg = []models.Vehicle{{Details: models.VehicleDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -475,7 +475,7 @@ func TestVehicle_VehiclesByUserIDHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -520,7 +520,7 @@ func TestVehicle_VehiclesByUserIDHandlerActiveCommunityIDFailedToFindOne(t *test
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -569,7 +569,7 @@ func TestVehicle_VehiclesByUserIDHandlerSuccess(t *testing.T) {
 		*arg = []models.Vehicle{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -617,7 +617,7 @@ func TestVehicle_VehiclesByUserIDHandlerSuccessWithActiveCommunityID(t *testing.
 		*arg = []models.Vehicle{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -665,7 +665,7 @@ func TestVehicle_VehiclesByUserIDHandlerSuccessWithNullCommunityID(t *testing.T)
 		*arg = []models.Vehicle{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)
@@ -712,7 +712,7 @@ func TestVehicle_VehiclesByUserIDHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Vehicle)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "vehicles").Return(conn)
 
 	vehicleDatabase := databases.NewVehicleDatabase(db)

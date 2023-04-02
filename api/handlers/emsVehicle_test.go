@@ -239,7 +239,7 @@ func TestEmsVehicle_EmsVehicleHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.EmsVehicle)
 		*arg = []models.EmsVehicle{{Details: models.EmsVehicleDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -284,7 +284,7 @@ func TestEmsVehicle_EmsVehicleHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -333,7 +333,7 @@ func TestEmsVehicle_EmsVehicleHandlerSuccess(t *testing.T) {
 		*arg = []models.EmsVehicle{{ID: "5fc51f58c72ff10004dca382"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -380,7 +380,7 @@ func TestEmsVehicle_EmsVehicleHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.EmsVehicle)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -430,7 +430,7 @@ func TestEmsVehicle_EmsVehiclesByUserIDHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.EmsVehicle)
 		*arg = []models.EmsVehicle{{Details: models.EmsVehicleDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -475,7 +475,7 @@ func TestEmsVehicle_EmsVehiclesByUserIDHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -520,7 +520,7 @@ func TestEmsVehicle_EmsVehiclesByUserIDHandlerActiveCommunityIDFailedToFindOne(t
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -569,7 +569,7 @@ func TestEmsVehicle_EmsVehiclesByUserIDHandlerSuccess(t *testing.T) {
 		*arg = []models.EmsVehicle{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -617,7 +617,7 @@ func TestEmsVehicle_EmsVehiclesByUserIDHandlerSuccessWithActiveCommunityID(t *te
 		*arg = []models.EmsVehicle{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -665,7 +665,7 @@ func TestEmsVehicle_EmsVehiclesByUserIDHandlerSuccessWithNullCommunityID(t *test
 		*arg = []models.EmsVehicle{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
@@ -712,7 +712,7 @@ func TestEmsVehicle_EmsVehiclesByUserIDHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.EmsVehicle)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "emsvehicles").Return(conn)
 
 	emsVehicleDatabase := databases.NewEmsVehicleDatabase(db)
