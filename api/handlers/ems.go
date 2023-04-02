@@ -3,11 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/config"
@@ -22,7 +25,17 @@ type Ems struct {
 
 // EmsHandler returns all ems
 func (e Ems) EmsHandler(w http.ResponseWriter, r *http.Request) {
-	dbResp, err := e.DB.Find(context.TODO(), bson.M{})
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
+	}
+	limit64 := int64(Limit)
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("page not set, using default of %v, err: %v", Page|1, err))
+	}
+	skip64 := int64(Page)
+	dbResp, err := e.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get ems", http.StatusNotFound, w, err)
 		return
