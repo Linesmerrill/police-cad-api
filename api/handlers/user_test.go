@@ -266,7 +266,7 @@ func TestUser_UsersFindAllHandlerInvalidID(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mocked-error"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -319,7 +319,7 @@ func TestUser_UsersFindAllHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.User)
 		(*arg) = []models.User{{Details: models.UserDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -365,7 +365,7 @@ func TestUser_UsersFindAllHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -414,7 +414,7 @@ func TestUser_UsersFindAllHandlerSuccess(t *testing.T) {
 		arg := args.Get(0).(*[]models.User)
 		(*arg) = []models.User{{ID: "608cafd695eb9dc05379b7f3"}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -462,7 +462,7 @@ func TestUser_UsersFindAllHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.User)
 		(*arg) = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)

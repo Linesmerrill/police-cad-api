@@ -239,7 +239,7 @@ func TestCall_CallHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Call)
 		*arg = []models.Call{{Details: models.CallDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -284,7 +284,7 @@ func TestCall_CallHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -333,7 +333,7 @@ func TestCall_CallHandlerSuccess(t *testing.T) {
 		*arg = []models.Call{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -380,7 +380,7 @@ func TestCall_CallHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Call)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -433,7 +433,7 @@ func TestCall_CallsByCommunityIDHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Call)
 		*arg = []models.Call{{Details: models.CallDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -480,7 +480,7 @@ func TestCall_CallsByCommunityIDHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -527,7 +527,7 @@ func TestCall_CallsByCommunityIDHandlerActiveCommunityIDFailedToFindOne(t *testi
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -579,7 +579,7 @@ func TestCall_CallsByCommunityIDHandlerSuccess(t *testing.T) {
 		*arg = []models.Call{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -630,7 +630,7 @@ func TestCall_CallsByCommunityIDHandlerSuccessWithActiveCommunityID(t *testing.T
 		*arg = []models.Call{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -681,7 +681,7 @@ func TestCall_CallsByCommunityIDHandlerSuccessWithNullCommunityID(t *testing.T) 
 		*arg = []models.Call{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)
@@ -731,7 +731,7 @@ func TestCall_CallsByCommunityIDHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Call)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "calls").Return(conn)
 
 	callDatabase := databases.NewCallDatabase(db)

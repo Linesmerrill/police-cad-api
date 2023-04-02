@@ -239,7 +239,7 @@ func TestFirearm_FirearmHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Firearm)
 		*arg = []models.Firearm{{Details: models.FirearmDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -284,7 +284,7 @@ func TestFirearm_FirearmHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -333,7 +333,7 @@ func TestFirearm_FirearmHandlerSuccess(t *testing.T) {
 		*arg = []models.Firearm{{ID: "5fc51f58c72ff10004dca382"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -380,7 +380,7 @@ func TestFirearm_FirearmHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Firearm)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -430,7 +430,7 @@ func TestFirearm_FirearmsByUserIDHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Firearm)
 		*arg = []models.Firearm{{Details: models.FirearmDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -475,7 +475,7 @@ func TestFirearm_FirearmsByUserIDHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -520,7 +520,7 @@ func TestFirearm_FirearmsByUserIDHandlerActiveCommunityIDFailedToFindOne(t *test
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -569,7 +569,7 @@ func TestFirearm_FirearmsByUserIDHandlerSuccess(t *testing.T) {
 		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -617,7 +617,7 @@ func TestFirearm_FirearmsByUserIDHandlerSuccessWithActiveCommunityID(t *testing.
 		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -665,7 +665,7 @@ func TestFirearm_FirearmsByUserIDHandlerSuccessWithNullCommunityID(t *testing.T)
 		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)
@@ -712,7 +712,7 @@ func TestFirearm_FirearmsByUserIDHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Firearm)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "firearms").Return(conn)
 
 	firearmDatabase := databases.NewFirearmDatabase(db)

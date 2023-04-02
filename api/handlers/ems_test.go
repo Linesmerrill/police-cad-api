@@ -239,7 +239,7 @@ func TestEms_EmsHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Ems)
 		*arg = []models.Ems{{Details: models.EmsDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -284,7 +284,7 @@ func TestEms_EmsHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -333,7 +333,7 @@ func TestEms_EmsHandlerSuccess(t *testing.T) {
 		*arg = []models.Ems{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -380,7 +380,7 @@ func TestEms_EmsHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Ems)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -430,7 +430,7 @@ func TestEms_EmsByUserIDHandlerJsonMarshalError(t *testing.T) {
 		arg := args.Get(0).(*[]models.Ems)
 		*arg = []models.Ems{{Details: models.EmsDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -475,7 +475,7 @@ func TestEms_EmsByUserIDHandlerFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -520,7 +520,7 @@ func TestEms_EmsByUserIDHandlerActiveCommunityIDFailedToFindOne(t *testing.T) {
 	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -569,7 +569,7 @@ func TestEms_EmsByUserIDHandlerSuccess(t *testing.T) {
 		*arg = []models.Ems{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -617,7 +617,7 @@ func TestEms_EmsByUserIDHandlerSuccessWithActiveCommunityID(t *testing.T) {
 		*arg = []models.Ems{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -665,7 +665,7 @@ func TestEms_EmsByUserIDHandlerSuccessWithNullCommunityID(t *testing.T) {
 		*arg = []models.Ems{{ID: "5fc51f36c72ff10004dca381"}}
 
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
@@ -712,7 +712,7 @@ func TestEms_EmsByUserIDHandlerEmptyResponse(t *testing.T) {
 		arg := args.Get(0).(*[]models.Ems)
 		*arg = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "ems").Return(conn)
 
 	emsDatabase := databases.NewEmsDatabase(db)
