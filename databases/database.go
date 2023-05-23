@@ -105,7 +105,10 @@ func (mc *mongoCollection) FindOne(ctx context.Context, filter interface{}, opts
 }
 
 func (mc *mongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) CursorHelper {
-	cursor, _ := mc.coll.Find(ctx, filter, opts...)
+	cursor, err := mc.coll.Find(ctx, filter, opts...)
+	if err != nil {
+		println(err)
+	}
 	return &mongoCursor{cr: cursor}
 }
 
