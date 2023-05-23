@@ -18,6 +18,11 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
+var (
+	// Page denotes the starting Page for pagination results
+	Page = 1
+)
+
 // Civilian exported for testing purposes
 type Civilian struct {
 	DB databases.CivilianDatabase
@@ -30,10 +35,7 @@ func (c Civilian) CivilianHandler(w http.ResponseWriter, r *http.Request) {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
 	}
 	limit64 := int64(Limit)
-	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("page not set, using default of %v, err: %v", Page|1, err))
-	}
+	Page = getPage(Page, r)
 	skip64 := int64(Page)
 	dbResp, err := c.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
@@ -85,6 +87,13 @@ func (c Civilian) CivilianByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
@@ -97,12 +106,12 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	//
 	// Likewise, if the user is not in a community, then we will display only the civilians
 	// that are not in a community
-	var err error
+	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = c.DB.Find(context.TODO(), bson.M{
 			"civilian.userID":            userID,
 			"civilian.activeCommunityID": activeCommunityID,
-		})
+		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
 			config.ErrorStatus("failed to get civilians with active community id", http.StatusNotFound, w, err)
 			return
@@ -114,7 +123,7 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 				{"civilian.activeCommunityID": nil},
 				{"civilian.activeCommunityID": ""},
 			},
-		})
+		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
 			config.ErrorStatus("failed to get civilians with empty active community id", http.StatusNotFound, w, err)
 			return
@@ -133,4 +142,17 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+func getPage(Page int, r *http.Request) int {
+	if r.URL.Query().Get("page") == "" {
+		zap.S().Warnf("page not set, using default of %v", Page)
+	} else {
+		var err error
+		Page, err = strconv.Atoi(r.URL.Query().Get("page"))
+		if err != nil {
+			zap.S().Errorf(fmt.Sprintf("error parsing page number: %v", err))
+		}
+	}
+	return Page
 }
