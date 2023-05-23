@@ -1,6 +1,6 @@
 package databases
 
-//go generate: mockery --name CommunityDatabase
+// go generate: mockery --name CommunityDatabase
 
 import (
 	"context"
