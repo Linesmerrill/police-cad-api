@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,5 +40,11 @@ func TestSetLoggerSetsProductionLogger(t *testing.T) {
 func TestSetLoggerSetsLocalLogger(t *testing.T) {
 	l, err := setLogger("local")
 	assert.NoError(t, err)
+	assert.True(t, l.Core().Enabled(0))
+}
+
+func TestSetLoggerCannotFindEnv(t *testing.T) {
+	l, err := setLogger("asdf")
+	assert.Equal(t, err, fmt.Errorf("cannot find ENV var so defaulting to debug level logging"))
 	assert.True(t, l.Core().Enabled(0))
 }
