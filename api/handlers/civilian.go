@@ -89,7 +89,7 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	activeCommunityID := r.URL.Query().Get("active_community_id")
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
 	}
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
@@ -152,6 +152,10 @@ func getPage(Page int, r *http.Request) int {
 		Page, err = strconv.Atoi(r.URL.Query().Get("page"))
 		if err != nil {
 			zap.S().Errorf(fmt.Sprintf("error parsing page number: %v", err))
+		}
+		if Page < 1 {
+			zap.S().Warnf(fmt.Sprintf("cannot process page number less than 1. Got: %v", Page))
+			return 1
 		}
 	}
 	return Page
