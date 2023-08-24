@@ -37,7 +37,7 @@ func (v Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
-	skip64 := int64(Page)
+	skip64 := int64(Page * Limit)
 	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get firearms", http.StatusNotFound, w, err)
@@ -89,6 +89,13 @@ func (v Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page * Limit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
@@ -101,12 +108,12 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	//
 	// Likewise, if the user is not in a community, then we will display only the firearms
 	// that are not in a community
-	var err error
+	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = v.DB.Find(context.TODO(), bson.M{
 			"firearm.userID":            userID,
 			"firearm.activeCommunityID": activeCommunityID,
-		})
+		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
 			config.ErrorStatus("failed to get firearms with active community id", http.StatusNotFound, w, err)
 			return
@@ -118,7 +125,7 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 				{"firearm.activeCommunityID": nil},
 				{"firearm.activeCommunityID": ""},
 			},
-		})
+		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
 			config.ErrorStatus("failed to get firearms with empty active community id", http.StatusNotFound, w, err)
 			return

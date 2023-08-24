@@ -31,7 +31,7 @@ func (v EmsVehicle) EmsVehicleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
-	skip64 := int64(Page)
+	skip64 := int64(Page * Limit)
 	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get emsVehicles", http.StatusNotFound, w, err)

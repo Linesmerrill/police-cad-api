@@ -20,7 +20,7 @@ import (
 
 var (
 	// Page denotes the starting Page for pagination results
-	Page = 1
+	Page = 0
 )
 
 // Civilian exported for testing purposes
@@ -36,7 +36,7 @@ func (c Civilian) CivilianHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
-	skip64 := int64(Page)
+	skip64 := int64(Page * Limit)
 	dbResp, err := c.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get civilians", http.StatusNotFound, w, err)
@@ -93,7 +93,7 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	}
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
-	skip64 := int64(Page)
+	skip64 := int64(Page * Limit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
@@ -153,9 +153,9 @@ func getPage(Page int, r *http.Request) int {
 		if err != nil {
 			zap.S().Errorf(fmt.Sprintf("error parsing page number: %v", err))
 		}
-		if Page < 1 {
+		if Page < 0 {
 			zap.S().Warnf(fmt.Sprintf("cannot process page number less than 1. Got: %v", Page))
-			return 1
+			return 0
 		}
 	}
 	return Page
