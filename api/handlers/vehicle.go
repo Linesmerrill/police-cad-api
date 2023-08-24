@@ -30,10 +30,7 @@ func (v Vehicle) VehicleHandler(w http.ResponseWriter, r *http.Request) {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
 	}
 	limit64 := int64(Limit)
-	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("page not set, using default of %v, err: %v", Page|1, err))
-	}
+	Page = getPage(Page, r)
 	skip64 := int64(Page)
 	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
