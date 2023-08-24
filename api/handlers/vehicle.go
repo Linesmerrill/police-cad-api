@@ -31,7 +31,7 @@ func (v Vehicle) VehicleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
-	skip64 := int64(Page)
+	skip64 := int64(Page * Limit)
 	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get vehicles", http.StatusNotFound, w, err)
@@ -82,6 +82,13 @@ func (v Vehicle) VehicleByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page * Limit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
@@ -94,12 +101,12 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	//
 	// Likewise, if the user is not in a community, then we will display only the vehicles
 	// that are not in a community
-	var err error
+	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = v.DB.Find(context.TODO(), bson.M{
 			"vehicle.userID":            userID,
 			"vehicle.activeCommunityID": activeCommunityID,
-		})
+		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
 			config.ErrorStatus("failed to get vehicles with active community id", http.StatusNotFound, w, err)
 			return
@@ -111,7 +118,7 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 				{"vehicle.activeCommunityID": nil},
 				{"vehicle.activeCommunityID": ""},
 			},
-		})
+		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
 			config.ErrorStatus("failed to get vehicles with empty active community id", http.StatusNotFound, w, err)
 			return
