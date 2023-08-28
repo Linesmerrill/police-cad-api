@@ -145,3 +145,47 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// FirearmsByRegisteredOwnerIDHandler returns all firearms that contain the given registeredOwnerID
+func (v Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
+	registeredOwnerID := mux.Vars(r)["registered_owner_id"]
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page * Limit)
+
+	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
+
+	var dbResp []models.Firearm
+
+	// If the user is in a community then we want to search for firearms that
+	// are in that same community. This way each user can have different firearms
+	// across different communities.
+	//
+	// Likewise, if the user is not in a community, then we will display only the firearms
+	// that are not in a community
+	err = nil
+	dbResp, err = v.DB.Find(context.TODO(), bson.M{
+		"firearm.registeredOwnerID": registeredOwnerID,
+	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	if err != nil {
+		config.ErrorStatus("failed to get firearms with empty registered owner id", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Because the frontend requires that the data elements inside models.Firearms exist, if
+	// len == 0 then we will just return an empty data object
+	if len(dbResp) == 0 {
+		dbResp = []models.Firearm{}
+	}
+	b, err := json.Marshal(dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
