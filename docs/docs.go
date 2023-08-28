@@ -217,6 +217,18 @@ type vehiclesByUserIDParamsWrapper struct {
 	ActiveCommunityID string `json:"active_community_id"`
 }
 
+// swagger:route GET /api/v1/vehicles/registered-owner/{registered_owner_id} vehicle vehiclesByRegisteredOwnerID
+// Get all vehicles by RegisteredOwnerID.
+// responses:
+//   200: vehiclesResponse
+
+// Shows all vehicles by RegisteredOwnerID
+// swagger:response vehiclesResponse
+type vehiclesByRegisteredOwnerIDResponseWrapper struct {
+	// in:body
+	Body []models.Vehicle
+}
+
 // swagger:route GET /api/v1/firearm/{firearm_id} firearm firearmByID
 // Get a firearm by ID.
 // responses:
@@ -259,6 +271,18 @@ type firearmsByUserIDResponseWrapper struct {
 type firearmsByUserIDParamsWrapper struct {
 	// in:query
 	ActiveCommunityID string `json:"active_community_id"`
+}
+
+// swagger:route GET /api/v1/firearms/registered-owner/{registered_owner_id} firearm firearmsByRegisteredOwnerID
+// Get all firearms by RegisteredOwnerID.
+// responses:
+//   200: firearmsResponse
+
+// Shows all firearms by RegisteredOwnerID
+// swagger:response firearmsResponse
+type firearmsByRegisteredOwnerIDResponseWrapper struct {
+	// in:body
+	Body []models.Firearm
 }
 
 // swagger:route GET /api/v1/ems/{ems_id} ems emsByID

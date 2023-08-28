@@ -138,3 +138,41 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// VehiclesByRegisteredOwnerIDHandler returns all vehicles that contain the given registeredOwnerID
+func (v Vehicle) VehiclesByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
+	registeredOwnerID := mux.Vars(r)["registered_owner_id"]
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page * Limit)
+
+	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
+
+	var dbResp []models.Vehicle
+
+	err = nil
+	dbResp, err = v.DB.Find(context.TODO(), bson.M{
+		"vehicle.registeredOwnerID": registeredOwnerID,
+	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	if err != nil {
+		config.ErrorStatus("failed to get vehicles by registered owner id", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Because the frontend requires that the data elements inside models.Vehicles exist, if
+	// len == 0 then we will just return an empty data object
+	if len(dbResp) == 0 {
+		dbResp = []models.Vehicle{}
+	}
+	b, err := json.Marshal(dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
