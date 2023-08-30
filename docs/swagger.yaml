@@ -393,6 +393,57 @@ definitions:
         x-go-name: Alive
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  License:
+    description: License holds the structure for the license collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      license:
+        $ref: '#/definitions/LicenseDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  LicenseDetails:
+    description: |-
+      LicenseDetails holds the structure for the inner user structure as
+      defined in the license collection in mongo
+    properties:
+      activeCommunityID:
+        type: string
+        x-go-name: ActiveCommunityID
+      additionalNotes:
+        type: string
+        x-go-name: AdditionalNotes
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      expirationDate:
+        type: string
+        x-go-name: ExpirationDate
+      licenseType:
+        type: string
+        x-go-name: LicenseType
+      ownerID:
+        type: string
+        x-go-name: OwnerID
+      ownerName:
+        type: string
+        x-go-name: OwnerName
+      status:
+        type: string
+        x-go-name: Status
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      userID:
+        type: string
+        x-go-name: UserID
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   MessageError:
     description: MessageError contains the inner details for the error message response
     properties:
@@ -750,6 +801,51 @@ paths:
       summary: Get all firearms by userID.
       tags:
       - firearm
+  /api/v1/license/{license_id}:
+    get:
+      operationId: licenseByID
+      responses:
+        "200":
+          $ref: '#/responses/licenseByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get a license by ID.
+      tags:
+      - license
+  /api/v1/licenses:
+    get:
+      operationId: licenses
+      responses:
+        "200":
+          $ref: '#/responses/licensesResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get all licenses.
+      tags:
+      - license
+  /api/v1/licenses/owner/{owner_id}:
+    get:
+      operationId: licensesByOwnerID
+      responses:
+        "200":
+          $ref: '#/responses/licensesResponse'
+      summary: Get all licenses by OwnerID.
+      tags:
+      - license
+  /api/v1/licenses/user/{user_id}:
+    get:
+      operationId: licensesByUserID
+      parameters:
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/licensesResponse'
+      summary: Get all licenses by userID.
+      tags:
+      - license
   /api/v1/name-search:
     get:
       operationId: nameSearchID
@@ -925,6 +1021,16 @@ responses:
       means it is not.
     schema:
       $ref: '#/definitions/HealthCheckResponse'
+  licenseByIDResponse:
+    description: Shows a license by the given license ID {license_id}
+    schema:
+      $ref: '#/definitions/License'
+  licensesResponse:
+    description: Shows all licenses by OwnerID
+    schema:
+      items:
+        $ref: '#/definitions/License'
+      type: array
   nameSearchResponse:
     description: Shows a civilian by the given firstname, lastname, date-of-birth
       and communityID
