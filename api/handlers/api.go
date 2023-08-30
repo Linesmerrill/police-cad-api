@@ -17,7 +17,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/databases"
 )
 
-// App stores the router and db connection so it can be reused
+// App stores the router and db connection, so it can be reused
 type App struct {
 	Router   *mux.Router
 	DB       databases.CollectionHelper
@@ -35,6 +35,7 @@ func (a *App) New() *mux.Router {
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
+	l := License{DB: databases.NewLicenseDatabase(a.dbHelper)}
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
 	ev := EmsVehicle{DB: databases.NewEmsVehicleDatabase(a.dbHelper)}
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
@@ -61,6 +62,10 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/firearms", api.Middleware(http.HandlerFunc(f.FirearmHandler))).Methods("GET")
 	apiCreate.Handle("/firearms/user/{user_id}", api.Middleware(http.HandlerFunc(f.FirearmsByUserIDHandler))).Methods("GET")
 	apiCreate.Handle("/firearms/registered-owner/{registered_owner_id}", api.Middleware(http.HandlerFunc(f.FirearmsByRegisteredOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/license/{license_id}", api.Middleware(http.HandlerFunc(l.LicenseByIDHandler))).Methods("GET")
+	apiCreate.Handle("/licenses", api.Middleware(http.HandlerFunc(l.LicenseHandler))).Methods("GET")
+	apiCreate.Handle("/licenses/user/{user_id}", api.Middleware(http.HandlerFunc(l.LicensesByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/licenses/owner/{owner_id}", api.Middleware(http.HandlerFunc(l.LicensesByOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/ems/{ems_id}", api.Middleware(http.HandlerFunc(e.EmsByIDHandler))).Methods("GET")
 	apiCreate.Handle("/ems", api.Middleware(http.HandlerFunc(e.EmsHandler))).Methods("GET")
 	apiCreate.Handle("/ems/user/{user_id}", api.Middleware(http.HandlerFunc(e.EmsByUserIDHandler))).Methods("GET")

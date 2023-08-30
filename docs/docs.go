@@ -285,6 +285,62 @@ type firearmsByRegisteredOwnerIDResponseWrapper struct {
 	Body []models.Firearm
 }
 
+// swagger:route GET /api/v1/license/{license_id} license licenseByID
+// Get a license by ID.
+// responses:
+//   200: licenseByIDResponse
+//   404: errorMessageResponse
+
+// Shows a license by the given license ID {license_id}
+// swagger:response licenseByIDResponse
+type licenseByIDResponseWrapper struct {
+	// in:body
+	Body models.License
+}
+
+// swagger:route GET /api/v1/licenses license licenses
+// Get all licenses.
+// responses:
+//   200: licensesResponse
+//   404: errorMessageResponse
+
+// Shows all licenses.
+// swagger:response licensesResponse
+type licensesResponseWrapper struct {
+	// in:body
+	Body []models.License
+}
+
+// swagger:route GET /api/v1/licenses/user/{user_id} license licensesByUserID
+// Get all licenses by userID.
+// responses:
+//   200: licensesResponse
+
+// Shows all licenses by userID
+// swagger:response licensesResponse
+type licensesByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.License
+}
+
+// swagger:parameters licensesByUserID
+type licensesByUserIDParamsWrapper struct {
+	// in:query
+	ActiveCommunityID string `json:"active_community_id"`
+}
+
+// swagger:route GET /api/v1/licenses/owner/{owner_id} license licensesByOwnerID
+// Get all licenses by OwnerID.
+// responses:
+//   200: licensesResponse
+
+// Shows all licenses by OwnerID
+// swagger:response licensesResponse
+type licensesByOwnerIDResponseWrapper struct {
+	// in:body
+	Body []models.License
+}
+
 // swagger:route GET /api/v1/ems/{ems_id} ems emsByID
 // Get a ems by ID.
 // responses:
