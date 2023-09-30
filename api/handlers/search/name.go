@@ -26,10 +26,10 @@ func (n NameSearch) NameSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	firstName := r.URL.Query().Get("first_name")
 	lastName := r.URL.Query().Get("last_name")
-	dob := r.URL.Query().Get("dob")
+	dateOfBirth := r.URL.Query().Get("date_of_birth")
 	communityID := r.URL.Query().Get("community_id")
 
-	zap.S().Debugf("first_name: %v, last_name: %v, dob: %v, community_id: %v", firstName, lastName, dob, communityID)
+	zap.S().Debugf("first_name: %v, last_name: %v, date_of_birth: %v, community_id: %v", firstName, lastName, dateOfBirth, communityID)
 
 	dbResp, err := n.DB.Find(context.TODO(), bson.M{
 		"$and": []bson.M{
@@ -39,7 +39,7 @@ func (n NameSearch) NameSearchHandler(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 			bson.M{
-				"civilian.birthday": dob,
+				"civilian.birthday": dateOfBirth,
 			},
 			bson.M{"$or": []bson.M{
 				bson.M{"civilian.activeCommunityID": ""},
