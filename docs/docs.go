@@ -152,25 +152,25 @@ type civiliansByUserIDParamsWrapper struct {
 	ActiveCommunityID string `json:"active_community_id"`
 }
 
-// swagger:route GET /api/v1/name-search name-search nameSearchID
-// Get a civilian by firstname, lastname, date-of-birth and communityID.
+// swagger:route GET /api/v1/civilians/search civilian civiliansByNameSearch
+// Search civilians by supplied params.
 // responses:
-//   200: nameSearchResponse
+//   200: civiliansResponse
 
-// Shows a civilian by the given firstname, lastname, date-of-birth and communityID
-// swagger:response nameSearchResponse
-type nameSearchResponseWrapper struct {
+// Shows all civilians by search params
+// swagger:response civiliansResponse
+type civiliansByNameSearchResponseWrapper struct {
 	// in:body
 	Body []models.Civilian
 }
 
-// swagger:parameters nameSearchID
-type nameSearchParamsWrapper struct {
+// swagger:parameters civiliansByNameSearch
+type civiliansByNameSearchParamsWrapper struct {
 	// in:query
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-	DateOfBirth string `json:"dob"`
-	CommunityID string `json:"community_id"`
+	FirstName         string `json:"first_name"`
+	LastName          string `json:"last_name"`
+	DateOfBirth       string `json:"date_of_birth"`
+	ActiveCommunityID string `json:"active_community_id"`
 }
 
 // swagger:route GET /api/v1/vehicle/{vehicle_id} vehicle vehicleByID
