@@ -575,6 +575,56 @@ definitions:
         x-go-name: Vin
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Warrant:
+    description: Warrant holds the structure for the warrant collection in mongo
+    properties:
+      __v:
+        format: int32
+        type: integer
+        x-go-name: Version
+      _id:
+        type: string
+        x-go-name: ID
+      warrant:
+        $ref: '#/definitions/WarrantDetails'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  WarrantDetails:
+    description: |-
+      WarrantDetails holds the structure for the inner user structure as
+      defined in the warrant collection in mongo
+    properties:
+      accusedFirstName:
+        type: string
+        x-go-name: AccusedFirstName
+      accusedID:
+        type: string
+        x-go-name: AccusedID
+      accusedLastName:
+        type: string
+        x-go-name: AccusedLastName
+      clearingOfficerID:
+        type: string
+        x-go-name: ClearingOfficerID
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      reasons:
+        items:
+          type: string
+        type: array
+        x-go-name: Reasons
+      reportingOfficerID:
+        type: string
+        x-go-name: ReportingOfficerID
+      status:
+        type: boolean
+        x-go-name: Status
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
 host: https://police-cad-api.herokuapp.com
 info:
   description: Documentation of Lines Police CAD API.
@@ -635,6 +685,32 @@ paths:
         "200":
           $ref: '#/responses/civiliansResponse'
       summary: Get all civilians.
+      tags:
+      - civilian
+  /api/v1/civilians/search:
+    get:
+      operationId: civiliansByNameSearch
+      parameters:
+      - in: query
+        name: first_name
+        type: string
+        x-go-name: FirstName
+      - in: query
+        name: last_name
+        type: string
+        x-go-name: LastName
+      - in: query
+        name: date_of_birth
+        type: string
+        x-go-name: DateOfBirth
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/civiliansResponse'
+      summary: Search civilians by supplied params.
       tags:
       - civilian
   /api/v1/civilians/user/{user_id}:
@@ -846,32 +922,6 @@ paths:
       summary: Get all licenses by userID.
       tags:
       - license
-  /api/v1/name-search:
-    get:
-      operationId: nameSearchID
-      parameters:
-      - in: query
-        name: first_name
-        type: string
-        x-go-name: FirstName
-      - in: query
-        name: last_name
-        type: string
-        x-go-name: LastName
-      - in: query
-        name: dob
-        type: string
-        x-go-name: DateOfBirth
-      - in: query
-        name: community_id
-        type: string
-        x-go-name: CommunityID
-      responses:
-        "200":
-          $ref: '#/responses/nameSearchResponse'
-      summary: Get a civilian by firstname, lastname, date-of-birth and communityID.
-      tags:
-      - name-search
   /api/v1/user/{user_id}:
     get:
       operationId: userByID
@@ -935,6 +985,42 @@ paths:
       summary: Get all vehicles by userID.
       tags:
       - vehicle
+  /api/v1/warrant/{warrant_id}:
+    get:
+      operationId: warrantByID
+      responses:
+        "200":
+          $ref: '#/responses/warrantByIDResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get a warrant by ID.
+      tags:
+      - warrant
+  /api/v1/warrants:
+    get:
+      operationId: warrants
+      responses:
+        "200":
+          $ref: '#/responses/warrantsResponse'
+        "404":
+          $ref: '#/responses/errorMessageResponse'
+      summary: Get all warrants.
+      tags:
+      - warrant
+  /api/v1/warrants/user/{user_id}:
+    get:
+      operationId: warrantsByUserID
+      parameters:
+      - in: query
+        name: page
+        type: string
+        x-go-name: Page
+      responses:
+        "200":
+          $ref: '#/responses/warrantsResponse'
+      summary: Get all warrants by userID.
+      tags:
+      - warrant
   /health:
     get:
       operationId: healthEndpointID
@@ -962,7 +1048,7 @@ responses:
     schema:
       $ref: '#/definitions/Civilian'
   civiliansResponse:
-    description: Shows all civilians by userID
+    description: Shows all civilians by search params
     schema:
       items:
         $ref: '#/definitions/Civilian'
@@ -1031,13 +1117,6 @@ responses:
       items:
         $ref: '#/definitions/License'
       type: array
-  nameSearchResponse:
-    description: Shows a civilian by the given firstname, lastname, date-of-birth
-      and communityID
-    schema:
-      items:
-        $ref: '#/definitions/Civilian'
-      type: array
   userByIDResponse:
     description: Shows the user by the given userID {user_id}
     schema:
@@ -1057,6 +1136,16 @@ responses:
     schema:
       items:
         $ref: '#/definitions/Vehicle'
+      type: array
+  warrantByIDResponse:
+    description: Shows a warrant by the given warrant ID {warrant_id}
+    schema:
+      $ref: '#/definitions/Warrant'
+  warrantsResponse:
+    description: Shows all warrants by userID
+    schema:
+      items:
+        $ref: '#/definitions/Warrant'
       type: array
 schemes:
 - https
