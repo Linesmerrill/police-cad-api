@@ -472,3 +472,47 @@ type callByCommunityIDParamsWrapper struct {
 	// in:query
 	Status bool `json:"status"`
 }
+
+// swagger:route GET /api/v1/warrant/{warrant_id} warrant warrantByID
+// Get a warrant by ID.
+// responses:
+//   200: warrantByIDResponse
+//   404: errorMessageResponse
+
+// Shows a warrant by the given warrant ID {warrant_id}
+// swagger:response warrantByIDResponse
+type warrantByIDResponseWrapper struct {
+	// in:body
+	Body models.Warrant
+}
+
+// swagger:route GET /api/v1/warrants warrant warrants
+// Get all warrants.
+// responses:
+//   200: warrantsResponse
+//   404: errorMessageResponse
+
+// Shows all warrants.
+// swagger:response warrantsResponse
+type warrantsResponseWrapper struct {
+	// in:body
+	Body []models.Warrant
+}
+
+// swagger:route GET /api/v1/warrants/user/{user_id} warrant warrantsByUserID
+// Get all warrants by userID.
+// responses:
+//   200: warrantsResponse
+
+// Shows all warrants by userID
+// swagger:response warrantsResponse
+type warrantsByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.Warrant
+}
+
+// swagger:parameters warrantsByUserID
+type warrantsByUserIDParamsWrapper struct {
+	// in:query
+	Page string `json:"page"`
+}
