@@ -89,6 +89,7 @@ func (v Warrant) WarrantByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (v Warrant) WarrantsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
+	status := r.URL.Query().Get("status")
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
@@ -108,9 +109,15 @@ func (v Warrant) WarrantsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	//
 	// Likewise, if the user is not in a community, then we will display only the warrants
 	// that are not in a community
+	statusBool := true
+	if status == "false" {
+		statusBool = false
+	}
+
 	err = nil
 	dbResp, err = v.DB.Find(context.TODO(), bson.M{
 		"warrant.accusedID": userID,
+		"warrant.status":    statusBool,
 	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get warrants", http.StatusNotFound, w, err)
