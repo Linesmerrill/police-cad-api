@@ -229,6 +229,25 @@ type vehiclesByRegisteredOwnerIDResponseWrapper struct {
 	Body []models.Vehicle
 }
 
+// swagger:route GET /api/v1/vehicles/search vehicle vehiclesByPlateSearch
+// Get all vehicles by plate.
+// responses:
+//   200: vehiclesResponse
+
+// Shows all vehicles by plate
+// swagger:response vehiclesResponse
+type vehiclesByPlateSearchResponseWrapper struct {
+	// in:body
+	Body []models.Vehicle
+}
+
+// swagger:parameters vehiclesByPlateSearch
+type vehiclesByPlateSearchParamsWrapper struct {
+	// in:query
+	Plate             string `json:"plate"`
+	ActiveCommunityID string `json:"active_community_id"`
+}
+
 // swagger:route GET /api/v1/firearm/{firearm_id} firearm firearmByID
 // Get a firearm by ID.
 // responses:

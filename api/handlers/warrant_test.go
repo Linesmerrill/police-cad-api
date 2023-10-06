@@ -592,6 +592,54 @@ func TestWarrant_WarrantsByUserIDHandlerSuccess(t *testing.T) {
 	assert.Equal(t, "5fc51f36c72ff10004dca381", testWarrant[0].ID)
 }
 
+func TestWarrant_WarrantsByUserIDHandlerSuccessWithStatusFalse(t *testing.T) {
+	req, err := http.NewRequest("GET", "/api/v1/warrants/user/61be0ebf22cfea7e7550f00e?active_community_id=61c74b7b88e1abdac307bb39&status=false", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Set("Authorization", "Bearer abc123")
+
+	var db databases.DatabaseHelper
+	var client databases.ClientHelper
+	var conn databases.CollectionHelper
+	var singleResultHelper databases.SingleResultHelper
+
+	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
+	client = &mocks.ClientHelper{}
+	conn = &mocks.CollectionHelper{}
+	singleResultHelper = &mocks.SingleResultHelper{}
+
+	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	db.(*MockDatabaseHelper).On("Client").Return(client)
+	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		arg := args.Get(0).(*[]models.Warrant)
+		*arg = []models.Warrant{{ID: "5fc51f36c72ff10004dca381"}}
+
+	})
+	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
+	db.(*MockDatabaseHelper).On("Collection", "warrants").Return(conn)
+
+	warrantDatabase := databases.NewWarrantDatabase(db)
+	u := handlers.Warrant{
+		DB: warrantDatabase,
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(u.WarrantsByUserIDHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
+	}
+
+	var testWarrant []models.Warrant
+	_ = json.Unmarshal(rr.Body.Bytes(), &testWarrant)
+
+	assert.Equal(t, "5fc51f36c72ff10004dca381", testWarrant[0].ID)
+}
+
 func TestWarrant_WarrantsByUserIDHandlerSuccessWithActiveCommunityID(t *testing.T) {
 	req, err := http.NewRequest("GET", "/api/v1/warrants/user/61be0ebf22cfea7e7550f00e?active_community_id=61c74b7b88e1abdac307bb39", nil)
 	if err != nil {
