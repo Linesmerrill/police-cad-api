@@ -971,6 +971,24 @@ paths:
       summary: Get all vehicles by RegisteredOwnerID.
       tags:
       - vehicle
+  /api/v1/vehicles/search:
+    get:
+      operationId: vehiclesByPlateSearch
+      parameters:
+      - in: query
+        name: plate
+        type: string
+        x-go-name: Plate
+      - in: query
+        name: active_community_id
+        type: string
+        x-go-name: ActiveCommunityID
+      responses:
+        "200":
+          $ref: '#/responses/vehiclesResponse'
+      summary: Get all vehicles by plate.
+      tags:
+      - vehicle
   /api/v1/vehicles/user/{user_id}:
     get:
       operationId: vehiclesByUserID
@@ -1132,7 +1150,7 @@ responses:
     schema:
       $ref: '#/definitions/Vehicle'
   vehiclesResponse:
-    description: Shows all vehicles by RegisteredOwnerID
+    description: Shows all vehicles by plate
     schema:
       items:
         $ref: '#/definitions/Vehicle'
