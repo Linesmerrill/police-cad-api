@@ -148,7 +148,6 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Request) {
 	firstName := r.URL.Query().Get("first_name")
 	lastName := r.URL.Query().Get("last_name")
-	dateOfBirth := r.URL.Query().Get("date_of_birth")             // optional
 	activeCommunityID := r.URL.Query().Get("active_community_id") // optional
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
@@ -158,7 +157,7 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
 
-	zap.S().Debugf("first_name: '%v', last_name: '%v', date_of_birth: '%v'", firstName, lastName, dateOfBirth)
+	zap.S().Debugf("first_name: '%v', last_name: '%v'", firstName, lastName)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
 	var dbResp []models.Civilian
@@ -170,31 +169,15 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	// Likewise, if the user is not in a community, then we will display only the civilians
 	// that are not in a community
 	err = nil
-	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = c.DB.Find(context.TODO(), bson.M{
-			"$text": bson.M{
-				"$search": fmt.Sprintf("%s %s", firstName, lastName),
-			},
-			"civilian.activeCommunityID": activeCommunityID,
-		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-		if err != nil {
-			config.ErrorStatus("failed to get civilian name search with active community id", http.StatusNotFound, w, err)
-			return
-		}
-	} else {
-		dbResp, err = c.DB.Find(context.TODO(), bson.M{
-			"civilian.firstName": firstName,
-			"civilian.lastName":  lastName,
-			"civilian.birthday":  dateOfBirth,
-			"$or": []bson.M{
-				{"civilian.activeCommunityID": nil},
-				{"civilian.activeCommunityID": ""},
-			},
-		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-		if err != nil {
-			config.ErrorStatus("failed to get civilian name search with empty active community id", http.StatusNotFound, w, err)
-			return
-		}
+	dbResp, err = c.DB.Find(context.TODO(), bson.M{
+		"$text": bson.M{
+			"$search": fmt.Sprintf("%s %s", firstName, lastName),
+		},
+		"civilian.activeCommunityID": activeCommunityID,
+	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	if err != nil {
+		config.ErrorStatus("failed to get civilian name search", http.StatusNotFound, w, err)
+		return
 	}
 
 	// Because the frontend requires that the data elements inside models.Civilians exist, if

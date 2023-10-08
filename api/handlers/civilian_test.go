@@ -968,7 +968,7 @@ func TestCivilian_CiviliansByNameSearchHandlerFailedToFindOne(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
 	}
 
-	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilian name search with active community id", Error: "mongo: no documents in result"}}
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilian name search", Error: "mongo: no documents in result"}}
 	b, _ := json.Marshal(expected)
 	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
@@ -1013,7 +1013,7 @@ func TestCivilian_CiviliansByNameSearchHandlerActiveCommunityIDFailedToFindOne(t
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
 	}
 
-	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilian name search with active community id", Error: "mongo: no documents in result"}}
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilian name search", Error: "mongo: no documents in result"}}
 	b, _ := json.Marshal(expected)
 	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
@@ -1165,7 +1165,7 @@ func TestCivilian_CiviliansByNameSearchHandlerSuccessWithNullCommunityID(t *test
 }
 
 func TestCivilian_CiviliansByNameSearchHandlerFailedToFindOneWithEmptyCommunityID(t *testing.T) {
-	req, err := http.NewRequest("GET", "/api/v1/civilians/search?active_community_id=null&first_name=alessandro&last_name=mills&date_of_birth=1987-03-20", nil)
+	req, err := http.NewRequest("GET", "/api/v1/civilians/search?active_community_id=null&first_name=alessandro&last_name=mills", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1202,7 +1202,7 @@ func TestCivilian_CiviliansByNameSearchHandlerFailedToFindOneWithEmptyCommunityI
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
 	}
 
-	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilian name search with empty active community id", Error: "mongo: no documents in result"}}
+	expected := models.ErrorMessageResponse{Response: models.MessageError{Message: "failed to get civilian name search", Error: "mongo: no documents in result"}}
 	b, _ := json.Marshal(expected)
 	if rr.Body.String() != string(b) {
 		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
