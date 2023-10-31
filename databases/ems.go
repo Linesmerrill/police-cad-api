@@ -6,14 +6,15 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const emsName = "ems"
 
 // EmsDatabase contains the methods to use with the ems database
 type EmsDatabase interface {
-	FindOne(ctx context.Context, filter interface{}) (*models.Ems, error)
-	Find(ctx context.Context, filter interface{}) ([]models.Ems, error)
+	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Ems, error)
+	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Ems, error)
 }
 
 type emsDatabase struct {
@@ -27,18 +28,18 @@ func NewEmsDatabase(db DatabaseHelper) EmsDatabase {
 	}
 }
 
-func (c *emsDatabase) FindOne(ctx context.Context, filter interface{}) (*models.Ems, error) {
+func (c *emsDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Ems, error) {
 	ems := &models.Ems{}
-	err := c.db.Collection(emsName).FindOne(ctx, filter).Decode(&ems)
+	err := c.db.Collection(emsName).FindOne(ctx, filter, opts...).Decode(&ems)
 	if err != nil {
 		return nil, err
 	}
 	return ems, nil
 }
 
-func (c *emsDatabase) Find(ctx context.Context, filter interface{}) ([]models.Ems, error) {
+func (c *emsDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Ems, error) {
 	var ems []models.Ems
-	err := c.db.Collection(emsName).Find(ctx, filter).Decode(&ems)
+	err := c.db.Collection(emsName).Find(ctx, filter, opts...).Decode(&ems)
 	if err != nil {
 		return nil, err
 	}
