@@ -152,25 +152,25 @@ type civiliansByUserIDParamsWrapper struct {
 	ActiveCommunityID string `json:"active_community_id"`
 }
 
-// swagger:route GET /api/v1/name-search name-search nameSearchID
-// Get a civilian by firstname, lastname, date-of-birth and communityID.
+// swagger:route GET /api/v1/civilians/search civilian civiliansByNameSearch
+// Search civilians by supplied params.
 // responses:
-//   200: nameSearchResponse
+//   200: civiliansResponse
 
-// Shows a civilian by the given firstname, lastname, date-of-birth and communityID
-// swagger:response nameSearchResponse
-type nameSearchResponseWrapper struct {
+// Shows all civilians by search params
+// swagger:response civiliansResponse
+type civiliansByNameSearchResponseWrapper struct {
 	// in:body
 	Body []models.Civilian
 }
 
-// swagger:parameters nameSearchID
-type nameSearchParamsWrapper struct {
+// swagger:parameters civiliansByNameSearch
+type civiliansByNameSearchParamsWrapper struct {
 	// in:query
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-	DateOfBirth string `json:"dob"`
-	CommunityID string `json:"community_id"`
+	FirstName         string `json:"first_name"`
+	LastName          string `json:"last_name"`
+	DateOfBirth       string `json:"date_of_birth"`
+	ActiveCommunityID string `json:"active_community_id"`
 }
 
 // swagger:route GET /api/v1/vehicle/{vehicle_id} vehicle vehicleByID
@@ -217,6 +217,37 @@ type vehiclesByUserIDParamsWrapper struct {
 	ActiveCommunityID string `json:"active_community_id"`
 }
 
+// swagger:route GET /api/v1/vehicles/registered-owner/{registered_owner_id} vehicle vehiclesByRegisteredOwnerID
+// Get all vehicles by RegisteredOwnerID.
+// responses:
+//   200: vehiclesResponse
+
+// Shows all vehicles by RegisteredOwnerID
+// swagger:response vehiclesResponse
+type vehiclesByRegisteredOwnerIDResponseWrapper struct {
+	// in:body
+	Body []models.Vehicle
+}
+
+// swagger:route GET /api/v1/vehicles/search vehicle vehiclesByPlateSearch
+// Get all vehicles by plate.
+// responses:
+//   200: vehiclesResponse
+
+// Shows all vehicles by plate
+// swagger:response vehiclesResponse
+type vehiclesByPlateSearchResponseWrapper struct {
+	// in:body
+	Body []models.Vehicle
+}
+
+// swagger:parameters vehiclesByPlateSearch
+type vehiclesByPlateSearchParamsWrapper struct {
+	// in:query
+	Plate             string `json:"plate"`
+	ActiveCommunityID string `json:"active_community_id"`
+}
+
 // swagger:route GET /api/v1/firearm/{firearm_id} firearm firearmByID
 // Get a firearm by ID.
 // responses:
@@ -259,6 +290,74 @@ type firearmsByUserIDResponseWrapper struct {
 type firearmsByUserIDParamsWrapper struct {
 	// in:query
 	ActiveCommunityID string `json:"active_community_id"`
+}
+
+// swagger:route GET /api/v1/firearms/registered-owner/{registered_owner_id} firearm firearmsByRegisteredOwnerID
+// Get all firearms by RegisteredOwnerID.
+// responses:
+//   200: firearmsResponse
+
+// Shows all firearms by RegisteredOwnerID
+// swagger:response firearmsResponse
+type firearmsByRegisteredOwnerIDResponseWrapper struct {
+	// in:body
+	Body []models.Firearm
+}
+
+// swagger:route GET /api/v1/license/{license_id} license licenseByID
+// Get a license by ID.
+// responses:
+//   200: licenseByIDResponse
+//   404: errorMessageResponse
+
+// Shows a license by the given license ID {license_id}
+// swagger:response licenseByIDResponse
+type licenseByIDResponseWrapper struct {
+	// in:body
+	Body models.License
+}
+
+// swagger:route GET /api/v1/licenses license licenses
+// Get all licenses.
+// responses:
+//   200: licensesResponse
+//   404: errorMessageResponse
+
+// Shows all licenses.
+// swagger:response licensesResponse
+type licensesResponseWrapper struct {
+	// in:body
+	Body []models.License
+}
+
+// swagger:route GET /api/v1/licenses/user/{user_id} license licensesByUserID
+// Get all licenses by userID.
+// responses:
+//   200: licensesResponse
+
+// Shows all licenses by userID
+// swagger:response licensesResponse
+type licensesByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.License
+}
+
+// swagger:parameters licensesByUserID
+type licensesByUserIDParamsWrapper struct {
+	// in:query
+	ActiveCommunityID string `json:"active_community_id"`
+}
+
+// swagger:route GET /api/v1/licenses/owner/{owner_id} license licensesByOwnerID
+// Get all licenses by OwnerID.
+// responses:
+//   200: licensesResponse
+
+// Shows all licenses by OwnerID
+// swagger:response licensesResponse
+type licensesByOwnerIDResponseWrapper struct {
+	// in:body
+	Body []models.License
 }
 
 // swagger:route GET /api/v1/ems/{ems_id} ems emsByID
@@ -391,4 +490,48 @@ type callsByCommunityIDResponseWrapper struct {
 type callByCommunityIDParamsWrapper struct {
 	// in:query
 	Status bool `json:"status"`
+}
+
+// swagger:route GET /api/v1/warrant/{warrant_id} warrant warrantByID
+// Get a warrant by ID.
+// responses:
+//   200: warrantByIDResponse
+//   404: errorMessageResponse
+
+// Shows a warrant by the given warrant ID {warrant_id}
+// swagger:response warrantByIDResponse
+type warrantByIDResponseWrapper struct {
+	// in:body
+	Body models.Warrant
+}
+
+// swagger:route GET /api/v1/warrants warrant warrants
+// Get all warrants.
+// responses:
+//   200: warrantsResponse
+//   404: errorMessageResponse
+
+// Shows all warrants.
+// swagger:response warrantsResponse
+type warrantsResponseWrapper struct {
+	// in:body
+	Body []models.Warrant
+}
+
+// swagger:route GET /api/v1/warrants/user/{user_id} warrant warrantsByUserID
+// Get all warrants by userID.
+// responses:
+//   200: warrantsResponse
+
+// Shows all warrants by userID
+// swagger:response warrantsResponse
+type warrantsByUserIDResponseWrapper struct {
+	// in:body
+	Body []models.Warrant
+}
+
+// swagger:parameters warrantsByUserID
+type warrantsByUserIDParamsWrapper struct {
+	// in:query
+	Page string `json:"page"`
 }

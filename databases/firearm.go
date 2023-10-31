@@ -6,14 +6,15 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const firearmName = "firearms"
 
 // FirearmDatabase contains the methods to use with the firearm database
 type FirearmDatabase interface {
-	FindOne(ctx context.Context, filter interface{}) (*models.Firearm, error)
-	Find(ctx context.Context, filter interface{}) ([]models.Firearm, error)
+	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Firearm, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Firearm, error)
 }
 
 type firearmDatabase struct {
@@ -27,7 +28,7 @@ func NewFirearmDatabase(db DatabaseHelper) FirearmDatabase {
 	}
 }
 
-func (c *firearmDatabase) FindOne(ctx context.Context, filter interface{}) (*models.Firearm, error) {
+func (c *firearmDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Firearm, error) {
 	firearm := &models.Firearm{}
 	err := c.db.Collection(firearmName).FindOne(ctx, filter).Decode(&firearm)
 	if err != nil {
@@ -36,9 +37,9 @@ func (c *firearmDatabase) FindOne(ctx context.Context, filter interface{}) (*mod
 	return firearm, nil
 }
 
-func (c *firearmDatabase) Find(ctx context.Context, filter interface{}) ([]models.Firearm, error) {
+func (c *firearmDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Firearm, error) {
 	var firearms []models.Firearm
-	err := c.db.Collection(firearmName).Find(ctx, filter).Decode(&firearms)
+	err := c.db.Collection(firearmName).Find(ctx, filter, opts...).Decode(&firearms)
 	if err != nil {
 		return nil, err
 	}

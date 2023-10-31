@@ -18,19 +18,19 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
-// Firearm exported for testing purposes
-type Firearm struct {
-	DB databases.FirearmDatabase
+// License exported for testing purposes
+type License struct {
+	DB databases.LicenseDatabase
 }
 
-// FirearmList paginated response with a list of items and next page id
-type FirearmList struct {
-	Items      []*models.Firearm `json:"items"`
+// LicenseList paginated response with a list of items and next page id
+type LicenseList struct {
+	Items      []*models.License `json:"items"`
 	NextPageID int               `json:"next_page_id,omitempty" example:"10"`
 }
 
-// FirearmHandler returns all firearms
-func (v Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
+// LicenseHandler returns all licenses
+func (v License) LicenseHandler(w http.ResponseWriter, r *http.Request) {
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
@@ -40,14 +40,14 @@ func (v Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
 	skip64 := int64(Page * Limit)
 	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
-		config.ErrorStatus("failed to get firearms", http.StatusNotFound, w, err)
+		config.ErrorStatus("failed to get licenses", http.StatusNotFound, w, err)
 		return
 	}
 
-	// Because the frontend requires that the data elements inside models.Firearms exist, if
+	// Because the frontend requires that the data elements inside models.Licenses exist, if
 	// len == 0 then we will just return an empty data object
 	if len(dbResp) == 0 {
-		dbResp = []models.Firearm{}
+		dbResp = []models.License{}
 	}
 	b, err := json.Marshal(dbResp)
 	if err != nil {
@@ -58,11 +58,11 @@ func (v Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
-// FirearmByIDHandler returns a firearm by ID
-func (v Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
-	civID := mux.Vars(r)["firearm_id"]
+// LicenseByIDHandler returns a license by ID
+func (v License) LicenseByIDHandler(w http.ResponseWriter, r *http.Request) {
+	civID := mux.Vars(r)["license_id"]
 
-	zap.S().Debugf("firearm_id: %v", civID)
+	zap.S().Debugf("license_id: %v", civID)
 
 	cID, err := primitive.ObjectIDFromHex(civID)
 	if err != nil {
@@ -72,7 +72,7 @@ func (v Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	dbResp, err := v.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
-		config.ErrorStatus("failed to get firearm by ID", http.StatusNotFound, w, err)
+		config.ErrorStatus("failed to get license by ID", http.StatusNotFound, w, err)
 		return
 	}
 
@@ -85,8 +85,8 @@ func (v Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
-// FirearmsByUserIDHandler returns all firearms that contain the given userID
-func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+// LicensesByUserIDHandler returns all licenses that contain the given userID
+func (v License) LicensesByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -100,42 +100,42 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
-	var dbResp []models.Firearm
+	var dbResp []models.License
 
-	// If the user is in a community then we want to search for firearms that
-	// are in that same community. This way each user can have different firearms
+	// If the user is in a community then we want to search for licenses that
+	// are in that same community. This way each user can have different licenses
 	// across different communities.
 	//
-	// Likewise, if the user is not in a community, then we will display only the firearms
+	// Likewise, if the user is not in a community, then we will display only the licenses
 	// that are not in a community
 	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"firearm.userID":            userID,
-			"firearm.activeCommunityID": activeCommunityID,
+			"license.userID":            userID,
+			"license.activeCommunityID": activeCommunityID,
 		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
-			config.ErrorStatus("failed to get firearms with active community id", http.StatusNotFound, w, err)
+			config.ErrorStatus("failed to get licenses with active community id", http.StatusNotFound, w, err)
 			return
 		}
 	} else {
 		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"firearm.userID": userID,
+			"license.userID": userID,
 			"$or": []bson.M{
-				{"firearm.activeCommunityID": nil},
-				{"firearm.activeCommunityID": ""},
+				{"license.activeCommunityID": nil},
+				{"license.activeCommunityID": ""},
 			},
 		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 		if err != nil {
-			config.ErrorStatus("failed to get firearms with empty active community id", http.StatusNotFound, w, err)
+			config.ErrorStatus("failed to get licenses with empty active community id", http.StatusNotFound, w, err)
 			return
 		}
 	}
 
-	// Because the frontend requires that the data elements inside models.Firearms exist, if
+	// Because the frontend requires that the data elements inside models.Licenses exist, if
 	// len == 0 then we will just return an empty data object
 	if len(dbResp) == 0 {
-		dbResp = []models.Firearm{}
+		dbResp = []models.License{}
 	}
 	b, err := json.Marshal(dbResp)
 	if err != nil {
@@ -146,9 +146,9 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	w.Write(b)
 }
 
-// FirearmsByRegisteredOwnerIDHandler returns all firearms that contain the given registeredOwnerID
-func (v Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
-	registeredOwnerID := mux.Vars(r)["registered_owner_id"]
+// LicensesByOwnerIDHandler returns all licenses that contain the given OwnerID
+func (v License) LicensesByOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
+	ownerID := mux.Vars(r)["owner_id"]
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
@@ -157,29 +157,29 @@ func (v Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
 
-	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
+	zap.S().Debugf("owner_id: '%v'", ownerID)
 
-	var dbResp []models.Firearm
+	var dbResp []models.License
 
-	// If the user is in a community then we want to search for firearms that
-	// are in that same community. This way each user can have different firearms
+	// If the user is in a community then we want to search for licenses that
+	// are in that same community. This way each user can have different licenses
 	// across different communities.
 	//
-	// Likewise, if the user is not in a community, then we will display only the firearms
+	// Likewise, if the user is not in a community, then we will display only the licenses
 	// that are not in a community
 	err = nil
 	dbResp, err = v.DB.Find(context.TODO(), bson.M{
-		"firearm.registeredOwnerID": registeredOwnerID,
+		"license.ownerID": ownerID,
 	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
-		config.ErrorStatus("failed to get firearms with empty registered owner id", http.StatusNotFound, w, err)
+		config.ErrorStatus("failed to get licenses with empty owner id", http.StatusNotFound, w, err)
 		return
 	}
 
-	// Because the frontend requires that the data elements inside models.Firearms exist, if
+	// Because the frontend requires that the data elements inside models.Licenses exist, if
 	// len == 0 then we will just return an empty data object
 	if len(dbResp) == 0 {
-		dbResp = []models.Firearm{}
+		dbResp = []models.License{}
 	}
 	b, err := json.Marshal(dbResp)
 	if err != nil {
