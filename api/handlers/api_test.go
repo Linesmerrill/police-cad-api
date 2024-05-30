@@ -70,12 +70,12 @@ func TestApp_CommunityHandlerInvalidToken(t *testing.T) {
 	req.Header.Add("Authorization", "Bearer asdfasdf")
 	response := executeRequest(req)
 
-	checkResponseCode(t, http.StatusInternalServerError, response.Code)
+	checkResponseCode(t, http.StatusUnauthorized, response.Code)
 
 	var m map[string]string
 	json.Unmarshal(response.Body.Bytes(), &m)
-	if m["error"] != "failed to parse token, token contains an invalid number of segments" {
-		t.Errorf("Expected the 'error' key of the reponse to be set to 'failed to parse token, token contains an invalid number of segments'. Got '%s'", m["error"])
+	if m["error"] != "unauthorized" {
+		t.Errorf("Expected the 'error' key of the reponse to be set to 'unauthorized'. Got '%s'", m["error"])
 	}
 }
 
