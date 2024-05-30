@@ -30,10 +30,13 @@ var cache store.Cache
 // Middleware adds some basic header authentication around accessing the routes
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		user, err := authenticator.Authenticate(r)
 		if err != nil {
-			code := http.StatusUnauthorized
-			http.Error(w, http.StatusText(code), code)
+			zap.S().Errorw("unauthorized",
+				"url", r.URL)
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "unauthorized"}`))
 			return
 		}
 		zap.S().Debugf("User %s Authenticated\n", user.UserName())
@@ -69,7 +72,6 @@ func (m MiddlewareDB) SetupGoGuardian() {
 
 // ValidateUser validates a user
 func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, password string) (auth.Info, error) {
-
 	usernameHash := sha256.Sum256([]byte(email))
 
 	// fetch email & pass from db
