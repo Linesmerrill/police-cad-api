@@ -6,13 +6,16 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"strings"
+
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/shaj13/go-guardian/auth"
-	"github.com/shaj13/go-guardian/auth/strategies/basic"
 	"github.com/shaj13/go-guardian/auth/strategies/bearer"
+
+	"github.com/shaj13/go-guardian/auth/strategies/basic"
 	"github.com/shaj13/go-guardian/store"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
@@ -95,4 +98,16 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		return auth.NewDefaultUser(email, "1", nil, nil), nil
 	}
 	return nil, fmt.Errorf("invalid credentials")
+}
+
+// RevokeToken revokes a token
+func RevokeToken(w http.ResponseWriter, r *http.Request) {
+	reqToken := r.Header.Get("Authorization")
+	splitToken := strings.Split(reqToken, "Bearer ")
+	reqToken = splitToken[1]
+
+	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
+	auth.Revoke(tokenStrategy, reqToken, r)
+	body := fmt.Sprintf("revoked token: %s \n", reqToken)
+	w.Write([]byte(body))
 }

@@ -48,6 +48,7 @@ func (a *App) New() *mux.Router {
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(api.CreateToken))).Methods("POST")
+	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
 
 	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(c.CommunityHandler))).Methods("GET")
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
