@@ -25,6 +25,10 @@ type App struct {
 
 // New creates a new mux router and all the routes
 func (a *App) New() *mux.Router {
+	// setup go-guardian for middleware
+	m := api.MiddlewareDB{DB: databases.NewUserDatabase(a.dbHelper)}
+	m.SetupGoGuardian()
+
 	r := mux.NewRouter()
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper)}
@@ -43,11 +47,17 @@ func (a *App) New() *mux.Router {
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 
+	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(api.CreateToken))).Methods("POST")
+
 	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(c.CommunityHandler))).Methods("GET")
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
+
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
 	apiCreate.Handle("/users/{active_community_id}", api.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET")
+	// apiCreate.Handle("/user/login", http.HandlerFunc(u.UserLoginHandler)).Methods("POST")
+	// apiCreate.Handle("/user/logout", api.Middleware(http.HandlerFunc(u.UserLogoutHandler))).Methods("DELETE")
+
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilians", api.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
 	apiCreate.Handle("/civilians/user/{user_id}", api.Middleware(http.HandlerFunc(civ.CiviliansByUserIDHandler))).Methods("GET")
