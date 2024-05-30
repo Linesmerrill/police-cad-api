@@ -49,6 +49,7 @@ func Middleware(next http.Handler) http.Handler {
 
 // CreateToken returns a token
 func CreateToken(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	email, _, ok := r.BasicAuth()
 	if !ok {
 		http.Error(w, "basic auth failed", http.StatusUnauthorized)
@@ -58,7 +59,7 @@ func CreateToken(w http.ResponseWriter, r *http.Request) {
 	user := auth.NewDefaultUser(email, "1", nil, nil)
 	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
 	auth.Append(tokenStrategy, token, user, r)
-	body := fmt.Sprintf("token: %s \n", token)
+	body := fmt.Sprintf(`{"token": "%s"}`, token)
 	w.Write([]byte(body))
 }
 
@@ -108,6 +109,6 @@ func RevokeToken(w http.ResponseWriter, r *http.Request) {
 
 	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
 	auth.Revoke(tokenStrategy, reqToken, r)
-	body := fmt.Sprintf("revoked token: %s \n", reqToken)
+	body := fmt.Sprintf(`{"revoked token": "%s"}`, reqToken)
 	w.Write([]byte(body))
 }
