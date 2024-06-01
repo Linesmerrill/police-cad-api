@@ -60,3 +60,19 @@ func (_m *UserDatabase) FindOne(ctx context.Context, filter interface{}) (*model
 
 	return r0, r1
 }
+
+// InsertOne provides a mock function with given fields: ctx, userDetails
+func (_m *UserDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) interface{} {
+	ret := _m.Called(ctx, userDetails)
+
+	var r0 interface{}
+	if rf, ok := ret.Get(0).(func(context.Context, models.UserDetails) interface{}); ok {
+		r0 = rf(ctx, userDetails)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(interface{})
+		}
+	}
+
+	return r0
+}

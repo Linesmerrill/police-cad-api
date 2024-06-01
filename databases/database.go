@@ -20,11 +20,17 @@ type DatabaseHelper interface {
 type CollectionHelper interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) SingleResultHelper
 	Find(context.Context, interface{}, ...*options.FindOptions) CursorHelper
+	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) InsertOneResultHelper
 }
 
 // SingleResultHelper contains a single method to decode the result
 type SingleResultHelper interface {
 	Decode(v interface{}) error
+}
+
+// InsertOneResultHelper contains a single method to decode the result
+type InsertOneResultHelper interface {
+	Decode() interface{}
 }
 
 // CursorHelper contains a method to decode the cursor
@@ -53,6 +59,10 @@ type mongoCollection struct {
 
 type mongoSingleResult struct {
 	sr *mongo.SingleResult
+}
+
+type mongoInsertOneResult struct {
+	ior *mongo.InsertOneResult
 }
 
 type mongoCursor struct {
@@ -104,6 +114,14 @@ func (mc *mongoCollection) FindOne(ctx context.Context, filter interface{}, opts
 	return &mongoSingleResult{sr: singleResult}
 }
 
+func (mc *mongoCollection) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) InsertOneResultHelper {
+	insertOneResult, err := mc.coll.InsertOne(ctx, document, opts...)
+	if err != nil {
+		println(err)
+	}
+	return &mongoInsertOneResult{ior: insertOneResult}
+}
+
 func (mc *mongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) CursorHelper {
 	cursor, err := mc.coll.Find(ctx, filter, opts...)
 	if err != nil {
@@ -114,6 +132,10 @@ func (mc *mongoCollection) Find(ctx context.Context, filter interface{}, opts ..
 
 func (sr *mongoSingleResult) Decode(v interface{}) error {
 	return sr.sr.Decode(v)
+}
+
+func (ior *mongoInsertOneResult) Decode() interface{} {
+	return ior.ior.InsertedID
 }
 
 func (cr *mongoCursor) Decode(v interface{}) error {

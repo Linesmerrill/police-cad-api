@@ -61,3 +61,26 @@ func (_m *CollectionHelper) FindOne(_a0 context.Context, _a1 interface{}, _a2 ..
 
 	return r0
 }
+
+// InsertOne provides a mock function with given fields: _a0, _a1, _a2
+func (_m *CollectionHelper) InsertOne(_a0 context.Context, _a1 interface{}, _a2 ...*options.InsertOneOptions) databases.InsertOneResultHelper {
+	_va := make([]interface{}, len(_a2))
+	for _i := range _a2 {
+		_va[_i] = _a2[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _a0, _a1)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 databases.InsertOneResultHelper
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.InsertOneOptions) databases.InsertOneResultHelper); ok {
+		r0 = rf(_a0, _a1, _a2...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(databases.InsertOneResultHelper)
+		}
+	}
+
+	return r0
+}
