@@ -147,3 +147,23 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 
 }
+
+// UserCheckEmailHandler checks if an email exists using POST
+func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var user models.UserDetails
+	err := json.NewDecoder(r.Body).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// check if the user already exists
+	existingUser, _ := u.DB.FindOne(context.Background(), bson.M{"email": user.Email})
+	if existingUser != nil {
+		config.ErrorStatus("email already exists", http.StatusConflict, w, fmt.Errorf("duplicate email"))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
