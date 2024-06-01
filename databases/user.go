@@ -14,6 +14,7 @@ const userName = "users"
 type UserDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.User, error)
 	Find(ctx context.Context, filter interface{}) ([]models.User, error)
+	InsertOne(ctx context.Context, userDetails models.UserDetails) interface{}
 }
 
 type userDatabase struct {
@@ -43,4 +44,9 @@ func (u *userDatabase) Find(ctx context.Context, filter interface{}) ([]models.U
 		return nil, err
 	}
 	return users, nil
+}
+
+func (u *userDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) interface{} {
+	res := u.db.Collection(userName).InsertOne(ctx, userDetails)
+	return res
 }

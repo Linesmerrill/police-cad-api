@@ -111,3 +111,39 @@ func (u User) UserLoginHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 
 }
+
+// UserCreateHandler creates a user
+func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var user models.UserDetails
+	err := json.NewDecoder(r.Body).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// check if the user already exists
+	existingUser, _ := u.DB.FindOne(context.Background(), bson.M{"email": user.Email})
+	if existingUser != nil {
+		config.ErrorStatus("user already exists", http.StatusConflict, w, fmt.Errorf("duplicate email"))
+		return
+	}
+
+	// hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		config.ErrorStatus("failed to hash password", http.StatusInternalServerError, w, err)
+		return
+	}
+	user.Password = string(hashedPassword)
+
+	// insert the user
+	_ = u.DB.InsertOne(context.Background(), user)
+	if err != nil {
+		config.ErrorStatus("failed to insert user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+
+}
