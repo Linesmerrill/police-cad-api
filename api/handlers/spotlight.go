@@ -80,17 +80,17 @@ func (s Spotlight) SpotlightByIDHandler(w http.ResponseWriter, r *http.Request) 
 
 // SpotlightCreateHandler creates a spotlight
 func (s Spotlight) SpotlightCreateHandler(w http.ResponseWriter, r *http.Request) {
-	var spotlight models.Spotlight
-	err := json.NewDecoder(r.Body).Decode(&spotlight)
+	var spotlightDetails models.SpotlightDetails
+	err := json.NewDecoder(r.Body).Decode(&spotlightDetails)
 	if err != nil {
 		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
 		return
 	}
 
-	h := s.DB.InsertOne(context.Background(), spotlight.Details)
+	h := s.DB.InsertOne(context.Background(), spotlightDetails)
 	zap.S().Debugf("inserted spotlight: %v", h)
 
-	b, err := json.Marshal(spotlight)
+	b, err := json.Marshal(spotlightDetails)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
