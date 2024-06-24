@@ -47,6 +47,10 @@ func (u *userDatabase) Find(ctx context.Context, filter interface{}) ([]models.U
 }
 
 func (u *userDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) interface{} {
-	res := u.db.Collection(userName).InsertOne(ctx, userDetails)
+	type user struct {
+		User models.UserDetails `bson:"user"`
+	}
+	users := user{User: userDetails}
+	res := u.db.Collection(userName).InsertOne(ctx, users)
 	return res
 }
