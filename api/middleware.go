@@ -66,7 +66,7 @@ func CreateToken(w http.ResponseWriter, r *http.Request) {
 // SetupGoGuardian sets up the go-guardian middleware
 func (m MiddlewareDB) SetupGoGuardian() {
 	authenticator = auth.New()
-	cache = store.NewFIFO(context.Background(), time.Minute*10)
+	cache = store.NewFIFO(context.Background(), time.Hour*26280) // 3 years ttl
 	basicStrategy := basic.New(m.ValidateUser, cache)
 	tokenStrategy := bearer.New(bearer.NoOpAuthenticate, cache)
 
