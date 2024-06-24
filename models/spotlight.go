@@ -7,8 +7,7 @@ type Spotlight struct {
 	Version int32            `json:"__v" bson:"__v"`
 }
 
-// SpotlightDetails holds the structure for the inner user structure as
-// defined in the spotlight collection in mongo
+// SpotlightDetails holds the structure for the inner spotlight structure as defined in the spotlight collection in mongo
 type SpotlightDetails struct {
 	Image     string      `json:"image" bson:"image"`
 	Title     string      `json:"title" bson:"title"`

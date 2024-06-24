@@ -48,6 +48,10 @@ func (s *spotlightDatabase) Find(ctx context.Context, filter interface{}, opts .
 }
 
 func (s *spotlightDatabase) InsertOne(ctx context.Context, spotlightDetails models.SpotlightDetails) interface{} {
-	res := s.db.Collection(spotlightName).InsertOne(ctx, spotlightDetails)
+	type spot struct {
+		Spotlight models.SpotlightDetails `bson:"spotlight"`
+	}
+	spots := spot{Spotlight: spotlightDetails}
+	res := s.db.Collection(spotlightName).InsertOne(ctx, spots)
 	return res
 }
