@@ -15,6 +15,7 @@ const spotlightName = "spotlight"
 type SpotlightDatabase interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Spotlight, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Spotlight, error)
+	InsertOne(context.Context, models.SpotlightDetails) interface{}
 }
 
 type spotlightDatabase struct {
@@ -28,20 +29,25 @@ func NewSpotlightDatabase(db DatabaseHelper) SpotlightDatabase {
 	}
 }
 
-func (c *spotlightDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Spotlight, error) {
+func (s *spotlightDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Spotlight, error) {
 	spotlight := &models.Spotlight{}
-	err := c.db.Collection(spotlightName).FindOne(ctx, filter, opts...).Decode(&spotlight)
+	err := s.db.Collection(spotlightName).FindOne(ctx, filter, opts...).Decode(&spotlight)
 	if err != nil {
 		return nil, err
 	}
 	return spotlight, nil
 }
 
-func (c *spotlightDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Spotlight, error) {
+func (s *spotlightDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Spotlight, error) {
 	var spotlight []models.Spotlight
-	err := c.db.Collection(spotlightName).Find(ctx, filter, opts...).Decode(&spotlight)
+	err := s.db.Collection(spotlightName).Find(ctx, filter, opts...).Decode(&spotlight)
 	if err != nil {
 		return nil, err
 	}
 	return spotlight, nil
+}
+
+func (s *spotlightDatabase) InsertOne(ctx context.Context, spotlightDetails models.SpotlightDetails) interface{} {
+	res := s.db.Collection(spotlightName).InsertOne(ctx, spotlightDetails)
+	return res
 }

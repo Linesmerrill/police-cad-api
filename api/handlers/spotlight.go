@@ -24,7 +24,7 @@ type Spotlight struct {
 }
 
 // SpotlightHandler returns all spotlights
-func (e Spotlight) SpotlightHandler(w http.ResponseWriter, r *http.Request) {
+func (s Spotlight) SpotlightHandler(w http.ResponseWriter, r *http.Request) {
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
@@ -32,7 +32,7 @@ func (e Spotlight) SpotlightHandler(w http.ResponseWriter, r *http.Request) {
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
-	dbResp, err := e.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	dbResp, err := s.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get spotlight", http.StatusNotFound, w, err)
 		return
@@ -52,7 +52,7 @@ func (e Spotlight) SpotlightHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // SpotlightByIDHandler returns a spotlight by ID
-func (e Spotlight) SpotlightByIDHandler(w http.ResponseWriter, r *http.Request) {
+func (s Spotlight) SpotlightByIDHandler(w http.ResponseWriter, r *http.Request) {
 	spotlightID := mux.Vars(r)["spotlight_id"]
 
 	zap.S().Debugf("spotlight_id: %v", spotlightID)
@@ -63,7 +63,7 @@ func (e Spotlight) SpotlightByIDHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	dbResp, err := e.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	dbResp, err := s.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get spotlight by ID", http.StatusNotFound, w, err)
 		return
@@ -75,5 +75,26 @@ func (e Spotlight) SpotlightByIDHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// SpotlightCreateHandler creates a spotlight
+func (s Spotlight) SpotlightCreateHandler(w http.ResponseWriter, r *http.Request) {
+	var spotlight models.Spotlight
+	err := json.NewDecoder(r.Body).Decode(&spotlight)
+	if err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+
+	h := s.DB.InsertOne(context.Background(), spotlight.Details)
+	zap.S().Debugf("inserted spotlight: %v", h)
+
+	b, err := json.Marshal(spotlight)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
 	w.Write(b)
 }
