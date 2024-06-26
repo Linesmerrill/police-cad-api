@@ -15,6 +15,7 @@ type UserDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.User, error)
 	Find(ctx context.Context, filter interface{}) ([]models.User, error)
 	InsertOne(ctx context.Context, userDetails models.UserDetails) interface{}
+	Aggregate(ctx context.Context, pipeline interface{}) ([]models.User, error)
 }
 
 type userDatabase struct {
@@ -53,4 +54,16 @@ func (u *userDatabase) InsertOne(ctx context.Context, userDetails models.UserDet
 	users := user{User: userDetails}
 	res := u.db.Collection(userName).InsertOne(ctx, users)
 	return res
+}
+
+func (u *userDatabase) Aggregate(ctx context.Context, pipeline interface{}) ([]models.User, error) {
+	var users []models.User
+	cursor, err := u.db.Collection(userName).Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	if err = cursor.Decode(&users); err != nil {
+		return nil, err
+	}
+	return users, nil
 }

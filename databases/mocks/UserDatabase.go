@@ -15,6 +15,36 @@ type UserDatabase struct {
 	mock.Mock
 }
 
+// Aggregate provides a mock function with given fields: ctx, pipeline
+func (_m *UserDatabase) Aggregate(ctx context.Context, pipeline interface{}) ([]models.User, error) {
+	ret := _m.Called(ctx, pipeline)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Aggregate")
+	}
+
+	var r0 []models.User
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) ([]models.User, error)); ok {
+		return rf(ctx, pipeline)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) []models.User); ok {
+		r0 = rf(ctx, pipeline)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.User)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
+		r1 = rf(ctx, pipeline)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Find provides a mock function with given fields: ctx, filter
 func (_m *UserDatabase) Find(ctx context.Context, filter interface{}) ([]models.User, error) {
 	ret := _m.Called(ctx, filter)
