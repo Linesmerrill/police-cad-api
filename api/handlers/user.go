@@ -167,3 +167,36 @@ func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 }
+
+// UsersDiscoverPeopleHandler returns a list of users that we suggest to the user to follow
+func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	email := r.URL.Query().Get("email")
+	if email == "" {
+		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+		return
+	}
+
+	pipeline := []bson.M{
+		{"$match": bson.M{"user.email": bson.M{"$ne": email}}},
+		{"$sample": bson.M{"size": 4}},
+	}
+
+	dbResp, err := u.DB.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to get discover people recommendations", http.StatusInternalServerError, w, err)
+		return
+	}
+	// Because the frontend requires that the data elements inside models.User exist, if
+	// len == 0 then we will just return an empty data object
+	if len(dbResp) == 0 {
+		dbResp = []models.User{}
+	}
+	b, err := json.Marshal(dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}

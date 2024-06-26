@@ -21,6 +21,7 @@ type CollectionHelper interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) SingleResultHelper
 	Find(context.Context, interface{}, ...*options.FindOptions) CursorHelper
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) InsertOneResultHelper
+	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (CursorHelper, error)
 }
 
 // SingleResultHelper contains a single method to decode the result
@@ -128,6 +129,14 @@ func (mc *mongoCollection) Find(ctx context.Context, filter interface{}, opts ..
 		println(err)
 	}
 	return &mongoCursor{cr: cursor}
+}
+
+func (mc *mongoCollection) Aggregate(ctx context.Context, pipeline interface{}, opts ...*options.AggregateOptions) (CursorHelper, error) {
+	cursor, err := mc.coll.Aggregate(ctx, pipeline, opts...)
+	if err != nil {
+		println(err)
+	}
+	return &mongoCursor{cr: cursor}, err
 }
 
 func (sr *mongoSingleResult) Decode(v interface{}) error {
