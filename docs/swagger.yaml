@@ -498,6 +498,9 @@ definitions:
       password:
         type: string
         x-go-name: Password
+      profilePicture:
+        type: string
+        x-go-name: ProfilePicture
       resetPasswordExpires:
         type: object
         x-go-name: ResetPasswordExpires

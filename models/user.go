@@ -18,6 +18,7 @@ type UserDetails struct {
 	Name                 string      `json:"name" bson:"name"`
 	Username             string      `json:"username" bson:"username"`
 	Password             string      `json:"password" bson:"password"`
+	ProfilePicture       string      `json:"profilePicture" bson:"profilePicture"`
 	ResetPasswordToken   string      `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires interface{} `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt            interface{} `json:"createdAt" bson:"createdAt"`
