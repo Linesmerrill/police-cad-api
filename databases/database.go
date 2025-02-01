@@ -12,7 +12,7 @@ import (
 // DatabaseHelper contains the collection and client to be used to access the methods
 // defined below
 type DatabaseHelper interface {
-	Collection(name string) CollectionHelper
+	Collection(name string) *MongoCollection
 	Client() ClientHelper
 }
 
@@ -21,7 +21,7 @@ type CollectionHelper interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) SingleResultHelper
 	Find(context.Context, interface{}, ...*options.FindOptions) CursorHelper
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) InsertOneResultHelper
-	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (CursorHelper, error)
+	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (*mongo.Cursor, error)
 }
 
 // SingleResultHelper contains a single method to decode the result
@@ -34,16 +34,17 @@ type InsertOneResultHelper interface {
 	Decode() interface{}
 }
 
-// CursorHelper contains a method to decode the cursor
-type CursorHelper interface {
-	Decode(v interface{}) error
-}
-
 // ClientHelper defined to help at client creation inside main.go
 type ClientHelper interface {
 	Database(string) DatabaseHelper
 	Connect() error
 	StartSession() (mongo.Session, error)
+}
+
+// SessionHelper defined to help at session creation inside main.go
+type SessionHelper interface {
+	EndSession() error
+	// Add other methods as needed
 }
 
 type mongoClient struct {
@@ -54,7 +55,8 @@ type mongoDatabase struct {
 	db *mongo.Database
 }
 
-type mongoCollection struct {
+// MongoCollection contains the collection to be used to access the methods
+type MongoCollection struct {
 	coll *mongo.Collection
 }
 
@@ -66,10 +68,12 @@ type mongoInsertOneResult struct {
 	ior *mongo.InsertOneResult
 }
 
-type mongoCursor struct {
+// MongoCursor contains the cursor to be used to access the methods
+type MongoCursor struct {
 	cr *mongo.Cursor
 }
 
+// mongoSession contains the session to be used to access the methods
 type mongoSession struct {
 	mongo.Session
 }
@@ -100,9 +104,9 @@ func (mc *mongoClient) Connect() error {
 	return mc.cl.Connect(nil)
 }
 
-func (md *mongoDatabase) Collection(colName string) CollectionHelper {
-	collection := md.db.Collection(colName)
-	return &mongoCollection{coll: collection}
+func (md *mongoDatabase) Collection(name string) *MongoCollection {
+	collection := md.db.Collection(name)
+	return &MongoCollection{coll: collection}
 }
 
 func (md *mongoDatabase) Client() ClientHelper {
@@ -110,12 +114,14 @@ func (md *mongoDatabase) Client() ClientHelper {
 	return &mongoClient{cl: client}
 }
 
-func (mc *mongoCollection) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper {
+// FindOne returns a single result from the collection
+func (mc *MongoCollection) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper {
 	singleResult := mc.coll.FindOne(ctx, filter, opts...)
 	return &mongoSingleResult{sr: singleResult}
 }
 
-func (mc *mongoCollection) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) InsertOneResultHelper {
+// InsertOne inserts a single document into the collection
+func (mc *MongoCollection) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) InsertOneResultHelper {
 	insertOneResult, err := mc.coll.InsertOne(ctx, document, opts...)
 	if err != nil {
 		println(err)
@@ -123,20 +129,22 @@ func (mc *mongoCollection) InsertOne(ctx context.Context, document interface{}, 
 	return &mongoInsertOneResult{ior: insertOneResult}
 }
 
-func (mc *mongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) CursorHelper {
+// Find returns a cursor to iterate over the collection
+func (mc *MongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) *MongoCursor {
 	cursor, err := mc.coll.Find(ctx, filter, opts...)
 	if err != nil {
 		println(err)
 	}
-	return &mongoCursor{cr: cursor}
+	return &MongoCursor{cr: cursor}
 }
 
-func (mc *mongoCollection) Aggregate(ctx context.Context, pipeline interface{}, opts ...*options.AggregateOptions) (CursorHelper, error) {
+// Aggregate returns a cursor to iterate over the collection
+func (mc *MongoCollection) Aggregate(ctx context.Context, pipeline interface{}, opts ...*options.AggregateOptions) (*MongoCursor, error) {
 	cursor, err := mc.coll.Aggregate(ctx, pipeline, opts...)
 	if err != nil {
 		println(err)
 	}
-	return &mongoCursor{cr: cursor}, err
+	return &MongoCursor{cr: cursor}, err
 }
 
 func (sr *mongoSingleResult) Decode(v interface{}) error {
@@ -147,10 +155,29 @@ func (ior *mongoInsertOneResult) Decode() interface{} {
 	return ior.ior.InsertedID
 }
 
-func (cr *mongoCursor) Decode(v interface{}) error {
+// Decode decodes the cursor into the provided interface
+func (cr *MongoCursor) Decode(v interface{}) error {
 	return cr.All(context.Background(), v)
 }
 
-func (cr *mongoCursor) All(ctx context.Context, results interface{}) error {
+// All decodes the cursor into the provided interface
+func (cr *MongoCursor) All(ctx context.Context, results interface{}) error {
 	return cr.cr.All(ctx, results)
+}
+
+// Next returns true if there are more documents to iterate over
+func (cr *MongoCursor) Next(ctx context.Context) bool { return cr.cr.Next(ctx) }
+
+// Close closes the cursor
+func (cr *MongoCursor) Close(ctx context.Context) error { return cr.cr.Close(ctx) }
+
+// Err returns the error from the cursor
+func (cr *MongoCursor) Err() error { return cr.cr.Err() }
+
+// CursorHelper defines the methods required for cursor operations
+type CursorHelper interface {
+	Next(ctx context.Context) bool
+	Close(ctx context.Context) error
+	Decode(val interface{}) error
+	Err() error
 }

@@ -15,7 +15,19 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 1. Go 1.17+ installed. See [download and install Go](https://go.dev/doc/install) to get started.
 2. Generate jwt token to communicate with front-end web server. See [How to Generate a JWT](#how-to-generate-a-jwt) for more details.
 3. Attach the jwt header as an `Authorization: Bearer` token. See [How to attach an Auth Bearer Token](#how-to-attach-an-auth-bearer-token) for more details.
+4. MongoDB installed. See [download and install MongoDB](https://docs.mongodb.com/manual/installation/) to get started.
 
+## Pre-requisites
+
+1. MongoDB installed and running on your local machine.
+```bash
+brew install mongodb-community@5.0
+```
+
+2. Start MongoDB service.
+```bash
+brew services start mongodb-community@5.0
+```
 
 ## Run
 

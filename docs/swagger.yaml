@@ -201,6 +201,9 @@ definitions:
         x-go-name: Code
       createdAt:
         $ref: '#/definitions/DateTime'
+      imageLink:
+        type: string
+        x-go-name: ImageLink
       name:
         type: string
         x-go-name: Name
@@ -393,6 +396,18 @@ definitions:
         x-go-name: Alive
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  LastAccessedCommunity:
+    description: LastAccessedCommunity holds the structure for the lastAccessedCommunity
+      for "Jump Back In" feature
+    properties:
+      communityID:
+        type: string
+        x-go-name: CommunityID
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   License:
     description: License holds the structure for the license collection in mongo
     properties:
@@ -492,6 +507,8 @@ definitions:
       email:
         type: string
         x-go-name: Email
+      lastAccessedCommunity:
+        $ref: '#/definitions/LastAccessedCommunity'
       name:
         type: string
         x-go-name: Name

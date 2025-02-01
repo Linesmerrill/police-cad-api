@@ -40,15 +40,15 @@ func (_m *MockDatabaseHelper) Client() databases.ClientHelper {
 }
 
 // Collection provides a mock function.
-func (_m *MockDatabaseHelper) Collection(name string) databases.CollectionHelper {
+func (_m *MockDatabaseHelper) Collection(name string) *databases.MongoCollection {
 	ret := _m.Called(name)
 
-	var r0 databases.CollectionHelper
-	if rf, ok := ret.Get(0).(func(string) databases.CollectionHelper); ok {
+	var r0 *databases.MongoCollection
+	if rf, ok := ret.Get(0).(func(string) *databases.MongoCollection); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(databases.CollectionHelper)
+			r0 = ret.Get(0).(*databases.MongoCollection)
 		}
 	}
 

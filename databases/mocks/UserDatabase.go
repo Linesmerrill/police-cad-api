@@ -5,6 +5,7 @@ package mocks
 import (
 	context "context"
 
+	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 
 	models "github.com/linesmerrill/police-cad-api/models"
@@ -16,24 +17,22 @@ type UserDatabase struct {
 }
 
 // Aggregate provides a mock function with given fields: ctx, pipeline
-func (_m *UserDatabase) Aggregate(ctx context.Context, pipeline interface{}) ([]models.User, error) {
+func (_m *UserDatabase) Aggregate(ctx context.Context, pipeline interface{}) (databases.MongoCursor, error) {
 	ret := _m.Called(ctx, pipeline)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Aggregate")
 	}
 
-	var r0 []models.User
+	var r0 databases.MongoCursor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) ([]models.User, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) (databases.MongoCursor, error)); ok {
 		return rf(ctx, pipeline)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) []models.User); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) databases.MongoCursor); ok {
 		r0 = rf(ctx, pipeline)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.User)
-		}
+		r0 = ret.Get(0).(databases.MongoCursor)
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
