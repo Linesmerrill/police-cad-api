@@ -2,6 +2,9 @@ module github.com/linesmerrill/police-cad-api
 
 go 1.22
 
+//heroku specific values:
+// +heroku goVersion 1.22
+
 require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.0
@@ -30,6 +33,3 @@ require (
 	golang.org/x/text v0.17.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )
-
-//heroku specific values:
-// +heroku goVersion 1.17
