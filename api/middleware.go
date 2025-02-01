@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/shaj13/go-guardian/auth"
 	"github.com/shaj13/go-guardian/auth/strategies/bearer"
 
@@ -24,31 +25,42 @@ import (
 
 // MiddlewareDB is a struct that holds the database
 type MiddlewareDB struct {
-	DB databases.UserDatabase
+	DB  databases.UserDatabase
+	TDB databases.TokenDatabase
 }
 
 var authenticator auth.Authenticator
 var cache store.Cache
 
 // Middleware adds some basic header authentication around accessing the routes
-func Middleware(next http.Handler) http.Handler {
+func (m MiddlewareDB) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		user, err := authenticator.Authenticate(r)
 		if err != nil {
-			zap.S().Errorw("unauthorized",
-				"url", r.URL)
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error": "unauthorized"}`))
-			return
+			// Try to load the token from MongoDB if not found in the cache
+			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if loadErr := m.LoadTokenFromDB(token); loadErr != nil {
+				zap.S().Errorw("unauthorized", "url", r.URL, "error", loadErr)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error": "unauthorized"}`))
+				return
+			}
+			user, err = authenticator.Authenticate(r)
+			if err != nil {
+				zap.S().Errorw("unauthorized", "url", r.URL, "error", err)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error": "unauthorized"}`))
+				return
+			}
 		}
 		zap.S().Debugf("User %s Authenticated\n", user.UserName())
 		next.ServeHTTP(w, r)
 	})
 }
 
-// CreateToken returns a token
-func CreateToken(w http.ResponseWriter, r *http.Request) {
+// CreateToken creates a token
+func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	email, _, ok := r.BasicAuth()
 	if !ok {
@@ -59,6 +71,16 @@ func CreateToken(w http.ResponseWriter, r *http.Request) {
 	user := auth.NewDefaultUser(email, "1", nil, nil)
 	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
 	auth.Append(tokenStrategy, token, user, r)
+
+	// Store the token in MongoDB
+	tokenDoc := models.Token{
+		Token:     token,
+		Email:     email,
+		CreatedAt: time.Now(),
+	}
+	t := m.TDB.InsertOne(context.Background(), tokenDoc)
+	zap.S().Debugf("inserted token: %v", t)
+
 	body := fmt.Sprintf(`{"token": "%s"}`, token)
 	w.Write([]byte(body))
 }
@@ -102,13 +124,33 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 }
 
 // RevokeToken revokes a token
-func RevokeToken(w http.ResponseWriter, r *http.Request) {
+func (m MiddlewareDB) RevokeToken(w http.ResponseWriter, r *http.Request) {
 	reqToken := r.Header.Get("Authorization")
 	splitToken := strings.Split(reqToken, "Bearer ")
 	reqToken = splitToken[1]
 
 	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
 	auth.Revoke(tokenStrategy, reqToken, r)
+
+	// Remove the token from MongoDB
+	err := m.TDB.DeleteOne(context.Background(), bson.M{"token": reqToken})
+	if err != nil {
+		http.Error(w, "failed to revoke token", http.StatusInternalServerError)
+		return
+	}
+
 	body := fmt.Sprintf(`{"revoked token": "%s"}`, reqToken)
 	w.Write([]byte(body))
+}
+
+// LoadTokenFromDB loads a specific token from MongoDB
+func (m MiddlewareDB) LoadTokenFromDB(token string) error {
+	t, err := m.TDB.FindOne(context.Background(), bson.M{"token": token})
+	if err != nil {
+		return fmt.Errorf("failed to load token from MongoDB: %w", err)
+	}
+	user := auth.NewDefaultUser(t.Email, "1", nil, nil)
+	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
+	auth.Append(tokenStrategy, t.Token, user, nil)
+	return nil
 }

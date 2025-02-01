@@ -147,6 +147,12 @@ func (mc *MongoCollection) Aggregate(ctx context.Context, pipeline interface{}, 
 	return &MongoCursor{cr: cursor}, err
 }
 
+// DeleteOne deletes a single document from the collection
+func (mc *MongoCollection) DeleteOne(ctx context.Context, filter interface{}) error {
+	_, err := mc.coll.DeleteOne(ctx, filter)
+	return err
+}
+
 func (sr *mongoSingleResult) Decode(v interface{}) error {
 	return sr.sr.Decode(v)
 }
