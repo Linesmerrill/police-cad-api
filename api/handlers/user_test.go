@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/gorilla/mux"
+	mocksdb "github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/databases"
-	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
@@ -21,7 +21,6 @@ type MockDatabaseHelper struct {
 	mock.Mock
 }
 
-// Client provides a mock function.
 func (_m *MockDatabaseHelper) Client() databases.ClientHelper {
 	ret := _m.Called()
 
@@ -38,15 +37,15 @@ func (_m *MockDatabaseHelper) Client() databases.ClientHelper {
 }
 
 // Collection provides a mock function.
-func (_m *MockDatabaseHelper) Collection(name string) databases.CollectionHelper {
+func (_m *MockDatabaseHelper) Collection(name string) *databases.MongoCollection {
 	ret := _m.Called(name)
 
-	var r0 databases.CollectionHelper
-	if rf, ok := ret.Get(0).(func(string) databases.CollectionHelper); ok {
+	var r0 *databases.MongoCollection
+	if rf, ok := ret.Get(0).(func(string) *databases.MongoCollection); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(databases.CollectionHelper)
+			r0 = ret.Get(0).(*databases.MongoCollection)
 		}
 	}
 
@@ -66,15 +65,15 @@ func TestUser_UserHandlerInvalidID(t *testing.T) {
 	var conn databases.CollectionHelper
 	var singleResultHelper databases.SingleResultHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	singleResultHelper = &mocks.SingleResultHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mocked-error"))
-	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mocked-error"))
+	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -112,22 +111,22 @@ func TestUser_UserHandlerJsonMarshalError(t *testing.T) {
 	var conn databases.CollectionHelper
 	var singleResultHelper databases.SingleResultHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	singleResultHelper = &mocks.SingleResultHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
 
 	x := map[string]interface{}{
 		"foo": make(chan int),
 	}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.User)
 		(*arg).Details.CreatedAt = x
 	})
-	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -165,15 +164,15 @@ func TestUser_UserHandlerFailedToFindOne(t *testing.T) {
 	var conn databases.CollectionHelper
 	var singleResultHelper databases.SingleResultHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	singleResultHelper = &mocks.SingleResultHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
+	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -211,18 +210,18 @@ func TestUser_UserHandlerSuccess(t *testing.T) {
 	var conn databases.CollectionHelper
 	var singleResultHelper databases.SingleResultHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	singleResultHelper = &mocks.SingleResultHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.User)
 		(*arg).ID = "608cafd695eb9dc05379b7f3"
 	})
-	conn.(*mocks.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -258,15 +257,15 @@ func TestUser_UsersFindAllHandlerInvalidID(t *testing.T) {
 	var conn databases.CollectionHelper
 	var singleResultHelper databases.SingleResultHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	singleResultHelper = &mocks.SingleResultHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mocked-error"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mocked-error"))
+	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -304,22 +303,22 @@ func TestUser_UsersFindAllHandlerJsonMarshalError(t *testing.T) {
 	var conn databases.CollectionHelper
 	var singleResultHelper databases.SingleResultHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	singleResultHelper = &mocks.SingleResultHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
 
 	x := map[string]interface{}{
 		"foo": make(chan int),
 	}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.User)
 		(*arg) = []models.User{{Details: models.UserDetails{CreatedAt: x}}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
+	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -357,15 +356,15 @@ func TestUser_UsersFindAllHandlerFailedToFindOne(t *testing.T) {
 	var conn databases.CollectionHelper
 	var singleResultHelper databases.SingleResultHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	singleResultHelper = &mocks.SingleResultHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	singleResultHelper.(*mocks.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(errors.New("mongo: no documents in result"))
+	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -403,18 +402,18 @@ func TestUser_UsersFindAllHandlerSuccess(t *testing.T) {
 	var conn databases.CollectionHelper
 	var cursorHelper databases.CursorHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	cursorHelper = &mocks.CursorHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	cursorHelper = &mocksdb.CursorHelper{}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	cursorHelper.(*mocks.CursorHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+	cursorHelper.(*mocksdb.CursorHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.User)
 		(*arg) = []models.User{{ID: "608cafd695eb9dc05379b7f3"}}
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)
@@ -451,18 +450,18 @@ func TestUser_UsersFindAllHandlerEmptyResponse(t *testing.T) {
 	var conn databases.CollectionHelper
 	var cursorHelper databases.CursorHelper
 
-	db = &MockDatabaseHelper{} // can be used as db = &mocks.DatabaseHelper{}
-	client = &mocks.ClientHelper{}
-	conn = &mocks.CollectionHelper{}
-	cursorHelper = &mocks.CursorHelper{}
+	db = &MockDatabaseHelper{} // can be used as db = &MockDatabaseHelper{}
+	client = &mocksdb.ClientHelper{}
+	conn = &mocksdb.CollectionHelper{}
+	cursorHelper = &mocksdb.CursorHelper{}
 
-	client.(*mocks.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
+	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*MockDatabaseHelper).On("Client").Return(client)
-	cursorHelper.(*mocks.CursorHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+	cursorHelper.(*mocksdb.CursorHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.User)
 		(*arg) = nil
 	})
-	conn.(*mocks.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
+	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(cursorHelper)
 	db.(*MockDatabaseHelper).On("Collection", "users").Return(conn)
 
 	userDatabase := databases.NewUserDatabase(db)

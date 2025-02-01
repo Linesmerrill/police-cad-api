@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/config"
@@ -20,7 +21,8 @@ import (
 
 // User exported for testing purposes
 type User struct {
-	DB databases.UserDatabase
+	DB  databases.UserDatabase
+	CDB databases.CommunityDatabase
 }
 
 // UserHandler returns a user given a userID
@@ -182,17 +184,111 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 		{"$sample": bson.M{"size": 4}},
 	}
 
-	dbResp, err := u.DB.Aggregate(context.Background(), pipeline)
+	cursor, err := u.DB.Aggregate(context.Background(), pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to get discover people recommendations", http.StatusInternalServerError, w, err)
 		return
 	}
-	// Because the frontend requires that the data elements inside models.User exist, if
-	// len == 0 then we will just return an empty data object
-	if len(dbResp) == 0 {
-		dbResp = []models.User{}
+	defer cursor.Close(context.Background())
+
+	var users []models.User
+	for cursor.Next(context.Background()) {
+		var user models.User
+		if err := cursor.Decode(&user); err != nil {
+			config.ErrorStatus("failed to decode user", http.StatusInternalServerError, w, err)
+			return
+		}
+		users = append(users, user)
 	}
-	b, err := json.Marshal(dbResp)
+
+	if err := cursor.Err(); err != nil {
+		config.ErrorStatus("cursor error", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if len(users) == 0 {
+		users = []models.User{}
+	}
+
+	b, err := json.Marshal(users)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// UsersLastAccessedCommunityHandler returns the last accessed community details for a user
+func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	email := r.URL.Query().Get("email")
+	if email == "" {
+		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+		return
+	}
+
+	// Find the user by email
+	user, err := u.DB.FindOne(context.Background(), bson.M{"user.email": email})
+	if err != nil {
+		config.ErrorStatus("failed to get user by email", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Get the last accessed community
+	lastAccessedCommunity := user.Details.LastAccessedCommunity
+	if lastAccessedCommunity == (models.LastAccessedCommunity{}) {
+		config.ErrorStatus("no last accessed community found", http.StatusNotFound, w, fmt.Errorf("no last accessed community found"))
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(lastAccessedCommunity.CommunityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	community, err := u.CDB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Calculate the time difference
+	now := time.Now()
+	var lastAccessedTime time.Time
+	switch v := lastAccessedCommunity.CreatedAt.(type) {
+	case time.Time:
+		lastAccessedTime = v
+	case primitive.DateTime:
+		lastAccessedTime = v.Time()
+	default:
+		config.ErrorStatus("invalid last accessed time", http.StatusInternalServerError, w, fmt.Errorf("invalid last accessed time"))
+		return
+	}
+	duration := now.Sub(lastAccessedTime)
+
+	var lastAccessed string
+	hours := duration.Hours()
+	if hours <= 24 {
+		lastAccessed = fmt.Sprintf("%.0f hours", hours)
+	} else if hours <= 24*365 {
+		days := hours / 24
+		lastAccessed = fmt.Sprintf("%.0f days", days)
+	} else {
+		years := hours / (24 * 365)
+		lastAccessed = fmt.Sprintf("%.0f years", years)
+	}
+
+	// Create a response with the required details
+	response := map[string]interface{}{
+		"communityName":      community.Details.Name,
+		"communityImageLink": community.Details.ImageLink,
+		"lastAccessed":       lastAccessed,
+	}
+
+	// Marshal the response
+	b, err := json.Marshal(response)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return

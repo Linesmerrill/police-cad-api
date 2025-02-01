@@ -8,6 +8,8 @@ import (
 	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 
+	mongo "go.mongodb.org/mongo-driver/mongo"
+
 	options "go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -17,7 +19,7 @@ type CollectionHelper struct {
 }
 
 // Aggregate provides a mock function with given fields: _a0, _a1, _a2
-func (_m *CollectionHelper) Aggregate(_a0 context.Context, _a1 interface{}, _a2 ...*options.AggregateOptions) (databases.CursorHelper, error) {
+func (_m *CollectionHelper) Aggregate(_a0 context.Context, _a1 interface{}, _a2 ...*options.AggregateOptions) (*mongo.Cursor, error) {
 	_va := make([]interface{}, len(_a2))
 	for _i := range _a2 {
 		_va[_i] = _a2[_i]
@@ -31,16 +33,16 @@ func (_m *CollectionHelper) Aggregate(_a0 context.Context, _a1 interface{}, _a2 
 		panic("no return value specified for Aggregate")
 	}
 
-	var r0 databases.CursorHelper
+	var r0 *mongo.Cursor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.AggregateOptions) (databases.CursorHelper, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.AggregateOptions) (*mongo.Cursor, error)); ok {
 		return rf(_a0, _a1, _a2...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.AggregateOptions) databases.CursorHelper); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.AggregateOptions) *mongo.Cursor); ok {
 		r0 = rf(_a0, _a1, _a2...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(databases.CursorHelper)
+			r0 = ret.Get(0).(*mongo.Cursor)
 		}
 	}
 
