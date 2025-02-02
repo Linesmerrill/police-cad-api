@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -15,6 +16,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -293,4 +295,112 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// UserFriendsHandler returns a list of friends for a user with pagination
+func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
+	email := r.URL.Query().Get("email")
+	if email == "" {
+		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+		return
+	}
+
+	limitParam := r.URL.Query().Get("limit")
+	pageParam := r.URL.Query().Get("page")
+
+	limit := 10 // default limit
+	page := 1   // default page
+
+	if limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil {
+			limit = l
+		}
+	}
+
+	if pageParam != "" {
+		if p, err := strconv.Atoi(pageParam); err == nil {
+			page = p
+		}
+	}
+
+	zap.S().Debugf("email: %v, limit: %v, page: %v", email, limit, page)
+	filter := bson.M{"email": email}
+
+	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		// Return an empty array if no user is found
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+		return
+	}
+
+	friends := dbResp.Details.Friends
+	if friends == nil {
+		friends = []models.Friend{}
+	}
+
+	start := (page - 1) * limit
+	end := start + limit
+
+	if start > len(friends) {
+		start = len(friends)
+	}
+	if end > len(friends) {
+		end = len(friends)
+	}
+
+	paginatedFriends := friends[start:end]
+
+	b, err := json.Marshal(paginatedFriends)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// AddFriendHandler adds a friend to a user
+func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
+	email := mux.Vars(r)["email"]
+	if email == "" {
+		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+		return
+	}
+
+	var friend struct {
+		FriendID string `json:"friend_id"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&friend)
+	if err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Check if the friend already exists
+	filter := bson.M{"email": email, "user.friends.friend_id": friend.FriendID}
+	existingFriend, err := u.DB.FindOne(context.Background(), filter)
+	if err == nil && existingFriend != nil {
+		config.ErrorStatus("friend already exists", http.StatusConflict, w, fmt.Errorf("friend already exists"))
+		return
+	}
+
+	newFriend := models.Friend{
+		FriendID:  friend.FriendID,
+		Status:    "pending",
+		CreatedAt: time.Now(),
+	}
+
+	filter = bson.M{"email": email}
+	update := bson.M{"$push": bson.M{"user.friends": newFriend}}
+	opts := options.Update().SetUpsert(true)
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
+	if err != nil {
+		config.ErrorStatus("failed to add friend", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "friend added successfully"}`))
 }
