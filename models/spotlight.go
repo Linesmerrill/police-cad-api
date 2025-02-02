@@ -11,6 +11,7 @@ type Spotlight struct {
 type SpotlightDetails struct {
 	Image     string      `json:"image" bson:"image"`
 	Title     string      `json:"title" bson:"title"`
+	Body      string      `json:"body" bson:"body"`
 	Time      string      `json:"time" bson:"time"`
 	CreatedAt interface{} `json:"createdAt" bson:"createdAt"`
 	UpdatedAt interface{} `json:"updatedAt" bson:"updatedAt"`
