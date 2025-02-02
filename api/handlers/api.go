@@ -26,7 +26,7 @@ type App struct {
 // New creates a new mux router and all the routes
 func (a *App) New() *mux.Router {
 	// setup go-guardian for middleware
-	m := api.MiddlewareDB{DB: databases.NewUserDatabase(a.dbHelper), TDB: databases.NewTokenDatabase(a.dbHelper)}
+	m := api.MiddlewareDB{DB: databases.NewUserDatabase(a.dbHelper)}
 	m.SetupGoGuardian()
 
 	r := mux.NewRouter()
@@ -48,54 +48,54 @@ func (a *App) New() *mux.Router {
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 
-	apiCreate.Handle("/auth/token", m.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
-	apiCreate.Handle("/auth/logout", m.Middleware(http.HandlerFunc(m.RevokeToken))).Methods("DELETE")
+	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(api.CreateToken))).Methods("POST")
+	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
 
-	apiCreate.Handle("/community/{community_id}", m.Middleware(http.HandlerFunc(c.CommunityHandler))).Methods("GET")
-	apiCreate.Handle("/community/{community_id}/{owner_id}", m.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
-	apiCreate.Handle("/communities/{owner_id}", m.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(c.CommunityHandler))).Methods("GET")
+	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
 
-	apiCreate.Handle("/user/{user_id}", m.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
+	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
 	apiCreate.Handle("/user/create-user", http.HandlerFunc(u.UserCreateHandler)).Methods("POST")
 	apiCreate.Handle("/user/check-user", http.HandlerFunc(u.UserCheckEmailHandler)).Methods("POST")
-	apiCreate.Handle("/users/discover-people", m.Middleware(http.HandlerFunc(u.UsersDiscoverPeopleHandler))).Methods("GET")
-	apiCreate.Handle("/users/last-accessed-community", m.Middleware(http.HandlerFunc(u.UsersLastAccessedCommunityHandler))).Methods("GET")
-	apiCreate.Handle("/users/{active_community_id}", m.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET") // All routes for user must go above this line
+	apiCreate.Handle("/users/discover-people", api.Middleware(http.HandlerFunc(u.UsersDiscoverPeopleHandler))).Methods("GET")
+	apiCreate.Handle("/users/last-accessed-community", api.Middleware(http.HandlerFunc(u.UsersLastAccessedCommunityHandler))).Methods("GET")
+	apiCreate.Handle("/users/{active_community_id}", api.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET") // All routes for user must go above this line
 
-	apiCreate.Handle("/civilian/{civilian_id}", m.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
-	apiCreate.Handle("/civilians", m.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
-	apiCreate.Handle("/civilians/user/{user_id}", m.Middleware(http.HandlerFunc(civ.CiviliansByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/civilians/search", m.Middleware(http.HandlerFunc(civ.CiviliansByNameSearchHandler))).Methods("GET")
-	apiCreate.Handle("/vehicle/{vehicle_id}", m.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
-	apiCreate.Handle("/vehicles", m.Middleware(http.HandlerFunc(v.VehicleHandler))).Methods("GET")
-	apiCreate.Handle("/vehicles/user/{user_id}", m.Middleware(http.HandlerFunc(v.VehiclesByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/vehicles/registered-owner/{registered_owner_id}", m.Middleware(http.HandlerFunc(v.VehiclesByRegisteredOwnerIDHandler))).Methods("GET")
-	apiCreate.Handle("/vehicles/search", m.Middleware(http.HandlerFunc(v.VehiclesByPlateSearchHandler))).Methods("GET")
-	apiCreate.Handle("/firearm/{firearm_id}", m.Middleware(http.HandlerFunc(f.FirearmByIDHandler))).Methods("GET")
-	apiCreate.Handle("/firearms", m.Middleware(http.HandlerFunc(f.FirearmHandler))).Methods("GET")
-	apiCreate.Handle("/firearms/user/{user_id}", m.Middleware(http.HandlerFunc(f.FirearmsByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/firearms/registered-owner/{registered_owner_id}", m.Middleware(http.HandlerFunc(f.FirearmsByRegisteredOwnerIDHandler))).Methods("GET")
-	apiCreate.Handle("/license/{license_id}", m.Middleware(http.HandlerFunc(l.LicenseByIDHandler))).Methods("GET")
-	apiCreate.Handle("/licenses", m.Middleware(http.HandlerFunc(l.LicenseHandler))).Methods("GET")
-	apiCreate.Handle("/licenses/user/{user_id}", m.Middleware(http.HandlerFunc(l.LicensesByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/licenses/owner/{owner_id}", m.Middleware(http.HandlerFunc(l.LicensesByOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
+	apiCreate.Handle("/civilians", api.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
+	apiCreate.Handle("/civilians/user/{user_id}", api.Middleware(http.HandlerFunc(civ.CiviliansByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/civilians/search", api.Middleware(http.HandlerFunc(civ.CiviliansByNameSearchHandler))).Methods("GET")
+	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
+	apiCreate.Handle("/vehicles", api.Middleware(http.HandlerFunc(v.VehicleHandler))).Methods("GET")
+	apiCreate.Handle("/vehicles/user/{user_id}", api.Middleware(http.HandlerFunc(v.VehiclesByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/vehicles/registered-owner/{registered_owner_id}", api.Middleware(http.HandlerFunc(v.VehiclesByRegisteredOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/vehicles/search", api.Middleware(http.HandlerFunc(v.VehiclesByPlateSearchHandler))).Methods("GET")
+	apiCreate.Handle("/firearm/{firearm_id}", api.Middleware(http.HandlerFunc(f.FirearmByIDHandler))).Methods("GET")
+	apiCreate.Handle("/firearms", api.Middleware(http.HandlerFunc(f.FirearmHandler))).Methods("GET")
+	apiCreate.Handle("/firearms/user/{user_id}", api.Middleware(http.HandlerFunc(f.FirearmsByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/firearms/registered-owner/{registered_owner_id}", api.Middleware(http.HandlerFunc(f.FirearmsByRegisteredOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/license/{license_id}", api.Middleware(http.HandlerFunc(l.LicenseByIDHandler))).Methods("GET")
+	apiCreate.Handle("/licenses", api.Middleware(http.HandlerFunc(l.LicenseHandler))).Methods("GET")
+	apiCreate.Handle("/licenses/user/{user_id}", api.Middleware(http.HandlerFunc(l.LicensesByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/licenses/owner/{owner_id}", api.Middleware(http.HandlerFunc(l.LicensesByOwnerIDHandler))).Methods("GET")
 
-	apiCreate.Handle("/warrant/{warrant_id}", m.Middleware(http.HandlerFunc(w.WarrantByIDHandler))).Methods("GET")
-	apiCreate.Handle("/warrants", m.Middleware(http.HandlerFunc(w.WarrantHandler))).Methods("GET")
-	apiCreate.Handle("/warrants/user/{user_id}", m.Middleware(http.HandlerFunc(w.WarrantsByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/warrant/{warrant_id}", api.Middleware(http.HandlerFunc(w.WarrantByIDHandler))).Methods("GET")
+	apiCreate.Handle("/warrants", api.Middleware(http.HandlerFunc(w.WarrantHandler))).Methods("GET")
+	apiCreate.Handle("/warrants/user/{user_id}", api.Middleware(http.HandlerFunc(w.WarrantsByUserIDHandler))).Methods("GET")
 
-	apiCreate.Handle("/ems/{ems_id}", m.Middleware(http.HandlerFunc(e.EmsByIDHandler))).Methods("GET")
-	apiCreate.Handle("/ems", m.Middleware(http.HandlerFunc(e.EmsHandler))).Methods("GET")
-	apiCreate.Handle("/ems/user/{user_id}", m.Middleware(http.HandlerFunc(e.EmsByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/emsVehicle/{ems_vehicle_id}", m.Middleware(http.HandlerFunc(ev.EmsVehicleByIDHandler))).Methods("GET")
-	apiCreate.Handle("/emsVehicles", m.Middleware(http.HandlerFunc(ev.EmsVehicleHandler))).Methods("GET")
-	apiCreate.Handle("/emsVehicles/user/{user_id}", m.Middleware(http.HandlerFunc(ev.EmsVehiclesByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/call/{call_id}", m.Middleware(http.HandlerFunc(call.CallByIDHandler))).Methods("GET")
-	apiCreate.Handle("/calls", m.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
-	apiCreate.Handle("/calls/community/{community_id}", m.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET")
+	apiCreate.Handle("/ems/{ems_id}", api.Middleware(http.HandlerFunc(e.EmsByIDHandler))).Methods("GET")
+	apiCreate.Handle("/ems", api.Middleware(http.HandlerFunc(e.EmsHandler))).Methods("GET")
+	apiCreate.Handle("/ems/user/{user_id}", api.Middleware(http.HandlerFunc(e.EmsByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/emsVehicle/{ems_vehicle_id}", api.Middleware(http.HandlerFunc(ev.EmsVehicleByIDHandler))).Methods("GET")
+	apiCreate.Handle("/emsVehicles", api.Middleware(http.HandlerFunc(ev.EmsVehicleHandler))).Methods("GET")
+	apiCreate.Handle("/emsVehicles/user/{user_id}", api.Middleware(http.HandlerFunc(ev.EmsVehiclesByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.CallByIDHandler))).Methods("GET")
+	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
+	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET")
 
-	apiCreate.Handle("/spotlight", m.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
-	apiCreate.Handle("/spotlight", m.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
+	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
+	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
