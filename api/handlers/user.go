@@ -324,7 +324,7 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	zap.S().Debugf("email: %v, limit: %v, page: %v", email, limit, page)
-	filter := bson.M{"email": email}
+	filter := bson.M{"user.email": email}
 
 	dbResp, err := u.DB.FindOne(context.Background(), filter)
 	if err != nil {
@@ -351,7 +351,31 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 
 	paginatedFriends := friends[start:end]
 
-	b, err := json.Marshal(paginatedFriends)
+	// Fetch user details for each friend
+	var detailedFriends []map[string]interface{}
+	for _, friend := range paginatedFriends {
+		fID, err := primitive.ObjectIDFromHex(friend.FriendID)
+		if err != nil {
+			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+			return
+		}
+		friendDetails, err := u.DB.FindOne(context.Background(), bson.M{"_id": fID})
+		if err != nil {
+			config.ErrorStatus("failed to fetch friend details", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		detailedFriend := map[string]interface{}{
+			"friend_id":  friend.FriendID,
+			"status":     friend.Status,
+			"created_at": friend.CreatedAt,
+			"avatar":     friendDetails.Details.ProfilePicture,
+			"user_name":  friendDetails.Details.Name,
+		}
+		detailedFriends = append(detailedFriends, detailedFriend)
+	}
+
+	b, err := json.Marshal(detailedFriends)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
@@ -378,7 +402,7 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if the friend already exists
-	filter := bson.M{"email": email, "user.friends.friend_id": friend.FriendID}
+	filter := bson.M{"user.email": email, "user.friends.friend_id": friend.FriendID}
 	existingFriend, err := u.DB.FindOne(context.Background(), filter)
 	if err == nil && existingFriend != nil {
 		config.ErrorStatus("friend already exists", http.StatusConflict, w, fmt.Errorf("friend already exists"))
@@ -391,9 +415,9 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 
-	filter = bson.M{"email": email}
+	filter = bson.M{"user.email": email}
 	update := bson.M{"$push": bson.M{"user.friends": newFriend}}
-	opts := options.Update().SetUpsert(true)
+	opts := options.Update().SetUpsert(false)
 
 	_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
 	if err != nil {
