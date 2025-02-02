@@ -405,8 +405,16 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 	filter := bson.M{"user.email": email, "user.friends.friend_id": friend.FriendID}
 	existingFriend, err := u.DB.FindOne(context.Background(), filter)
 	if err == nil && existingFriend != nil {
-		config.ErrorStatus("friend already exists", http.StatusConflict, w, fmt.Errorf("friend already exists"))
-		return
+		for _, f := range existingFriend.Details.Friends {
+			if f.FriendID == friend.FriendID {
+				if f.Status == "pending" {
+					config.ErrorStatus("friend request is already pending", http.StatusConflict, w, fmt.Errorf("friend request is already pending"))
+				} else if f.Status == "approved" {
+					config.ErrorStatus("friend is already approved", http.StatusConflict, w, fmt.Errorf("friend is already approved"))
+				}
+				return
+			}
+		}
 	}
 
 	newFriend := models.Friend{
