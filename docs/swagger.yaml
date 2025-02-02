@@ -388,6 +388,26 @@ definitions:
         x-go-name: WeaponType
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Friend:
+    description: Friend holds the structure for a friend
+    properties:
+      created_at:
+        type: object
+        x-go-name: CreatedAt
+      friend_id:
+        type: string
+        x-go-name: FriendID
+      is_online:
+        type: boolean
+        x-go-name: IsOnline
+      last_online:
+        type: object
+        x-go-name: LastOnline
+      status:
+        type: string
+        x-go-name: Status
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   HealthCheckResponse:
     description: HealthCheckResponse returns the health check response duh
     properties:
@@ -507,6 +527,11 @@ definitions:
       email:
         type: string
         x-go-name: Email
+      friends:
+        items:
+          $ref: '#/definitions/Friend'
+        type: array
+        x-go-name: Friends
       lastAccessedCommunity:
         $ref: '#/definitions/LastAccessedCommunity'
       name:

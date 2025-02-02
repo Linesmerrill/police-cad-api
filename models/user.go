@@ -20,8 +20,18 @@ type UserDetails struct {
 	Username              string                `json:"username" bson:"username"`
 	Password              string                `json:"password" bson:"password"`
 	ProfilePicture        string                `json:"profilePicture" bson:"profilePicture"`
+	Friends               []Friend              `json:"friends" bson:"friends"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt             interface{}           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Friend holds the structure for a friend
+type Friend struct {
+	FriendID   string      `json:"friend_id" bson:"friend_id"`
+	Status     string      `json:"status" bson:"status"` // e.g., "pending", "approved"
+	LastOnline interface{} `json:"last_online" bson:"last_online"`
+	IsOnline   bool        `json:"is_online" bson:"is_online"`
+	CreatedAt  interface{} `json:"created_at" bson:"created_at"`
 }

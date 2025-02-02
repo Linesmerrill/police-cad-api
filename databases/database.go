@@ -22,6 +22,7 @@ type CollectionHelper interface {
 	Find(context.Context, interface{}, ...*options.FindOptions) CursorHelper
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) InsertOneResultHelper
 	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (*mongo.Cursor, error)
+	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 }
 
 // SingleResultHelper contains a single method to decode the result
@@ -151,6 +152,15 @@ func (mc *MongoCollection) Aggregate(ctx context.Context, pipeline interface{}, 
 func (mc *MongoCollection) DeleteOne(ctx context.Context, filter interface{}) error {
 	_, err := mc.coll.DeleteOne(ctx, filter)
 	return err
+}
+
+// UpdateOne updates a single document in the collection
+func (mc *MongoCollection) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	res, err := mc.coll.UpdateOne(ctx, filter, update, opts...)
+	if err != nil {
+		println(err)
+	}
+	return res, err
 }
 
 func (sr *mongoSingleResult) Decode(v interface{}) error {
