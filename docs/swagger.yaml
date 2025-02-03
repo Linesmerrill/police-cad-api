@@ -488,6 +488,32 @@ definitions:
         type: string
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Notification:
+    description: Notification holds the structure for a notification
+    properties:
+      _id:
+        type: string
+        x-go-name: ID
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      message:
+        type: string
+        x-go-name: Message
+      seen:
+        type: boolean
+        x-go-name: Seen
+      sentFromID:
+        type: string
+        x-go-name: SentFromID
+      sentToID:
+        type: string
+        x-go-name: SentToID
+      type:
+        type: string
+        x-go-name: Type
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   User:
     description: User holds the structure for the user collection in mongo
     properties:
@@ -537,6 +563,11 @@ definitions:
       name:
         type: string
         x-go-name: Name
+      notifications:
+        items:
+          $ref: '#/definitions/Notification'
+        type: array
+        x-go-name: Notifications
       password:
         type: string
         x-go-name: Password

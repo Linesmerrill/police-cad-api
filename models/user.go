@@ -21,6 +21,7 @@ type UserDetails struct {
 	Password              string                `json:"password" bson:"password"`
 	ProfilePicture        string                `json:"profilePicture" bson:"profilePicture"`
 	Friends               []Friend              `json:"friends" bson:"friends"`
+	Notifications         []Notification        `json:"notifications" bson:"notifications"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
@@ -34,4 +35,15 @@ type Friend struct {
 	LastOnline interface{} `json:"last_online" bson:"last_online"`
 	IsOnline   bool        `json:"is_online" bson:"is_online"`
 	CreatedAt  interface{} `json:"created_at" bson:"created_at"`
+}
+
+// Notification holds the structure for a notification
+type Notification struct {
+	ID         string      `json:"_id" bson:"_id"`
+	SentFromID string      `json:"sentFromID" bson:"sentFromID"`
+	SentToID   string      `json:"sentToID" bson:"sentToID"`
+	Type       string      `json:"type" bson:"type"`
+	Message    string      `json:"message" bson:"message"`
+	Seen       bool        `json:"seen" bson:"seen"`
+	CreatedAt  interface{} `json:"createdAt" bson:"createdAt"`
 }
