@@ -475,3 +475,41 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "notification created successfully"}`))
 }
+
+// GetUserNotificationsHandler returns all notifications for a user
+func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["user_id"]
+
+	if userID == "" {
+		config.ErrorStatus("user_id is required", http.StatusBadRequest, w, fmt.Errorf("user_id is required"))
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": uID}
+	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	notifications := dbResp.Details.Notifications
+	if notifications == nil {
+		notifications = []models.Notification{}
+	}
+
+	responseBody, err := json.Marshal(notifications)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBody)
+}
