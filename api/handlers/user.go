@@ -518,6 +518,31 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 
+		// Calculate timeAgo
+		now := time.Now()
+		var createdAtTime time.Time
+		switch v := notification.CreatedAt.(type) {
+		case time.Time:
+			createdAtTime = v
+		case primitive.DateTime:
+			createdAtTime = v.Time()
+		default:
+			config.ErrorStatus("invalid last accessed time", http.StatusInternalServerError, w, fmt.Errorf("invalid last accessed time"))
+			return
+		}
+		duration := now.Sub(createdAtTime)
+		var timeAgo string
+		hours := duration.Hours()
+		if hours <= 24 {
+			timeAgo = fmt.Sprintf("%.0f hours", hours)
+		} else if hours <= 24*365 {
+			days := hours / 24
+			timeAgo = fmt.Sprintf("%.0f days", days)
+		} else {
+			years := hours / (24 * 365)
+			timeAgo = fmt.Sprintf("%.0f years", years)
+		}
+
 		detailedNotification := map[string]interface{}{
 			"notificationId":       notification.ID,
 			"friendId":             notification.SentFromID,
@@ -528,6 +553,7 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 			"senderName":           sender.Details.Name,
 			"senderUsername":       sender.Details.Username,
 			"senderProfilePicture": sender.Details.ProfilePicture,
+			"timeAgo":              timeAgo,
 		}
 		detailedNotifications = append(detailedNotifications, detailedNotification)
 	}
