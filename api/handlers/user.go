@@ -436,3 +436,42 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "friend added successfully"}`))
 }
+
+// AddNotificationHandler adds a notification to a user
+func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
+	notification := models.Notification{}
+	err := json.NewDecoder(r.Body).Decode(&notification)
+	if err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+
+	newNotification := models.Notification{
+		ID:         primitive.NewObjectID().Hex(),
+		SentFromID: notification.SentFromID,
+		SentToID:   notification.SentToID,
+		Type:       notification.Type,
+		Message:    notification.Message,
+		Seen:       false,
+		CreatedAt:  time.Now(),
+	}
+
+	nID, err := primitive.ObjectIDFromHex(notification.SentToID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": nID}
+	update := bson.M{"$push": bson.M{"user.notifications": newNotification}}
+	opts := options.Update().SetUpsert(false)
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
+	if err != nil {
+		config.ErrorStatus("failed to create notification", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "notification created successfully"}`))
+}
