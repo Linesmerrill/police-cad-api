@@ -1,0 +1,86 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+
+	"context"
+
+	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/linesmerrill/police-cad-api/databases"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// Search struct mostly used for mocking tests
+type Search struct {
+	UserDB databases.UserDatabase
+	CommDB databases.CommunityDatabase
+}
+
+// SearchHandler returns a list of users and communities that match the query
+func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		config.ErrorStatus("query param q is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	limitParam := r.URL.Query().Get("limit")
+	pageParam := r.URL.Query().Get("page")
+
+	limit := int64(10) // default limit
+	page := int64(1)   // default page
+
+	if limitParam != "" {
+		l, err := strconv.ParseInt(limitParam, 10, 64)
+		if err == nil {
+			limit = l
+		}
+	}
+
+	if pageParam != "" {
+		p, err := strconv.ParseInt(pageParam, 10, 64)
+		if err == nil {
+			page = p
+		}
+	}
+
+	skip := (page - 1) * limit
+
+	results := map[string]interface{}{}
+
+	// Search for users
+	userFilter := bson.M{"$or": []bson.M{
+		{"user.name": bson.M{"$regex": query, "$options": "i"}},
+		{"user.username": bson.M{"$regex": query, "$options": "i"}},
+	}}
+	userOptions := options.Find().SetLimit(limit).SetSkip(skip)
+	userCursor, err := s.UserDB.Find(context.Background(), userFilter, userOptions)
+	if err != nil {
+		config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Search for communities
+	communityFilter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
+	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
+	communityCursor, err := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
+	if err != nil {
+		config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	results["users"] = userCursor
+	results["communities"] = communityCursor
+
+	responseBody, err := json.Marshal(results)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBody)
+}
