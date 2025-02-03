@@ -504,7 +504,35 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 		notifications = []models.Notification{}
 	}
 
-	responseBody, err := json.Marshal(notifications)
+	var detailedNotifications []map[string]interface{}
+	for _, notification := range notifications {
+		senderID, err := primitive.ObjectIDFromHex(notification.SentFromID)
+		if err != nil {
+			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+			return
+		}
+
+		sender, err := u.DB.FindOne(context.Background(), bson.M{"_id": senderID})
+		if err != nil {
+			config.ErrorStatus("failed to fetch sender details", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		detailedNotification := map[string]interface{}{
+			"notificationId":       notification.ID,
+			"friendId":             notification.SentFromID,
+			"type":                 notification.Type,
+			"message":              notification.Message,
+			"isRead":               notification.Seen,
+			"createdAt":            notification.CreatedAt,
+			"senderName":           sender.Details.Name,
+			"senderUsername":       sender.Details.Username,
+			"senderProfilePicture": sender.Details.ProfilePicture,
+		}
+		detailedNotifications = append(detailedNotifications, detailedNotification)
+	}
+
+	responseBody, err := json.Marshal(detailedNotifications)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
