@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -48,19 +49,39 @@ func Middleware(next http.Handler) http.Handler {
 }
 
 // CreateToken returns a token
-func CreateToken(w http.ResponseWriter, r *http.Request) {
+func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	email, _, ok := r.BasicAuth()
 	if !ok {
 		http.Error(w, "basic auth failed", http.StatusUnauthorized)
 		return
 	}
+
+	// Fetch user details from the database
+	dbEmailResp, err := m.DB.Find(context.Background(), bson.M{"user.email": email})
+	if err != nil || len(dbEmailResp) == 0 {
+		http.Error(w, "failed to get user by email", http.StatusUnauthorized)
+		return
+	}
+
+	user := dbEmailResp[0]
 	token := uuid.New().String()
-	user := auth.NewDefaultUser(email, "1", nil, nil)
+	authUser := auth.NewDefaultUser(email, user.ID, nil, nil)
 	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
-	auth.Append(tokenStrategy, token, user, r)
-	body := fmt.Sprintf(`{"token": "%s"}`, token)
-	w.Write([]byte(body))
+	auth.Append(tokenStrategy, token, authUser, r)
+
+	response := map[string]string{
+		"token": token,
+		"_id":   user.ID,
+	}
+
+	responseBody, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "failed to marshal response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(responseBody)
 }
 
 // SetupGoGuardian sets up the go-guardian middleware
