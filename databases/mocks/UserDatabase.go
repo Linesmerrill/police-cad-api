@@ -46,9 +46,16 @@ func (_m *UserDatabase) Aggregate(ctx context.Context, pipeline interface{}) (da
 	return r0, r1
 }
 
-// Find provides a mock function with given fields: ctx, filter
-func (_m *UserDatabase) Find(ctx context.Context, filter interface{}) ([]models.User, error) {
-	ret := _m.Called(ctx, filter)
+// Find provides a mock function with given fields: ctx, filter, opts
+func (_m *UserDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Find")
@@ -56,19 +63,19 @@ func (_m *UserDatabase) Find(ctx context.Context, filter interface{}) ([]models.
 
 	var r0 []models.User
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) ([]models.User, error)); ok {
-		return rf(ctx, filter)
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) ([]models.User, error)); ok {
+		return rf(ctx, filter, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) []models.User); ok {
-		r0 = rf(ctx, filter)
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) []models.User); ok {
+		r0 = rf(ctx, filter, opts...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.User)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
-		r1 = rf(ctx, filter)
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}, ...*options.FindOptions) error); ok {
+		r1 = rf(ctx, filter, opts...)
 	} else {
 		r1 = ret.Error(1)
 	}

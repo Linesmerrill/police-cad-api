@@ -14,7 +14,7 @@ const userName = "users"
 // UserDatabase contains the methods to use with the user database
 type UserDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.User, error)
-	Find(ctx context.Context, filter interface{}) ([]models.User, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error)
 	InsertOne(ctx context.Context, userDetails models.UserDetails) interface{}
 	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error)
@@ -40,9 +40,9 @@ func (u *userDatabase) FindOne(ctx context.Context, filter interface{}) (*models
 	return user, nil
 }
 
-func (u *userDatabase) Find(ctx context.Context, filter interface{}) ([]models.User, error) {
+func (u *userDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error) {
 	var users []models.User
-	err := u.db.Collection(userName).Find(ctx, filter).Decode(&users)
+	err := u.db.Collection(userName).Find(ctx, filter, opts...).Decode(&users)
 	if err != nil {
 		return nil, err
 	}

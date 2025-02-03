@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const collectionName = "communities"
@@ -13,7 +14,7 @@ const collectionName = "communities"
 // CommunityDatabase contains the methods to use with the community database
 type CommunityDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Community, error)
-	Find(ctx context.Context, filter interface{}) ([]models.Community, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Community, error)
 }
 
 type communityDatabase struct {
@@ -36,9 +37,9 @@ func (c *communityDatabase) FindOne(ctx context.Context, filter interface{}) (*m
 	return community, nil
 }
 
-func (c *communityDatabase) Find(ctx context.Context, filter interface{}) ([]models.Community, error) {
+func (c *communityDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Community, error) {
 	var communities []models.Community
-	err := c.db.Collection(collectionName).Find(ctx, filter).Decode(&communities)
+	err := c.db.Collection(collectionName).Find(ctx, filter, opts...).Decode(&communities)
 	if err != nil {
 		return nil, err
 	}
