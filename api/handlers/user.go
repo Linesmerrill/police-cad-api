@@ -356,13 +356,11 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, friend := range paginatedFriends {
 		fID, err := primitive.ObjectIDFromHex(friend.FriendID)
 		if err != nil {
-			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-			return
+			continue // Skip invalid ObjectID
 		}
 		friendDetails, err := u.DB.FindOne(context.Background(), bson.M{"_id": fID})
 		if err != nil {
-			config.ErrorStatus("failed to fetch friend details", http.StatusInternalServerError, w, err)
-			return
+			continue // Skip if friend not found
 		}
 
 		detailedFriend := map[string]interface{}{
@@ -370,7 +368,12 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 			"status":     friend.Status,
 			"created_at": friend.CreatedAt,
 			"avatar":     friendDetails.Details.ProfilePicture,
-			"user_name":  friendDetails.Details.Name,
+			"user_name":  friendDetails.Details.Username,
+			"userName":   friendDetails.Details.Username,
+			"name":       friendDetails.Details.Name,
+			"createdAt":  friend.CreatedAt,
+			"numFriends": len(friendDetails.Details.Friends),
+			"isOnline":   friend.IsOnline,
 		}
 		detailedFriends = append(detailedFriends, detailedFriend)
 	}
