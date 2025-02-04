@@ -548,7 +548,7 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 			"friendId":             notification.SentFromID,
 			"type":                 notification.Type,
 			"message":              notification.Message,
-			"isRead":               notification.Seen,
+			"seen":                 notification.Seen,
 			"createdAt":            notification.CreatedAt,
 			"senderName":           sender.Details.Name,
 			"senderUsername":       sender.Details.Username,
@@ -630,4 +630,59 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "friend status updated successfully"}`))
+}
+
+// MarkNotificationAsReadHandler marks a notification as read
+func (u User) MarkNotificationAsReadHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["user_id"]
+	notificationID := vars["notification_id"]
+
+	if userID == "" || notificationID == "" {
+		config.ErrorStatus("user_id and notification_id are required", http.StatusBadRequest, w, fmt.Errorf("user_id and notification_id are required"))
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": uID}
+	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	notifications := dbResp.Details.Notifications
+	if notifications == nil {
+		config.ErrorStatus("no notifications found", http.StatusNotFound, w, fmt.Errorf("no notifications found"))
+		return
+	}
+
+	notificationFound := false
+	for i, notification := range notifications {
+		if notification.ID == notificationID {
+			notifications[i].Seen = true
+			notificationFound = true
+			break
+		}
+	}
+
+	if !notificationFound {
+		config.ErrorStatus("notification not found", http.StatusNotFound, w, fmt.Errorf("notification not found"))
+		return
+	}
+
+	update := bson.M{"$set": bson.M{"user.notifications": notifications}}
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to mark notification as read", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "notification marked as read successfully"}`))
 }
