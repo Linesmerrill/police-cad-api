@@ -567,3 +567,67 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBody)
 }
+
+// UpdateFriendStatusHandler updates the status of a friend
+func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["user_id"]
+
+	if userID == "" {
+		config.ErrorStatus("user_id is required", http.StatusBadRequest, w, fmt.Errorf("user_id is required"))
+		return
+	}
+
+	var updateRequest struct {
+		FriendID string `json:"friendId"`
+		Status   string `json:"status"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&updateRequest)
+	if err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": uID}
+	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	friends := dbResp.Details.Friends
+	if friends == nil {
+		config.ErrorStatus("no friends found", http.StatusNotFound, w, fmt.Errorf("no friends found"))
+		return
+	}
+
+	friendFound := false
+	for i, friend := range friends {
+		if friend.FriendID == updateRequest.FriendID {
+			friends[i].Status = updateRequest.Status
+			friendFound = true
+			break
+		}
+	}
+
+	if !friendFound {
+		config.ErrorStatus("friend not found", http.StatusNotFound, w, fmt.Errorf("friend not found"))
+		return
+	}
+
+	update := bson.M{"$set": bson.M{"user.friends": friends}}
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update friend status", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "friend status updated successfully"}`))
+}
