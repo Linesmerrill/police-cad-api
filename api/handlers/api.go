@@ -62,6 +62,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{email}/add-friend", api.Middleware(http.HandlerFunc(u.AddFriendHandler))).Methods("POST")
 	apiCreate.Handle("/user/{user_id}/update-status", api.Middleware(http.HandlerFunc(u.UpdateFriendStatusHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}/read", api.Middleware(http.HandlerFunc(u.MarkNotificationAsReadHandler))).Methods("PUT")
+	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}", api.Middleware(http.HandlerFunc(u.DeleteNotificationHandler))).Methods("DELETE")
 	apiCreate.Handle("/users/discover-people", api.Middleware(http.HandlerFunc(u.UsersDiscoverPeopleHandler))).Methods("GET")
 	apiCreate.Handle("/users/last-accessed-community", api.Middleware(http.HandlerFunc(u.UsersLastAccessedCommunityHandler))).Methods("GET")
 	apiCreate.Handle("/users/friends", api.Middleware(http.HandlerFunc(u.UserFriendsHandler))).Methods("GET")
