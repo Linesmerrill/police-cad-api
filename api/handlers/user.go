@@ -744,3 +744,152 @@ func (u User) DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "notification deleted successfully"}`))
 }
+
+// fetchUserFriendsByID returns a list of friends for a user
+func (u User) fetchUserFriendsByID(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["user_id"]
+
+	if userID == "" {
+		config.ErrorStatus("user_id is required", http.StatusBadRequest, w, fmt.Errorf("user_id is required"))
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": uID}
+	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	friends := dbResp.Details.Friends
+	if friends == nil {
+		friends = []models.Friend{}
+	}
+
+	var approvedFriends []models.Friend
+	for _, friend := range friends {
+		if friend.Status == "approved" {
+			approvedFriends = append(approvedFriends, friend)
+		}
+	}
+
+	response := map[string]interface{}{
+		"count": len(approvedFriends),
+		// "friends": approvedFriends,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	friendID := vars["friend_id"]
+	userID := r.URL.Query().Get("userId")
+
+	if friendID == "" || userID == "" {
+		config.ErrorStatus("friend_id and userId are required", http.StatusBadRequest, w, fmt.Errorf("friend_id and userId are required"))
+		return
+	}
+
+	fID, err := primitive.ObjectIDFromHex(friendID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	friendFilter := bson.M{"_id": fID}
+	friendResp, err := u.DB.FindOne(context.Background(), friendFilter)
+	if err != nil {
+		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	userFilter := bson.M{"_id": uID}
+	userResp, err := u.DB.FindOne(context.Background(), userFilter)
+	if err != nil {
+		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	friendFriends := friendResp.Details.Friends
+	userFriends := userResp.Details.Friends
+
+	if friendFriends == nil {
+		friendFriends = []models.Friend{}
+	}
+	if userFriends == nil {
+		userFriends = []models.Friend{}
+	}
+
+	var approvedFriendFriends []models.Friend
+	for _, friend := range friendFriends {
+		if friend.Status == "approved" {
+			approvedFriendFriends = append(approvedFriendFriends, friend)
+		}
+	}
+
+	mutualFriendsCount := 0
+	for _, userFriend := range userFriends {
+		if userFriend.Status == "approved" {
+			for _, friendFriend := range approvedFriendFriends {
+				if userFriend.FriendID == friendFriend.FriendID {
+					mutualFriendsCount++
+					break
+				}
+			}
+		}
+	}
+
+	// Check if the user and friend are mutual friends
+	userIsFriendOfFriend := false
+	friendIsFriendOfUser := false
+
+	for _, friend := range approvedFriendFriends {
+		if friend.FriendID == userID {
+			userIsFriendOfFriend = true
+			break
+		}
+	}
+
+	for _, friend := range userFriends {
+		if friend.FriendID == friendID && friend.Status == "approved" {
+			friendIsFriendOfUser = true
+			break
+		}
+	}
+
+	if userIsFriendOfFriend && friendIsFriendOfUser {
+		mutualFriendsCount++
+	}
+
+	response := map[string]interface{}{
+		"mutualFriendsCount": mutualFriendsCount,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
