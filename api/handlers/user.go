@@ -597,6 +597,13 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	fID, err := primitive.ObjectIDFromHex(updateRequest.FriendID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the user's friend status
 	filter := bson.M{"_id": uID}
 	dbResp, err := u.DB.FindOne(context.Background(), filter)
 	if err != nil {
@@ -628,6 +635,44 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update friend status", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Update the friend's friend status
+	friendFilter := bson.M{"_id": fID}
+	friendResp, err := u.DB.FindOne(context.Background(), friendFilter)
+	if err != nil {
+		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	friendFriends := friendResp.Details.Friends
+	if friendFriends == nil {
+		friendFriends = []models.Friend{}
+	}
+
+	userFound := false
+	for i, friend := range friendFriends {
+		if friend.FriendID == userID {
+			friendFriends[i].Status = updateRequest.Status
+			userFound = true
+			break
+		}
+	}
+
+	if !userFound {
+		newFriend := models.Friend{
+			FriendID:  userID,
+			Status:    updateRequest.Status,
+			CreatedAt: time.Now(),
+		}
+		friendFriends = append(friendFriends, newFriend)
+	}
+
+	friendUpdate := bson.M{"$set": bson.M{"user.friends": friendFriends}}
+	_, err = u.DB.UpdateOne(context.Background(), friendFilter, friendUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to update friend's friend status", http.StatusInternalServerError, w, err)
 		return
 	}
 
