@@ -536,9 +536,12 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 		}
 		duration := now.Sub(createdAtTime)
 		var timeAgo string
+		seconds := duration.Seconds()
+		minutes := duration.Minutes()
 		hours := duration.Hours()
-		if hours < 1 {
-			minutes := duration.Minutes()
+		if seconds < 60 {
+			timeAgo = fmt.Sprintf("%.0f seconds ago", seconds)
+		} else if minutes < 60 {
 			timeAgo = fmt.Sprintf("%.0f minutes ago", minutes)
 		} else if hours <= 24 {
 			timeAgo = fmt.Sprintf("%.0f hours ago", hours)
