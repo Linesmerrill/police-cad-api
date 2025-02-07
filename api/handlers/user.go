@@ -882,6 +882,7 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 	}
 
 	response := map[string]interface{}{
+		"friendCount":        len(approvedFriendFriends),
 		"mutualFriendsCount": mutualFriendsCount,
 	}
 
