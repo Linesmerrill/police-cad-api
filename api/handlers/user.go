@@ -412,10 +412,11 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 			if f.FriendID == friend.FriendID {
 				if f.Status == "pending" {
 					config.ErrorStatus("friend request is already pending", http.StatusConflict, w, fmt.Errorf("friend request is already pending"))
+					return
 				} else if f.Status == "approved" {
 					config.ErrorStatus("friend is already approved", http.StatusConflict, w, fmt.Errorf("friend is already approved"))
+					return
 				}
-				return
 			}
 		}
 	}
