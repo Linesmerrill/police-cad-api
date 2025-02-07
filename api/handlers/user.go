@@ -537,14 +537,17 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 		duration := now.Sub(createdAtTime)
 		var timeAgo string
 		hours := duration.Hours()
-		if hours <= 24 {
-			timeAgo = fmt.Sprintf("%.0f hours", hours)
+		if hours < 1 {
+			minutes := duration.Minutes()
+			timeAgo = fmt.Sprintf("%.0f minutes ago", minutes)
+		} else if hours <= 24 {
+			timeAgo = fmt.Sprintf("%.0f hours ago", hours)
 		} else if hours <= 24*365 {
 			days := hours / 24
-			timeAgo = fmt.Sprintf("%.0f days", days)
+			timeAgo = fmt.Sprintf("%.0f days ago", days)
 		} else {
 			years := hours / (24 * 365)
-			timeAgo = fmt.Sprintf("%.0f years", years)
+			timeAgo = fmt.Sprintf("%.0f years ago", years)
 		}
 
 		detailedNotification := map[string]interface{}{
