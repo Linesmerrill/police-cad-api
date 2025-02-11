@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -23,7 +25,19 @@ type Search struct {
 func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		config.ErrorStatus("query param q is required", http.StatusBadRequest, w, nil)
+		config.ErrorStatus("query param q is required", http.StatusBadRequest, w, fmt.Errorf("q == %s", query))
+		return
+	}
+
+	currentUserID := r.URL.Query().Get("userId")
+	if currentUserID == "" {
+		config.ErrorStatus("query param userId is required", http.StatusBadRequest, w, fmt.Errorf("userId == %s", currentUserID))
+		return
+	}
+
+	currentUserObjectID, err := primitive.ObjectIDFromHex(currentUserID)
+	if err != nil {
+		config.ErrorStatus("invalid userId", http.StatusBadRequest, w, err)
 		return
 	}
 
@@ -52,10 +66,15 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	results := map[string]interface{}{}
 
 	// Search for users
-	userFilter := bson.M{"$or": []bson.M{
-		{"user.name": bson.M{"$regex": query, "$options": "i"}},
-		{"user.username": bson.M{"$regex": query, "$options": "i"}},
-	}}
+	userFilter := bson.M{
+		"$and": []bson.M{
+			{"$or": []bson.M{
+				{"user.name": bson.M{"$regex": query, "$options": "i"}},
+				{"user.username": bson.M{"$regex": query, "$options": "i"}},
+			}},
+			{"_id": bson.M{"$ne": currentUserObjectID}},
+		},
+	}
 	userOptions := options.Find().SetLimit(limit).SetSkip(skip)
 	userCursor, err := s.UserDB.Find(context.Background(), userFilter, userOptions)
 	if err != nil {
