@@ -19,6 +19,7 @@ type CommunityDetails struct {
 	ActivePanics    map[string]interface{} `json:"activePanics"`
 	ActiveSignal100 bool                   `json:"activeSignal100"`
 	ImageLink       string                 `json:"imageLink"`
+	LastAccessed    string                 `json:"lastAccessed"`
 	CreatedAt       primitive.DateTime     `json:"createdAt"`
 	UpdatedAt       primitive.DateTime     `json:"updatedAt"`
 }

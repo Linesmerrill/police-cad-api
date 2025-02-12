@@ -204,6 +204,9 @@ definitions:
       imageLink:
         type: string
         x-go-name: ImageLink
+      lastAccessed:
+        type: string
+        x-go-name: LastAccessed
       name:
         type: string
         x-go-name: Name
