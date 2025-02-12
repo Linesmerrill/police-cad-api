@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/config"
@@ -100,9 +102,23 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
-	// Find all users that belong to the community
+	// Parse query parameters for pagination
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+
+	// Calculate the offset for pagination
+	offset := (page - 1) * limit
+
+	// Find all users that belong to the community with pagination
 	filter := bson.M{"user.communities": communityID}
-	users, err := c.UDB.Find(context.Background(), filter)
+	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
+	users, err := c.UDB.Find(context.Background(), filter, options)
 	if err != nil {
 		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, err)
 		return
@@ -121,6 +137,8 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 	response := map[string]interface{}{
 		"members":     members,
 		"onlineCount": onlineCount,
+		"page":        page,
+		"limit":       limit,
 	}
 
 	b, err := json.Marshal(response)
