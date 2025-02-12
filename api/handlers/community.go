@@ -117,6 +117,15 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 
 	// Find all users that belong to the community with pagination
 	filter := bson.M{"user.communities": communityID}
+
+	// Count the total number of users
+	totalUsers, err := c.UDB.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count users by community ID", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Fetch only the first 10 users' details
 	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
 	users, err := c.UDB.Find(context.Background(), filter, options)
 	if err != nil {
@@ -137,6 +146,7 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 	response := map[string]interface{}{
 		"members":     members,
 		"onlineCount": onlineCount,
+		"totalUsers":  totalUsers,
 		"page":        page,
 		"limit":       limit,
 	}

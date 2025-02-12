@@ -15,6 +15,7 @@ const userName = "users"
 type UserDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.User, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error)
+	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	InsertOne(ctx context.Context, userDetails models.UserDetails) interface{}
 	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error)
@@ -72,4 +73,12 @@ func (u *userDatabase) UpdateOne(ctx context.Context, filter interface{}, update
 		return nil, err
 	}
 	return res, nil
+}
+
+func (u *userDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	count, err := u.db.Collection(userName).CountDocuments(ctx, filter, opts...)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
