@@ -10,7 +10,7 @@ type User struct {
 // UserDetails holds the structure for the inner user structure as defined in the user collection in mongo
 type UserDetails struct {
 	Address               string                `json:"address" bson:"address"`
-	ActiveCommunity       string                `json:"activeCommunity" bson:"activeCommunity"`
+	ActiveCommunity       string                `json:"activeCommunity" bson:"activeCommunity"` // will be deprecated, use lastAccessedCommunity and communities
 	CallSign              string                `json:"callSign" bson:"callSign"`
 	DispatchStatus        string                `json:"dispatchStatus" bson:"dispatchStatus"`
 	DispatchStatusSetBy   string                `json:"dispatchStatusSetBy" bson:"dispatchStatusSetBy"`
@@ -22,6 +22,8 @@ type UserDetails struct {
 	ProfilePicture        string                `json:"profilePicture" bson:"profilePicture"`
 	Friends               []Friend              `json:"friends" bson:"friends"`
 	Notifications         []Notification        `json:"notifications" bson:"notifications"`
+	Communities           []string              `json:"communities" bson:"communities"`
+	IsOnline              bool                  `json:"isOnline" bson:"isOnline"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
