@@ -20,6 +20,7 @@ type DatabaseHelper interface {
 type CollectionHelper interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) SingleResultHelper
 	Find(context.Context, interface{}, ...*options.FindOptions) CursorHelper
+	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) InsertOneResultHelper
 	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (*mongo.Cursor, error)
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
@@ -161,6 +162,15 @@ func (mc *MongoCollection) UpdateOne(ctx context.Context, filter interface{}, up
 		println(err)
 	}
 	return res, err
+}
+
+// CountDocuments returns the number of documents in the collection
+func (mc *MongoCollection) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	count, err := mc.coll.CountDocuments(ctx, filter, opts...)
+	if err != nil {
+		println(err)
+	}
+	return count, err
 }
 
 func (sr *mongoSingleResult) Decode(v interface{}) error {
