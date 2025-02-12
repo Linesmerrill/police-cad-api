@@ -222,16 +222,22 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 // UsersLastAccessedCommunityHandler returns the last accessed community details for a user
 func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	email := r.URL.Query().Get("email")
-	if email == "" {
-		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		config.ErrorStatus("query param userId is required", http.StatusBadRequest, w, fmt.Errorf("query param userId is required"))
 		return
 	}
 
-	// Find the user by email
-	user, err := u.DB.FindOne(context.Background(), bson.M{"user.email": email})
+	uID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
-		config.ErrorStatus("failed to get user by email", http.StatusNotFound, w, err)
+		config.ErrorStatus("invalid userId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the user by userId
+	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	if err != nil {
+		config.ErrorStatus("failed to get user by userId", http.StatusNotFound, w, err)
 		return
 	}
 
@@ -280,15 +286,10 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 		lastAccessed = fmt.Sprintf("%.0f years", years)
 	}
 
-	// Create a response with the required details
-	response := map[string]interface{}{
-		"communityName":      community.Details.Name,
-		"communityImageLink": community.Details.ImageLink,
-		"lastAccessed":       lastAccessed,
-	}
+	community.Details.LastAccessed = lastAccessed
 
 	// Marshal the response
-	b, err := json.Marshal(response)
+	b, err := json.Marshal(community)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
