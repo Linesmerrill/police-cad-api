@@ -544,6 +544,11 @@ definitions:
       callSign:
         type: string
         x-go-name: CallSign
+      communities:
+        items:
+          type: string
+        type: array
+        x-go-name: Communities
       createdAt:
         type: object
         x-go-name: CreatedAt
@@ -561,6 +566,9 @@ definitions:
           $ref: '#/definitions/Friend'
         type: array
         x-go-name: Friends
+      isOnline:
+        type: boolean
+        x-go-name: IsOnline
       lastAccessedCommunity:
         $ref: '#/definitions/LastAccessedCommunity'
       name:

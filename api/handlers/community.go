@@ -12,11 +12,13 @@ import (
 
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/models"
 )
 
 // Community struct mostly used for mocking tests
 type Community struct {
-	DB databases.CommunityDatabase
+	DB  databases.CommunityDatabase
+	UDB databases.UserDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -90,6 +92,43 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// CommunityMembersHandler returns all members of a community
+func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Find all users that belong to the community
+	filter := bson.M{"user.communities": communityID}
+	users, err := c.UDB.Find(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	var members []models.User
+	onlineCount := 0
+
+	for _, user := range users {
+		members = append(members, user)
+		if user.Details.IsOnline {
+			onlineCount++
+		}
+	}
+
+	response := map[string]interface{}{
+		"members":     members,
+		"onlineCount": onlineCount,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
