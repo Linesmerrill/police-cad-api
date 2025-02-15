@@ -162,6 +162,62 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 	w.Write(b)
 }
 
+// GetEventsByCommunityIDHandler returns all events of a community
+func (c Community) GetEventsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse query parameters for pagination
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+
+	// Calculate the offset for pagination
+	offset := (page - 1) * limit
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	comm, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Extract the events from the community
+	events := comm.Details.Events
+
+	// Apply pagination to the events
+	start := offset
+	end := offset + limit
+	if start > len(events) {
+		start = len(events)
+	}
+	if end > len(events) {
+		end = len(events)
+	}
+	paginatedEvents := events[start:end]
+
+	// Marshal the paginated events to JSON
+	b, err := json.Marshal(paginatedEvents)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
 // AddEventToCommunityHandler adds an event to a community
 func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
