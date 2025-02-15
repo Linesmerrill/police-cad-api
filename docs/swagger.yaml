@@ -2,6 +2,26 @@ basePath: /
 consumes:
 - application/json
 definitions:
+  Attendance:
+    description: Attendance holds the structure for attendance
+    properties:
+      confirmed:
+        items:
+          type: string
+        type: array
+        x-go-name: Confirmed
+      declined:
+        items:
+          type: string
+        type: array
+        x-go-name: Declined
+      maybe:
+        items:
+          type: string
+        type: array
+        x-go-name: Maybe
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   Call:
     description: Call holds the structure for the call collection in mongo
     properties:
@@ -201,6 +221,14 @@ definitions:
         x-go-name: Code
       createdAt:
         $ref: '#/definitions/DateTime'
+      description:
+        type: string
+        x-go-name: Description
+      events:
+        items:
+          $ref: '#/definitions/Event'
+        type: array
+        x-go-name: Events
       imageLink:
         type: string
         x-go-name: ImageLink
@@ -341,6 +369,47 @@ definitions:
     properties:
       Response:
         $ref: '#/definitions/MessageError'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  Event:
+    description: Event holds the structure for an event
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      attendance:
+        $ref: '#/definitions/Attendance'
+      coHosts:
+        items:
+          type: string
+        type: array
+        x-go-name: CoHosts
+      communityID:
+        type: string
+        x-go-name: CommunityID
+      createdAt:
+        $ref: '#/definitions/DateTime'
+      description:
+        type: string
+        x-go-name: Description
+      host:
+        type: string
+        x-go-name: Host
+      image:
+        type: string
+        x-go-name: Image
+      location:
+        type: string
+        x-go-name: Location
+      required:
+        type: boolean
+        x-go-name: Required
+      scheduledDate:
+        $ref: '#/definitions/DateTime'
+      title:
+        type: string
+        x-go-name: Title
+      updatedAt:
+        $ref: '#/definitions/DateTime'
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Firearm:
@@ -517,6 +586,13 @@ definitions:
         x-go-name: Type
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  ObjectID:
+    items:
+      format: uint8
+      type: integer
+    title: ObjectID is the BSON ObjectID type.
+    type: array
+    x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
   User:
     description: User holds the structure for the user collection in mongo
     properties:

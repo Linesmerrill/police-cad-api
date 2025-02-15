@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -159,4 +160,43 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// AddEventToCommunityHandler adds an event to a community
+func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse the request body to get the event details
+	var event models.Event
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Generate a new _id for the event
+	event.ID = primitive.NewObjectID()
+
+	// Set the createdAt and updatedAt fields to the current time
+	now := primitive.NewDateTimeFromTime(time.Now())
+	event.CreatedAt = now
+	event.UpdatedAt = now
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the community to add the new event
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$push": bson.M{"community.events": event}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add event to community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Event added successfully"}`))
 }
