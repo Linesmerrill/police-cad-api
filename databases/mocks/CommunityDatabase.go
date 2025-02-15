@@ -84,6 +84,31 @@ func (_m *CommunityDatabase) FindOne(ctx context.Context, filter interface{}) (*
 	return r0, r1
 }
 
+// UpdateOne provides a mock function with given fields: ctx, filter, update, opts
+func (_m *CommunityDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter, update)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateOne")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error); ok {
+		r0 = rf(ctx, filter, update, opts...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NewCommunityDatabase creates a new instance of CommunityDatabase. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewCommunityDatabase(t interface {

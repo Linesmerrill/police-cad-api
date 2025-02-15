@@ -15,6 +15,7 @@ const collectionName = "communities"
 type CommunityDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Community, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Community, error)
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 }
 
 type communityDatabase struct {
@@ -44,4 +45,9 @@ func (c *communityDatabase) Find(ctx context.Context, filter interface{}, opts .
 		return nil, err
 	}
 	return communities, nil
+}
+
+func (c *communityDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := c.db.Collection(collectionName).UpdateOne(ctx, filter, update, opts...)
+	return err
 }
