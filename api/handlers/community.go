@@ -256,3 +256,54 @@ func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Event added successfully"}`))
 }
+
+// GetEventByIDHandler returns an event by ID
+func (c Community) GetEventByIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	eventID := mux.Vars(r)["eventId"]
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the event ID to a primitive.ObjectID
+	eID, err := primitive.ObjectIDFromHex(eventID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	comm, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find the event by ID within the community
+	var event *models.Event
+	for _, evt := range comm.Details.Events {
+		if evt.ID == eID {
+			event = &evt
+			break
+		}
+	}
+
+	if event == nil {
+		config.ErrorStatus("event not found", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// Marshal the event to JSON
+	b, err := json.Marshal(event)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
