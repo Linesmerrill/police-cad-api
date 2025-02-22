@@ -20,6 +20,7 @@ type CommunityDetails struct {
 	ActiveSignal100 bool                   `json:"activeSignal100"`
 	ImageLink       string                 `json:"imageLink"`
 	LastAccessed    string                 `json:"lastAccessed"`
+	Visibility      string                 `json:"visibility"`
 	Description     string                 `json:"description"`
 	Events          []Event                `json:"events"`
 	CreatedAt       primitive.DateTime     `json:"createdAt"`
