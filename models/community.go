@@ -21,6 +21,7 @@ type CommunityDetails struct {
 	ImageLink       string                 `json:"imageLink"`
 	LastAccessed    string                 `json:"lastAccessed"`
 	Visibility      string                 `json:"visibility"`
+	PromotionalText string                 `json:"promotionalText"`
 	Description     string                 `json:"description"`
 	Events          []Event                `json:"events"`
 	CreatedAt       primitive.DateTime     `json:"createdAt"`
