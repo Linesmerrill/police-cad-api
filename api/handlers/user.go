@@ -947,3 +947,38 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// GetUserCommunitiesHandler returns the communities a user is a part of
+func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Convert the user ID to a primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the user by ID
+	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	if err != nil {
+		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Extract the community IDs from the user
+	communityIDs := user.Details.Communities
+	if communityIDs == nil {
+		communityIDs = []string{}
+	}
+
+	// Marshal the community IDs to JSON
+	b, err := json.Marshal(communityIDs)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}

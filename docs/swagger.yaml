@@ -243,6 +243,9 @@ definitions:
         x-go-name: OwnerID
       updatedAt:
         $ref: '#/definitions/DateTime'
+      visibility:
+        type: string
+        x-go-name: Visibility
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   DateTime:
