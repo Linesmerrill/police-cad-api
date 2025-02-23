@@ -19,9 +19,9 @@ type CommunityDetails struct {
 	ActivePanics    map[string]interface{} `json:"activePanics"`
 	ActiveSignal100 bool                   `json:"activeSignal100"`
 	ImageLink       string                 `json:"imageLink"`
-	LastAccessed    string                 `json:"lastAccessed"`
 	Visibility      string                 `json:"visibility"`
 	PromotionalText string                 `json:"promotionalText"`
+	InviteCodes     InviteCode             `json:"inviteCodes"`
 	Description     string                 `json:"description"`
 	Events          []Event                `json:"events"`
 	CreatedAt       primitive.DateTime     `json:"createdAt"`
@@ -50,4 +50,10 @@ type Attendance struct {
 	Confirmed []string `json:"confirmed" bson:"confirmed"`
 	Maybe     []string `json:"maybe" bson:"maybe"`
 	Declined  []string `json:"declined" bson:"declined"`
+}
+
+// InviteCode holds the structure for invite codes
+type InviteCode struct {
+	Code          string `json:"code" bson:"code"`
+	RemainingUses int    `json:"remainingUses" bson:"remainingUses"`
 }

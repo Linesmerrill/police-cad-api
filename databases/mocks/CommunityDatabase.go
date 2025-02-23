@@ -5,6 +5,7 @@ package mocks
 import (
 	context "context"
 
+	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 
 	models "github.com/linesmerrill/police-cad-api/models"
@@ -82,6 +83,33 @@ func (_m *CommunityDatabase) FindOne(ctx context.Context, filter interface{}) (*
 	}
 
 	return r0, r1
+}
+
+// InsertOne provides a mock function with given fields: ctx, community, opts
+func (_m *CommunityDatabase) InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) databases.InsertOneResultHelper {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, community)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InsertOne")
+	}
+
+	var r0 databases.InsertOneResultHelper
+	if rf, ok := ret.Get(0).(func(context.Context, models.Community, ...*options.InsertOneOptions) databases.InsertOneResultHelper); ok {
+		r0 = rf(ctx, community, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(databases.InsertOneResultHelper)
+		}
+	}
+
+	return r0
 }
 
 // UpdateOne provides a mock function with given fields: ctx, filter, update, opts

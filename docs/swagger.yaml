@@ -232,15 +232,17 @@ definitions:
       imageLink:
         type: string
         x-go-name: ImageLink
-      lastAccessed:
-        type: string
-        x-go-name: LastAccessed
+      inviteCodes:
+        $ref: '#/definitions/InviteCode'
       name:
         type: string
         x-go-name: Name
       ownerID:
         type: string
         x-go-name: OwnerID
+      promotionalText:
+        type: string
+        x-go-name: PromotionalText
       updatedAt:
         $ref: '#/definitions/DateTime'
       visibility:
@@ -489,6 +491,18 @@ definitions:
       alive:
         type: boolean
         x-go-name: Alive
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  InviteCode:
+    description: InviteCode holds the structure for invite codes
+    properties:
+      code:
+        type: string
+        x-go-name: Code
+      remainingUses:
+        format: int64
+        type: integer
+        x-go-name: RemainingUses
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   LastAccessedCommunity:
