@@ -51,6 +51,27 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
+// CreateCommunityHandler creates a new community
+func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	var newCommunity models.Community
+
+	// Parse the request body to get the new community details
+	if err := json.NewDecoder(r.Body).Decode(&newCommunity); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Set the createdAt and updatedAt fields to the current time
+	newCommunity.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	newCommunity.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	// Insert the new community into the database
+	_ = c.DB.InsertOne(context.Background(), newCommunity)
+
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"message": "Community created successfully"}`))
+}
+
 // CommunityByCommunityAndOwnerIDHandler returns a community that contains the specified ownerID
 func (c Community) CommunityByCommunityAndOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
 	commID := mux.Vars(r)["community_id"]

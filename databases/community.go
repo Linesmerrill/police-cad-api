@@ -16,6 +16,7 @@ type CommunityDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Community, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Community, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
+	InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) InsertOneResultHelper
 }
 
 type communityDatabase struct {
@@ -50,4 +51,9 @@ func (c *communityDatabase) Find(ctx context.Context, filter interface{}, opts .
 func (c *communityDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
 	_, err := c.db.Collection(collectionName).UpdateOne(ctx, filter, update, opts...)
 	return err
+}
+
+func (c *communityDatabase) InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) InsertOneResultHelper {
+	res := c.db.Collection(collectionName).InsertOne(ctx, community, opts...)
+	return res
 }
