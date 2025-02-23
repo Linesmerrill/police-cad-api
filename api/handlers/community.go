@@ -61,6 +61,8 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Generate a new _id for the community
+	newCommunity.ID = primitive.NewObjectID()
 	// Set the createdAt and updatedAt fields to the current time
 	newCommunity.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	newCommunity.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())

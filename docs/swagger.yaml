@@ -198,8 +198,7 @@ definitions:
         type: integer
         x-go-name: Version
       _id:
-        type: string
-        x-go-name: ID
+        $ref: '#/definitions/ObjectID'
       community:
         $ref: '#/definitions/CommunityDetails'
     type: object
