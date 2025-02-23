@@ -70,6 +70,22 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	// Insert the new community into the database
 	_ = c.DB.InsertOne(context.Background(), newCommunity)
 
+	// Add the community to the user's communities array
+	ownerID := newCommunity.Details.OwnerID
+	uID, err := primitive.ObjectIDFromHex(ownerID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$addToSet": bson.M{"user.communities": newCommunity.ID.Hex()}} // $addToSet ensures no duplicates
+	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"message": "Community created successfully"}`))
 }
