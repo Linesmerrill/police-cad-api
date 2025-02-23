@@ -6,26 +6,26 @@ import (
 
 // Community holds the structure for the community collection in mongo
 type Community struct {
-	ID      string           `json:"_id" bson:"_id"`
-	Details CommunityDetails `json:"community" bson:"community"`
-	Version int32            `json:"__v" bson:"__v"`
+	ID      primitive.ObjectID `json:"_id" bson:"_id"`
+	Details CommunityDetails   `json:"community" bson:"community"`
+	Version int32              `json:"__v" bson:"__v"`
 }
 
 // CommunityDetails holds the structure for the inner community collection in mongo
 type CommunityDetails struct {
-	Name            string                 `json:"name"`
-	OwnerID         string                 `json:"ownerID"`
-	Code            string                 `json:"code"`
-	ActivePanics    map[string]interface{} `json:"activePanics"`
-	ActiveSignal100 bool                   `json:"activeSignal100"`
-	ImageLink       string                 `json:"imageLink"`
-	Visibility      string                 `json:"visibility"`
-	PromotionalText string                 `json:"promotionalText"`
-	InviteCodes     InviteCode             `json:"inviteCodes"`
-	Description     string                 `json:"description"`
-	Events          []Event                `json:"events"`
-	CreatedAt       primitive.DateTime     `json:"createdAt"`
-	UpdatedAt       primitive.DateTime     `json:"updatedAt"`
+	Name            string                 `json:"name" bson:"name"`
+	OwnerID         string                 `json:"ownerID" bson:"ownerID"`
+	Code            string                 `json:"code" bson:"code"`
+	ActivePanics    map[string]interface{} `json:"activePanics" bson:"activePanics"`
+	ActiveSignal100 bool                   `json:"activeSignal100" bson:"activeSignal100"`
+	ImageLink       string                 `json:"imageLink" bson:"imageLink"`
+	Visibility      string                 `json:"visibility" bson:"visibility"`
+	PromotionalText string                 `json:"promotionalText" bson:"promotionalText"`
+	InviteCodes     InviteCode             `json:"inviteCodes" bson:"inviteCodes"`
+	Description     string                 `json:"description" bson:"description"`
+	Events          []Event                `json:"events" bson:"events"`
+	CreatedAt       primitive.DateTime     `json:"createdAt" bson:"createdAt"`
+	UpdatedAt       primitive.DateTime     `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Event holds the structure for an event
