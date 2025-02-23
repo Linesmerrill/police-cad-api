@@ -10,6 +10,7 @@ import (
 
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -76,7 +77,7 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	userOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	userCursor, err := s.UserDB.Find(context.Background(), userFilter, userOptions)
+	users, err := s.UserDB.Find(context.Background(), userFilter, userOptions)
 	if err != nil {
 		config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)
 		return
@@ -86,9 +87,16 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	communityFilter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
 	communityCursor := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
+	defer communityCursor.Close(context.Background())
 
-	results["users"] = userCursor
-	results["communities"] = communityCursor
+	var communities []models.Community
+	if err = communityCursor.All(context.Background(), &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	results["users"] = users
+	results["communities"] = communities
 
 	responseBody, err := json.Marshal(results)
 	if err != nil {
