@@ -85,11 +85,7 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	// Search for communities
 	communityFilter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	communityCursor, err := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
-	if err != nil {
-		config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
-		return
-	}
+	communityCursor := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
 
 	results["users"] = userCursor
 	results["communities"] = communityCursor

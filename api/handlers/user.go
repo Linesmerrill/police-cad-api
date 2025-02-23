@@ -1028,3 +1028,65 @@ func (u User) UpdateLastAccessedCommunityHandler(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Last accessed community updated successfully"}`))
 }
+
+// GetRandomCommunitiesHandler returns a list of random communities that the user does not belong to
+func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	if limit <= 0 {
+		limit = 10 // default limit
+	}
+
+	// Convert the user ID to a primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the user by ID
+	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	if err != nil {
+		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Get the list of community IDs the user belongs to
+	userCommunityIDs := user.Details.Communities
+
+	// Convert community IDs to primitive.ObjectID
+	var communityObjectIDs []primitive.ObjectID
+	for _, id := range userCommunityIDs {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+			return
+		}
+		communityObjectIDs = append(communityObjectIDs, objID)
+	}
+
+	// Find communities that the user does not belong to
+	filter := bson.M{"_id": bson.M{"$nin": communityObjectIDs}}
+	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"$natural": 1})
+
+	cursor := u.CDB.Find(context.Background(), filter, options)
+	defer cursor.Close(context.Background())
+
+	var communities []models.Community
+	if err = cursor.All(context.Background(), &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Marshal the communities to JSON
+	b, err := json.Marshal(communities)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
