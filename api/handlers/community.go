@@ -123,13 +123,37 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 
 	zap.S().Debugf("owner_id: %v", ownerID)
 
-	dbResp, err := c.DB.Find(context.Background(), bson.M{"community.ownerID": ownerID})
+	// Parse query parameters for pagination
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+
+	// Calculate the offset for pagination
+	offset := (page - 1) * limit
+
+	// Find communities by owner ID with pagination
+	filter := bson.M{"community.ownerID": ownerID}
+	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
+
+	cursor := c.DB.Find(context.Background(), filter, options)
 	if err != nil {
-		config.ErrorStatus("failed to get community by ownerID", http.StatusNotFound, w, err)
+		config.ErrorStatus("failed to get communities by ownerID", http.StatusNotFound, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var communities []models.Community
+	if err = cursor.All(context.Background(), &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	b, err := json.Marshal(dbResp)
+	b, err := json.Marshal(communities)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
