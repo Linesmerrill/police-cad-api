@@ -982,3 +982,49 @@ func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// UpdateLastAccessedCommunityHandler updates the last accessed community for a user
+func (u User) UpdateLastAccessedCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		UserID      string `json:"userId"`
+		CommunityID string `json:"communityId"`
+		CreatedAt   string `json:"createdAt"`
+	}
+
+	// Parse the request body to get the update details
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the user ID and community ID to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(request.UserID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the createdAt to a primitive.DateTime
+	createdAt, err := time.Parse(time.RFC3339, request.CreatedAt)
+	if err != nil {
+		config.ErrorStatus("failed to parse createdAt", http.StatusBadRequest, w, err)
+		return
+	}
+	createdAtPrimitive := primitive.NewDateTimeFromTime(createdAt)
+
+	// Update the user's lastAccessedCommunity details
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$set": bson.M{
+		"user.lastAccessedCommunity.communityID": request.CommunityID,
+		"user.lastAccessedCommunity.createdAt":   createdAtPrimitive,
+	}}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update lastAccessedCommunity", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Last accessed community updated successfully"}`))
+}
