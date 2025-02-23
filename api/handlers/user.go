@@ -1067,8 +1067,11 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		communityObjectIDs = append(communityObjectIDs, objID)
 	}
 
-	// Find communities that the user does not belong to
-	filter := bson.M{"_id": bson.M{"$nin": communityObjectIDs}}
+	// Find communities that the user does not belong to and are public
+	filter := bson.M{
+		"_id":                  bson.M{"$nin": communityObjectIDs},
+		"community.visibility": "public",
+	}
 	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"$natural": 1})
 
 	cursor := u.CDB.Find(context.Background(), filter, options)
@@ -1078,6 +1081,11 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	if err = cursor.All(context.Background(), &communities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Return an empty array if no communities are found
+	if len(communities) == 0 {
+		communities = []models.Community{}
 	}
 
 	// Marshal the communities to JSON
