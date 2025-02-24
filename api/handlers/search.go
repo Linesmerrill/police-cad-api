@@ -83,8 +83,13 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Search for communities
-	communityFilter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
+	// Search for communities with visibility set to "public"
+	communityFilter := bson.M{
+		"$and": []bson.M{
+			{"community.name": bson.M{"$regex": query, "$options": "i"}},
+			{"community.visibility": "public"},
+		},
+	}
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
 	communityCursor := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
 	defer communityCursor.Close(context.Background())
