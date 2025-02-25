@@ -242,6 +242,8 @@ definitions:
       promotionalText:
         type: string
         x-go-name: PromotionalText
+      roles:
+        $ref: '#/definitions/Role'
       updatedAt:
         $ref: '#/definitions/DateTime'
       visibility:
@@ -609,6 +611,13 @@ definitions:
     title: ObjectID is the BSON ObjectID type.
     type: array
     x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
+  Role:
+    properties:
+      name:
+        type: string
+        x-go-name: Name
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   User:
     description: User holds the structure for the user collection in mongo
     properties:

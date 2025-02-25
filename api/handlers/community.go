@@ -452,3 +452,36 @@ func (c Community) DeleteEventByIDHandler(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Event deleted successfully"}`))
 }
+
+// UpdateCommunityFieldHandler updates a field in a community
+func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["community_id"]
+
+	var req map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	objID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid communityId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Prefix the keys with "community." to update nested fields
+	update := bson.M{}
+	for key, value := range req {
+		update["community."+key] = value
+	}
+
+	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": objID}, bson.M{"$set": update})
+	if err != nil {
+		config.ErrorStatus("failed to update community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "community updated successfully"}`))
+}
