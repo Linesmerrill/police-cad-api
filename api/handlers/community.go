@@ -588,6 +588,11 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Role added successfully"}`))
+	response := map[string]interface{}{
+		"message": "Role added successfully",
+		"role_id": role.ID.Hex(),
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
 }
