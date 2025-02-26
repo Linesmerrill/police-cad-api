@@ -243,7 +243,10 @@ definitions:
         type: string
         x-go-name: PromotionalText
       roles:
-        $ref: '#/definitions/Role'
+        items:
+          $ref: '#/definitions/Role'
+        type: array
+        x-go-name: Roles
       updatedAt:
         $ref: '#/definitions/DateTime'
       visibility:
@@ -611,11 +614,40 @@ definitions:
     title: ObjectID is the BSON ObjectID type.
     type: array
     x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
-  Role:
+  Permission:
+    description: Permission holds the structure for a permission
     properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      description:
+        type: string
+        x-go-name: Description
+      enabled:
+        type: boolean
+        x-go-name: Enabled
       name:
         type: string
         x-go-name: Name
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  Role:
+    description: Role holds the structure for a role
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      members:
+        items:
+          type: string
+        type: array
+        x-go-name: Members
+      name:
+        type: string
+        x-go-name: Name
+      permissions:
+        items:
+          $ref: '#/definitions/Permission'
+        type: array
+        x-go-name: Permissions
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   User:

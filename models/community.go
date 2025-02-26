@@ -22,7 +22,7 @@ type CommunityDetails struct {
 	Visibility      string                 `json:"visibility" bson:"visibility"`
 	PromotionalText string                 `json:"promotionalText" bson:"promotionalText"`
 	InviteCodes     InviteCode             `json:"inviteCodes" bson:"inviteCodes"`
-	Roles           Role                   `json:"roles" bson:"roles"`
+	Roles           []Role                 `json:"roles" bson:"roles"`
 	Description     string                 `json:"description" bson:"description"`
 	Events          []Event                `json:"events" bson:"events"`
 	CreatedAt       primitive.DateTime     `json:"createdAt" bson:"createdAt"`
@@ -59,6 +59,18 @@ type InviteCode struct {
 	RemainingUses int    `json:"remainingUses" bson:"remainingUses"`
 }
 
+// Role holds the structure for a role
 type Role struct {
-	Name string `json:"name" bson:"name"`
+	ID          primitive.ObjectID `json:"_id" bson:"_id"`
+	Name        string             `json:"name" bson:"name"`
+	Members     []string           `json:"members" bson:"members"`
+	Permissions []Permission       `json:"permissions" bson:"permissions"`
+}
+
+// Permission holds the structure for a permission
+type Permission struct {
+	ID          primitive.ObjectID `json:"_id" bson:"_id"`
+	Name        string             `json:"name" bson:"name"`
+	Description string             `json:"description" bson:"description"`
+	Enabled     bool               `json:"enabled" bson:"enabled"`
 }
