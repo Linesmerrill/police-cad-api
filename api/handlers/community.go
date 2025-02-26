@@ -672,3 +672,33 @@ func (c Community) UpdateRoleNameHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role name updated successfully"}`))
 }
+
+// DeleteRoleByIDHandler deletes a role by communityId and roleId
+func (c Community) DeleteRoleByIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	roleID := mux.Vars(r)["roleId"]
+
+	// Convert the community ID and role ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	rID, err := primitive.ObjectIDFromHex(roleID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the community to pull the role by ID
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$pull": bson.M{"community.roles": bson.M{"_id": rID}}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to delete role from community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Role deleted successfully"}`))
+}
