@@ -58,6 +58,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/members", api.Middleware(http.HandlerFunc(c.CommunityMembersHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/roles", api.Middleware(http.HandlerFunc(c.GetRolesByCommunityIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/roles", api.Middleware(http.HandlerFunc(c.AddRoleToCommunityHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.UpdateRoleMembersHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/events", api.Middleware(http.HandlerFunc(c.GetEventsByCommunityIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/events", api.Middleware(http.HandlerFunc(c.AddEventToCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.GetEventByIDHandler))).Methods("GET")

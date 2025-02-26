@@ -596,3 +596,40 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
 }
+
+// UpdateRoleMembersHandler updates the members of a role in a community
+func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	roleID := mux.Vars(r)["roleId"]
+
+	// Parse the request body to get the new members
+	var members []string
+	if err := json.NewDecoder(r.Body).Decode(&members); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the community ID and role ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	rID, err := primitive.ObjectIDFromHex(roleID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the role members in the community
+	filter := bson.M{"_id": cID, "community.roles._id": rID}
+	update := bson.M{"$set": bson.M{"community.roles.$.members": members}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update role members", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Role members updated successfully"}`))
+}
