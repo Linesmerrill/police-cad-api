@@ -485,3 +485,109 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "community updated successfully"}`))
 }
+
+// GetRolesByCommunityIDHandler fetches all roles for a given community ID
+func (c Community) GetRolesByCommunityIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	var community *models.Community
+	community, err = c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Marshal the roles to JSON
+	b, err := json.Marshal(community.Details.Roles)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// AddRoleToCommunityHandler adds a role to a community
+func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse the request body to get the role details
+	var role models.Role
+	if err := json.NewDecoder(r.Body).Decode(&role); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Generate a new _id for the role
+	role.ID = primitive.NewObjectID()
+
+	var DefaultPermissions = []models.Permission{
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "manage community settings",
+			Description: "Allows managing community settings",
+			Enabled:     false,
+		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "manage community events",
+			Description: "Allows managing community events",
+			Enabled:     false,
+		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "manage departments",
+			Description: "Allows managing departments",
+			Enabled:     false,
+		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "manage roles",
+			Description: "Allows managing roles",
+			Enabled:     false,
+		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "manage members",
+			Description: "Allows managing members",
+			Enabled:     false,
+		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "manage bans",
+			Description: "Allows managing bans",
+			Enabled:     false,
+		},
+	}
+
+	// Add default permissions to the role
+	role.Permissions = append(role.Permissions, DefaultPermissions...)
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the community to add the new role
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$push": bson.M{"community.roles": role}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add role to community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Role added successfully"}`))
+}
