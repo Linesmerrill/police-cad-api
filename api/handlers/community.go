@@ -567,6 +567,12 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 			Description: "Allows managing bans",
 			Enabled:     false,
 		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "administrator",
+			Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.",
+			Enabled:     false,
+		},
 	}
 
 	// Add default permissions to the role
