@@ -76,8 +76,50 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 			{
 				ID:          primitive.NewObjectID(),
 				Name:        "administrator",
-				Description: "head admin",
+				Description: "Head Admin",
 				Enabled:     true,
+			},
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "manage community settings",
+				Description: "Allows managing community settings",
+				Enabled:     false,
+			},
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "manage community events",
+				Description: "Allows managing community events",
+				Enabled:     false,
+			},
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "manage departments",
+				Description: "Allows managing departments",
+				Enabled:     false,
+			},
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "manage roles",
+				Description: "Allows managing roles",
+				Enabled:     false,
+			},
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "manage members",
+				Description: "Allows managing members",
+				Enabled:     false,
+			},
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "manage bans",
+				Description: "Allows managing bans",
+				Enabled:     false,
+			},
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "administrator",
+				Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.",
+				Enabled:     false,
 			},
 		},
 	}
