@@ -76,7 +76,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 			{
 				ID:          primitive.NewObjectID(),
 				Name:        "administrator",
-				Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.",
+				Description: "head admin",
 				Enabled:     true,
 			},
 		},
