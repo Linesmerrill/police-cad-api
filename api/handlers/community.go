@@ -52,7 +52,6 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateCommunityHandler creates a new community
-// CreateCommunityHandler creates a new community
 func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	var newCommunity models.Community
 
@@ -70,8 +69,9 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 
 	// Define the Head Admin role and permission
 	headAdminRole := models.Role{
-		ID:   primitive.NewObjectID(),
-		Name: "Head Admin",
+		ID:      primitive.NewObjectID(),
+		Name:    "Head Admin",
+		Members: []string{newCommunity.Details.OwnerID},
 		Permissions: []models.Permission{
 			{
 				ID:          primitive.NewObjectID(),
