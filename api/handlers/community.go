@@ -52,6 +52,7 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateCommunityHandler creates a new community
+// CreateCommunityHandler creates a new community
 func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	var newCommunity models.Community
 
@@ -66,6 +67,23 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	// Set the createdAt and updatedAt fields to the current time
 	newCommunity.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	newCommunity.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	// Define the Head Admin role and permission
+	headAdminRole := models.Role{
+		ID:   primitive.NewObjectID(),
+		Name: "Head Admin",
+		Permissions: []models.Permission{
+			{
+				ID:          primitive.NewObjectID(),
+				Name:        "administrator",
+				Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.",
+				Enabled:     true,
+			},
+		},
+	}
+
+	// Add the Head Admin role to the community
+	newCommunity.Details.Roles = append(newCommunity.Details.Roles, headAdminRole)
 
 	// Insert the new community into the database
 	_ = c.DB.InsertOne(context.Background(), newCommunity)
