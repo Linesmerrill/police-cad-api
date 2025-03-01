@@ -46,6 +46,8 @@ type Notification struct {
 	SentToID   string      `json:"sentToID" bson:"sentToID"`
 	Type       string      `json:"type" bson:"type"`
 	Message    string      `json:"message" bson:"message"`
+	Data1      string      `json:"data1" bson:"data1"`
+	Data2      string      `json:"data2" bson:"data2"`
 	Seen       bool        `json:"seen" bson:"seen"`
 	CreatedAt  interface{} `json:"createdAt" bson:"createdAt"`
 }
