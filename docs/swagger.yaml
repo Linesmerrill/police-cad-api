@@ -590,6 +590,12 @@ definitions:
       createdAt:
         type: object
         x-go-name: CreatedAt
+      data1:
+        type: string
+        x-go-name: Data1
+      data2:
+        type: string
+        x-go-name: Data2
       message:
         type: string
         x-go-name: Message
