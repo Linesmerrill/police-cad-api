@@ -677,7 +677,7 @@ definitions:
       _id:
         type: string
         x-go-name: ID
-      communityID:
+      communityId:
         type: string
         x-go-name: CommunityID
       status:

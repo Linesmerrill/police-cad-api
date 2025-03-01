@@ -55,6 +55,6 @@ type Notification struct {
 // UserCommunity holds the structure for a user community, mainly used to store the status of a community request for the user
 type UserCommunity struct {
 	ID          string `json:"_id" bson:"_id"`
-	CommunityID string `json:"communityID" bson:"communityID"`
+	CommunityID string `json:"communityId" bson:"communityId"`
 	Status      string `json:"status" bson:"status"`
 }
