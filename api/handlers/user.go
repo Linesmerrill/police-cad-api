@@ -970,14 +970,14 @@ func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Extract the community IDs from the user
-	communityIDs := user.Details.Communities
-	if communityIDs == nil {
-		communityIDs = []string{}
+	// Extract the communities from the user
+	communities := user.Details.Communities
+	if communities == nil {
+		communities = []models.UserCommunity{}
 	}
 
 	// Marshal the community IDs to JSON
-	b, err := json.Marshal(communityIDs)
+	b, err := json.Marshal(communities)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
@@ -1057,13 +1057,16 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get the list of community IDs the user belongs to
-	userCommunityIDs := user.Details.Communities
+	// Extract the communities from the user
+	userCommunities := user.Details.Communities
+	if userCommunities == nil {
+		userCommunities = []models.UserCommunity{}
+	}
 
 	// Convert community IDs to primitive.ObjectID
 	var communityObjectIDs []primitive.ObjectID
-	for _, id := range userCommunityIDs {
-		objID, err := primitive.ObjectIDFromHex(id)
+	for _, community := range userCommunities {
+		objID, err := primitive.ObjectIDFromHex(community.CommunityID)
 		if err != nil {
 			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 			return
@@ -1123,9 +1126,16 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Create a new UserCommunity object
+	newCommunity := models.UserCommunity{
+		ID:          primitive.NewObjectID().Hex(),
+		CommunityID: requestBody.CommunityID,
+		Status:      "approved",
+	}
+
 	// Update the user's communities array
 	filter := bson.M{"_id": uID}
-	update := bson.M{"$addToSet": bson.M{"user.communities": requestBody.CommunityID}} // $addToSet ensures no duplicates
+	update := bson.M{"$addToSet": bson.M{"user.communities": newCommunity}} // $addToSet ensures no duplicates
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
