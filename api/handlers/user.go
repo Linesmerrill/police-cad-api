@@ -1102,3 +1102,36 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// AddCommunityToUserHandler adds a community to a user's array of communities
+func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Parse the request body to get the community ID
+	var requestBody struct {
+		CommunityID string `json:"communityId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the user ID to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the user's communities array
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$addToSet": bson.M{"user.communities": requestBody.CommunityID}} // $addToSet ensures no duplicates
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Community added to user successfully"}`))
+}
