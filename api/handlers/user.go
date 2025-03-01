@@ -561,6 +561,8 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 			"friendId":             notification.SentFromID,
 			"type":                 notification.Type,
 			"message":              notification.Message,
+			"data1":                notification.Data1,
+			"data2":                notification.Data2,
 			"seen":                 notification.Seen,
 			"createdAt":            notification.CreatedAt,
 			"senderName":           sender.Details.Name,
