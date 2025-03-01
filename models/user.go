@@ -22,7 +22,7 @@ type UserDetails struct {
 	ProfilePicture        string                `json:"profilePicture" bson:"profilePicture"`
 	Friends               []Friend              `json:"friends" bson:"friends"`
 	Notifications         []Notification        `json:"notifications" bson:"notifications"`
-	Communities           []string              `json:"communities" bson:"communities"`
+	Communities           []UserCommunity       `json:"communities" bson:"communities"`
 	IsOnline              bool                  `json:"isOnline" bson:"isOnline"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
@@ -50,4 +50,11 @@ type Notification struct {
 	Data2      string      `json:"data2" bson:"data2"`
 	Seen       bool        `json:"seen" bson:"seen"`
 	CreatedAt  interface{} `json:"createdAt" bson:"createdAt"`
+}
+
+// UserCommunity holds the structure for a user community, mainly used to store the status of a community request for the user
+type UserCommunity struct {
+	ID          string `json:"_id" bson:"_id"`
+	CommunityID string `json:"communityID" bson:"communityID"`
+	Status      string `json:"status" bson:"status"`
 }
