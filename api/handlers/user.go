@@ -457,6 +457,8 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		SentToID:   notification.SentToID,
 		Type:       notification.Type,
 		Message:    notification.Message,
+		Data1:      notification.Data1,
+		Data2:      notification.Data2,
 		Seen:       false,
 		CreatedAt:  time.Now(),
 	}
