@@ -1145,3 +1145,58 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community added to user successfully"}`))
 }
+
+// PendingCommunityRequestHandler handles pending community requests for a user
+// PendingCommunityRequestHandler handles pending community requests for a user
+func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Parse the request body to get the community ID
+	var requestBody struct {
+		CommunityID string `json:"communityId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the user ID to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Check if the communityId already exists in the user's pending community requests
+	existingUser, err := u.DB.FindOne(context.Background(), bson.M{
+		"_id": uID,
+		"user.communities": bson.M{
+			"$elemMatch": bson.M{
+				"communityId": requestBody.CommunityID,
+			},
+		},
+	})
+	if err == nil && existingUser != nil {
+		config.ErrorStatus("community request already exists", http.StatusConflict, w, fmt.Errorf("community request already exists"))
+		return
+	}
+
+	// Create a new pending community request object
+	pendingRequest := models.UserCommunity{
+		ID:          primitive.NewObjectID().Hex(),
+		CommunityID: requestBody.CommunityID,
+		Status:      "pending",
+	}
+
+	// Update the user's pending community requests array
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$addToSet": bson.M{"user.communities": pendingRequest}} // $addToSet ensures no duplicates
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user's pending community requests", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Pending community request added successfully"}`))
+}
