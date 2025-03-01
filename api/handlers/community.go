@@ -240,12 +240,11 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 	offset := (page - 1) * limit
 
 	// Find all users that belong to the community with pagination
-	filter := bson.M{"user.communities": communityID}
+	filter := bson.M{"user.communities.communityId": communityID}
 
 	// Count the total number of users
 	totalUsers, err := c.UDB.CountDocuments(context.Background(), filter)
 	if err != nil {
-		config.ErrorStatus("failed to count users by community ID", http.StatusInternalServerError, w, err)
 		return
 	}
 
