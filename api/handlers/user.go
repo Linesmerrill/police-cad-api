@@ -1147,7 +1147,6 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // PendingCommunityRequestHandler handles pending community requests for a user
-// PendingCommunityRequestHandler handles pending community requests for a user
 func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["userId"]
 
