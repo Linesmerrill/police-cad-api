@@ -1113,6 +1113,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	// Parse the request body to get the community ID
 	var requestBody struct {
 		CommunityID string `json:"communityId"`
+		Status      string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -1126,24 +1127,32 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Create a new UserCommunity object
-	newCommunity := models.UserCommunity{
-		ID:          primitive.NewObjectID().Hex(),
-		CommunityID: requestBody.CommunityID,
-		Status:      "approved",
+	// Find the pending community request
+	filter := bson.M{
+		"_id": uID,
+		"user.communities": bson.M{
+			"$elemMatch": bson.M{
+				"communityId": requestBody.CommunityID,
+				"status":      "pending",
+			},
+		},
 	}
 
-	// Update the user's communities array
-	filter := bson.M{"_id": uID}
-	update := bson.M{"$addToSet": bson.M{"user.communities": newCommunity}} // $addToSet ensures no duplicates
+	update := bson.M{
+		"$set": bson.M{
+			"user.communities.$.status": requestBody.Status,
+		},
+	}
+
+	// Update the status to "approved"
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
-		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to update community status", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Community added to user successfully"}`))
+	w.Write([]byte(`{"message": "Community request approved successfully"}`))
 }
 
 // PendingCommunityRequestHandler handles pending community requests for a user
