@@ -38,7 +38,7 @@ func Middleware(next http.Handler) http.Handler {
 		user, err := authenticator.Authenticate(r)
 		if err != nil {
 			zap.S().Errorw("unauthorized",
-				"url", r.URL)
+				"url", r.URL, "error", err)
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error": "unauthorized"}`))
 			return
@@ -53,14 +53,13 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	email, _, ok := r.BasicAuth()
 	if !ok {
-		http.Error(w, "basic auth failed", http.StatusUnauthorized)
+		http.Error(w, "basic auth failed", http.StatusBadRequest)
 		return
 	}
 
-	// Fetch user details from the database
 	dbEmailResp, err := m.DB.Find(context.Background(), bson.M{"user.email": email})
 	if err != nil || len(dbEmailResp) == 0 {
-		http.Error(w, "failed to get user by email", http.StatusUnauthorized)
+		http.Error(w, "failed to get user by email", http.StatusNotFound)
 		return
 	}
 
@@ -99,10 +98,9 @@ func (m MiddlewareDB) SetupGoGuardian() {
 func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, password string) (auth.Info, error) {
 	usernameHash := sha256.Sum256([]byte(email))
 
-	// fetch email & pass from db
 	dbEmailResp, err := m.DB.Find(context.Background(), bson.M{"user.email": email})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user by ID")
+		return nil, fmt.Errorf("failed to get user by email, %v", err)
 	}
 	if len(dbEmailResp) == 0 {
 		return nil, fmt.Errorf("no matching email found")
