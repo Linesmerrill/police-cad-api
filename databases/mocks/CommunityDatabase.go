@@ -19,7 +19,7 @@ type CommunityDatabase struct {
 }
 
 // Find provides a mock function with given fields: ctx, filter, opts
-func (_m *CommunityDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) databases.MongoCursor {
+func (_m *CommunityDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (databases.MongoCursor, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -34,13 +34,23 @@ func (_m *CommunityDatabase) Find(ctx context.Context, filter interface{}, opts 
 	}
 
 	var r0 databases.MongoCursor
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) (databases.MongoCursor, error)); ok {
+		return rf(ctx, filter, opts...)
+	}
 	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) databases.MongoCursor); ok {
 		r0 = rf(ctx, filter, opts...)
 	} else {
 		r0 = ret.Get(0).(databases.MongoCursor)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}, ...*options.FindOptions) error); ok {
+		r1 = rf(ctx, filter, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // FindOne provides a mock function with given fields: ctx, filter

@@ -39,7 +39,11 @@ func (c *callDatabase) FindOne(ctx context.Context, filter interface{}, opts ...
 
 func (c *callDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Call, error) {
 	var calls []models.Call
-	err := c.db.Collection(callName).Find(ctx, filter, opts...).Decode(&calls)
+	cr, err := c.db.Collection(callName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cr.Decode(&calls)
 	if err != nil {
 		return nil, err
 	}

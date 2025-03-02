@@ -39,7 +39,11 @@ func (c *firearmDatabase) FindOne(ctx context.Context, filter interface{}, opts 
 
 func (c *firearmDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Firearm, error) {
 	var firearms []models.Firearm
-	err := c.db.Collection(firearmName).Find(ctx, filter, opts...).Decode(&firearms)
+	cur, err := c.db.Collection(firearmName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cur.Decode(&firearms)
 	if err != nil {
 		return nil, err
 	}

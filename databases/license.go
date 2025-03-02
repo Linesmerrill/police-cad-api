@@ -39,7 +39,11 @@ func (c *licenseDatabase) FindOne(ctx context.Context, filter interface{}, opts 
 
 func (c *licenseDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.License, error) {
 	var licenses []models.License
-	err := c.db.Collection(licenseName).Find(ctx, filter, opts...).Decode(&licenses)
+	cur, err := c.db.Collection(licenseName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cur.Decode(&licenses)
 	if err != nil {
 		return nil, err
 	}

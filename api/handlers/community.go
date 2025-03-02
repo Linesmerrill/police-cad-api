@@ -208,7 +208,7 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 	filter := bson.M{"community.ownerID": ownerID}
 	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
 
-	cursor := c.DB.Find(context.Background(), filter, options)
+	cursor, err := c.DB.Find(context.Background(), filter, options)
 	if err != nil {
 		config.ErrorStatus("failed to get communities by ownerID", http.StatusNotFound, w, err)
 		return

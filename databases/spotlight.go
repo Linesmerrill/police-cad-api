@@ -40,7 +40,11 @@ func (s *spotlightDatabase) FindOne(ctx context.Context, filter interface{}, opt
 
 func (s *spotlightDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Spotlight, error) {
 	var spotlight []models.Spotlight
-	err := s.db.Collection(spotlightName).Find(ctx, filter, opts...).Decode(&spotlight)
+	cur, err := s.db.Collection(spotlightName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cur.Decode(&spotlight)
 	if err != nil {
 		return nil, err
 	}
