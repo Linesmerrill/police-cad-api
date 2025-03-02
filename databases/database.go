@@ -150,8 +150,8 @@ func (mc *MongoCollection) Aggregate(ctx context.Context, pipeline interface{}, 
 }
 
 // DeleteOne deletes a single document from the collection
-func (mc *MongoCollection) DeleteOne(ctx context.Context, filter interface{}) error {
-	_, err := mc.coll.DeleteOne(ctx, filter)
+func (mc *MongoCollection) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	_, err := mc.coll.DeleteOne(ctx, filter, opts...)
 	return err
 }
 
@@ -171,6 +171,15 @@ func (mc *MongoCollection) CountDocuments(ctx context.Context, filter interface{
 		println(err)
 	}
 	return count, err
+}
+
+// UpdateMany updates multiple documents in the collection
+func (mc *MongoCollection) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	res, err := mc.coll.UpdateMany(ctx, filter, update, opts...)
+	if err != nil {
+		println(err)
+	}
+	return res, err
 }
 
 func (sr *mongoSingleResult) Decode(v interface{}) error {

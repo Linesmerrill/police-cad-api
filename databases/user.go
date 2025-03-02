@@ -19,6 +19,7 @@ type UserDatabase interface {
 	InsertOne(ctx context.Context, userDetails models.UserDetails) interface{}
 	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error)
+	UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error)
 }
 
 type userDatabase struct {
@@ -85,4 +86,12 @@ func (u *userDatabase) CountDocuments(ctx context.Context, filter interface{}, o
 		return 0, err
 	}
 	return count, nil
+}
+
+func (u *userDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error) {
+	res, err := u.db.Collection(userName).UpdateMany(ctx, filter, update, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }

@@ -18,6 +18,31 @@ type CommunityDatabase struct {
 	mock.Mock
 }
 
+// DeleteOne provides a mock function with given fields: ctx, filter, opts
+func (_m *CommunityDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteOne")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.DeleteOptions) error); ok {
+		r0 = rf(ctx, filter, opts...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Find provides a mock function with given fields: ctx, filter, opts
 func (_m *CommunityDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (databases.MongoCursor, error) {
 	_va := make([]interface{}, len(opts))
