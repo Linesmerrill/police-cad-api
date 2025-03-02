@@ -1063,15 +1063,17 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		userCommunities = []models.UserCommunity{}
 	}
 
-	// Convert community IDs to primitive.ObjectID
+	// Convert community IDs to primitive.ObjectID for communities with status "approved"
 	var communityObjectIDs []primitive.ObjectID
 	for _, community := range userCommunities {
-		objID, err := primitive.ObjectIDFromHex(community.CommunityID)
-		if err != nil {
-			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-			return
+		if community.Status == "approved" {
+			objID, err := primitive.ObjectIDFromHex(community.CommunityID)
+			if err != nil {
+				config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+				return
+			}
+			communityObjectIDs = append(communityObjectIDs, objID)
 		}
-		communityObjectIDs = append(communityObjectIDs, objID)
 	}
 
 	// Find communities that the user does not belong to and are public
