@@ -132,12 +132,12 @@ func (mc *MongoCollection) InsertOne(ctx context.Context, document interface{}, 
 }
 
 // Find returns a cursor to iterate over the collection
-func (mc *MongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) *MongoCursor {
+func (mc *MongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error) {
 	cursor, err := mc.coll.Find(ctx, filter, opts...)
 	if err != nil {
 		println(err)
 	}
-	return &MongoCursor{cr: cursor}
+	return &MongoCursor{cr: cursor}, err
 }
 
 // Aggregate returns a cursor to iterate over the collection

@@ -41,7 +41,11 @@ func (t *tokenDatabase) FindOne(ctx context.Context, filter interface{}, opts ..
 
 func (t *tokenDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Token, error) {
 	var token []models.Token
-	err := t.db.Collection(tokenName).Find(ctx, filter, opts...).Decode(&token)
+	cur, err := t.db.Collection(tokenName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cur.Decode(&token)
 	if err != nil {
 		return nil, err
 	}

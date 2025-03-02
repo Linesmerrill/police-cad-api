@@ -39,7 +39,11 @@ func (c *emsDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*
 
 func (c *emsDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Ems, error) {
 	var ems []models.Ems
-	err := c.db.Collection(emsName).Find(ctx, filter, opts...).Decode(&ems)
+	cur, err := c.db.Collection(emsName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cur.Decode(&ems)
 	if err != nil {
 		return nil, err
 	}

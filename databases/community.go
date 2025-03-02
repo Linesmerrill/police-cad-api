@@ -14,7 +14,7 @@ const collectionName = "communities"
 // CommunityDatabase contains the methods to use with the community database
 type CommunityDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Community, error)
-	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) MongoCursor
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) InsertOneResultHelper
 }
@@ -39,9 +39,12 @@ func (c *communityDatabase) FindOne(ctx context.Context, filter interface{}) (*m
 	return community, nil
 }
 
-func (c *communityDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) MongoCursor {
-	cursor := c.db.Collection(collectionName).Find(ctx, filter, opts...)
-	return *cursor
+func (c *communityDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error) {
+	cursor, err := c.db.Collection(collectionName).Find(ctx, filter, opts...)
+	if err != nil {
+		return MongoCursor{}, err
+	}
+	return *cursor, err
 }
 
 func (c *communityDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {

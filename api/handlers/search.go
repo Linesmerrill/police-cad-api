@@ -91,7 +91,11 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	communityCursor := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
+	communityCursor, err := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
+	if err != nil {
+		config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
+		return
+	}
 	defer communityCursor.Close(context.Background())
 
 	var communities []models.Community

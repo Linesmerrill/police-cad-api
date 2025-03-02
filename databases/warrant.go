@@ -39,7 +39,11 @@ func (c *warrantDatabase) FindOne(ctx context.Context, filter interface{}, opts 
 
 func (c *warrantDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Warrant, error) {
 	var warrants []models.Warrant
-	err := c.db.Collection(warrantName).Find(ctx, filter, opts...).Decode(&warrants)
+	curr, err := c.db.Collection(warrantName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = curr.Decode(&warrants)
 	if err != nil {
 		return nil, err
 	}

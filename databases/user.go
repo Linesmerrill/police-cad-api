@@ -43,7 +43,11 @@ func (u *userDatabase) FindOne(ctx context.Context, filter interface{}) (*models
 
 func (u *userDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error) {
 	var users []models.User
-	err := u.db.Collection(userName).Find(ctx, filter, opts...).Decode(&users)
+	cur, err := u.db.Collection(userName).Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cur.Decode(&users)
 	if err != nil {
 		return nil, err
 	}
