@@ -1266,7 +1266,7 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 
 	// Iterate through the roles and remove the user ID from the members array
 	for _, role := range community.Details.Roles {
-		roleFilter := bson.M{"_id": cID, "community.roles._id": role.ID}
+		roleFilter := bson.M{"_id": cID, "community.roles._id": role.ID, "community.roles.members": userID}
 		roleUpdate := bson.M{"$pull": bson.M{"community.roles.$.members": userID}}
 		err := u.CDB.UpdateOne(context.Background(), roleFilter, roleUpdate)
 		if err != nil {
