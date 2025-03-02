@@ -1224,22 +1224,46 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Convert the user ID to primitive.ObjectID
+	// Convert the user ID and community ID to primitive.ObjectID
 	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 		return
 	}
 
 	// Update the user's communities array to remove the specified community
-	filter := bson.M{"_id": uID}
-	update := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	userFilter := bson.M{"_id": uID}
+	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
+	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to remove community from user's communities", http.StatusInternalServerError, w, err)
 		return
 	}
 
+	// Find the community by community ID
+	communityFilter := bson.M{"_id": cID}
+	community, err := u.CDB.FindOne(context.Background(), communityFilter)
+	if err != nil {
+		config.ErrorStatus("failed to find community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Iterate through the roles and remove the user ID from the members array
+	for _, role := range community.Details.Roles {
+		roleFilter := bson.M{"_id": cID, "community.roles._id": role.ID}
+		roleUpdate := bson.M{"$pull": bson.M{"community.roles.$.members": userID}}
+		err := u.CDB.UpdateOne(context.Background(), roleFilter, roleUpdate)
+		if err != nil {
+			config.ErrorStatus("failed to remove user from role members", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Community removed successfully"}`))
+	w.Write([]byte(`{"message": "Community and roles updated successfully"}`))
 }
