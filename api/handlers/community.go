@@ -822,7 +822,7 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 
 // DeleteCommunityByIDHandler deletes a community by ID and removes references from all users
 func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Request) {
-	communityID := mux.Vars(r)["communityId"]
+	communityID := mux.Vars(r)["community_id"]
 
 	// Convert the community ID to primitive.ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
