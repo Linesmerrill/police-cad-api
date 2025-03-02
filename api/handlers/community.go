@@ -819,3 +819,35 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role permissions updated successfully"}`))
 }
+
+// DeleteCommunityByIDHandler deletes a community by ID and removes references from all users
+func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Convert the community ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Delete the community by ID
+	communityFilter := bson.M{"_id": cID}
+	err = c.DB.DeleteOne(context.Background(), communityFilter)
+	if err != nil {
+		config.ErrorStatus("failed to delete community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Remove the community references from all users
+	userFilter := bson.M{"user.communities.communityId": communityID}
+	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}
+	_, err = c.UDB.UpdateMany(context.Background(), userFilter, userUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to remove community references from users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Community deleted and references removed successfully"}`))
+}

@@ -15,8 +15,9 @@ const collectionName = "communities"
 type CommunityDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Community, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
-	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) InsertOneResultHelper
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
+	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 }
 
 type communityDatabase struct {
@@ -55,4 +56,9 @@ func (c *communityDatabase) UpdateOne(ctx context.Context, filter interface{}, u
 func (c *communityDatabase) InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) InsertOneResultHelper {
 	res := c.db.Collection(collectionName).InsertOne(ctx, community, opts...)
 	return res
+}
+
+func (c *communityDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	return c.db.Collection(collectionName).DeleteOne(ctx, filter, opts...)
+
 }
