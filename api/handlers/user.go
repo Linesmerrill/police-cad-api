@@ -1278,3 +1278,61 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community and roles updated successfully"}`))
 }
+
+// BanUserFromCommunityHandler bans a user from a community
+func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Parse the request body to get the community ID
+	var requestBody struct {
+		CommunityID string `json:"communityId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the user ID and community ID to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the user's community status to "banned"
+	userFilter := bson.M{
+		"_id":                          uID,
+		"user.communities.communityId": requestBody.CommunityID,
+	}
+	userUpdate := bson.M{
+		"$set": bson.M{
+			"user.communities.$.status": "banned",
+		},
+	}
+	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to update community status", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Add the user ID to the community's banList
+	communityFilter := bson.M{"_id": cID}
+	communityUpdate := bson.M{
+		"$addToSet": bson.M{
+			"community.banList": userID,
+		},
+	}
+	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to update community ban list", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User banned from community successfully"}`))
+}
