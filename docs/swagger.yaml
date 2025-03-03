@@ -215,6 +215,11 @@ definitions:
       activeSignal100:
         type: boolean
         x-go-name: ActiveSignal100
+      banList:
+        items:
+          type: string
+        type: array
+        x-go-name: BanList
       code:
         type: string
         x-go-name: Code

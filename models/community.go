@@ -23,6 +23,7 @@ type CommunityDetails struct {
 	PromotionalText string                 `json:"promotionalText" bson:"promotionalText"`
 	InviteCodes     InviteCode             `json:"inviteCodes" bson:"inviteCodes"`
 	Roles           []Role                 `json:"roles" bson:"roles"`
+	BanList         []string               `json:"banList" bson:"banList"`
 	Description     string                 `json:"description" bson:"description"`
 	Events          []Event                `json:"events" bson:"events"`
 	CreatedAt       primitive.DateTime     `json:"createdAt" bson:"createdAt"`
