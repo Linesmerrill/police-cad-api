@@ -252,7 +252,13 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 		"$and": []bson.M{
 			{"user.communities": bson.M{"$exists": true}},
 			{"user.communities": bson.M{"$ne": nil}},
-			{"user.communities.communityId": communityID}},
+			{"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      bson.M{"$ne": "banned"},
+				},
+			}},
+		},
 	}
 
 	// Count the total number of users
