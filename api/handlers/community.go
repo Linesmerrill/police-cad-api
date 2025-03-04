@@ -859,6 +859,7 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 }
 
 // GetBannedUsersHandler returns all banned users of a community
+// GetBannedUsersHandler returns all banned users of a community
 func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
@@ -879,9 +880,21 @@ func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request)
 	// Get the list of banned user IDs
 	banList := community.Details.BanList
 
+	// Convert banList to a slice of primitive.ObjectID
+	var objectIDs []primitive.ObjectID
+	for _, id := range banList {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			config.ErrorStatus("failed to convert banList ID to ObjectID", http.StatusInternalServerError, w, err)
+			return
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+
 	// Find the banned users
-	userFilter := bson.M{"_id": bson.M{"$in": banList}}
-	bannedUsers, err := c.UDB.Find(context.Background(), userFilter)
+	userFilter := bson.M{"_id": bson.M{"$in": objectIDs}}
+	var bannedUsers []models.User
+	bannedUsers, err = c.UDB.Find(context.Background(), userFilter)
 	if err != nil {
 		config.ErrorStatus("failed to get banned users", http.StatusInternalServerError, w, err)
 		return
