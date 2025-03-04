@@ -859,7 +859,6 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 }
 
 // GetBannedUsersHandler returns all banned users of a community
-// GetBannedUsersHandler returns all banned users of a community
 func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
@@ -893,11 +892,15 @@ func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request)
 
 	// Find the banned users
 	userFilter := bson.M{"_id": bson.M{"$in": objectIDs}}
-	var bannedUsers []models.User
-	bannedUsers, err = c.UDB.Find(context.Background(), userFilter)
+	bannedUsers, err := c.UDB.Find(context.Background(), userFilter)
 	if err != nil {
 		config.ErrorStatus("failed to get banned users", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// If no banned users are found, return an empty array
+	if bannedUsers == nil {
+		bannedUsers = []models.User{}
 	}
 
 	// Marshal the banned users to JSON
