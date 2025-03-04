@@ -897,3 +897,50 @@ func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// UnbanUserFromCommunityHandler unbans a user from a community
+func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Parse the request body to get the community ID
+	var requestBody struct {
+		CommunityID string `json:"communityId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the user ID and community ID to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Delete the matching community object from the user's array of communities
+	userFilter := bson.M{"_id": uID}
+	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
+	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to remove community from user's communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Remove the user ID from the community's banList
+	communityFilter := bson.M{"_id": cID}
+	communityUpdate := bson.M{"$pull": bson.M{"community.banList": userID}}
+	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to remove user from community ban list", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User unbanned from community successfully"}`))
+}
