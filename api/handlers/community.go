@@ -857,3 +857,43 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community deleted and references removed successfully"}`))
 }
+
+// GetBannedUsersHandler returns all banned users of a community
+func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Get the list of banned user IDs
+	banList := community.Details.BanList
+
+	// Find the banned users
+	userFilter := bson.M{"_id": bson.M{"$in": banList}}
+	bannedUsers, err := c.UDB.Find(context.Background(), userFilter)
+	if err != nil {
+		config.ErrorStatus("failed to get banned users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Marshal the banned users to JSON
+	b, err := json.Marshal(bannedUsers)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
