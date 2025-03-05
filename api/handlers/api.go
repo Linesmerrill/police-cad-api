@@ -43,6 +43,7 @@ func (a *App) New() *mux.Router {
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
+	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -130,6 +131,8 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
+
+	apiCreate.Handle("/report", api.Middleware(http.HandlerFunc(report.CreateReportHandler))).Methods("POST")
 
 	apiCreate.Handle("/search", api.Middleware(http.HandlerFunc(search.SearchHandler))).Methods("GET")
 
