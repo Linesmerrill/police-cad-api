@@ -385,6 +385,18 @@ func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Initialize the events slice if it is null
+	if community.Details.Events == nil {
+		community.Details.Events = []models.Event{}
+	}
+
 	// Update the community to add the new event
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$push": bson.M{"community.events": event}}
