@@ -67,6 +67,11 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	newCommunity.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
 
+	// Initialize the events slice if it is null
+	if newCommunity.Details.Events == nil {
+		newCommunity.Details.Events = []models.Event{}
+	}
+
 	// Define the Head Admin role and permission
 	headAdminRole := models.Role{
 		ID:      primitive.NewObjectID(),
