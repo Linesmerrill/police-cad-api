@@ -977,3 +977,42 @@ func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User unbanned from community successfully"}`))
 }
+
+// AddInviteCodeHandler adds a new invite code to the community's inviteCodes array
+func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse the request body to get the invite code
+	var requestBody struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Create a new invite code object with infinite uses
+	newInviteCode := models.InviteCode{
+		Code:          requestBody.Code,
+		RemainingUses: -1, // -1 to indicate infinite uses
+	}
+
+	// Update the community's inviteCodes array
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$addToSet": bson.M{"community.inviteCodes": newInviteCode}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add invite code to community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Invite code added successfully"}`))
+}

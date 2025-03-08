@@ -237,7 +237,10 @@ definitions:
         type: string
         x-go-name: ImageLink
       inviteCodes:
-        $ref: '#/definitions/InviteCode'
+        items:
+          $ref: '#/definitions/InviteCode'
+        type: array
+        x-go-name: InviteCodes
       name:
         type: string
         x-go-name: Name
