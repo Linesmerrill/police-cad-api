@@ -73,8 +73,6 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
 
-	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
-
 	apiCreate.Handle("/user/create-user", http.HandlerFunc(u.UserCreateHandler)).Methods("POST")
 	apiCreate.Handle("/user/check-user", http.HandlerFunc(u.UserCheckEmailHandler)).Methods("POST")
 	apiCreate.Handle("/user/last-accessed-community", api.Middleware(http.HandlerFunc(u.UpdateLastAccessedCommunityHandler))).Methods("PUT")
@@ -97,7 +95,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/users/{user_id}/friends", api.Middleware(http.HandlerFunc(u.fetchUserFriendsByID))).Methods("GET")
 	apiCreate.Handle("/users/{friend_id}/friends-and-mutual-friends", api.Middleware(http.HandlerFunc(u.fetchFriendsAndMutualFriendsCount))).Methods("GET")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UpdateUserByIDHandler))).Methods("PUT")
-	apiCreate.Handle("/users/{active_community_id}", api.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET") // All routes for user must go above this line
+	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
+	apiCreate.Handle("/users/{active_community_id}", api.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET")
+	// All routes for user must go above this line
 
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilians", api.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
