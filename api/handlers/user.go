@@ -1336,3 +1336,37 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User banned from community successfully"}`))
 }
+
+// UpdateUserByIDHandler updates a user by ID
+func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Convert the user ID to a primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Parse the request body to get the updated user details
+	var updatedUser models.User
+	if err := json.NewDecoder(r.Body).Decode(&updatedUser); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Set the updatedAt field to the current time
+	updatedUser.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	// Update the user in the database
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$set": updatedUser}
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User updated successfully"}`))
+}
