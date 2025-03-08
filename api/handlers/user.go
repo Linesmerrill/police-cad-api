@@ -528,14 +528,25 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 		// Calculate timeAgo
 		now := time.Now()
 		var createdAtTime time.Time
-		switch v := notification.CreatedAt.(type) {
-		case time.Time:
-			createdAtTime = v
-		case primitive.DateTime:
-			createdAtTime = v.Time()
-		default:
-			config.ErrorStatus("invalid last accessed time", http.StatusInternalServerError, w, fmt.Errorf("invalid last accessed time"))
-			return
+
+		// Check if CreatedAt is a string and parse it
+		if createdAtStr, ok := notification.CreatedAt.(string); ok {
+			parsedTime, err := time.Parse(time.RFC3339, createdAtStr)
+			if err != nil {
+				config.ErrorStatus("failed to parse createdAt", http.StatusInternalServerError, w, err)
+				return
+			}
+			createdAtTime = parsedTime
+		} else {
+			switch v := notification.CreatedAt.(type) {
+			case time.Time:
+				createdAtTime = v
+			case primitive.DateTime:
+				createdAtTime = v.Time()
+			default:
+				config.ErrorStatus("invalid last accessed time", http.StatusInternalServerError, w, fmt.Errorf("invalid last accessed time"))
+				return
+			}
 		}
 		duration := now.Sub(createdAtTime)
 		var timeAgo string
