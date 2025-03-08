@@ -21,7 +21,7 @@ type CommunityDetails struct {
 	ImageLink       string                 `json:"imageLink" bson:"imageLink"`
 	Visibility      string                 `json:"visibility" bson:"visibility"`
 	PromotionalText string                 `json:"promotionalText" bson:"promotionalText"`
-	InviteCodes     InviteCode             `json:"inviteCodes" bson:"inviteCodes"`
+	InviteCodes     []InviteCode           `json:"inviteCodes" bson:"inviteCodes"`
 	Roles           []Role                 `json:"roles" bson:"roles"`
 	BanList         []string               `json:"banList" bson:"banList"`
 	Description     string                 `json:"description" bson:"description"`
