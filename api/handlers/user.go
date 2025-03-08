@@ -521,8 +521,8 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 
 		sender, err := u.DB.FindOne(context.Background(), bson.M{"_id": senderID})
 		if err != nil {
-			config.ErrorStatus("failed to fetch sender details", http.StatusInternalServerError, w, err)
-			return
+			// Skip this notification if the sender is not found
+			continue
 		}
 
 		// Calculate timeAgo
