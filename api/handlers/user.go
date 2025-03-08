@@ -1339,7 +1339,7 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 
 // UpdateUserByIDHandler updates a user by ID
 func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
-	userID := mux.Vars(r)["userId"]
+	userID := mux.Vars(r)["user_id"]
 
 	// Convert the user ID to a primitive.ObjectID
 	uID, err := primitive.ObjectIDFromHex(userID)
