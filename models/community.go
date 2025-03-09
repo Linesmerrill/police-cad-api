@@ -56,8 +56,10 @@ type Attendance struct {
 
 // InviteCode holds the structure for invite codes
 type InviteCode struct {
-	Code          string `json:"code" bson:"code"`
-	RemainingUses int    `json:"remainingUses" bson:"remainingUses"`
+	Code          string             `json:"code" bson:"code"`
+	RemainingUses int                `json:"remainingUses" bson:"remainingUses"`
+	CreatedBy     string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt     primitive.DateTime `json:"createdAt" bson:"createdAt"`
 }
 
 // Role holds the structure for a role
