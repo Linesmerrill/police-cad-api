@@ -982,11 +982,9 @@ func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Reque
 func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
-	// Parse the request body to get the invite code
-	var requestBody struct {
-		Code string `json:"code"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+	// Parse the request body to get the invite code details
+	var newInviteCode models.InviteCode
+	if err := json.NewDecoder(r.Body).Decode(&newInviteCode); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -998,11 +996,8 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Create a new invite code object with infinite uses
-	newInviteCode := models.InviteCode{
-		Code:          requestBody.Code,
-		RemainingUses: -1, // -1 to indicate infinite uses
-	}
+	// Set the CreatedAt field to the current time
+	newInviteCode.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
 	// Update the community's inviteCodes array
 	filter := bson.M{"_id": cID}
