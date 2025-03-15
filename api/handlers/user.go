@@ -1437,3 +1437,35 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User blocked successfully"}`))
 }
+
+// UnblockUserHandler unblocks a user by removing the friendId from the user's friends list
+func (u User) UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the request body to get the userId and friendId
+	var requestBody struct {
+		UserID   string `json:"userId"`
+		FriendID string `json:"friendId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the userId to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Remove the friendId from the user's friends list
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$pull": bson.M{"user.friends": bson.M{"friend_id": requestBody.FriendID}}}
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to remove friend from user's friends list", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User unblocked successfully"}`))
+}
