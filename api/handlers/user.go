@@ -468,7 +468,8 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 
 		for _, friend := range dbResp.Details.Friends {
 			if friend.FriendID == notification.SentFromID && friend.Status == "blocked" {
-				config.ErrorStatus("cannot send friend request to a blocked user", http.StatusForbidden, w, fmt.Errorf("cannot send friend request to a blocked user"))
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"message": "notification created successfully"}`))
 				return
 			}
 		}
