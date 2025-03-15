@@ -1383,3 +1383,50 @@ func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User updated successfully"}`))
 }
+
+// BlockUserHandler blocks a user by updating or inserting the friendId with status "blocked"
+func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the request body to get the userId and friendId
+	var requestBody struct {
+		UserID   string `json:"userId"`
+		FriendID string `json:"friendId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the userId and friendId to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	fID, err := primitive.ObjectIDFromHex(requestBody.FriendID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Check if the friendId exists in the user's friends list
+	filter := bson.M{"_id": uID, "user.friends.friendId": fID}
+	update := bson.M{"$set": bson.M{"user.friends.$.status": "blocked"}}
+	result, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update friend status", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// If the friendId does not exist, insert a new object with status "blocked"
+	if result.MatchedCount == 0 {
+		update = bson.M{"$push": bson.M{"user.friends": bson.M{"friendId": fID, "status": "blocked"}}}
+		_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
+		if err != nil {
+			config.ErrorStatus("failed to insert new friend with status blocked", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User blocked successfully"}`))
+}

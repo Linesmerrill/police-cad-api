@@ -10,6 +10,8 @@ import (
 
 	models "github.com/linesmerrill/police-cad-api/models"
 
+	mongo "go.mongodb.org/mongo-driver/mongo"
+
 	options "go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -169,7 +171,7 @@ func (_m *UserDatabase) InsertOne(ctx context.Context, userDetails models.UserDe
 }
 
 // UpdateMany provides a mock function with given fields: ctx, filter, update, opts
-func (_m *UserDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error) {
+func (_m *UserDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -183,16 +185,16 @@ func (_m *UserDatabase) UpdateMany(ctx context.Context, filter interface{}, upda
 		panic("no return value specified for UpdateMany")
 	}
 
-	var r0 interface{}
+	var r0 *mongo.UpdateResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (interface{}, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)); ok {
 		return rf(ctx, filter, update, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) interface{}); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) *mongo.UpdateResult); ok {
 		r0 = rf(ctx, filter, update, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(interface{})
+			r0 = ret.Get(0).(*mongo.UpdateResult)
 		}
 	}
 
@@ -206,7 +208,7 @@ func (_m *UserDatabase) UpdateMany(ctx context.Context, filter interface{}, upda
 }
 
 // UpdateOne provides a mock function with given fields: ctx, filter, update, opts
-func (_m *UserDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error) {
+func (_m *UserDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -220,16 +222,16 @@ func (_m *UserDatabase) UpdateOne(ctx context.Context, filter interface{}, updat
 		panic("no return value specified for UpdateOne")
 	}
 
-	var r0 interface{}
+	var r0 *mongo.UpdateResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (interface{}, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)); ok {
 		return rf(ctx, filter, update, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) interface{}); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.UpdateOptions) *mongo.UpdateResult); ok {
 		r0 = rf(ctx, filter, update, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(interface{})
+			r0 = ret.Get(0).(*mongo.UpdateResult)
 		}
 	}
 

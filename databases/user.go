@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -18,8 +19,8 @@ type UserDatabase interface {
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	InsertOne(ctx context.Context, userDetails models.UserDetails) interface{}
 	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
-	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error)
-	UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error)
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 }
 
 type userDatabase struct {
@@ -72,7 +73,7 @@ func (u *userDatabase) Aggregate(ctx context.Context, pipeline interface{}) (Mon
 	return *cursor, nil
 }
 
-func (u *userDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error) {
+func (u *userDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	res, err := u.db.Collection(userName).UpdateOne(ctx, filter, update, opts...)
 	if err != nil {
 		return nil, err
@@ -88,7 +89,7 @@ func (u *userDatabase) CountDocuments(ctx context.Context, filter interface{}, o
 	return count, nil
 }
 
-func (u *userDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (interface{}, error) {
+func (u *userDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	res, err := u.db.Collection(userName).UpdateMany(ctx, filter, update, opts...)
 	if err != nil {
 		return nil, err

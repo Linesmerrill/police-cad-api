@@ -511,6 +511,11 @@ definitions:
       code:
         type: string
         x-go-name: Code
+      createdAt:
+        $ref: '#/definitions/DateTime'
+      createdBy:
+        type: string
+        x-go-name: CreatedBy
       remainingUses:
         format: int64
         type: integer
