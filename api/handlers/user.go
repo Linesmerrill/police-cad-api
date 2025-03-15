@@ -451,6 +451,30 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Perform blocked user check only if the notification type is "friend_request"
+	if notification.Type == "friend_request" {
+		nID, err := primitive.ObjectIDFromHex(notification.SentToID)
+		if err != nil {
+			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+			return
+		}
+
+		filter := bson.M{"_id": nID}
+		dbResp, err := u.DB.FindOne(context.Background(), filter)
+		if err != nil {
+			config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		for _, friend := range dbResp.Details.Friends {
+			if friend.FriendID == notification.SentFromID && friend.Status == "blocked" {
+				config.ErrorStatus("cannot send friend request to a blocked user", http.StatusForbidden, w, fmt.Errorf("cannot send friend request to a blocked user"))
+				return
+			}
+		}
+	}
+
+	// Create the new notification
 	newNotification := models.Notification{
 		ID:         primitive.NewObjectID().Hex(),
 		SentFromID: notification.SentFromID,
