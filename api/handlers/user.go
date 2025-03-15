@@ -1402,14 +1402,14 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 		return
 	}
-	fID, err := primitive.ObjectIDFromHex(requestBody.FriendID)
-	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-		return
-	}
+	// fID, err := primitive.ObjectIDFromHex(requestBody.FriendID)
+	// if err != nil {
+	// 	config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+	// 	return
+	// }
 
 	// Check if the friendId exists in the user's friends list
-	filter := bson.M{"_id": uID, "user.friends.friendId": fID}
+	filter := bson.M{"_id": uID, "user.friends.friend_id": requestBody.FriendID}
 	update := bson.M{"$set": bson.M{"user.friends.$.status": "blocked"}}
 	result, err := u.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
@@ -1419,7 +1419,14 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	// If the friendId does not exist, insert a new object with status "blocked"
 	if result.MatchedCount == 0 {
-		update = bson.M{"$push": bson.M{"user.friends": bson.M{"friendId": fID, "status": "blocked"}}}
+		newFriend := bson.M{
+			"friend_id":   requestBody.FriendID,
+			"status":      "blocked",
+			"last_online": nil,
+			"is_online":   false,
+			"created_at":  time.Now(),
+		}
+		update = bson.M{"$push": bson.M{"user.friends": newFriend}}
 		_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
 		if err != nil {
 			config.ErrorStatus("failed to insert new friend with status blocked", http.StatusInternalServerError, w, err)
