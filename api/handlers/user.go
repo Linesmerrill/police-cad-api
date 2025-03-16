@@ -1498,27 +1498,49 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the friendId exists in the user's friends list
-	filter := bson.M{"_id": uID, "user.friends.friend_id": requestBody.FriendID}
-	update := bson.M{"$set": bson.M{"user.friends.$.status": "blocked"}}
-	result, err := u.DB.UpdateOne(context.Background(), filter, update)
+	// Retrieve the user's friends array
+	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
 	if err != nil {
-		config.ErrorStatus("failed to update friend status", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// If the friendId does not exist, insert a new object with status "blocked"
-	if result.MatchedCount == 0 {
+	// Check if the friends array is nil or empty
+	if user.Details.Friends == nil || len(user.Details.Friends) == 0 {
 		newFriend := bson.M{
 			"friend_id":  fID,
 			"status":     "blocked",
 			"created_at": time.Now(),
 		}
-		update = bson.M{"$push": bson.M{"user.friends": newFriend}}
+		update := bson.M{"$set": bson.M{"user.friends": []bson.M{newFriend}}}
 		_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
 		if err != nil {
-			config.ErrorStatus("failed to insert new friend with status blocked", http.StatusInternalServerError, w, err)
+			config.ErrorStatus("failed to initialize user's friends", http.StatusInternalServerError, w, err)
 			return
+		}
+	} else {
+		// Check if the friendId exists in the user's friends list
+		filter := bson.M{"_id": uID, "user.friends.friend_id": requestBody.FriendID}
+		update := bson.M{"$set": bson.M{"user.friends.$.status": "blocked"}}
+		result, err := u.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to update friend status", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		// If the friendId does not exist, insert a new object with status "blocked"
+		if result.MatchedCount == 0 {
+			newFriend := bson.M{
+				"friend_id":  fID,
+				"status":     "blocked",
+				"created_at": time.Now(),
+			}
+			update = bson.M{"$push": bson.M{"user.friends": newFriend}}
+			_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
+			if err != nil {
+				config.ErrorStatus("failed to insert new friend with status blocked", http.StatusInternalServerError, w, err)
+				return
+			}
 		}
 	}
 
