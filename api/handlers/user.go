@@ -516,13 +516,31 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := bson.M{"_id": nID}
-	update := bson.M{"$push": bson.M{"user.notifications": newNotification}}
-	opts := options.Update().SetUpsert(false)
-
-	_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
+	dbResp, err := u.DB.FindOne(context.Background(), filter)
 	if err != nil {
-		config.ErrorStatus("failed to create notification", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Check if the notifications array is nil or empty
+	if dbResp.Details.Notifications == nil || len(dbResp.Details.Notifications) == 0 {
+		update := bson.M{
+			"$set": bson.M{"user.notifications": []models.Notification{newNotification}},
+		}
+		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to initialize user's notifications", http.StatusInternalServerError, w, err)
+			return
+		}
+	} else {
+		update := bson.M{"$push": bson.M{"user.notifications": newNotification}}
+		opts := options.Update().SetUpsert(false)
+
+		_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
+		if err != nil {
+			config.ErrorStatus("failed to create notification", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
