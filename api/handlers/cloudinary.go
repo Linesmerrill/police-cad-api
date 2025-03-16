@@ -21,7 +21,10 @@ func (c CloudinaryHandler) GenerateSignature(w http.ResponseWriter, r *http.Requ
 	timestamp := time.Now().Unix()
 
 	// Create the parameters to sign
-	paramsToSign := url.Values{"timestamp": {strconv.FormatInt(timestamp, 10)}, "source": {uploadPreset}}
+	paramsToSign := url.Values{
+		"timestamp":     {strconv.FormatInt(timestamp, 10)},
+		"upload_preset": {uploadPreset},
+	}
 
 	// Generate the signature using Cloudinary SDK
 	signature, err := api.SignParameters(paramsToSign, apiSecret)
