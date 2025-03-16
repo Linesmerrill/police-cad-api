@@ -1395,11 +1395,14 @@ func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
 	updatedFields["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
 	// Create an update document targeting the internal user object
-	update := bson.M{"$set": bson.M{"user": updatedFields}}
+	update := bson.M{}
+	for key, value := range updatedFields {
+		update["user."+key] = value
+	}
 
 	// Update the user in the database
 	filter := bson.M{"_id": uID}
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update user", http.StatusInternalServerError, w, err)
 		return
