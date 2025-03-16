@@ -44,6 +44,7 @@ func (a *App) New() *mux.Router {
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
+	cloudinaryHandler := CloudinaryHandler{}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -140,6 +141,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/report", api.Middleware(http.HandlerFunc(report.CreateReportHandler))).Methods("POST")
 
 	apiCreate.Handle("/search", api.Middleware(http.HandlerFunc(search.SearchHandler))).Methods("GET")
+
+	apiCreate.Handle("/generate-signature", api.Middleware(http.HandlerFunc(cloudinaryHandler.GenerateSignature))).Methods("POST")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
