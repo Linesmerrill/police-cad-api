@@ -1394,8 +1394,8 @@ func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
 	// Set the updatedAt field to the current time
 	updatedFields["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
-	// Create an update document
-	update := bson.M{"$set": updatedFields}
+	// Create an update document targeting the internal user object
+	update := bson.M{"$set": bson.M{"user": updatedFields}}
 
 	// Update the user in the database
 	filter := bson.M{"_id": uID}
