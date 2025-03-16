@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cloudinary/cloudinary-go/api"
+	"github.com/cloudinary/cloudinary-go/v2/api"
 )
 
 // CloudinaryHandler handles Cloudinary related requests
@@ -29,7 +29,7 @@ func (c CloudinaryHandler) GenerateSignature(w http.ResponseWriter, r *http.Requ
 	// Generate the signature using Cloudinary SDK
 	signature, err := api.SignParameters(paramsToSign, apiSecret)
 	if err != nil {
-		http.Error(w, "failed to generate signature", http.StatusInternalServerError)
+		http.Error(w, "failed to generate signature: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
