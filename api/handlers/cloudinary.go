@@ -18,11 +18,11 @@ type CloudinaryHandler struct{}
 func (c CloudinaryHandler) GenerateSignature(w http.ResponseWriter, r *http.Request) {
 	uploadPreset := os.Getenv("CLOUDINARY_UPLOAD_PRESET")
 	apiSecret := os.Getenv("CLOUDINARY_API_SECRET")
-	timestamp := time.Now().Unix()
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 
 	// Create the parameters to sign
 	paramsToSign := url.Values{
-		"timestamp":     {strconv.FormatInt(timestamp, 10)},
+		"timestamp":     {timestamp},
 		"upload_preset": {uploadPreset},
 	}
 
@@ -35,7 +35,7 @@ func (c CloudinaryHandler) GenerateSignature(w http.ResponseWriter, r *http.Requ
 
 	// Respond with the timestamp and signature
 	response := map[string]string{
-		"timestamp": strconv.FormatInt(timestamp, 10),
+		"timestamp": timestamp,
 		"signature": signature,
 	}
 	w.Header().Set("Content-Type", "application/json")
