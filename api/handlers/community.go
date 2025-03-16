@@ -152,23 +152,32 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 
 	// Ensure the user's communities array is initialized
 	filter := bson.M{"_id": uID}
-	update := bson.M{
-		"$set": bson.M{"user.communities": bson.M{"$ifNull": []models.UserCommunity{}}},
-	}
-	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
+
+	user, err := c.UDB.FindOne(context.Background(), filter)
 	if err != nil {
-		config.ErrorStatus("failed to initialize user's communities", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to retrieve user's communities", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Add the new community to the user's communities array
-	update = bson.M{
-		"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
-	}
-	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
-		return
+	if user.Details.Communities == nil || len(user.Details.Communities) == 0 {
+		update := bson.M{
+			"$set": bson.M{"user.communities": []models.UserCommunity{newUserCommunity}},
+		}
+		_, err = c.UDB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to initialize user's communities", http.StatusInternalServerError, w, err)
+			return
+		}
+	} else {
+		// Add the new community to the user's communities array
+		update := bson.M{
+			"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
+		}
+		_, err = c.UDB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
