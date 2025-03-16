@@ -35,7 +35,7 @@ type Event struct {
 	ID            primitive.ObjectID `json:"_id" bson:"_id"`
 	CommunityID   string             `json:"communityID" bson:"communityID"`
 	Title         string             `json:"title" bson:"title"`
-	ScheduledDate primitive.DateTime `json:"scheduledDate" bson:"scheduledDate"`
+	ScheduledDate string             `json:"scheduledDate" bson:"scheduledDate"`
 	Image         string             `json:"image" bson:"image"`
 	Location      string             `json:"location" bson:"location"`
 	Description   string             `json:"description" bson:"description"`

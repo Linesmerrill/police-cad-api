@@ -421,7 +421,8 @@ definitions:
         type: boolean
         x-go-name: Required
       scheduledDate:
-        $ref: '#/definitions/DateTime'
+        type: string
+        x-go-name: ScheduledDate
       title:
         type: string
         x-go-name: Title
