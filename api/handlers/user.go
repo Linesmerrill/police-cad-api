@@ -140,13 +140,10 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user.Password = string(hashedPassword)
+	user.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
 	// insert the user
 	_ = u.DB.InsertOne(context.Background(), user)
-	if err != nil {
-		config.ErrorStatus("failed to insert user", http.StatusInternalServerError, w, err)
-		return
-	}
 
 	w.WriteHeader(http.StatusCreated)
 
@@ -405,37 +402,61 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the friend already exists
-	filter := bson.M{"user.email": email, "user.friends.friend_id": friend.FriendID}
-	existingFriend, err := u.DB.FindOne(context.Background(), filter)
-	if err == nil && existingFriend != nil {
-		for _, f := range existingFriend.Details.Friends {
-			if f.FriendID == friend.FriendID {
-				if f.Status == "pending" {
-					config.ErrorStatus("friend request is already pending", http.StatusConflict, w, fmt.Errorf("friend request is already pending"))
-					return
-				} else if f.Status == "approved" {
-					config.ErrorStatus("friend is already approved", http.StatusConflict, w, fmt.Errorf("friend is already approved"))
-					return
+	// Retrieve the user's friends array
+	filter := bson.M{"user.email": email}
+
+	user, err := u.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Check if the friends array is nil or empty
+	if user.Details.Friends == nil || len(user.Details.Friends) == 0 {
+		newFriend := models.Friend{
+			FriendID:  friend.FriendID,
+			Status:    "pending",
+			CreatedAt: time.Now(),
+		}
+		update := bson.M{
+			"$set": bson.M{"user.friends": []models.Friend{newFriend}},
+		}
+		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to initialize user's friends", http.StatusInternalServerError, w, err)
+			return
+		}
+	} else {
+		// Check if the friend already exists
+		existingFriend, err := u.DB.FindOne(context.Background(), bson.M{"user.email": email, "user.friends.friend_id": friend.FriendID})
+		if err == nil && existingFriend != nil {
+			for _, f := range existingFriend.Details.Friends {
+				if f.FriendID == friend.FriendID {
+					if f.Status == "pending" {
+						config.ErrorStatus("friend request is already pending", http.StatusConflict, w, fmt.Errorf("friend request is already pending"))
+						return
+					} else if f.Status == "approved" {
+						config.ErrorStatus("friend is already approved", http.StatusConflict, w, fmt.Errorf("friend is already approved"))
+						return
+					}
 				}
 			}
 		}
-	}
 
-	newFriend := models.Friend{
-		FriendID:  friend.FriendID,
-		Status:    "pending",
-		CreatedAt: time.Now(),
-	}
+		newFriend := models.Friend{
+			FriendID:  friend.FriendID,
+			Status:    "pending",
+			CreatedAt: time.Now(),
+		}
 
-	filter = bson.M{"user.email": email}
-	update := bson.M{"$push": bson.M{"user.friends": newFriend}}
-	opts := options.Update().SetUpsert(false)
+		update := bson.M{"$push": bson.M{"user.friends": newFriend}}
+		opts := options.Update().SetUpsert(false)
 
-	_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
-	if err != nil {
-		config.ErrorStatus("failed to add friend", http.StatusInternalServerError, w, err)
-		return
+		_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
+		if err != nil {
+			config.ErrorStatus("failed to add friend", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -1121,9 +1142,9 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		"_id":                  bson.M{"$nin": communityObjectIDs},
 		"community.visibility": "public",
 	}
-	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"$natural": 1})
+	opt := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"$natural": 1})
 
-	cursor, err := u.CDB.Find(context.Background(), filter, options)
+	cursor, err := u.CDB.Find(context.Background(), filter, opt)
 	if err != nil {
 		config.ErrorStatus("failed to find communities", http.StatusInternalServerError, w, err)
 		return
