@@ -281,7 +281,7 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 			{"user.communities": bson.M{
 				"$elemMatch": bson.M{
 					"communityId": communityID,
-					"status":      bson.M{"$ne": "banned"},
+					"status":      "approved",
 				},
 			}},
 		},
