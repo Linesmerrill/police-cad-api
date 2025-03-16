@@ -127,7 +127,7 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user already exists
-	existingUser, _ := u.DB.FindOne(context.Background(), bson.M{"email": user.Email})
+	existingUser, _ := u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email})
 	if existingUser != nil {
 		config.ErrorStatus("email already exists", http.StatusConflict, w, fmt.Errorf("duplicate email"))
 		return
