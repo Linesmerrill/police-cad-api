@@ -150,9 +150,12 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 		Status:      "approved",
 	}
 
-	// Update the user's communities array
+	// Ensure the user's communities array is initialized
 	filter := bson.M{"_id": uID}
-	update := bson.M{"$addToSet": bson.M{"user.communities": newUserCommunity}} // $addToSet ensures no duplicates
+	update := bson.M{
+		"$set":      bson.M{"user.communities": bson.M{"$ifNull": []models.UserCommunity{}}},
+		"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
+	}
 	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
