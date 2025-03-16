@@ -1385,17 +1385,17 @@ func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse the request body to get the updated user details
-	var updatedUserDetails models.UserDetails
-	if err := json.NewDecoder(r.Body).Decode(&updatedUserDetails); err != nil {
+	var updatedFields map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedFields); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
 
 	// Set the updatedAt field to the current time
-	updatedUserDetails.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+	updatedFields["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
 	// Create an update document
-	update := bson.M{"$set": bson.M{"user": updatedUserDetails}}
+	update := bson.M{"$set": updatedFields}
 
 	// Update the user in the database
 	filter := bson.M{"_id": uID}
