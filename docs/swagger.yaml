@@ -708,6 +708,9 @@ definitions:
       address:
         type: string
         x-go-name: Address
+      backgroundImage:
+        type: string
+        x-go-name: BackgroundImage
       callSign:
         type: string
         x-go-name: CallSign
