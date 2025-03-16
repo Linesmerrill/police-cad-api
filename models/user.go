@@ -20,6 +20,7 @@ type UserDetails struct {
 	Username              string                `json:"username" bson:"username"`
 	Password              string                `json:"password" bson:"password"`
 	ProfilePicture        string                `json:"profilePicture" bson:"profilePicture"`
+	BackgroundImage       string                `json:"backgroundImage" bson:"backgroundImage"`
 	Friends               []Friend              `json:"friends" bson:"friends"`
 	Notifications         []Notification        `json:"notifications" bson:"notifications"`
 	Communities           []UserCommunity       `json:"communities" bson:"communities"`
