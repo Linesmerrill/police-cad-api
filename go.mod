@@ -6,6 +6,7 @@ go 1.22
 // +heroku goVersion 1.22
 
 require (
+	github.com/cloudinary/cloudinary-go v1.7.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.0
 	github.com/shaj13/go-guardian v1.5.11
@@ -16,8 +17,10 @@ require (
 )
 
 require (
+	github.com/creasty/defaults v1.5.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/gorilla/schema v1.2.0 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
