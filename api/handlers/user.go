@@ -1263,34 +1263,57 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Check if the communityId already exists in the user's pending community requests
-	existingUser, err := u.DB.FindOne(context.Background(), bson.M{
-		"_id": uID,
-		"user.communities": bson.M{
-			"$elemMatch": bson.M{
-				"communityId": requestBody.CommunityID,
-			},
-		},
-	})
-	if err == nil && existingUser != nil {
-		config.ErrorStatus("community request already exists", http.StatusConflict, w, fmt.Errorf("community request already exists"))
-		return
-	}
-
-	// Create a new pending community request object
-	pendingRequest := models.UserCommunity{
-		ID:          primitive.NewObjectID().Hex(),
-		CommunityID: requestBody.CommunityID,
-		Status:      "pending",
-	}
-
-	// Update the user's pending community requests array
-	filter := bson.M{"_id": uID}
-	update := bson.M{"$addToSet": bson.M{"user.communities": pendingRequest}} // $addToSet ensures no duplicates
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
 	if err != nil {
-		config.ErrorStatus("failed to update user's pending community requests", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to retrieve user's communities", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Check if the communities array is nil or empty
+	if user.Details.Communities == nil || len(user.Details.Communities) == 0 {
+		pendingRequest := models.UserCommunity{
+			ID:          primitive.NewObjectID().Hex(),
+			CommunityID: requestBody.CommunityID,
+			Status:      "pending",
+		}
+		update := bson.M{
+			"$set": bson.M{"user.communities": []models.UserCommunity{pendingRequest}},
+		}
+		_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
+		if err != nil {
+			config.ErrorStatus("failed to initialize user's communities", http.StatusInternalServerError, w, err)
+			return
+		}
+	} else {
+		// Check if the communityId already exists in the user's pending community requests
+		existingUser, err := u.DB.FindOne(context.Background(), bson.M{
+			"_id": uID,
+			"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": requestBody.CommunityID,
+				},
+			},
+		})
+		if err == nil && existingUser != nil {
+			config.ErrorStatus("community request already exists", http.StatusConflict, w, fmt.Errorf("community request already exists"))
+			return
+		}
+
+		// Create a new pending community request object
+		pendingRequest := models.UserCommunity{
+			ID:          primitive.NewObjectID().Hex(),
+			CommunityID: requestBody.CommunityID,
+			Status:      "pending",
+		}
+
+		// Update the user's pending community requests array
+		filter := bson.M{"_id": uID}
+		update := bson.M{"$addToSet": bson.M{"user.communities": pendingRequest}} // $addToSet ensures no duplicates
+		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to update user's pending community requests", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
