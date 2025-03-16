@@ -486,27 +486,24 @@ func (c Community) UpdateEventByIDHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Parse the request body to get the updated event details
-	var updatedEvent models.Event
+	var updatedEvent map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updatedEvent); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
 
 	// Set the updatedAt field to the current time
-	updatedEvent.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+	updatedEvent["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+
+	// Create the update document dynamically
+	update := bson.M{}
+	for key, value := range updatedEvent {
+		update["community.events.$."+key] = value
+	}
 
 	// Update the event in the community
 	filter := bson.M{"_id": cID, "community.events._id": eID}
-	update := bson.M{"$set": bson.M{
-		"community.events.$.title":         updatedEvent.Title,
-		"community.events.$.description":   updatedEvent.Description,
-		"community.events.$.scheduledDate": updatedEvent.ScheduledDate,
-		"community.events.$.image":         updatedEvent.Image,
-		"community.events.$.location":      updatedEvent.Location,
-		"community.events.$.required":      updatedEvent.Required,
-		"community.events.$.updatedAt":     updatedEvent.UpdatedAt,
-	}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update event in community", http.StatusInternalServerError, w, err)
 		return
