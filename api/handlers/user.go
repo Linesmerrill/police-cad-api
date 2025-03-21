@@ -216,17 +216,9 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 	defer cursor.Close(context.Background())
 
 	var users []models.User
-	for cursor.Next(context.Background()) {
-		var user models.User
-		if err := cursor.Decode(&user); err != nil {
-			config.ErrorStatus("failed to decode user", http.StatusInternalServerError, w, err)
-			return
-		}
-		users = append(users, user)
-	}
-
-	if err := cursor.Err(); err != nil {
-		config.ErrorStatus("cursor error", http.StatusInternalServerError, w, err)
+	err = cursor.All(context.Background(), &users)
+	if err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
 
