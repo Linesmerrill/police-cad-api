@@ -172,7 +172,8 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 
 	// Add the new community to the user's communities array
 	update := bson.M{
-		"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
+		"$set":      bson.M{"user.communities": user.Details.Communities}, // Ensure communities is an array
+		"$addToSet": bson.M{"user.communities": newUserCommunity},         // $addToSet ensures no duplicates
 	}
 	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
