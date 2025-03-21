@@ -204,6 +204,11 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Ensure approvedFriendIDs is initialized
+	if approvedFriendIDs == nil {
+		approvedFriendIDs = []primitive.ObjectID{}
+	}
+
 	// Modify the pipeline to exclude approved friends
 	pipeline := []bson.M{
 		{"$match": bson.M{"_id": bson.M{"$ne": uID, "$nin": approvedFriendIDs}}},
