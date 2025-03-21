@@ -159,25 +159,25 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if user.Details.Communities == nil || len(user.Details.Communities) == 0 {
-		update := bson.M{
-			"$set": bson.M{"user.communities": []models.UserCommunity{newUserCommunity}},
-		}
-		_, err = c.UDB.UpdateOne(context.Background(), filter, update)
-		if err != nil {
-			config.ErrorStatus("failed to initialize user's communities", http.StatusInternalServerError, w, err)
-			return
-		}
-	} else {
-		// Add the new community to the user's communities array
-		update := bson.M{
-			"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
-		}
-		_, err = c.UDB.UpdateOne(context.Background(), filter, update)
-		if err != nil {
-			config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
-			return
-		}
+	// Initialize null fields
+	if user.Details.Communities == nil {
+		user.Details.Communities = []models.UserCommunity{}
+	}
+	if user.Details.Friends == nil {
+		user.Details.Friends = []models.Friend{}
+	}
+	if user.Details.Notifications == nil {
+		user.Details.Notifications = []models.Notification{}
+	}
+
+	// Add the new community to the user's communities array
+	update := bson.M{
+		"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
+	}
+	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
+		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
