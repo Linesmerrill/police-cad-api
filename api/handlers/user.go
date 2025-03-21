@@ -172,14 +172,39 @@ func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
 // UsersDiscoverPeopleHandler returns a list of users that we suggest to the user to follow
 func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	email := r.URL.Query().Get("email")
-	if email == "" {
-		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		config.ErrorStatus("query param userId is required", http.StatusBadRequest, w, fmt.Errorf("query param userId is required"))
 		return
 	}
 
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid userId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Retrieve the user's friends list
+	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	if err != nil {
+		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Extract the list of approved friends' IDs
+	var approvedFriendIDs []primitive.ObjectID
+	for _, friend := range user.Details.Friends {
+		if friend.Status == "approved" {
+			fID, err := primitive.ObjectIDFromHex(friend.FriendID)
+			if err == nil {
+				approvedFriendIDs = append(approvedFriendIDs, fID)
+			}
+		}
+	}
+
+	// Modify the pipeline to exclude approved friends
 	pipeline := []bson.M{
-		{"$match": bson.M{"user.email": bson.M{"$ne": email}}},
+		{"$match": bson.M{"_id": bson.M{"$ne": uID, "$nin": approvedFriendIDs}}},
 		{"$sample": bson.M{"size": 4}},
 	}
 
@@ -192,10 +217,12 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 
 	var users []models.User
 	for cursor.Next(context.Background()) {
-		if err := cursor.Decode(&users); err != nil {
+		var user models.User
+		if err := cursor.Decode(&user); err != nil {
 			config.ErrorStatus("failed to decode user", http.StatusInternalServerError, w, err)
 			return
 		}
+		users = append(users, user)
 	}
 
 	if err := cursor.Err(); err != nil {
