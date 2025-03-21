@@ -371,7 +371,7 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 			"name":       friendDetails.Details.Name,
 			"createdAt":  friend.CreatedAt,
 			"numFriends": len(friendDetails.Details.Friends),
-			"isOnline":   friend.IsOnline,
+			"isOnline":   friendDetails.Details.IsOnline,
 		}
 		detailedFriends = append(detailedFriends, detailedFriend)
 	}
