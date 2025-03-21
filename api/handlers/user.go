@@ -1588,3 +1588,33 @@ func (u User) UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User unblocked successfully"}`))
 }
+
+// SetOnlineStatusHandler updates the online status of a user
+func (u User) SetOnlineStatusHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID   string `json:"userId"`
+		IsOnline bool   `json:"isOnline"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$set": bson.M{"user.isOnline": requestBody.IsOnline}}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update online status", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User online status updated successfully"}`))
+}
