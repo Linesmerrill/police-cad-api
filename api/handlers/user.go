@@ -193,11 +193,13 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 
 	// Extract the list of approved friends' IDs
 	var approvedFriendIDs []primitive.ObjectID
-	for _, friend := range user.Details.Friends {
-		if friend.Status == "approved" {
-			fID, err := primitive.ObjectIDFromHex(friend.FriendID)
-			if err == nil {
-				approvedFriendIDs = append(approvedFriendIDs, fID)
+	if user.Details.Friends != nil {
+		for _, friend := range user.Details.Friends {
+			if friend.Status == "approved" {
+				fID, err := primitive.ObjectIDFromHex(friend.FriendID)
+				if err == nil {
+					approvedFriendIDs = append(approvedFriendIDs, fID)
+				}
 			}
 		}
 	}
