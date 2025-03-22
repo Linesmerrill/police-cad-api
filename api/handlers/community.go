@@ -1039,3 +1039,34 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Invite code added successfully"}`))
 }
+
+// DeleteRoleMemberHandler deletes a member from a role in a community
+func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	roleID := mux.Vars(r)["roleId"]
+	memberID := mux.Vars(r)["memberId"]
+
+	// Convert the community ID and role ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	rID, err := primitive.ObjectIDFromHex(roleID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the community to pull the member from the role
+	filter := bson.M{"_id": cID, "community.roles._id": rID}
+	update := bson.M{"$pull": bson.M{"community.roles.$.members": memberID}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to delete role member", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Role member deleted successfully"}`))
+}
