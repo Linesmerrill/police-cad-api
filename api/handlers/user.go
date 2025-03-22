@@ -1644,3 +1644,48 @@ func (u User) SetOnlineStatusHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User online status updated successfully"}`))
 }
+
+// UnfriendUserHandler unfriends a user by removing the friendId from the user's friends list
+func (u User) UnfriendUserHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID   string `json:"userId"`
+		FriendID string `json:"friendId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	fID, err := primitive.ObjectIDFromHex(requestBody.FriendID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Remove the friend from the user's friends list
+	userFilter := bson.M{"_id": uID}
+	userUpdate := bson.M{"$pull": bson.M{"user.friends": bson.M{"friend_id": requestBody.FriendID}}}
+	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to remove friend from user's friends list", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Remove the user from the friend's friends list
+	friendFilter := bson.M{"_id": fID}
+	friendUpdate := bson.M{"$pull": bson.M{"user.friends": bson.M{"friend_id": requestBody.UserID}}}
+	_, err = u.DB.UpdateOne(context.Background(), friendFilter, friendUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to remove user from friend's friends list", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User unfriended successfully"}`))
+}
