@@ -910,10 +910,10 @@ func (u User) DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) 
 // fetchUserFriendsByID returns a list of friends for a user
 func (u User) fetchUserFriendsByID(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	userID := vars["user_id"]
+	userID := vars["userId"]
 
 	if userID == "" {
-		config.ErrorStatus("user_id is required", http.StatusBadRequest, w, fmt.Errorf("user_id is required"))
+		config.ErrorStatus("userId is required", http.StatusBadRequest, w, fmt.Errorf("userId is required"))
 		return
 	}
 
