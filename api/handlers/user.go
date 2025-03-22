@@ -1010,6 +1010,8 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 		}
 	}
 
+	approvedFriendFriendsCount := len(approvedFriendFriends)
+
 	mutualFriendsCount := 0
 	for _, userFriend := range userFriends {
 		if userFriend.Status == "approved" {
@@ -1023,7 +1025,8 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 	}
 
 	response := map[string]interface{}{
-		"mutualFriendsCount": mutualFriendsCount,
+		"approvedFriendFriendsCount": approvedFriendFriendsCount,
+		"mutualFriendsCount":         mutualFriendsCount,
 	}
 
 	b, err := json.Marshal(response)
