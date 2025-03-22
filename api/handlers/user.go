@@ -382,25 +382,25 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 	paginatedFriends := friends[start:end]
 
 	// Fetch user details for each friend
-	// var detailedFriends []map[string]interface{}
-	// for _, friend := range paginatedFriends {
-	// 	fID, err := primitive.ObjectIDFromHex(friend.FriendID)
-	// 	if err != nil {
-	// 		continue
-	// 	}
-	// 	friendDetails, err := u.DB.FindOne(context.Background(), bson.M{"_id": fID})
-	// 	if err != nil {
-	// 		continue
-	// 	}
-	//
-	// 	detailedFriend := map[string]interface{}{
-	// 		"friendId": friend.FriendID,
-	// 		"details":  friendDetails,
-	// 	}
-	// 	detailedFriends = append(detailedFriends, detailedFriend)
-	// }
+	var detailedFriends []map[string]interface{}
+	for _, friend := range paginatedFriends {
+		fID, err := primitive.ObjectIDFromHex(friend.FriendID)
+		if err != nil {
+			continue
+		}
+		friendDetails, err := u.DB.FindOne(context.Background(), bson.M{"_id": fID})
+		if err != nil {
+			continue
+		}
 
-	b, err := json.Marshal(paginatedFriends)
+		detailedFriend := map[string]interface{}{
+			"friend":  friend,
+			"details": friendDetails,
+		}
+		detailedFriends = append(detailedFriends, detailedFriend)
+	}
+
+	b, err := json.Marshal(detailedFriends)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return

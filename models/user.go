@@ -33,11 +33,9 @@ type UserDetails struct {
 
 // Friend holds the structure for a friend
 type Friend struct {
-	FriendID   string      `json:"friend_id" bson:"friend_id"`
-	Status     string      `json:"status" bson:"status"` // e.g., "pending", "approved"
-	LastOnline interface{} `json:"last_online" bson:"last_online"`
-	IsOnline   bool        `json:"is_online" bson:"is_online"`
-	CreatedAt  interface{} `json:"created_at" bson:"created_at"`
+	FriendID  string      `json:"friend_id" bson:"friend_id"`
+	Status    string      `json:"status" bson:"status"` // e.g., "pending", "approved"
+	CreatedAt interface{} `json:"created_at" bson:"created_at"`
 }
 
 // Notification holds the structure for a notification

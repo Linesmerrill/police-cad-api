@@ -487,12 +487,6 @@ definitions:
       friend_id:
         type: string
         x-go-name: FriendID
-      is_online:
-        type: boolean
-        x-go-name: IsOnline
-      last_online:
-        type: object
-        x-go-name: LastOnline
       status:
         type: string
         x-go-name: Status
