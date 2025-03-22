@@ -956,6 +956,7 @@ func (u User) fetchUserFriendsByID(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
+// fetchFriendsAndMutualFriendsCount returns the count of mutual friends between two users
 func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	friendID := vars["friend_id"]
@@ -1021,30 +1022,7 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Check if the user and friend are mutual friends
-	userIsFriendOfFriend := false
-	friendIsFriendOfUser := false
-
-	for _, friend := range approvedFriendFriends {
-		if friend.FriendID == userID {
-			userIsFriendOfFriend = true
-			break
-		}
-	}
-
-	for _, friend := range userFriends {
-		if friend.FriendID == friendID && friend.Status == "approved" {
-			friendIsFriendOfUser = true
-			break
-		}
-	}
-
-	if userIsFriendOfFriend && friendIsFriendOfUser {
-		mutualFriendsCount++
-	}
-
 	response := map[string]interface{}{
-		"friendCount":        len(approvedFriendFriends),
 		"mutualFriendsCount": mutualFriendsCount,
 	}
 
