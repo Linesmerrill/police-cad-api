@@ -1070,3 +1070,56 @@ func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role member deleted successfully"}`))
 }
+
+// FetchCommunityMembersByRoleIDHandler returns all members of a role in a community
+func (c Community) FetchCommunityMembersByRoleIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	roleID := mux.Vars(r)["roleId"]
+
+	// Convert the community ID and role ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	rID, err := primitive.ObjectIDFromHex(roleID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find the role by ID within the community
+	var role *models.Role
+	for _, r := range community.Details.Roles {
+		if r.ID == rID {
+			role = &r
+			break
+		}
+	}
+
+	if role == nil {
+		config.ErrorStatus("role not found", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// Return the members array
+	response := map[string]interface{}{
+		"members": role.Members,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
