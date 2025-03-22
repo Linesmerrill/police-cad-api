@@ -413,9 +413,9 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 
 // AddFriendHandler adds a friend to a user
 func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
-	email := mux.Vars(r)["email"]
-	if email == "" {
-		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+	userID := mux.Vars(r)["userId"]
+	if userID == "" {
+		config.ErrorStatus("query param userId is required", http.StatusBadRequest, w, fmt.Errorf("query param userId is required"))
 		return
 	}
 
@@ -428,8 +428,15 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert the user ID to a primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid userId", http.StatusBadRequest, w, err)
+		return
+	}
+
 	// Retrieve the user's friends array
-	filter := bson.M{"user.email": email}
+	filter := bson.M{"_id": uID}
 
 	user, err := u.DB.FindOne(context.Background(), filter)
 	if err != nil {
@@ -454,7 +461,7 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// Check if the friend already exists
-		existingFriend, err := u.DB.FindOne(context.Background(), bson.M{"user.email": email, "user.friends.friend_id": friend.FriendID})
+		existingFriend, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID, "user.friends.friend_id": friend.FriendID})
 		if err == nil && existingFriend != nil {
 			for _, f := range existingFriend.Details.Friends {
 				if f.FriendID == friend.FriendID {
