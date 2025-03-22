@@ -750,9 +750,9 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Update the role members in the community
+	// Update the role members in the community by appending new members
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
-	update := bson.M{"$set": bson.M{"community.roles.$.members": members}}
+	update := bson.M{"$addToSet": bson.M{"community.roles.$.members": bson.M{"$each": members}}}
 	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update role members", http.StatusInternalServerError, w, err)
