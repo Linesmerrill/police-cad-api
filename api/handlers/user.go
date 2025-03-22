@@ -323,9 +323,9 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 
 // UserFriendsHandler returns a list of friends for a user with pagination
 func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
-	email := r.URL.Query().Get("email")
-	if email == "" {
-		config.ErrorStatus("query param email is required", http.StatusBadRequest, w, fmt.Errorf("query param email is required"))
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		config.ErrorStatus("query param userId is required", http.StatusBadRequest, w, fmt.Errorf("query param userId is required"))
 		return
 	}
 
@@ -347,8 +347,14 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	zap.S().Debugf("email: %v, limit: %v, page: %v", email, limit, page)
-	filter := bson.M{"user.email": email}
+	zap.S().Debugf("userId: %v, limit: %v, page: %v", userID, limit, page)
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid userId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": uID}
 
 	dbResp, err := u.DB.FindOne(context.Background(), filter)
 	if err != nil {
@@ -380,24 +386,16 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, friend := range paginatedFriends {
 		fID, err := primitive.ObjectIDFromHex(friend.FriendID)
 		if err != nil {
-			continue // Skip invalid ObjectID
+			continue
 		}
 		friendDetails, err := u.DB.FindOne(context.Background(), bson.M{"_id": fID})
 		if err != nil {
-			continue // Skip if friend not found
+			continue
 		}
 
 		detailedFriend := map[string]interface{}{
-			"friend_id":  friend.FriendID,
-			"status":     friend.Status,
-			"created_at": friend.CreatedAt,
-			"avatar":     friendDetails.Details.ProfilePicture,
-			"user_name":  friendDetails.Details.Username,
-			"userName":   friendDetails.Details.Username,
-			"name":       friendDetails.Details.Name,
-			"createdAt":  friend.CreatedAt,
-			"numFriends": len(friendDetails.Details.Friends),
-			"isOnline":   friendDetails.Details.IsOnline,
+			"friendId": friend.FriendID,
+			"details":  friendDetails,
 		}
 		detailedFriends = append(detailedFriends, detailedFriend)
 	}
@@ -435,9 +433,8 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve the user's friends array
+	// Retrieve the user's details
 	filter := bson.M{"_id": uID}
-
 	user, err := u.DB.FindOne(context.Background(), filter)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
@@ -462,7 +459,10 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Check if the friend already exists
 		existingFriend, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID, "user.friends.friend_id": friend.FriendID})
-		if err == nil && existingFriend != nil {
+		if err != nil {
+			config.ErrorStatus("failed to check if friend exists", http.StatusInternalServerError, w, err)
+			return
+		} else if existingFriend != nil {
 			for _, f := range existingFriend.Details.Friends {
 				if f.FriendID == friend.FriendID {
 					if f.Status == "pending" {
