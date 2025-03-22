@@ -459,10 +459,7 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Check if the friend already exists
 		existingFriend, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID, "user.friends.friend_id": friend.FriendID})
-		if err != nil {
-			config.ErrorStatus("failed to check if friend exists", http.StatusInternalServerError, w, err)
-			return
-		} else if existingFriend != nil {
+		if err == nil && existingFriend != nil {
 			for _, f := range existingFriend.Details.Friends {
 				if f.FriendID == friend.FriendID {
 					if f.Status == "pending" {
