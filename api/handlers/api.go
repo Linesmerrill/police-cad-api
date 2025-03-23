@@ -62,6 +62,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/roles", api.Middleware(http.HandlerFunc(c.GetRolesByCommunityIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/banned-users", api.Middleware(http.HandlerFunc(c.GetBannedUsersHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/add-invite-code", api.Middleware(http.HandlerFunc(c.AddInviteCodeHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.FetchUserDepartmentsHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.FetchAllCommunityDepartmentsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/roles", api.Middleware(http.HandlerFunc(c.AddRoleToCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersByRoleIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.UpdateRoleMembersHandler))).Methods("PUT")

@@ -26,8 +26,36 @@ type CommunityDetails struct {
 	BanList         []string               `json:"banList" bson:"banList"`
 	Description     string                 `json:"description" bson:"description"`
 	Events          []Event                `json:"events" bson:"events"`
+	Departments     []Department           `json:"departments" bson:"departments"`
+	Templates       []Template             `json:"templates" bson:"templates"`
 	CreatedAt       primitive.DateTime     `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       primitive.DateTime     `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Department holds the structure for a department
+type Department struct {
+	ID          primitive.ObjectID `json:"_id" bson:"_id"`
+	Name        string             `json:"name" bson:"name"`
+	Description string             `json:"description" bson:"description"`
+	Image       string             `json:"image" bson:"image"`
+	Members     []MemberStatus     `json:"members" bson:"members"`
+	TemplateID  string             `json:"template" bson:"template"`
+	CreatedAt   primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Template holds the structure for a department template
+type Template struct {
+	ID          primitive.ObjectID `json:"_id" bson:"_id"`
+	Name        string             `json:"name" bson:"name"`
+	Description string             `json:"description" bson:"description"`
+	Components  []Component        `json:"components" bson:"components"`
+}
+
+// Component holds the structure for a template component
+type Component struct {
+	ID   primitive.ObjectID `json:"_id" bson:"_id"`
+	Name string             `json:"name" bson:"name"`
 }
 
 // Event holds the structure for an event
@@ -45,6 +73,12 @@ type Event struct {
 	Attendance    Attendance         `json:"attendance" bson:"attendance"`
 	CreatedAt     primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt     primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// MemberStatus holds the structure for a member status
+type MemberStatus struct {
+	UserID string `json:"userID" bson:"userID"`
+	Status string `json:"status" bson:"status"`
 }
 
 // Attendance holds the structure for attendance

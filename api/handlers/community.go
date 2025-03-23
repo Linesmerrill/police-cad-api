@@ -1123,3 +1123,93 @@ func (c Community) FetchCommunityMembersByRoleIDHandler(w http.ResponseWriter, r
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// FetchUserDepartmentsHandler returns all departments where the user is a member with status "approved"
+func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	userID := r.URL.Query().Get("userId")
+
+	// Convert the community ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Initialize departments to an empty array if it is null
+	if community.Details.Departments == nil {
+		community.Details.Departments = []models.Department{}
+	}
+
+	// Initialize the userDepartments slice
+	var userDepartments []models.Department
+
+	// Filter departments where the user is a member with status "approved"
+	for _, department := range community.Details.Departments {
+		for _, member := range department.Members {
+			if member.UserID == userID && member.Status == "approved" {
+				userDepartments = append(userDepartments, department)
+				break
+			}
+		}
+	}
+
+	// Return the filtered departments
+	response := map[string]interface{}{
+		"departments": userDepartments,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// FetchAllCommunityDepartmentsHandler returns all departments of a community
+func (c Community) FetchAllCommunityDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Convert the community ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Initialize departments to an empty array if it is null
+	if community.Details.Departments == nil {
+		community.Details.Departments = []models.Department{}
+	}
+
+	// Return the departments array
+	response := map[string]interface{}{
+		"departments": community.Details.Departments,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
