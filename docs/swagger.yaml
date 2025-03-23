@@ -225,6 +225,11 @@ definitions:
         x-go-name: Code
       createdAt:
         $ref: '#/definitions/DateTime'
+      departments:
+        items:
+          $ref: '#/definitions/Department'
+        type: array
+        x-go-name: Departments
       description:
         type: string
         x-go-name: Description
@@ -255,6 +260,11 @@ definitions:
           $ref: '#/definitions/Role'
         type: array
         x-go-name: Roles
+      templates:
+        items:
+          $ref: '#/definitions/Template'
+        type: array
+        x-go-name: Templates
       updatedAt:
         $ref: '#/definitions/DateTime'
       visibility:
@@ -262,11 +272,49 @@ definitions:
         x-go-name: Visibility
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Component:
+    description: Component holds the structure for a template component
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      name:
+        type: string
+        x-go-name: Name
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   DateTime:
     format: int64
     title: DateTime represents the BSON datetime value.
     type: integer
     x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
+  Department:
+    description: Department holds the structure for a department
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      createdAt:
+        $ref: '#/definitions/DateTime'
+      description:
+        type: string
+        x-go-name: Description
+      image:
+        type: string
+        x-go-name: Image
+      members:
+        items:
+          $ref: '#/definitions/MemberStatus'
+        type: array
+        x-go-name: Members
+      name:
+        type: string
+        x-go-name: Name
+      template:
+        type: string
+        x-go-name: TemplateID
+      updatedAt:
+        $ref: '#/definitions/DateTime'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   Ems:
     description: Ems holds the structure for the ems collection in mongo
     properties:
@@ -580,6 +628,17 @@ definitions:
         x-go-name: UserID
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  MemberStatus:
+    description: MemberStatus holds the structure for a member status
+    properties:
+      status:
+        type: string
+        x-go-name: Status
+      userID:
+        type: string
+        x-go-name: UserID
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   MessageError:
     description: MessageError contains the inner details for the error message response
     properties:
@@ -662,6 +721,24 @@ definitions:
           $ref: '#/definitions/Permission'
         type: array
         x-go-name: Permissions
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  Template:
+    description: Template holds the structure for a department template
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      components:
+        items:
+          $ref: '#/definitions/Component'
+        type: array
+        x-go-name: Components
+      description:
+        type: string
+        x-go-name: Description
+      name:
+        type: string
+        x-go-name: Name
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   User:
