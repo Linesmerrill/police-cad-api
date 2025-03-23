@@ -40,7 +40,7 @@ type Department struct {
 	Image            string             `json:"image" bson:"image"`
 	ApprovalRequired bool               `json:"approvalRequired" bson:"approvalRequired"`
 	Members          []MemberStatus     `json:"members" bson:"members"`
-	TemplateID       string             `json:"template" bson:"template"`
+	Template         Template           `json:"template" bson:"template"`
 	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt        primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
