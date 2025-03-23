@@ -1273,3 +1273,33 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
 }
+
+// DeleteCommunityDepartmentByIDHandler deletes a department by ID
+func (c Community) DeleteCommunityDepartmentByIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	// Convert the community ID and department ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the community to pull the department by ID
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$pull": bson.M{"community.departments": bson.M{"_id": dID}}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to delete department from community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Department deleted successfully"}`))
+}
