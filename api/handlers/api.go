@@ -73,6 +73,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.FetchUserDepartmentsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.CreateCommunityDepartmentHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}", api.Middleware(http.HandlerFunc(c.DeleteCommunityDepartmentByIDHandler))).Methods("DELETE")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members", api.Middleware(http.HandlerFunc(c.UpdateDepartmentMembersHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/events", api.Middleware(http.HandlerFunc(c.GetEventsByCommunityIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/events", api.Middleware(http.HandlerFunc(c.AddEventToCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.GetEventByIDHandler))).Methods("GET")

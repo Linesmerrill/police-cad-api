@@ -1303,3 +1303,49 @@ func (c Community) DeleteCommunityDepartmentByIDHandler(w http.ResponseWriter, r
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department deleted successfully"}`))
 }
+
+// UpdateDepartmentMembersHandler updates the members of a department in a community
+func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	var requestBody struct {
+		Members []string `json:"members"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	members := make([]bson.M, len(requestBody.Members))
+	for i, memberID := range requestBody.Members {
+		mID, err := primitive.ObjectIDFromHex(memberID)
+		if err != nil {
+			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+			return
+		}
+		members[i] = bson.M{"_id": mID, "status": "approved"}
+	}
+
+	filter := bson.M{"_id": cID, "community.departments._id": dID}
+	update := bson.M{"$addToSet": bson.M{"community.departments.$.members": bson.M{"$each": members}}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update department members", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Department members updated successfully"}`))
+}
