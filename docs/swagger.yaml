@@ -277,6 +277,9 @@ definitions:
     properties:
       _id:
         $ref: '#/definitions/ObjectID'
+      enabled:
+        type: boolean
+        x-go-name: Enabled
       name:
         type: string
         x-go-name: Name

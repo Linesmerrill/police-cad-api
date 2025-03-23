@@ -55,8 +55,9 @@ type Template struct {
 
 // Component holds the structure for a template component
 type Component struct {
-	ID   primitive.ObjectID `json:"_id" bson:"_id"`
-	Name string             `json:"name" bson:"name"`
+	ID      primitive.ObjectID `json:"_id" bson:"_id"`
+	Name    string             `json:"name" bson:"name"`
+	Enabled bool               `json:"enabled" bson:"enabled"`
 }
 
 // Event holds the structure for an event
