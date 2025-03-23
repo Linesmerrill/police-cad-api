@@ -1217,3 +1217,59 @@ func (c Community) FetchAllCommunityDepartmentsHandler(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
 }
+
+// CreateCommunityDepartmentHandler adds a new department to a community
+func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse the request body to get the department details
+	var department models.Department
+	if err := json.NewDecoder(r.Body).Decode(&department); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Generate a new _id for the department
+	department.ID = primitive.NewObjectID()
+
+	// Set the createdAt and updatedAt fields to the current time
+	now := primitive.NewDateTimeFromTime(time.Now())
+	department.CreatedAt = now
+	department.UpdatedAt = now
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Initialize the departments slice if it is null
+	if community.Details.Departments == nil {
+		community.Details.Departments = []models.Department{}
+	}
+
+	// Update the community to add the new department
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$push": bson.M{"community.departments": department}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add department to community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	response := map[string]interface{}{
+		"message":       "Department added successfully",
+		"department_id": department.ID.Hex(),
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
+}
