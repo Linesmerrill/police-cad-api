@@ -266,8 +266,9 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 
 	// Get the last accessed community
 	lastAccessedCommunity := user.Details.LastAccessedCommunity
-	if lastAccessedCommunity == (models.LastAccessedCommunity{}) {
-		config.ErrorStatus("no last accessed community found", http.StatusNotFound, w, fmt.Errorf("no last accessed community found"))
+	if lastAccessedCommunity == (models.LastAccessedCommunity{}) || lastAccessedCommunity.CommunityID == "" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
 		return
 	}
 
@@ -282,34 +283,6 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
 	}
-
-	// Calculate the time difference
-	// now := time.Now()
-	// var lastAccessedTime time.Time
-	// switch v := lastAccessedCommunity.CreatedAt.(type) {
-	// case time.Time:
-	// 	lastAccessedTime = v
-	// case primitive.DateTime:
-	// 	lastAccessedTime = v.Time()
-	// default:
-	// 	config.ErrorStatus("invalid last accessed time", http.StatusInternalServerError, w, fmt.Errorf("invalid last accessed time"))
-	// 	return
-	// }
-	// duration := now.Sub(lastAccessedTime)
-
-	// var lastAccessed string
-	// hours := duration.Hours()
-	// if hours <= 24 {
-	// 	lastAccessed = fmt.Sprintf("%.0f hours", hours)
-	// } else if hours <= 24*365 {
-	// 	days := hours / 24
-	// 	lastAccessed = fmt.Sprintf("%.0f days", days)
-	// } else {
-	// 	years := hours / (24 * 365)
-	// 	lastAccessed = fmt.Sprintf("%.0f years", years)
-	// }
-
-	// community.Details.LastAccessed = lastAccessed
 
 	// Marshal the response
 	b, err := json.Marshal(community)
