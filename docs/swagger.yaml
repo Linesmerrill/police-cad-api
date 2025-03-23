@@ -312,8 +312,7 @@ definitions:
         type: string
         x-go-name: Name
       template:
-        type: string
-        x-go-name: TemplateID
+        $ref: '#/definitions/Template'
       updatedAt:
         $ref: '#/definitions/DateTime'
     type: object
