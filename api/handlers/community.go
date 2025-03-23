@@ -1229,8 +1229,22 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Generate a new _id for the department
-	department.ID = primitive.NewObjectID()
+	// Generate a new _id for the department if not supplied
+	if department.ID.IsZero() {
+		department.ID = primitive.NewObjectID()
+	}
+
+	// Generate new _id for the template if not supplied
+	if department.Template.ID.IsZero() {
+		department.Template.ID = primitive.NewObjectID()
+	}
+
+	// Generate new _id for each component if not supplied
+	for i := range department.Template.Components {
+		if department.Template.Components[i].ID.IsZero() {
+			department.Template.Components[i].ID = primitive.NewObjectID()
+		}
+	}
 
 	// Set the createdAt and updatedAt fields to the current time
 	now := primitive.NewDateTimeFromTime(time.Now())
