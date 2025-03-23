@@ -1342,8 +1342,11 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Initialize the members field to an empty array if it is null
-	filter := bson.M{"_id": cID, "community.departments._id": dID, "community.departments.members": bson.M{"$exists": false}}
+	// Initialize the members field to an empty array if it is null or does not exist
+	filter := bson.M{"_id": cID, "community.departments._id": dID, "$or": []bson.M{
+		{"community.departments.members": bson.M{"$exists": false}},
+		{"community.departments.members": nil},
+	}}
 	update := bson.M{"$set": bson.M{"community.departments.$.members": []bson.M{}}}
 	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
