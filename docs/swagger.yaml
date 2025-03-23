@@ -292,6 +292,9 @@ definitions:
     properties:
       _id:
         $ref: '#/definitions/ObjectID'
+      approvalRequired:
+        type: boolean
+        x-go-name: ApprovalRequired
       createdAt:
         $ref: '#/definitions/DateTime'
       description:

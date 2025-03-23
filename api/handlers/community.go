@@ -1151,8 +1151,12 @@ func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Re
 	// Initialize the userDepartments slice
 	var userDepartments []models.Department
 
-	// Filter departments where the user is a member with status "approved"
+	// Filter departments where the user is a member with status "approved" or approval is not required
 	for _, department := range community.Details.Departments {
+		if !department.ApprovalRequired {
+			userDepartments = append(userDepartments, department)
+			continue
+		}
 		for _, member := range department.Members {
 			if member.UserID == userID && member.Status == "approved" {
 				userDepartments = append(userDepartments, department)
