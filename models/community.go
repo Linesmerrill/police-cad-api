@@ -34,14 +34,15 @@ type CommunityDetails struct {
 
 // Department holds the structure for a department
 type Department struct {
-	ID          primitive.ObjectID `json:"_id" bson:"_id"`
-	Name        string             `json:"name" bson:"name"`
-	Description string             `json:"description" bson:"description"`
-	Image       string             `json:"image" bson:"image"`
-	Members     []MemberStatus     `json:"members" bson:"members"`
-	TemplateID  string             `json:"template" bson:"template"`
-	CreatedAt   primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	ID               primitive.ObjectID `json:"_id" bson:"_id"`
+	Name             string             `json:"name" bson:"name"`
+	Description      string             `json:"description" bson:"description"`
+	Image            string             `json:"image" bson:"image"`
+	ApprovalRequired bool               `json:"approvalRequired" bson:"approvalRequired"`
+	Members          []MemberStatus     `json:"members" bson:"members"`
+	TemplateID       string             `json:"template" bson:"template"`
+	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt        primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Template holds the structure for a department template
