@@ -1126,6 +1126,7 @@ func (c Community) FetchCommunityMembersByRoleIDHandler(w http.ResponseWriter, r
 
 // FetchUserDepartmentsHandler returns all departments where the user is a member with status "approved"
 func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	zap.S().Debugf("Fetch user departments")
 	communityID := mux.Vars(r)["communityId"]
 	userID := r.URL.Query().Get("userId")
 
