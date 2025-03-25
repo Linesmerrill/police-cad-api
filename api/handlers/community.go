@@ -1357,12 +1357,8 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 
 	members := make([]bson.M, len(requestBody.Members))
 	for i, memberID := range requestBody.Members {
-		mID, err := primitive.ObjectIDFromHex(memberID)
-		if err != nil {
-			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-			return
-		}
-		members[i] = bson.M{"_id": mID, "status": "approved"}
+		mID := primitive.NewObjectID()
+		members[i] = bson.M{"_id": mID, "status": "approved", "userID": memberID}
 	}
 
 	filter = bson.M{"_id": cID, "community.departments._id": dID}
