@@ -1376,3 +1376,56 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department members updated successfully"}`))
 }
+
+// FetchDepartmentByIDHandler returns a department by ID
+func (c Community) FetchDepartmentByIDHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	// Convert the community ID and department ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find the department by ID within the community
+	var department *models.Department
+	for _, dept := range community.Details.Departments {
+		if dept.ID == dID {
+			department = &dept
+			break
+		}
+	}
+
+	if department == nil {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// Return the department details
+	response := map[string]interface{}{
+		"department": department,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
