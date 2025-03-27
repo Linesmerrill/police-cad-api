@@ -215,7 +215,7 @@ func getPage(Page int, r *http.Request) int {
 // CreateCivilianHandler creates a civilian
 func (c Civilian) CreateCivilianHandler(w http.ResponseWriter, r *http.Request) {
 	var civilian models.Civilian
-	if err := json.NewDecoder(r.Body).Decode(&civilian); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&civilian.Details); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
