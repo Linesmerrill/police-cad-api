@@ -133,7 +133,11 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.Roles = append(newCommunity.Details.Roles, headAdminRole)
 
 	// Insert the new community into the database
-	_ = c.DB.InsertOne(context.Background(), newCommunity)
+	_, err := c.DB.InsertOne(context.Background(), newCommunity)
+	if err != nil {
+		config.ErrorStatus("failed to create community", http.StatusInternalServerError, w, err)
+		return
+	}
 
 	// Add the community to the user's communities array
 	ownerID := newCommunity.Details.OwnerID

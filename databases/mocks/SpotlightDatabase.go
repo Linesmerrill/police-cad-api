@@ -5,6 +5,7 @@ package mocks
 import (
 	context "context"
 
+	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 
 	models "github.com/linesmerrill/police-cad-api/models"
@@ -92,23 +93,33 @@ func (_m *SpotlightDatabase) FindOne(_a0 context.Context, _a1 interface{}, _a2 .
 }
 
 // InsertOne provides a mock function with given fields: _a0, _a1
-func (_m *SpotlightDatabase) InsertOne(_a0 context.Context, _a1 models.SpotlightDetails) interface{} {
+func (_m *SpotlightDatabase) InsertOne(_a0 context.Context, _a1 models.SpotlightDetails) (databases.InsertOneResultHelper, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for InsertOne")
 	}
 
-	var r0 interface{}
-	if rf, ok := ret.Get(0).(func(context.Context, models.SpotlightDetails) interface{}); ok {
+	var r0 databases.InsertOneResultHelper
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, models.SpotlightDetails) (databases.InsertOneResultHelper, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, models.SpotlightDetails) databases.InsertOneResultHelper); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(interface{})
+			r0 = ret.Get(0).(databases.InsertOneResultHelper)
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, models.SpotlightDetails) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // NewSpotlightDatabase creates a new instance of SpotlightDatabase. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

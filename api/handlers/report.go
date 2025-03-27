@@ -34,7 +34,11 @@ func (re Report) CreateReportHandler(w http.ResponseWriter, r *http.Request) {
 	report.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
 	// Insert the new report into the database
-	_ = re.RDB.InsertOne(context.Background(), report)
+	_, err := re.RDB.InsertOne(context.Background(), report)
+	if err != nil {
+		config.ErrorStatus("failed to insert report", http.StatusInternalServerError, w, err)
+		return
+	}
 
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"message": "Report created successfully"}`))

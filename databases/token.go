@@ -15,7 +15,7 @@ const tokenName = "tokens"
 type TokenDatabase interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Token, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Token, error)
-	InsertOne(context.Context, models.Token) interface{}
+	InsertOne(context.Context, models.Token) (InsertOneResultHelper, error)
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
 }
 
@@ -52,13 +52,13 @@ func (t *tokenDatabase) Find(ctx context.Context, filter interface{}, opts ...*o
 	return token, nil
 }
 
-func (t *tokenDatabase) InsertOne(ctx context.Context, tokenDetails models.Token) interface{} {
+func (t *tokenDatabase) InsertOne(ctx context.Context, tokenDetails models.Token) (InsertOneResultHelper, error) {
 	type spot struct {
 		Token models.Token `bson:"token"`
 	}
 	spots := spot{Token: tokenDetails}
-	res := t.db.Collection(tokenName).InsertOne(ctx, spots)
-	return res
+	res, err := t.db.Collection(tokenName).InsertOne(ctx, spots)
+	return res, err
 }
 
 func (t *tokenDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {

@@ -15,7 +15,7 @@ const reportName = "reports"
 type ReportDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Report, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
-	InsertOne(ctx context.Context, report models.Report, opts ...*options.InsertOneOptions) InsertOneResultHelper
+	InsertOne(ctx context.Context, report models.Report, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 }
@@ -53,9 +53,9 @@ func (c *reportDatabase) UpdateOne(ctx context.Context, filter interface{}, upda
 	return err
 }
 
-func (c *reportDatabase) InsertOne(ctx context.Context, report models.Report, opts ...*options.InsertOneOptions) InsertOneResultHelper {
-	res := c.db.Collection(reportName).InsertOne(ctx, report, opts...)
-	return res
+func (c *reportDatabase) InsertOne(ctx context.Context, report models.Report, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	res, err := c.db.Collection(reportName).InsertOne(ctx, report, opts...)
+	return res, err
 }
 
 func (c *reportDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {

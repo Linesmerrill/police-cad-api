@@ -109,7 +109,7 @@ func (_m *ReportDatabase) FindOne(ctx context.Context, filter interface{}) (*mod
 }
 
 // InsertOne provides a mock function with given fields: ctx, report, opts
-func (_m *ReportDatabase) InsertOne(ctx context.Context, report models.Report, opts ...*options.InsertOneOptions) databases.InsertOneResultHelper {
+func (_m *ReportDatabase) InsertOne(ctx context.Context, report models.Report, opts ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -124,6 +124,10 @@ func (_m *ReportDatabase) InsertOne(ctx context.Context, report models.Report, o
 	}
 
 	var r0 databases.InsertOneResultHelper
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, models.Report, ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error)); ok {
+		return rf(ctx, report, opts...)
+	}
 	if rf, ok := ret.Get(0).(func(context.Context, models.Report, ...*options.InsertOneOptions) databases.InsertOneResultHelper); ok {
 		r0 = rf(ctx, report, opts...)
 	} else {
@@ -132,7 +136,13 @@ func (_m *ReportDatabase) InsertOne(ctx context.Context, report models.Report, o
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, models.Report, ...*options.InsertOneOptions) error); ok {
+		r1 = rf(ctx, report, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // UpdateOne provides a mock function with given fields: ctx, filter, update, opts

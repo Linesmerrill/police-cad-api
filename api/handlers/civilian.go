@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -209,4 +210,29 @@ func getPage(Page int, r *http.Request) int {
 		}
 	}
 	return Page
+}
+
+// CreateCivilianHandler creates a civilian
+func (c Civilian) CreateCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	var civilian models.Civilian
+	if err := json.NewDecoder(r.Body).Decode(&civilian); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	civilian.ID = primitive.NewObjectID()
+	civilian.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	civilian.Details.UpdatedAt = civilian.Details.CreatedAt
+
+	_, err := c.DB.InsertOne(context.Background(), civilian)
+	if err != nil {
+		config.ErrorStatus("failed to create civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Civilian created successfully",
+		"id":      civilian.ID.Hex(),
+	})
 }
