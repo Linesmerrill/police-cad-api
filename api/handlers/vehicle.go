@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -238,4 +239,29 @@ func (v Vehicle) VehiclesByPlateSearchHandler(w http.ResponseWriter, r *http.Req
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// CreateVehicleHandler creates a vehicle
+func (v Vehicle) CreateVehicleHandler(w http.ResponseWriter, r *http.Request) {
+	var vehicle models.Vehicle
+	if err := json.NewDecoder(r.Body).Decode(&vehicle.Details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	vehicle.ID = primitive.NewObjectID()
+	vehicle.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	vehicle.Details.UpdatedAt = vehicle.Details.CreatedAt
+
+	_, err := v.DB.InsertOne(context.Background(), vehicle)
+	if err != nil {
+		config.ErrorStatus("failed to create vehicle", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Vehicle created successfully",
+		"id":      vehicle.ID.Hex(),
+	})
 }

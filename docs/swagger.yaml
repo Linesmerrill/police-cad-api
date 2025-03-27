@@ -491,8 +491,7 @@ definitions:
         type: integer
         x-go-name: Version
       _id:
-        type: string
-        x-go-name: ID
+        $ref: '#/definitions/ObjectID'
       firearm:
         $ref: '#/definitions/FirearmDetails'
     type: object
@@ -506,11 +505,13 @@ definitions:
         type: string
         x-go-name: ActiveCommunityID
       createdAt:
-        type: object
-        x-go-name: CreatedAt
+        $ref: '#/definitions/DateTime'
       isStolen:
         type: string
         x-go-name: IsStolen
+      name:
+        type: string
+        x-go-name: Name
       registeredOwner:
         type: string
         x-go-name: RegisteredOwner
@@ -521,8 +522,7 @@ definitions:
         type: string
         x-go-name: SerialNumber
       updatedAt:
-        type: object
-        x-go-name: UpdatedAt
+        $ref: '#/definitions/DateTime'
       userID:
         type: string
         x-go-name: UserID
@@ -854,8 +854,7 @@ definitions:
         type: integer
         x-go-name: Version
       _id:
-        type: string
-        x-go-name: ID
+        $ref: '#/definitions/ObjectID'
       vehicle:
         $ref: '#/definitions/VehicleDetails'
     type: object
@@ -872,8 +871,7 @@ definitions:
         type: string
         x-go-name: Color
       createdAt:
-        type: object
-        x-go-name: CreatedAt
+        $ref: '#/definitions/DateTime'
       email:
         type: string
         x-go-name: Email
@@ -892,9 +890,11 @@ definitions:
       registeredOwnerID:
         type: string
         x-go-name: RegisteredOwnerID
+      type:
+        type: string
+        x-go-name: Type
       updatedAt:
-        type: object
-        x-go-name: UpdatedAt
+        $ref: '#/definitions/DateTime'
       userID:
         type: string
         x-go-name: UserID

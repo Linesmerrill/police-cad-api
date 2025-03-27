@@ -15,6 +15,7 @@ const vehicleName = "vehicles"
 type VehicleDatabase interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Vehicle, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Vehicle, error)
+	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 }
 
 type vehicleDatabase struct {
@@ -48,4 +49,9 @@ func (c *vehicleDatabase) Find(ctx context.Context, filter interface{}, opts ...
 		return nil, err
 	}
 	return vehicles, nil
+}
+
+func (c *vehicleDatabase) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	res, err := c.db.Collection(vehicleName).InsertOne(ctx, document, opts...)
+	return res, err
 }
