@@ -15,6 +15,7 @@ const firearmName = "firearms"
 type FirearmDatabase interface {
 	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Firearm, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Firearm, error)
+	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 }
 
 type firearmDatabase struct {
@@ -48,4 +49,9 @@ func (c *firearmDatabase) Find(ctx context.Context, filter interface{}, opts ...
 		return nil, err
 	}
 	return firearms, nil
+}
+
+func (c *firearmDatabase) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	res, err := c.db.Collection(firearmName).InsertOne(ctx, document, opts...)
+	return res, err
 }

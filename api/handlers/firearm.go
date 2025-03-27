@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -30,7 +31,7 @@ type FirearmList struct {
 }
 
 // FirearmHandler returns all firearms
-func (v Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
+func (f Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
@@ -38,7 +39,7 @@ func (v Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
-	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	dbResp, err := f.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get firearms", http.StatusNotFound, w, err)
 		return
@@ -59,7 +60,7 @@ func (v Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // FirearmByIDHandler returns a firearm by ID
-func (v Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
+func (f Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
 	civID := mux.Vars(r)["firearm_id"]
 
 	zap.S().Debugf("firearm_id: %v", civID)
@@ -70,7 +71,7 @@ func (v Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := v.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	dbResp, err := f.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get firearm by ID", http.StatusNotFound, w, err)
 		return
@@ -86,7 +87,7 @@ func (v Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // FirearmsByUserIDHandler returns all firearms that contain the given userID
-func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -110,7 +111,7 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	// that are not in a community
 	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
+		dbResp, err = f.DB.Find(context.TODO(), bson.M{
 			"firearm.userID":            userID,
 			"firearm.activeCommunityID": activeCommunityID,
 		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
@@ -119,7 +120,7 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	} else {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
+		dbResp, err = f.DB.Find(context.TODO(), bson.M{
 			"firearm.userID": userID,
 			"$or": []bson.M{
 				{"firearm.activeCommunityID": nil},
@@ -147,7 +148,7 @@ func (v Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // FirearmsByRegisteredOwnerIDHandler returns all firearms that contain the given registeredOwnerID
-func (v Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
+func (f Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
 	registeredOwnerID := mux.Vars(r)["registered_owner_id"]
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
@@ -168,7 +169,7 @@ func (v Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 	// Likewise, if the user is not in a community, then we will display only the firearms
 	// that are not in a community
 	err = nil
-	dbResp, err = v.DB.Find(context.TODO(), bson.M{
+	dbResp, err = f.DB.Find(context.TODO(), bson.M{
 		"firearm.registeredOwnerID": registeredOwnerID,
 	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
@@ -188,4 +189,29 @@ func (v Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// CreateFirearmHandler creates a new firearm
+func (f Firearm) CreateFirearmHandler(w http.ResponseWriter, r *http.Request) {
+	var firearm models.Firearm
+	if err := json.NewDecoder(r.Body).Decode(&firearm.Details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	firearm.ID = primitive.NewObjectID()
+	firearm.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	firearm.Details.UpdatedAt = firearm.Details.CreatedAt
+
+	_, err := f.DB.InsertOne(context.Background(), firearm)
+	if err != nil {
+		config.ErrorStatus("failed to create firearm", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Firearm created successfully",
+		"id":      firearm.ID.Hex(),
+	})
 }
