@@ -109,7 +109,7 @@ func (_m *CommunityDatabase) FindOne(ctx context.Context, filter interface{}) (*
 }
 
 // InsertOne provides a mock function with given fields: ctx, community, opts
-func (_m *CommunityDatabase) InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) databases.InsertOneResultHelper {
+func (_m *CommunityDatabase) InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -124,6 +124,10 @@ func (_m *CommunityDatabase) InsertOne(ctx context.Context, community models.Com
 	}
 
 	var r0 databases.InsertOneResultHelper
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, models.Community, ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error)); ok {
+		return rf(ctx, community, opts...)
+	}
 	if rf, ok := ret.Get(0).(func(context.Context, models.Community, ...*options.InsertOneOptions) databases.InsertOneResultHelper); ok {
 		r0 = rf(ctx, community, opts...)
 	} else {
@@ -132,7 +136,13 @@ func (_m *CommunityDatabase) InsertOne(ctx context.Context, community models.Com
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, models.Community, ...*options.InsertOneOptions) error); ok {
+		r1 = rf(ctx, community, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // UpdateOne provides a mock function with given fields: ctx, filter, update, opts

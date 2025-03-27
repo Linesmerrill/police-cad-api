@@ -5,6 +5,7 @@ package mocks
 import (
 	context "context"
 
+	databases "github.com/linesmerrill/police-cad-api/databases"
 	mock "github.com/stretchr/testify/mock"
 
 	models "github.com/linesmerrill/police-cad-api/models"
@@ -117,23 +118,33 @@ func (_m *TokenDatabase) FindOne(_a0 context.Context, _a1 interface{}, _a2 ...*o
 }
 
 // InsertOne provides a mock function with given fields: _a0, _a1
-func (_m *TokenDatabase) InsertOne(_a0 context.Context, _a1 models.Token) interface{} {
+func (_m *TokenDatabase) InsertOne(_a0 context.Context, _a1 models.Token) (databases.InsertOneResultHelper, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for InsertOne")
 	}
 
-	var r0 interface{}
-	if rf, ok := ret.Get(0).(func(context.Context, models.Token) interface{}); ok {
+	var r0 databases.InsertOneResultHelper
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, models.Token) (databases.InsertOneResultHelper, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, models.Token) databases.InsertOneResultHelper); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(interface{})
+			r0 = ret.Get(0).(databases.InsertOneResultHelper)
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, models.Token) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // NewTokenDatabase creates a new instance of TokenDatabase. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

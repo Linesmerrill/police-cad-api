@@ -15,7 +15,7 @@ const spotlightName = "spotlight"
 type SpotlightDatabase interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Spotlight, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Spotlight, error)
-	InsertOne(context.Context, models.SpotlightDetails) interface{}
+	InsertOne(context.Context, models.SpotlightDetails) (InsertOneResultHelper, error)
 }
 
 type spotlightDatabase struct {
@@ -51,11 +51,11 @@ func (s *spotlightDatabase) Find(ctx context.Context, filter interface{}, opts .
 	return spotlight, nil
 }
 
-func (s *spotlightDatabase) InsertOne(ctx context.Context, spotlightDetails models.SpotlightDetails) interface{} {
+func (s *spotlightDatabase) InsertOne(ctx context.Context, spotlightDetails models.SpotlightDetails) (InsertOneResultHelper, error) {
 	type spot struct {
 		Spotlight models.SpotlightDetails `bson:"spotlight"`
 	}
 	spots := spot{Spotlight: spotlightDetails}
-	res := s.db.Collection(spotlightName).InsertOne(ctx, spots)
-	return res
+	res, err := s.db.Collection(spotlightName).InsertOne(ctx, spots)
+	return res, err
 }

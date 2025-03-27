@@ -123,12 +123,12 @@ func (mc *MongoCollection) FindOne(ctx context.Context, filter interface{}, opts
 }
 
 // InsertOne inserts a single document into the collection
-func (mc *MongoCollection) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) InsertOneResultHelper {
+func (mc *MongoCollection) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
 	insertOneResult, err := mc.coll.InsertOne(ctx, document, opts...)
 	if err != nil {
-		println(err)
+		return &mongoInsertOneResult{}, err
 	}
-	return &mongoInsertOneResult{ior: insertOneResult}
+	return &mongoInsertOneResult{ior: insertOneResult}, err
 }
 
 // Find returns a cursor to iterate over the collection

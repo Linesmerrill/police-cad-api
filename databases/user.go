@@ -17,7 +17,7 @@ type UserDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.User, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
-	InsertOne(ctx context.Context, userDetails models.UserDetails) interface{}
+	InsertOne(ctx context.Context, userDetails models.UserDetails) (InsertOneResultHelper, error)
 	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
@@ -56,13 +56,13 @@ func (u *userDatabase) Find(ctx context.Context, filter interface{}, opts ...*op
 	return users, nil
 }
 
-func (u *userDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) interface{} {
+func (u *userDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) (InsertOneResultHelper, error) {
 	type user struct {
 		User models.UserDetails `bson:"user"`
 	}
 	users := user{User: userDetails}
-	res := u.db.Collection(userName).InsertOne(ctx, users)
-	return res
+	res, err := u.db.Collection(userName).InsertOne(ctx, users)
+	return res, err
 }
 
 func (u *userDatabase) Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error) {

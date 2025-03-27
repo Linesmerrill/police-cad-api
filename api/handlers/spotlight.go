@@ -87,7 +87,11 @@ func (s Spotlight) SpotlightCreateHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h := s.DB.InsertOne(context.Background(), spotlightDetails)
+	h, err := s.DB.InsertOne(context.Background(), spotlightDetails)
+	if err != nil {
+		config.ErrorStatus("failed to insert spotlight", http.StatusInternalServerError, w, err)
+		return
+	}
 	zap.S().Debugf("inserted spotlight: %v", h)
 
 	b, err := json.Marshal(spotlightDetails)

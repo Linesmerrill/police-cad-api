@@ -143,7 +143,11 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 	user.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
 	// insert the user
-	_ = u.DB.InsertOne(context.Background(), user)
+	_, err = u.DB.InsertOne(context.Background(), user)
+	if err != nil {
+		config.ErrorStatus("failed to insert user", http.StatusInternalServerError, w, err)
+		return
+	}
 
 	w.WriteHeader(http.StatusCreated)
 

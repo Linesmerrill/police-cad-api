@@ -151,23 +151,33 @@ func (_m *UserDatabase) FindOne(ctx context.Context, filter interface{}) (*model
 }
 
 // InsertOne provides a mock function with given fields: ctx, userDetails
-func (_m *UserDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) interface{} {
+func (_m *UserDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) (databases.InsertOneResultHelper, error) {
 	ret := _m.Called(ctx, userDetails)
 
 	if len(ret) == 0 {
 		panic("no return value specified for InsertOne")
 	}
 
-	var r0 interface{}
-	if rf, ok := ret.Get(0).(func(context.Context, models.UserDetails) interface{}); ok {
+	var r0 databases.InsertOneResultHelper
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, models.UserDetails) (databases.InsertOneResultHelper, error)); ok {
+		return rf(ctx, userDetails)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, models.UserDetails) databases.InsertOneResultHelper); ok {
 		r0 = rf(ctx, userDetails)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(interface{})
+			r0 = ret.Get(0).(databases.InsertOneResultHelper)
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, models.UserDetails) error); ok {
+		r1 = rf(ctx, userDetails)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // UpdateMany provides a mock function with given fields: ctx, filter, update, opts

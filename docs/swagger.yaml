@@ -101,8 +101,7 @@ definitions:
         type: integer
         x-go-name: Version
       _id:
-        type: string
-        x-go-name: ID
+        $ref: '#/definitions/ObjectID'
       civilian:
         $ref: '#/definitions/CivilianDetails'
     type: object
@@ -124,8 +123,7 @@ definitions:
         type: string
         x-go-name: Birthday
       createdAt:
-        type: object
-        x-go-name: CreatedAt
+        $ref: '#/definitions/DateTime'
       email:
         type: string
         x-go-name: Email
@@ -169,8 +167,7 @@ definitions:
         type: string
         x-go-name: TicketCount
       updatedAt:
-        type: object
-        x-go-name: UpdatedAt
+        $ref: '#/definitions/DateTime'
       userID:
         type: string
         x-go-name: UserID
