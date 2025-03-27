@@ -154,6 +154,9 @@ definitions:
       licenseStatus:
         type: string
         x-go-name: LicenseStatus
+      name:
+        type: string
+        x-go-name: Name
       occupation:
         type: string
         x-go-name: Occupation

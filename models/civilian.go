@@ -15,6 +15,7 @@ type CivilianDetails struct {
 	Email                string             `json:"email" bson:"email"`
 	FirstName            string             `json:"firstName" bson:"firstName"`
 	LastName             string             `json:"lastName" bson:"lastName"`
+	Name                 string             `json:"name" bson:"name"`
 	LicenseStatus        string             `json:"licenseStatus" bson:"licenseStatus"`
 	TicketCount          string             `json:"ticketCount" bson:"ticketCount"` // TODO may need to change the database definition
 	Birthday             string             `json:"birthday" bson:"birthday"`
