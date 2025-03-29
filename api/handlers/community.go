@@ -1524,9 +1524,13 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	update := bson.M{}
+	for key, value := range updatedDetails {
+		update["community.departments.$."+key] = value
+	}
+
 	filter := bson.M{"_id": cID, "community.departments._id": dID}
-	update := bson.M{"$set": bson.M{"community.departments.$": updatedDetails}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update department details", http.StatusInternalServerError, w, err)
 		return
