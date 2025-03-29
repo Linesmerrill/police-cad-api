@@ -1501,3 +1501,37 @@ func (c Community) UpdateDepartmentImageLinkHandler(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department image link updated successfully"}`))
 }
+
+// UpdateDepartmentDetailsHandler updates the details of a department
+func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	var updatedDetails map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedDetails); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": cID, "community.departments._id": dID}
+	update := bson.M{"$set": bson.M{"community.departments.$": updatedDetails}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update department details", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Department details updated successfully"}`))
+}
