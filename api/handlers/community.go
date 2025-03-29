@@ -1347,26 +1347,8 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Initialize the members field to an empty array if it is null or does not exist
-	filter := bson.M{"_id": cID, "community.departments._id": dID, "$or": []bson.M{
-		{"community.departments.members": bson.M{"$exists": false}},
-		{"community.departments.members": nil},
-	}}
-	update := bson.M{"$set": bson.M{"community.departments.$.members": []bson.M{}}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		config.ErrorStatus("failed to initialize department members", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	members := make([]bson.M, len(requestBody.Members))
-	for i, memberID := range requestBody.Members {
-		mID := primitive.NewObjectID()
-		members[i] = bson.M{"_id": mID, "status": "approved", "userID": memberID}
-	}
-
-	filter = bson.M{"_id": cID, "community.departments._id": dID}
-	update = bson.M{"$addToSet": bson.M{"community.departments.$.members": bson.M{"$each": members}}}
+	filter := bson.M{"_id": cID, "community.departments._id": dID}
+	update := bson.M{"$addToSet": bson.M{"community.departments.$.members": bson.M{"$each": requestBody.Members}}}
 	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update department members", http.StatusInternalServerError, w, err)
