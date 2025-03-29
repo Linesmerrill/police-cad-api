@@ -1347,12 +1347,27 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	filter := bson.M{"_id": cID, "community.departments._id": dID}
-	update := bson.M{"$addToSet": bson.M{"community.departments.$.members": bson.M{"$each": requestBody.Members}}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		config.ErrorStatus("failed to update department members", http.StatusInternalServerError, w, err)
-		return
+	for _, memberID := range requestBody.Members {
+		mID := primitive.NewObjectID()
+		filter := bson.M{
+			"_id":                                  cID,
+			"community.departments._id":            dID,
+			"community.departments.members.userID": bson.M{"$ne": memberID},
+		}
+		update := bson.M{
+			"$addToSet": bson.M{
+				"community.departments.$.members": bson.M{
+					"_id":    mID,
+					"status": "approved",
+					"userID": memberID,
+				},
+			},
+		}
+		err = c.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to update department members", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
