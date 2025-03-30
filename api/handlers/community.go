@@ -1132,7 +1132,7 @@ func (c Community) FetchCommunityMembersByRoleIDHandler(w http.ResponseWriter, r
 func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
 	zap.S().Debugf("Fetch user departments")
 	communityID := mux.Vars(r)["communityId"]
-	userID := r.URL.Query().Get("userId")
+	userID := mux.Vars(r)["userId"]
 
 	// Convert the community ID to primitive.ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
@@ -1158,14 +1158,15 @@ func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Re
 
 	// Filter departments where the user is a member with status "approved" or approval is not required
 	for _, department := range community.Details.Departments {
+		zap.S().Debugf("Fetch department by department name %s", department.Name)
 		if !department.ApprovalRequired {
 			userDepartments = append(userDepartments, department)
-			continue
-		}
-		for _, member := range department.Members {
-			if member.UserID == userID && member.Status == "approved" {
-				userDepartments = append(userDepartments, department)
-				break
+		} else {
+			for _, member := range department.Members {
+				if member.UserID == userID && member.Status == "approved" {
+					userDepartments = append(userDepartments, department)
+					break
+				}
 			}
 		}
 	}
