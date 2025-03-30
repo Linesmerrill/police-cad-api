@@ -266,3 +266,25 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		"message": "Civilian updated successfully",
 	})
 }
+
+// DeleteCivilianHandler deletes a civilian by ID
+func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	civID := mux.Vars(r)["civilian_id"]
+
+	cID, err := primitive.ObjectIDFromHex(civID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	err = c.DB.DeleteOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to delete civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Civilian deleted successfully",
+	})
+}
