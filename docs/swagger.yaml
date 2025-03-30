@@ -668,6 +668,12 @@ definitions:
       data2:
         type: string
         x-go-name: Data2
+      data3:
+        type: string
+        x-go-name: Data3
+      data4:
+        type: string
+        x-go-name: Data4
       message:
         type: string
         x-go-name: Message

@@ -512,6 +512,8 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		Message:    notification.Message,
 		Data1:      notification.Data1,
 		Data2:      notification.Data2,
+		Data3:      notification.Data3,
+		Data4:      notification.Data4,
 		Seen:       false,
 		CreatedAt:  time.Now(),
 	}
