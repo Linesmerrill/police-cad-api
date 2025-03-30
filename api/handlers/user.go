@@ -1651,3 +1651,73 @@ func (u User) UnfriendUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User unfriended successfully"}`))
 }
+
+// AddUserToPendingDepartmentHandler adds a user to a department's members list with status "pending"
+func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["userId"]
+
+	var requestBody struct {
+		CommunityID  string `json:"communityId"`
+		DepartmentID string `json:"departmentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert IDs to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("invalid communityId", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(requestBody.DepartmentID)
+	if err != nil {
+		config.ErrorStatus("invalid departmentId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := u.CDB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to find community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find the department within the community
+	var department *models.Department
+	for i, dept := range community.Details.Departments {
+		if dept.ID == dID {
+			department = &community.Details.Departments[i]
+			break
+		}
+	}
+	if department == nil {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// Initialize members if it is nil
+	if department.Members == nil {
+		department.Members = []models.MemberStatus{}
+	}
+
+	// Add the user to the department's members list with status "pending"
+	member := models.MemberStatus{
+		UserID: userID,
+		Status: "pending",
+	}
+	department.Members = append(department.Members, member)
+
+	// Update the community in the database
+	update := bson.M{"$set": bson.M{"community.departments": community.Details.Departments}}
+	err = u.CDB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
+	if err != nil {
+		config.ErrorStatus("failed to update community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User added to department with pending status successfully"}`))
+}
