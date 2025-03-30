@@ -18,6 +18,31 @@ type CivilianDatabase struct {
 	mock.Mock
 }
 
+// DeleteOne provides a mock function with given fields: _a0, _a1, _a2
+func (_m *CivilianDatabase) DeleteOne(_a0 context.Context, _a1 interface{}, _a2 ...*options.DeleteOptions) error {
+	_va := make([]interface{}, len(_a2))
+	for _i := range _a2 {
+		_va[_i] = _a2[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _a0, _a1)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteOne")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.DeleteOptions) error); ok {
+		r0 = rf(_a0, _a1, _a2...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Find provides a mock function with given fields: _a0, _a1, _a2
 func (_m *CivilianDatabase) Find(_a0 context.Context, _a1 interface{}, _a2 ...*options.FindOptions) ([]models.Civilian, error) {
 	_va := make([]interface{}, len(_a2))
