@@ -16,6 +16,7 @@ type CivilianDatabase interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Civilian, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Civilian, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
 }
 
 type civilianDatabase struct {
@@ -54,4 +55,9 @@ func (c *civilianDatabase) Find(ctx context.Context, filter interface{}, opts ..
 func (c *civilianDatabase) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
 	res, err := c.db.Collection(civilianName).InsertOne(ctx, document, opts...)
 	return res, err
+}
+
+func (c *civilianDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := c.db.Collection(civilianName).UpdateOne(ctx, filter, update, opts...)
+	return err
 }

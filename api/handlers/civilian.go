@@ -236,3 +236,34 @@ func (c Civilian) CreateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		"id":      civilian.ID.Hex(),
 	})
 }
+
+// UpdateCivilianHandler updates a civilian's details
+func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	civID := mux.Vars(r)["civilian_id"]
+
+	cID, err := primitive.ObjectIDFromHex(civID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var civilian models.Civilian
+	if err := json.NewDecoder(r.Body).Decode(&civilian.Details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	civilian.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	update := bson.M{"$set": civilian.Details}
+	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
+	if err != nil {
+		config.ErrorStatus("failed to update civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Civilian updated successfully",
+	})
+}

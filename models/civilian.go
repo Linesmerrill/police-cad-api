@@ -12,7 +12,7 @@ type Civilian struct {
 // CivilianDetails holds the structure for the inner user structure as
 // defined in the civilian collection in mongo
 type CivilianDetails struct {
-	Email                string             `json:"email" bson:"email"`
+	Email                string             `json:"email" bson:"email"` // Deprecated, use the userID field
 	FirstName            string             `json:"firstName" bson:"firstName"`
 	LastName             string             `json:"lastName" bson:"lastName"`
 	Name                 string             `json:"name" bson:"name"`
