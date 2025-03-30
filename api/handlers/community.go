@@ -1536,3 +1536,77 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department details updated successfully"}`))
 }
+
+// UpdateDepartmentJoinRequestHandler updates the join request status for a user in a department
+func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+	departmentID := vars["departmentId"]
+
+	var requestBody struct {
+		UserID string `json:"userId"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert IDs to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid communityId", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("invalid departmentId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to find community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find the department within the community
+	var department *models.Department
+	for i, dept := range community.Details.Departments {
+		if dept.ID == dID {
+			department = &community.Details.Departments[i]
+			break
+		}
+	}
+	if department == nil {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// Update the user's join request status in the department
+	updated := false
+	for i, member := range department.Members {
+		if member.UserID == requestBody.UserID {
+			department.Members[i].Status = requestBody.Status
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		config.ErrorStatus("user not found in department members", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// Update the community in the database
+	update := bson.M{"$set": bson.M{"community.departments": community.Details.Departments}}
+	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
+	if err != nil {
+		config.ErrorStatus("failed to update community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Department join request updated successfully"}`))
+}
