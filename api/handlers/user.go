@@ -647,6 +647,8 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 			"message":              notification.Message,
 			"data1":                notification.Data1,
 			"data2":                notification.Data2,
+			"data3":                notification.Data3,
+			"data4":                notification.Data4,
 			"seen":                 notification.Seen,
 			"createdAt":            notification.CreatedAt,
 			"senderName":           sender.Details.Name,
