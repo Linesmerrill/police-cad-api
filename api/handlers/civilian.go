@@ -255,8 +255,7 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 
 	civilian.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
 
-	update := bson.M{"$set": civilian.Details}
-	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
+	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, bson.M{"$set": bson.M{"civilian": civilian.Details}})
 	if err != nil {
 		config.ErrorStatus("failed to update civilian", http.StatusInternalServerError, w, err)
 		return
