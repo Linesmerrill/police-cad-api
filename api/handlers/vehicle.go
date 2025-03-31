@@ -265,3 +265,55 @@ func (v Vehicle) CreateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 		"id":      vehicle.ID.Hex(),
 	})
 }
+
+// DeleteVehicleHandler deletes a vehicle by ID
+func (v Vehicle) DeleteVehicleHandler(w http.ResponseWriter, r *http.Request) {
+	vehicleID := mux.Vars(r)["vehicle_id"]
+
+	vID, err := primitive.ObjectIDFromHex(vehicleID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	err = v.DB.DeleteOne(context.Background(), bson.M{"_id": vID})
+	if err != nil {
+		config.ErrorStatus("failed to delete vehicle", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Vehicle deleted successfully",
+	})
+}
+
+// UpdateVehicleHandler updates a vehicle's details
+func (v Vehicle) UpdateVehicleHandler(w http.ResponseWriter, r *http.Request) {
+	vehicleID := mux.Vars(r)["vehicle_id"]
+
+	vID, err := primitive.ObjectIDFromHex(vehicleID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var vehicle models.Vehicle
+	if err := json.NewDecoder(r.Body).Decode(&vehicle.Details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	vehicle.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	err = v.DB.UpdateOne(context.Background(), bson.M{"_id": vID}, bson.M{"$set": bson.M{"vehicle": vehicle.Details}})
+	if err != nil {
+		config.ErrorStatus("failed to update vehicle", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Vehicle updated successfully",
+	})
+}
