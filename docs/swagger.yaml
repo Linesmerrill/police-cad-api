@@ -912,10 +912,10 @@ definitions:
         type: string
         x-go-name: UserID
       validInsurance:
-        type: string
+        type: boolean
         x-go-name: ValidInsurance
       validRegistration:
-        type: string
+        type: boolean
         x-go-name: ValidRegistration
       vin:
         type: string
