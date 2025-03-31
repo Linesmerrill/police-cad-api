@@ -111,8 +111,6 @@ definitions:
       CivilianDetails holds the structure for the inner user structure as
       defined in the civilian collection in mongo
     properties:
-      Gender:
-        type: string
       activeCommunityID:
         type: string
         x-go-name: ActiveCommunityID
@@ -136,6 +134,9 @@ definitions:
       firstName:
         type: string
         x-go-name: FirstName
+      gender:
+        type: string
+        x-go-name: Gender
       hairColor:
         type: string
         x-go-name: HairColor
@@ -884,6 +885,9 @@ definitions:
       isStolen:
         type: string
         x-go-name: IsStolen
+      make:
+        type: string
+        x-go-name: Make
       model:
         type: string
         x-go-name: Model
@@ -913,6 +917,9 @@ definitions:
       vin:
         type: string
         x-go-name: Vin
+      year:
+        type: string
+        x-go-name: Year
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Warrant:
