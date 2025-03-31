@@ -882,6 +882,9 @@ definitions:
       email:
         type: string
         x-go-name: Email
+      image:
+        type: string
+        x-go-name: Image
       isStolen:
         type: string
         x-go-name: IsStolen
