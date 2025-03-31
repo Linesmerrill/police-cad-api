@@ -19,6 +19,7 @@ type VehicleDetails struct {
 	Make              string             `json:"make" bson:"make"`
 	Model             string             `json:"model" bson:"model"`
 	Year              string             `json:"year" bson:"year"`
+	Image             string             `json:"image" bson:"image"`
 	Color             string             `json:"color" bson:"color"`
 	ValidRegistration string             `json:"validRegistration" bson:"validRegistration"`
 	ValidInsurance    string             `json:"validInsurance" bson:"validInsurance"`
