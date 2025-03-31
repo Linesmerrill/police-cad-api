@@ -16,6 +16,8 @@ type VehicleDatabase interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Vehicle, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Vehicle, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
 }
 
 type vehicleDatabase struct {
@@ -54,4 +56,20 @@ func (c *vehicleDatabase) Find(ctx context.Context, filter interface{}, opts ...
 func (c *vehicleDatabase) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
 	res, err := c.db.Collection(vehicleName).InsertOne(ctx, document, opts...)
 	return res, err
+}
+
+func (c *vehicleDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	err := c.db.Collection(vehicleName).DeleteOne(ctx, filter, opts...)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *vehicleDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := c.db.Collection(vehicleName).UpdateOne(ctx, filter, update, opts...)
+	if err != nil {
+		return err
+	}
+	return nil
 }

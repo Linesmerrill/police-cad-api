@@ -23,7 +23,7 @@ type VehicleDetails struct {
 	Color             string             `json:"color" bson:"color"`
 	ValidRegistration string             `json:"validRegistration" bson:"validRegistration"`
 	ValidInsurance    string             `json:"validInsurance" bson:"validInsurance"`
-	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`
+	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"` // Deprecated, use the registeredOwnerID field
 	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"`
 	IsStolen          string             `json:"isStolen" bson:"isStolen"`
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`
