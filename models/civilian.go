@@ -20,7 +20,7 @@ type CivilianDetails struct {
 	TicketCount          string             `json:"ticketCount" bson:"ticketCount"` // TODO may need to change the database definition
 	Birthday             string             `json:"birthday" bson:"birthday"`
 	Warrants             []interface{}      `json:"warrants" bson:"warrants"` // TODO replace with a concrete type
-	Gender               string             `json:"Gender" bson:"gender"`
+	Gender               string             `json:"gender" bson:"gender"`
 	Address              string             `json:"address" bson:"address"`
 	Race                 string             `json:"race" bson:"race"`
 	HairColor            string             `json:"hairColor" bson:"hairColor"`
