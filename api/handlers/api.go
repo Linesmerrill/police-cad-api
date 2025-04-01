@@ -137,6 +137,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/vehicles/search", api.Middleware(http.HandlerFunc(v.VehiclesByPlateSearchHandler))).Methods("GET")
 
 	apiCreate.Handle("/firearm/{firearm_id}", api.Middleware(http.HandlerFunc(f.FirearmByIDHandler))).Methods("GET")
+	apiCreate.Handle("/firearm/{firearm_id}", api.Middleware(http.HandlerFunc(f.UpdateFirearmHandler))).Methods("PUT")
+	apiCreate.Handle("/firearm/{firearm_id}", api.Middleware(http.HandlerFunc(f.DeleteFirearmHandler))).Methods("DELETE")
 	apiCreate.Handle("/firearm", api.Middleware(http.HandlerFunc(f.CreateFirearmHandler))).Methods("POST")
 	apiCreate.Handle("/firearms", api.Middleware(http.HandlerFunc(f.FirearmHandler))).Methods("GET")
 	apiCreate.Handle("/firearms/user/{user_id}", api.Middleware(http.HandlerFunc(f.FirearmsByUserIDHandler))).Methods("GET")

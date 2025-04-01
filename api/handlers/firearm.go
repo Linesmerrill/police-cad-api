@@ -215,3 +215,79 @@ func (f Firearm) CreateFirearmHandler(w http.ResponseWriter, r *http.Request) {
 		"id":      firearm.ID.Hex(),
 	})
 }
+
+// UpdateFirearmHandler updates a firearm's details
+func (f Firearm) UpdateFirearmHandler(w http.ResponseWriter, r *http.Request) {
+	firearmID := mux.Vars(r)["firearm_id"]
+
+	fID, err := primitive.ObjectIDFromHex(firearmID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Retrieve the existing firearm data
+	existingFirearm, err := f.DB.FindOne(context.Background(), bson.M{"_id": fID})
+	if err != nil {
+		config.ErrorStatus("failed to find firearm", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Convert existing firearm details to a map
+	existingDetailsMap := make(map[string]interface{})
+	data, _ := json.Marshal(existingFirearm.Details)
+	json.Unmarshal(data, &existingDetailsMap)
+
+	// Decode the request body into a map
+	var updateData map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Merge the update data with the existing firearm data
+	for key, value := range updateData {
+		existingDetailsMap[key] = value
+	}
+	existingDetailsMap["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+
+	// Convert the map back to FirearmDetails
+	updatedDetails := models.FirearmDetails{}
+	data, _ = json.Marshal(existingDetailsMap)
+	json.Unmarshal(data, &updatedDetails)
+
+	// Update the firearm in the database
+	err = f.DB.UpdateOne(context.Background(), bson.M{"_id": fID}, bson.M{"$set": bson.M{"firearm": updatedDetails}})
+	if err != nil {
+		config.ErrorStatus("failed to update firearm", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Firearm updated successfully",
+	})
+}
+
+// DeleteFirearmHandler deletes a firearm by its ID
+func (f Firearm) DeleteFirearmHandler(w http.ResponseWriter, r *http.Request) {
+	firearmID := mux.Vars(r)["firearm_id"]
+
+	fID, err := primitive.ObjectIDFromHex(firearmID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Delete the firearm from the database
+	err = f.DB.DeleteOne(context.Background(), bson.M{"_id": fID})
+	if err != nil {
+		config.ErrorStatus("failed to delete firearm", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Firearm deleted successfully",
+	})
+}
