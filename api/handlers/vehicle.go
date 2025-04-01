@@ -298,15 +298,39 @@ func (v Vehicle) UpdateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var vehicle models.Vehicle
-	if err := json.NewDecoder(r.Body).Decode(&vehicle.Details); err != nil {
+	// Retrieve the existing vehicle data
+	// var existingVehicle models.Vehicle
+	existingVehicle, err := v.DB.FindOne(context.Background(), bson.M{"_id": vID})
+	if err != nil {
+		config.ErrorStatus("failed to find vehicle", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Convert existing vehicle details to a map
+	existingDetailsMap := make(map[string]interface{})
+	data, _ := json.Marshal(existingVehicle.Details)
+	json.Unmarshal(data, &existingDetailsMap)
+
+	// Decode the request body into a map
+	var updateData map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
 
-	vehicle.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+	// Merge the update data with the existing vehicle data
+	for key, value := range updateData {
+		existingDetailsMap[key] = value
+	}
+	existingDetailsMap["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
-	err = v.DB.UpdateOne(context.Background(), bson.M{"_id": vID}, bson.M{"$set": bson.M{"vehicle": vehicle.Details}})
+	// Convert the map back to VehicleDetails
+	updatedDetails := models.VehicleDetails{}
+	data, _ = json.Marshal(existingDetailsMap)
+	json.Unmarshal(data, &updatedDetails)
+
+	// Update the vehicle in the database
+	err = v.DB.UpdateOne(context.Background(), bson.M{"_id": vID}, bson.M{"$set": bson.M{"vehicle": updatedDetails}})
 	if err != nil {
 		config.ErrorStatus("failed to update vehicle", http.StatusInternalServerError, w, err)
 		return
