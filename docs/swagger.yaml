@@ -510,6 +510,9 @@ definitions:
       isStolen:
         type: string
         x-go-name: IsStolen
+      linkedCivilianID:
+        type: string
+        x-go-name: LinkedCivilianID
       name:
         type: string
         x-go-name: Name
@@ -888,6 +891,9 @@ definitions:
       isStolen:
         type: string
         x-go-name: IsStolen
+      linkedCivilianID:
+        type: string
+        x-go-name: LinkedCivilianID
       make:
         type: string
         x-go-name: Make
@@ -912,10 +918,10 @@ definitions:
         type: string
         x-go-name: UserID
       validInsurance:
-        type: boolean
+        type: string
         x-go-name: ValidInsurance
       validRegistration:
-        type: boolean
+        type: string
         x-go-name: ValidRegistration
       vin:
         type: string
