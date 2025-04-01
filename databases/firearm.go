@@ -16,6 +16,8 @@ type FirearmDatabase interface {
 	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Firearm, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Firearm, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
 }
 
 type firearmDatabase struct {
@@ -54,4 +56,13 @@ func (c *firearmDatabase) Find(ctx context.Context, filter interface{}, opts ...
 func (c *firearmDatabase) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
 	res, err := c.db.Collection(firearmName).InsertOne(ctx, document, opts...)
 	return res, err
+}
+
+func (c *firearmDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	return c.db.Collection(firearmName).DeleteOne(ctx, filter, opts...)
+}
+
+func (c *firearmDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := c.db.Collection(firearmName).UpdateOne(ctx, filter, update, opts...)
+	return err
 }
