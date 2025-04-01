@@ -21,6 +21,7 @@ type VehicleDetails struct {
 	Year              string             `json:"year" bson:"year"`
 	Image             string             `json:"image" bson:"image"`
 	Color             string             `json:"color" bson:"color"`
+	LinkedCivilianID  string             `json:"linkedCivilianID" bson:"linkedCivilianID"`
 	ValidRegistration string             `json:"validRegistration" bson:"validRegistration"` // TODO change to boolean
 	ValidInsurance    string             `json:"validInsurance" bson:"validInsurance"`       // TODO change to boolean
 	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`     // Deprecated, use the registeredOwnerID field
