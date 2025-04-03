@@ -20,6 +20,7 @@ type FirearmDetails struct {
 	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`
 	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"`
 	IsStolen          string             `json:"isStolen" bson:"isStolen"`
+	Image             string             `json:"image" bson:"image"`
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	UserID            string             `json:"userID" bson:"userID"`
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
