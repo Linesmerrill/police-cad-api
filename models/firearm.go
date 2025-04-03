@@ -15,6 +15,7 @@ type FirearmDetails struct {
 	SerialNumber      string             `json:"serialNumber" bson:"serialNumber"`
 	Name              string             `json:"name" bson:"name"`
 	WeaponType        string             `json:"weaponType" bson:"weaponType"`
+	Caliber           string             `json:"caliber" bson:"caliber"`
 	LinkedCivilianID  string             `json:"linkedCivilianID" bson:"linkedCivilianID"`
 	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`
 	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"`
