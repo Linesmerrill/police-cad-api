@@ -41,6 +41,7 @@ func (a *App) New() *mux.Router {
 	ev := EmsVehicle{DB: databases.NewEmsVehicleDatabase(a.dbHelper)}
 	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper)}
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
+	bolo := Bolo{DB: databases.NewBoloDatabase(a.dbHelper)}
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
@@ -159,9 +160,13 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/emsVehicle/{ems_vehicle_id}", api.Middleware(http.HandlerFunc(ev.EmsVehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/emsVehicles", api.Middleware(http.HandlerFunc(ev.EmsVehicleHandler))).Methods("GET")
 	apiCreate.Handle("/emsVehicles/user/{user_id}", api.Middleware(http.HandlerFunc(ev.EmsVehiclesByUserIDHandler))).Methods("GET")
+
 	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.CallByIDHandler))).Methods("GET")
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
 	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET")
+
+	apiCreate.Handle("/bolo", api.Middleware(http.HandlerFunc(bolo.CreateBoloHandler))).Methods("POST")
+	apiCreate.Handle("/bolos", api.Middleware(http.HandlerFunc(bolo.FetchDepartmentBolosHandler))).Methods("GET")
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")

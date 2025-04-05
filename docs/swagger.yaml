@@ -505,8 +505,14 @@ definitions:
       activeCommunityID:
         type: string
         x-go-name: ActiveCommunityID
+      caliber:
+        type: string
+        x-go-name: Caliber
       createdAt:
         $ref: '#/definitions/DateTime'
+      image:
+        type: string
+        x-go-name: Image
       isStolen:
         type: string
         x-go-name: IsStolen
