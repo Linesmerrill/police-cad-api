@@ -67,21 +67,32 @@ func (b Bolo) FetchDepartmentBolosHandler(w http.ResponseWriter, r *http.Request
 	}
 	skip64 := int64(Page * Limit)
 
-	// Fetch total count
-	totalCount, err := b.DB.CountDocuments(context.TODO(), bson.M{
+	// Create the base filter
+	filter := bson.M{
 		"bolo.communityID":  communityID,
 		"bolo.departmentID": departmentID,
-	})
+	}
+
+	// Add optional key-value filter
+	for key, values := range r.URL.Query() {
+		if key != "communityId" && key != "departmentId" && key != "limit" && key != "page" {
+			if boolValue, err := strconv.ParseBool(values[0]); err == nil {
+				filter["bolo."+key] = boolValue
+			} else {
+				filter["bolo."+key] = values[0]
+			}
+		}
+	}
+
+	// Fetch total count
+	totalCount, err := b.DB.CountDocuments(context.TODO(), filter)
 	if err != nil {
 		config.ErrorStatus("failed to get total count of BOLOs", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Fetch paginated data
-	dbResp, err := b.DB.Find(context.TODO(), bson.M{
-		"bolo.communityID":  communityID,
-		"bolo.departmentID": departmentID,
-	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	dbResp, err := b.DB.Find(context.TODO(), filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get BOLOs", http.StatusNotFound, w, err)
 		return
