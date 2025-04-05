@@ -20,4 +20,5 @@ type BoloDetails struct {
 	ReportedByID string             `json:"reportedByID" bson:"reportedByID"`
 	Status       bool               `json:"status" bson:"status"`
 	CreatedAt    primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt    primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }

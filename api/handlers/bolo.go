@@ -163,6 +163,9 @@ func (b Bolo) UpdateBoloHandler(w http.ResponseWriter, r *http.Request) {
 		update["bolo."+key] = value
 	}
 
+	// Set updatedAt to the current time
+	update["bolo.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+
 	filter := bson.M{"_id": bID}
 	err = b.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
 	if err != nil {
