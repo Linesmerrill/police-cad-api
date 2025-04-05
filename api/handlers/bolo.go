@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -27,6 +28,27 @@ type PaginatedResponse struct {
 	Page       int           `json:"page"`
 	TotalCount int64         `json:"totalCount"`
 	Data       []models.Bolo `json:"data"`
+}
+
+// GetBoloByIDHandler retrieves a BOLO by its ID
+func (b Bolo) GetBoloByIDHandler(w http.ResponseWriter, r *http.Request) {
+	boloID := mux.Vars(r)["bolo_id"]
+
+	bID, err := primitive.ObjectIDFromHex(boloID)
+	if err != nil {
+		config.ErrorStatus("invalid BOLO ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": bID}
+	bolo, err := b.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to find BOLO", http.StatusNotFound, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(bolo)
 }
 
 // FetchDepartmentBolosHandler returns all BOLOs for a given community and department
@@ -107,4 +129,57 @@ func (b Bolo) CreateBoloHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "BOLO created successfully",
 		"id":      newBolo.ID.Hex(),
 	})
+}
+
+// UpdateBoloHandler updates the details of an existing BOLO
+func (b Bolo) UpdateBoloHandler(w http.ResponseWriter, r *http.Request) {
+	boloID := mux.Vars(r)["bolo_id"]
+
+	var updatedDetails map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedDetails); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	bID, err := primitive.ObjectIDFromHex(boloID)
+	if err != nil {
+		config.ErrorStatus("invalid BOLO ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	update := bson.M{}
+	for key, value := range updatedDetails {
+		update["bolo."+key] = value
+	}
+
+	filter := bson.M{"_id": bID}
+	err = b.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
+	if err != nil {
+		config.ErrorStatus("failed to update BOLO", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "BOLO updated successfully"}`))
+}
+
+// DeleteBoloHandler deletes an existing BOLO
+func (b Bolo) DeleteBoloHandler(w http.ResponseWriter, r *http.Request) {
+	boloID := mux.Vars(r)["bolo_id"]
+
+	bID, err := primitive.ObjectIDFromHex(boloID)
+	if err != nil {
+		config.ErrorStatus("invalid BOLO ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": bID}
+	err = b.DB.DeleteOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to delete BOLO", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "BOLO deleted successfully"}`))
 }

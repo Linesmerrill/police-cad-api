@@ -17,6 +17,8 @@ type BoloDatabase interface {
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Bolo, error)
 	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
 	InsertOne(ctx context.Context, bolo models.Bolo, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
+	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 }
 
 type boloDatabase struct {
@@ -66,4 +68,17 @@ func (c *boloDatabase) InsertOne(ctx context.Context, bolo models.Bolo, opts ...
 		return nil, err
 	}
 	return res, nil
+}
+
+func (c *boloDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := c.db.Collection(boloName).UpdateOne(ctx, filter, update, opts...)
+	return err
+}
+
+func (c *boloDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	err := c.db.Collection(boloName).DeleteOne(ctx, filter, opts...)
+	if err != nil {
+		return err
+	}
+	return nil
 }
