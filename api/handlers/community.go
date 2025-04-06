@@ -1711,6 +1711,59 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(`{"message": "Ten-Code deleted successfully"}`))
 }
 
+// UpdateTenCodeHandler updates a Ten-Code in a department
+func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+	codeID := mux.Vars(r)["codeId"]
+
+	var requestBody map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
+		return
+	}
+	tID, err := primitive.ObjectIDFromHex(codeID)
+	if err != nil {
+		config.ErrorStatus("invalid Ten-Code ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{
+		"_id":                                cID,
+		"community.departments._id":          dID,
+		"community.departments.tenCodes._id": tID,
+	}
+
+	update := bson.M{}
+	for key, value := range requestBody {
+		update["community.departments.$.tenCodes.$[tenCode]."+key] = value
+	}
+
+	arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
+		Filters: []interface{}{bson.M{"tenCode._id": tID}},
+	})
+
+	err = c.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update}, arrayFilters)
+	if err != nil {
+		config.ErrorStatus("failed to update Ten-Code", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Ten-Code updated successfully"}`))
+}
+
 func defaultTenCodes() []models.TenCodes {
 	return []models.TenCodes{
 		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
