@@ -1403,16 +1403,25 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Updated filter to properly match the nested structure
 	filter := bson.M{
-		"_id":                                  cID,
-		"community.departments._id":            dID,
-		"community.departments.members.userID": userID,
+		"_id":                       cID,
+		"community.departments._id": dID,
 	}
+
+	// Updated update statement with proper nested path
 	update := bson.M{
-		"$set": bson.M{"community.departments.$.members.$[member].tenCodeID": requestBody.TenCodeID},
+		"$set": bson.M{
+			"community.departments.$[dept].members.$[member].tenCodeID": requestBody.TenCodeID,
+		},
 	}
+
+	// Array filters to match both department and member
 	arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
-		Filters: []interface{}{bson.M{"member.userID": userID}},
+		Filters: []interface{}{
+			bson.M{"dept._id": dID},
+			bson.M{"member.userID": userID},
+		},
 	})
 
 	err = c.DB.UpdateOne(context.Background(), filter, update, arrayFilters)
