@@ -1378,6 +1378,53 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 	w.Write([]byte(`{"message": "Department members updated successfully"}`))
 }
 
+// SetMemberTenCodeHandler sets the Ten-Code for a member in a department
+func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+	userID := mux.Vars(r)["userId"]
+
+	var requestBody struct {
+		TenCodeID string `json:"tenCodeID"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{
+		"_id":                                  cID,
+		"community.departments._id":            dID,
+		"community.departments.members.userID": userID,
+	}
+	update := bson.M{
+		"$set": bson.M{"community.departments.$.members.$[member].tenCodeID": requestBody.TenCodeID},
+	}
+	arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
+		Filters: []interface{}{bson.M{"member.userID": userID}},
+	})
+
+	err = c.DB.UpdateOne(context.Background(), filter, update, arrayFilters)
+	if err != nil {
+		config.ErrorStatus("failed to set Ten-Code for member", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Ten-Code set successfully"}`))
+}
+
 // FetchDepartmentByIDHandler returns a department by ID
 func (c Community) FetchDepartmentByIDHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
