@@ -1810,7 +1810,10 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Ten-Code added successfully"}`))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Ten-Code added successfully",
+		"tenCode": newTenCode,
+	})
 }
 
 func defaultTenCodes() []models.TenCodes {
