@@ -40,9 +40,17 @@ type Department struct {
 	Image            string             `json:"image" bson:"image"`
 	ApprovalRequired bool               `json:"approvalRequired" bson:"approvalRequired"`
 	Members          []MemberStatus     `json:"members" bson:"members"`
+	TenCodes         []TenCodes         `json:"tenCodes" bson:"tenCodes"`
 	Template         Template           `json:"template" bson:"template"`
 	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt        primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// TenCodes holds the structure for ten-codes used in departments
+type TenCodes struct {
+	ID          primitive.ObjectID `json:"_id" bson:"_id"`
+	Code        string             `json:"code" bson:"code"`
+	Description string             `json:"description" bson:"description"`
 }
 
 // Template holds the structure for a department template
@@ -79,8 +87,9 @@ type Event struct {
 
 // MemberStatus holds the structure for a member status
 type MemberStatus struct {
-	UserID string `json:"userID" bson:"userID"`
-	Status string `json:"status" bson:"status"`
+	UserID    string `json:"userID" bson:"userID"`
+	Status    string `json:"status" bson:"status"`
+	TenCodeID string `json:"tenCodeID" bson:"tenCodeID"`
 }
 
 // Attendance holds the structure for attendance
