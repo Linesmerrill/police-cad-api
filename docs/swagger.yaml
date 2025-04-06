@@ -317,6 +317,11 @@ definitions:
         x-go-name: Name
       template:
         $ref: '#/definitions/Template'
+      tenCodes:
+        items:
+          $ref: '#/definitions/TenCodes'
+        type: array
+        x-go-name: TenCodes
       updatedAt:
         $ref: '#/definitions/DateTime'
     type: object
@@ -649,6 +654,9 @@ definitions:
       status:
         type: string
         x-go-name: Status
+      tenCodeID:
+        type: string
+        x-go-name: TenCodeID
       userID:
         type: string
         x-go-name: UserID
@@ -760,6 +768,19 @@ definitions:
       name:
         type: string
         x-go-name: Name
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  TenCodes:
+    description: TenCodes holds the structure for ten-codes used in departments
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      code:
+        type: string
+        x-go-name: Code
+      description:
+        type: string
+        x-go-name: Description
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   User:

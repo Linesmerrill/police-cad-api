@@ -1257,6 +1257,9 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 	department.CreatedAt = now
 	department.UpdatedAt = now
 
+	// Set default ten codes
+	department.TenCodes = defaultTenCodes()
+
 	// Convert the community ID to a primitive.ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
@@ -1610,4 +1613,76 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department join request updated successfully"}`))
+}
+
+func defaultTenCodes() []models.TenCodes {
+	return []models.TenCodes{
+		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
+		{ID: primitive.NewObjectID(), Code: "Signal 60", Description: "Drugs"},
+		{ID: primitive.NewObjectID(), Code: "Signal 41", Description: "Log on to MDT"},
+		{ID: primitive.NewObjectID(), Code: "Signal 42", Description: "Log out of MDT"},
+		{ID: primitive.NewObjectID(), Code: "Signal 37", Description: "Meet @ ..."},
+		{ID: primitive.NewObjectID(), Code: "Code 4", Description: "Under Control"},
+		{ID: primitive.NewObjectID(), Code: "Code 5", Description: "Felony Stop/High Risk Stop"},
+		{ID: primitive.NewObjectID(), Code: "10-0", Description: "Disappeared"},
+		{ID: primitive.NewObjectID(), Code: "10-1", Description: "Frequency Change"},
+		{ID: primitive.NewObjectID(), Code: "10-2", Description: "Radio Check Loud and Clear"},
+		{ID: primitive.NewObjectID(), Code: "10-3", Description: "Stop Transmitting"},
+		{ID: primitive.NewObjectID(), Code: "10-4", Description: "Affirmative"},
+		{ID: primitive.NewObjectID(), Code: "10-6", Description: "Busy"},
+		{ID: primitive.NewObjectID(), Code: "10-7", Description: "Out of Service"},
+		{ID: primitive.NewObjectID(), Code: "10-8", Description: "In Service"},
+		{ID: primitive.NewObjectID(), Code: "10-9", Description: "Repeat Last Transmission"},
+		{ID: primitive.NewObjectID(), Code: "10-10", Description: "Fight in Progress"},
+		{ID: primitive.NewObjectID(), Code: "10-11", Description: "Traffic Stop"},
+		{ID: primitive.NewObjectID(), Code: "10-12", Description: "Active Ride Along"},
+		{ID: primitive.NewObjectID(), Code: "10-13", Description: "Shots Fired"},
+		{ID: primitive.NewObjectID(), Code: "10-15", Description: "Subject in Custody"},
+		{ID: primitive.NewObjectID(), Code: "10-16", Description: "Stolen Vehicle"},
+		{ID: primitive.NewObjectID(), Code: "10-17", Description: "Suspicious Person"},
+		{ID: primitive.NewObjectID(), Code: "10-19", Description: "Return to Station"},
+		{ID: primitive.NewObjectID(), Code: "10-20", Description: "Location"},
+		{ID: primitive.NewObjectID(), Code: "10-21", Description: "Contact via Discord/Text"},
+		{ID: primitive.NewObjectID(), Code: "10-22", Description: "Disregard"},
+		{ID: primitive.NewObjectID(), Code: "10-23", Description: "Arrived on Scene"},
+		{ID: primitive.NewObjectID(), Code: "10-25", Description: "Domestic Dispute"},
+		{ID: primitive.NewObjectID(), Code: "10-26", Description: "ETA"},
+		{ID: primitive.NewObjectID(), Code: "10-27", Description: "Name Check"},
+		{ID: primitive.NewObjectID(), Code: "10-28", Description: "Plate Check"},
+		{ID: primitive.NewObjectID(), Code: "10-29", Description: "Warrant Check"},
+		{ID: primitive.NewObjectID(), Code: "10-30", Description: "Wanted Person"},
+		{ID: primitive.NewObjectID(), Code: "10-31", Description: "Not Wanted, No Warrants"},
+		{ID: primitive.NewObjectID(), Code: "10-32", Description: "Request Backup (Code 1-2-3)"},
+		{ID: primitive.NewObjectID(), Code: "10-41", Description: "Beginning Tour of Duty"},
+		{ID: primitive.NewObjectID(), Code: "10-42", Description: "Ending Tour of Duty"},
+		{ID: primitive.NewObjectID(), Code: "10-43", Description: "Information"},
+		{ID: primitive.NewObjectID(), Code: "10-49", Description: "Homicide"},
+		{ID: primitive.NewObjectID(), Code: "10-50", Description: "Vehicle Accident"},
+		{ID: primitive.NewObjectID(), Code: "10-50 PD", Description: "Property Damage Only"},
+		{ID: primitive.NewObjectID(), Code: "10-50 PI", Description: "Persons Injured"},
+		{ID: primitive.NewObjectID(), Code: "10-50 F", Description: "Fatal"},
+		{ID: primitive.NewObjectID(), Code: "10-51", Description: "Request Towing Service"},
+		{ID: primitive.NewObjectID(), Code: "10-52", Description: "Request EMS"},
+		{ID: primitive.NewObjectID(), Code: "10-53", Description: "Request Fire Department"},
+		{ID: primitive.NewObjectID(), Code: "10-55", Description: "Intoxicated Driver"},
+		{ID: primitive.NewObjectID(), Code: "10-56", Description: "Suicide"},
+		{ID: primitive.NewObjectID(), Code: "10-56A", Description: "Suicide Attempt"},
+		{ID: primitive.NewObjectID(), Code: "10-60", Description: "Armed with a Gun"},
+		{ID: primitive.NewObjectID(), Code: "10-61", Description: "Armed with a Knife"},
+		{ID: primitive.NewObjectID(), Code: "10-62", Description: "Kidnapping"},
+		{ID: primitive.NewObjectID(), Code: "10-64", Description: "Sexual Assault"},
+		{ID: primitive.NewObjectID(), Code: "10-65", Description: "Escorting Prisoner"},
+		{ID: primitive.NewObjectID(), Code: "10-66", Description: "Reckless Driver"},
+		{ID: primitive.NewObjectID(), Code: "10-67", Description: "Active Fire"},
+		{ID: primitive.NewObjectID(), Code: "10-68", Description: "Armed Robbery"},
+		{ID: primitive.NewObjectID(), Code: "10-70", Description: "Foot Pursuit"},
+		{ID: primitive.NewObjectID(), Code: "10-71", Description: "Request Supervisor at Scene"},
+		{ID: primitive.NewObjectID(), Code: "10-73", Description: "Advise Status or Scene Update"},
+		{ID: primitive.NewObjectID(), Code: "10-80", Description: "Vehicle Pursuit"},
+		{ID: primitive.NewObjectID(), Code: "10-90", Description: "In Game Warning"},
+		{ID: primitive.NewObjectID(), Code: "10-93", Description: "Removed From Game"},
+		{ID: primitive.NewObjectID(), Code: "10-97", Description: "In Route"},
+		{ID: primitive.NewObjectID(), Code: "10-99", Description: "Officer in Distress Extreme Emergency Only"},
+		{ID: primitive.NewObjectID(), Code: "11-44", Description: "Person Deceased"},
+	}
 }
