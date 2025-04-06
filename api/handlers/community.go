@@ -1764,6 +1764,55 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(`{"message": "Ten-Code updated successfully"}`))
 }
 
+// AddTenCodeHandler adds a new Ten-Code to a department
+func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	var requestBody struct {
+		Code        string `json:"code"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	newTenCode := bson.M{
+		"_id":         primitive.NewObjectID(),
+		"code":        requestBody.Code,
+		"description": requestBody.Description,
+	}
+
+	filter := bson.M{
+		"_id":                       cID,
+		"community.departments._id": dID,
+	}
+	update := bson.M{
+		"$push": bson.M{"community.departments.$.tenCodes": newTenCode},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add Ten-Code", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Ten-Code added successfully"}`))
+}
+
 func defaultTenCodes() []models.TenCodes {
 	return []models.TenCodes{
 		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
