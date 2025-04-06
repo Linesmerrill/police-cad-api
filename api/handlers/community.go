@@ -1671,6 +1671,46 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 	w.Write([]byte(`{"message": "Department join request updated successfully"}`))
 }
 
+// DeleteTenCodeHandler deletes a Ten-Code from a department
+func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+	codeID := mux.Vars(r)["codeId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
+		return
+	}
+	tID, err := primitive.ObjectIDFromHex(codeID)
+	if err != nil {
+		config.ErrorStatus("invalid Ten-Code ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{
+		"_id":                       cID,
+		"community.departments._id": dID,
+	}
+	update := bson.M{
+		"$pull": bson.M{"community.departments.$.tenCodes": bson.M{"_id": tID}},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to delete Ten-Code", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Ten-Code deleted successfully"}`))
+}
+
 func defaultTenCodes() []models.TenCodes {
 	return []models.TenCodes{
 		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
