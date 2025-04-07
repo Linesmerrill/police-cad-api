@@ -57,13 +57,12 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbEmailResp, err := m.DB.Find(context.Background(), bson.M{"user.email": email})
-	if err != nil || len(dbEmailResp) == 0 {
+	user, err := m.DB.FindOne(context.Background(), bson.M{"user.email": email})
+	if err != nil {
 		http.Error(w, "failed to get user by email", http.StatusNotFound)
 		return
 	}
 
-	user := dbEmailResp[0]
 	token := uuid.New().String()
 	authUser := auth.NewDefaultUser(email, user.ID, nil, nil)
 	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
@@ -98,18 +97,15 @@ func (m MiddlewareDB) SetupGoGuardian() {
 func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, password string) (auth.Info, error) {
 	usernameHash := sha256.Sum256([]byte(email))
 
-	dbEmailResp, err := m.DB.Find(context.Background(), bson.M{"user.email": email})
+	dbEmailResp, err := m.DB.FindOne(context.Background(), bson.M{"user.email": email})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by email, %v", err)
 	}
-	if len(dbEmailResp) == 0 {
-		return nil, fmt.Errorf("no matching email found")
-	}
 
-	expectedUsernameHash := sha256.Sum256([]byte(dbEmailResp[0].Details.Email))
+	expectedUsernameHash := sha256.Sum256([]byte(dbEmailResp.Details.Email))
 	usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1
 
-	err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp[0].Details.Password), []byte(password))
+	err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp.Details.Password), []byte(password))
 	if err != nil {
 		return nil, fmt.Errorf("failed to compare password")
 	}

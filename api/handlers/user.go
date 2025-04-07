@@ -55,28 +55,82 @@ func (u User) UserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // UsersFindAllHandler runs a mongo find{} query to find all
+// Deprecated: this is not used in the codebase
 func (u User) UsersFindAllHandler(w http.ResponseWriter, r *http.Request) {
 	commID := mux.Vars(r)["active_community_id"]
 
 	zap.S().Debugf("active_community_id: %v", commID)
 
-	dbResp, err := u.DB.Find(context.Background(), bson.M{"user.activeCommunity": commID})
+	cursor, err := u.DB.Find(context.Background(), bson.M{"user.activeCommunity": commID})
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
 	}
+	defer cursor.Close(context.Background())
+
+	var users []models.User
+	if err = cursor.All(context.Background(), &users); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	// Because the frontend requires that the data elements inside models.User exist, if
 	// len == 0 then we will just return an empty data object
-	if len(dbResp) == 0 {
-		dbResp = []models.User{}
+	if len(users) == 0 {
+		users = []models.User{}
 	}
-	b, err := json.Marshal(dbResp)
+	b, err := json.Marshal(users)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// FetchUsersByIdsHandler returns an array of users given an array of user IDs
+func (u User) FetchUsersByIdsHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserIDs []string `json:"userIds"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var objectIDs []primitive.ObjectID
+	for _, id := range requestBody.UserIDs {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+			return
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+
+	filter := bson.M{"_id": bson.M{"$in": objectIDs}}
+	cursor, err := u.DB.Find(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to fetch users", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var users []models.User
+	if err = cursor.All(context.Background(), &users); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if len(users) == 0 {
+		users = []models.User{}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"users": users,
+	})
 }
 
 // UserLoginHandler returns a session token for a user
@@ -86,20 +140,16 @@ func (u User) UserLoginHandler(w http.ResponseWriter, r *http.Request) {
 		usernameHash := sha256.Sum256([]byte(email))
 
 		// fetch email & pass from db
-		dbEmailResp, err := u.DB.Find(context.Background(), bson.M{"user.email": email})
+		dbEmailResp, err := u.DB.FindOne(context.Background(), bson.M{"user.email": email})
 		if err != nil {
 			config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 			return
 		}
-		if len(dbEmailResp) == 0 {
-			config.ErrorStatus("no matching email found", http.StatusUnauthorized, w, fmt.Errorf("no matching email found"))
-			return
-		}
 
-		expectedUsernameHash := sha256.Sum256([]byte(dbEmailResp[0].Details.Email))
+		expectedUsernameHash := sha256.Sum256([]byte(dbEmailResp.Details.Email))
 		usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1
 
-		err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp[0].Details.Password), []byte(password))
+		err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp.Details.Password), []byte(password))
 		if err != nil {
 			config.ErrorStatus("failed to compare password", http.StatusUnauthorized, w, err)
 			return

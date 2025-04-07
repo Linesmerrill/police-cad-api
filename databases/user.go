@@ -15,7 +15,7 @@ const userName = "users"
 // UserDatabase contains the methods to use with the user database
 type UserDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.User, error)
-	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	InsertOne(ctx context.Context, userDetails models.UserDetails) (InsertOneResultHelper, error)
 	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
@@ -43,17 +43,18 @@ func (u *userDatabase) FindOne(ctx context.Context, filter interface{}) (*models
 	return user, nil
 }
 
-func (u *userDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error) {
+func (u *userDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error) {
 	var users []models.User
 	cur, err := u.db.Collection(userName).Find(ctx, filter, opts...)
 	if err != nil {
-		return nil, err
+		return MongoCursor{}, err
 	}
 	err = cur.Decode(&users)
 	if err != nil {
-		return nil, err
+		return MongoCursor{}, err
 	}
-	return users, nil
+	return *cur, nil
+
 }
 
 func (u *userDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) (InsertOneResultHelper, error) {

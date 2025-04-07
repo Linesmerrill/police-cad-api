@@ -309,12 +309,19 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 
 	// Fetch only the first 10 users' details
 	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
-	users, err := c.UDB.Find(context.Background(), filter, options)
+	cursor, err := c.UDB.Find(context.Background(), filter, options)
 	if err != nil {
 		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, err)
 		return
 	}
 
+	defer cursor.Close(context.Background())
+
+	var users []models.User
+	if err = cursor.All(context.Background(), &users); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
+		return
+	}
 	var members []models.User
 	onlineCount := 0
 
@@ -941,9 +948,17 @@ func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request)
 
 	// Find the banned users
 	userFilter := bson.M{"_id": bson.M{"$in": objectIDs}}
-	bannedUsers, err := c.UDB.Find(context.Background(), userFilter)
+	cursor, err := c.UDB.Find(context.Background(), userFilter)
 	if err != nil {
 		config.ErrorStatus("failed to get banned users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	defer cursor.Close(context.Background())
+
+	var bannedUsers []models.User
+	if err = cursor.All(context.Background(), &bannedUsers); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
 
