@@ -167,11 +167,17 @@ func (c Call) UpdateCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add the updatedAt field to the inner call object
-	requestBody["call.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+	// Add the updatedAt field to the requestBody
+	requestBody["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+
+	// Prefix all keys in requestBody with "call."
+	updateFields := bson.M{}
+	for key, value := range requestBody {
+		updateFields["call."+key] = value
+	}
 
 	update := bson.M{
-		"$set": bson.M{"call": requestBody},
+		"$set": updateFields,
 	}
 
 	filter := bson.M{"_id": cID}
