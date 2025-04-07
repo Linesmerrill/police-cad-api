@@ -166,6 +166,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/emsVehicles/user/{user_id}", api.Middleware(http.HandlerFunc(ev.EmsVehiclesByUserIDHandler))).Methods("GET")
 
 	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.CallByIDHandler))).Methods("GET")
+	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.UpdateCallByIDHandler))).Methods("PUT")
+	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.DeleteCallByIDHandler))).Methods("DELETE")
+	apiCreate.Handle("/call/{call_id}/note/{note_id}", api.Middleware(http.HandlerFunc(call.EditCallNoteByIDHandler))).Methods("PUT")
+	apiCreate.Handle("/call/{call_id}/note/{note_id}", api.Middleware(http.HandlerFunc(call.DeleteCallNoteByIDHandler))).Methods("DELETE")
+	apiCreate.Handle("/call/{call_id}/note", api.Middleware(http.HandlerFunc(call.AddCallNoteHandler))).Methods("POST")
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CreateCallHandler))).Methods("POST")
 	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET")
