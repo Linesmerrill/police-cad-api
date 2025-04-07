@@ -122,6 +122,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/users/{userId}/friends", api.Middleware(http.HandlerFunc(u.fetchUserFriendsByID))).Methods("GET")
 	apiCreate.Handle("/users/{friend_id}/friends-and-mutual-friends", api.Middleware(http.HandlerFunc(u.fetchFriendsAndMutualFriendsCount))).Methods("GET")
 	apiCreate.Handle("/users/{active_community_id}", api.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET")
+	apiCreate.Handle("/users", api.Middleware(http.HandlerFunc(u.FetchUsersByIdsHandler))).Methods("POST")
 	// All routes for user must go above this line
 
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")

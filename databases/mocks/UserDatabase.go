@@ -84,7 +84,7 @@ func (_m *UserDatabase) CountDocuments(ctx context.Context, filter interface{}, 
 }
 
 // Find provides a mock function with given fields: ctx, filter, opts
-func (_m *UserDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.User, error) {
+func (_m *UserDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (databases.MongoCursor, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -98,17 +98,15 @@ func (_m *UserDatabase) Find(ctx context.Context, filter interface{}, opts ...*o
 		panic("no return value specified for Find")
 	}
 
-	var r0 []models.User
+	var r0 databases.MongoCursor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) ([]models.User, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) (databases.MongoCursor, error)); ok {
 		return rf(ctx, filter, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) []models.User); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) databases.MongoCursor); ok {
 		r0 = rf(ctx, filter, opts...)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.User)
-		}
+		r0 = ret.Get(0).(databases.MongoCursor)
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, interface{}, ...*options.FindOptions) error); ok {
