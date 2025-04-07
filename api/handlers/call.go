@@ -155,7 +155,7 @@ func (c Call) CreateCallHandler(w http.ResponseWriter, r *http.Request) {
 func (c Call) UpdateCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 	callID := mux.Vars(r)["call_id"]
 
-	var requestBody models.CallDetails
+	var requestBody map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
@@ -167,12 +167,10 @@ func (c Call) UpdateCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestBody.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+	requestBody["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
 	update := bson.M{
-		"$set": bson.M{
-			"call": requestBody,
-		},
+		"$set": requestBody,
 	}
 
 	filter := bson.M{"_id": cID}
@@ -255,8 +253,8 @@ func (c Call) EditCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) {
 	callID := mux.Vars(r)["call_id"]
 	noteID := mux.Vars(r)["note_id"]
 
-	var updatedNote models.CallNotes
-	if err := json.NewDecoder(r.Body).Decode(&updatedNote); err != nil {
+	var requestBody map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -267,14 +265,11 @@ func (c Call) EditCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updatedNote.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+	requestBody["call.callNotes.$.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
 	filter := bson.M{"_id": cID, "call.callNotes.id": noteID}
 	update := bson.M{
-		"$set": bson.M{
-			"call.callNotes.$.note":      updatedNote.Note,
-			"call.callNotes.$.updatedAt": updatedNote.UpdatedAt,
-		},
+		"$set": requestBody,
 	}
 
 	_, err = c.DB.UpdateOne(context.Background(), filter, update)
