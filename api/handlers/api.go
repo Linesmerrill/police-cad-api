@@ -167,6 +167,7 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.CallByIDHandler))).Methods("GET")
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
+	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CreateCallHandler))).Methods("POST")
 	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET")
 
 	apiCreate.Handle("/bolo/{bolo_id}", api.Middleware(http.HandlerFunc(bolo.GetBoloByIDHandler))).Methods("GET")

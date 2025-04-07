@@ -15,6 +15,7 @@ const callName = "calls"
 type CallDatabase interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Call, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Call, error)
+	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 }
 
 type callDatabase struct {
@@ -48,4 +49,9 @@ func (c *callDatabase) Find(ctx context.Context, filter interface{}, opts ...*op
 		return nil, err
 	}
 	return calls, nil
+}
+
+func (c *callDatabase) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	res, err := c.db.Collection(callName).InsertOne(ctx, document, opts...)
+	return res, err
 }

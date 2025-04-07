@@ -51,9 +51,14 @@ definitions:
           type: object
         type: array
         x-go-name: AssignedOfficers
+      assignedTo:
+        items:
+          type: string
+        type: array
+        x-go-name: AssignedTo
       callNotes:
         items:
-          type: object
+          $ref: '#/definitions/CallNotes'
         type: array
         x-go-name: CallNotes
       classifier:
@@ -82,15 +87,49 @@ definitions:
       createdByUsername:
         type: string
         x-go-name: CreatedByUsername
+      departments:
+        items:
+          type: string
+        type: array
+        x-go-name: Departments
+      details:
+        type: string
+        x-go-name: Details
       shortDescription:
         type: string
         x-go-name: ShortDescription
       status:
         type: boolean
         x-go-name: Status
+      title:
+        type: string
+        x-go-name: Title
       updatedAt:
         type: object
         x-go-name: UpdatedAt
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  CallNotes:
+    description: CallNotes holds the structure for the notes associated with a call
+    properties:
+      _id:
+        type: string
+        x-go-name: ID
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      createdBy:
+        type: string
+        x-go-name: CreatedBy
+      note:
+        type: string
+        x-go-name: Note
+      updatedAt:
+        type: object
+        x-go-name: UpdatedAt
+      updatedBy:
+        type: string
+        x-go-name: UpdatedBy
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Civilian:
