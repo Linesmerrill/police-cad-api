@@ -327,7 +327,7 @@ func (c Call) DeleteCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) 
 	filter := bson.M{"_id": cID}
 	update := bson.M{
 		"$pull": bson.M{
-			"call.callNotes": bson.M{"id": noteID},
+			"call.callNotes": bson.M{"_id": noteID},
 		},
 	}
 
