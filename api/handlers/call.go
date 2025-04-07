@@ -294,11 +294,16 @@ func (c Call) EditCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add the updatedAt field to the requestBody
 	requestBody["call.callNotes.$.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
-	filter := bson.M{"_id": cID, "call.callNotes.id": noteID}
+	// Find the call by ID and update the specific note by note ID
+	filter := bson.M{"_id": cID, "call.callNotes._id": noteID}
 	update := bson.M{
-		"$set": requestBody,
+		"$set": bson.M{
+			"call.callNotes.$.note":      requestBody["note"],
+			"call.callNotes.$.updatedAt": requestBody["call.callNotes.$.updatedAt"],
+		},
 	}
 
 	_, err = c.DB.UpdateOne(context.Background(), filter, update)
