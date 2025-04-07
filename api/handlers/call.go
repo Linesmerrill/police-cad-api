@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -117,4 +118,29 @@ func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// CreateCallHandler creates a new call
+func (c Call) CreateCallHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody models.Call
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	requestBody.ID = primitive.NewObjectID().Hex()
+	requestBody.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	requestBody.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	_, err := c.DB.InsertOne(context.Background(), requestBody)
+	if err != nil {
+		config.ErrorStatus("failed to create call", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Call created successfully",
+		"call":    requestBody,
+	})
 }
