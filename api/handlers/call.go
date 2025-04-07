@@ -86,24 +86,25 @@ func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) 
 	zap.S().Debugf("community_id: '%v'", communityID)
 	zap.S().Debugf("status: '%v'", status)
 
-	statusB, err := strconv.ParseBool(status)
-	if err != nil {
-		// if no value is passed or it fails to parse, we will default
-		// grab the events that are true
-		statusB = true
-		err = nil
+	var filter bson.M
+	if communityID != "" && communityID != "null" && communityID != "undefined" {
+		filter = bson.M{
+			"call.communityID": communityID,
+		}
+		if status != "" {
+			statusB, err := strconv.ParseBool(status)
+			if err != nil {
+				config.ErrorStatus("invalid status value", http.StatusBadRequest, w, err)
+				return
+			}
+			filter["call.status"] = statusB
+		}
 	}
 
-	var dbResp []models.Call
-	if communityID != "" && communityID != "null" && communityID != "undefined" {
-		dbResp, err = c.DB.Find(context.TODO(), bson.M{
-			"call.communityID": communityID,
-			"call.status":      statusB,
-		})
-		if err != nil {
-			config.ErrorStatus("failed to get calls with community id", http.StatusNotFound, w, err)
-			return
-		}
+	dbResp, err := c.DB.Find(context.TODO(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get calls with community id", http.StatusNotFound, w, err)
+		return
 	}
 
 	// Because the frontend requires that the data elements inside models.Calls exist, if
