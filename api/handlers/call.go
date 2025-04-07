@@ -150,3 +150,171 @@ func (c Call) CreateCallHandler(w http.ResponseWriter, r *http.Request) {
 		"call":    newCall,
 	})
 }
+
+// UpdateCallByIDHandler updates a call by ID
+func (c Call) UpdateCallByIDHandler(w http.ResponseWriter, r *http.Request) {
+	callID := mux.Vars(r)["call_id"]
+
+	var requestBody models.CallDetails
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(callID)
+	if err != nil {
+		config.ErrorStatus("invalid call ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	requestBody.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	update := bson.M{
+		"$set": bson.M{
+			"call": requestBody,
+		},
+	}
+
+	filter := bson.M{"_id": cID}
+	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update call", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Call updated successfully",
+	})
+}
+
+// DeleteCallByIDHandler deletes a call by ID
+func (c Call) DeleteCallByIDHandler(w http.ResponseWriter, r *http.Request) {
+	callID := mux.Vars(r)["call_id"]
+
+	cID, err := primitive.ObjectIDFromHex(callID)
+	if err != nil {
+		config.ErrorStatus("invalid call ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": cID}
+	err = c.DB.DeleteOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to delete call", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Call deleted successfully",
+	})
+}
+
+// AddCallNoteHandler adds a new note to a call
+func (c Call) AddCallNoteHandler(w http.ResponseWriter, r *http.Request) {
+	callID := mux.Vars(r)["call_id"]
+
+	var newNote models.CallNotes
+	if err := json.NewDecoder(r.Body).Decode(&newNote); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(callID)
+	if err != nil {
+		config.ErrorStatus("invalid call ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	newNote.ID = primitive.NewObjectID().Hex()
+	newNote.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	newNote.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	update := bson.M{
+		"$push": bson.M{
+			"call.callNotes": newNote,
+		},
+	}
+
+	filter := bson.M{"_id": cID}
+	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add call note", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Call note added successfully",
+	})
+}
+
+// EditCallNoteByIDHandler edits a note of a call by note ID
+func (c Call) EditCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) {
+	callID := mux.Vars(r)["call_id"]
+	noteID := mux.Vars(r)["note_id"]
+
+	var updatedNote models.CallNotes
+	if err := json.NewDecoder(r.Body).Decode(&updatedNote); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(callID)
+	if err != nil {
+		config.ErrorStatus("invalid call ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	updatedNote.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	filter := bson.M{"_id": cID, "call.callNotes.id": noteID}
+	update := bson.M{
+		"$set": bson.M{
+			"call.callNotes.$.note":      updatedNote.Note,
+			"call.callNotes.$.updatedAt": updatedNote.UpdatedAt,
+		},
+	}
+
+	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update call note", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Call note updated successfully",
+	})
+}
+
+// DeleteCallNoteByIDHandler deletes a note of a call by note ID
+func (c Call) DeleteCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) {
+	callID := mux.Vars(r)["call_id"]
+	noteID := mux.Vars(r)["note_id"]
+
+	cID, err := primitive.ObjectIDFromHex(callID)
+	if err != nil {
+		config.ErrorStatus("invalid call ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$pull": bson.M{
+			"call.callNotes": bson.M{"id": noteID},
+		},
+	}
+
+	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to delete call note", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Call note deleted successfully",
+	})
+}
