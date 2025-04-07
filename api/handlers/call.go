@@ -236,13 +236,35 @@ func (c Call) AddCallNoteHandler(w http.ResponseWriter, r *http.Request) {
 	newNote.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	newNote.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
 
+	// Check if call.callNotes is null and initialize it if necessary
+	filter := bson.M{"_id": cID}
+
+	callDoc, err := c.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to find call", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if callDoc.Details.CallNotes == nil {
+		update := bson.M{
+			"$set": bson.M{
+				"call.callNotes": []models.CallNotes{},
+			},
+		}
+		_, err = c.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to initialize call notes", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
+	// Add the new note to call.callNotes
 	update := bson.M{
 		"$push": bson.M{
 			"call.callNotes": newNote,
 		},
 	}
 
-	filter := bson.M{"_id": cID}
 	_, err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add call note", http.StatusInternalServerError, w, err)
