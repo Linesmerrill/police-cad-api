@@ -25,10 +25,19 @@ type UserDetails struct {
 	Notifications         []Notification        `json:"notifications" bson:"notifications"`
 	Communities           []UserCommunity       `json:"communities" bson:"communities"`
 	IsOnline              bool                  `json:"isOnline" bson:"isOnline"`
+	Subscription          Subscription          `json:"subscription" bson:"subscription"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt             interface{}           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Subscription holds the structure for a user's subscription
+type Subscription struct {
+	Plan      string      `json:"plan" bson:"plan"`
+	Active    bool        `json:"active" bson:"active"`
+	CreatedAt interface{} `json:"createdAt" bson:"createdAt"`
+	ExpiresAt interface{} `json:"expiresAt" bson:"expiresAt"`
 }
 
 // Friend holds the structure for a friend
