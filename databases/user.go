@@ -44,17 +44,11 @@ func (u *userDatabase) FindOne(ctx context.Context, filter interface{}) (*models
 }
 
 func (u *userDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error) {
-	var users []models.User
-	cur, err := u.db.Collection(userName).Find(ctx, filter, opts...)
+	cursor, err := u.db.Collection(userName).Find(ctx, filter, opts...)
 	if err != nil {
 		return MongoCursor{}, err
 	}
-	err = cur.Decode(&users)
-	if err != nil {
-		return MongoCursor{}, err
-	}
-	return *cur, nil
-
+	return *cursor, err
 }
 
 func (u *userDatabase) InsertOne(ctx context.Context, userDetails models.UserDetails) (InsertOneResultHelper, error) {
