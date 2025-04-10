@@ -946,6 +946,12 @@ func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request)
 		objectIDs = append(objectIDs, objID)
 	}
 
+	if len(objectIDs) == 0 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("[]"))
+		return
+	}
+
 	// Find the banned users
 	userFilter := bson.M{"_id": bson.M{"$in": objectIDs}}
 	cursor, err := c.UDB.Find(context.Background(), userFilter)
