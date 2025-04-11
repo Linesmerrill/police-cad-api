@@ -1837,6 +1837,7 @@ func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 	filter := bson.M{"_id": userID}
 	update := bson.M{
 		"$set": bson.M{
+			"user.subscription.plan":      "free",
 			"user.subscription.active":    false,
 			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
