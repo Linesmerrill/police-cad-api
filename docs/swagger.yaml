@@ -797,15 +797,28 @@ definitions:
       active:
         type: boolean
         x-go-name: Active
+      ads:
+        type: string
+        x-go-name: Ads
+      communitiesLimit:
+        format: int64
+        type: integer
+        x-go-name: CommunitiesLimit
       createdAt:
         type: object
         x-go-name: CreatedAt
+      customDepartments:
+        type: boolean
+        x-go-name: CustomDepartments
       expiresAt:
         type: object
         x-go-name: ExpiresAt
       plan:
         type: string
         x-go-name: Plan
+      verified:
+        type: boolean
+        x-go-name: Verified
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Template:
