@@ -791,6 +791,23 @@ definitions:
         x-go-name: Permissions
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Subscription:
+    description: Subscription holds the structure for a user's subscription
+    properties:
+      active:
+        type: boolean
+        x-go-name: Active
+      createdAt:
+        type: object
+        x-go-name: CreatedAt
+      expiresAt:
+        type: object
+        x-go-name: ExpiresAt
+      plan:
+        type: string
+        x-go-name: Plan
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   Template:
     description: Template holds the structure for a department template
     properties:
@@ -914,6 +931,8 @@ definitions:
       resetPasswordToken:
         type: string
         x-go-name: ResetPasswordToken
+      subscription:
+        $ref: '#/definitions/Subscription'
       updatedAt:
         type: object
         x-go-name: UpdatedAt

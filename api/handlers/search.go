@@ -77,10 +77,22 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	userOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	users, err := s.UserDB.Find(context.Background(), userFilter, userOptions)
+	cursor, err := s.UserDB.Find(context.Background(), userFilter, userOptions)
 	if err != nil {
 		config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	defer cursor.Close(context.Background())
+
+	var users []models.User
+	if err = cursor.All(context.Background(), &users); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if users == nil {
+		users = []models.User{}
 	}
 
 	// Search for communities with visibility set to "public"
