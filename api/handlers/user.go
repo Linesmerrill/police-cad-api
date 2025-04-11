@@ -1775,3 +1775,81 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User added to department with pending status successfully"}`))
 }
+
+// SubscribeUserHandler subscribes a user to a specific tier
+func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID   string `json:"userId"`
+		Tier     string `json:"tier"`
+		IsAnnual bool   `json:"isAnnual"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": userID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.plan":      requestBody.Tier,
+			"user.subscription.isAnnual":  requestBody.IsAnnual,
+			"user.subscription.active":    true,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to subscribe user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "User subscribed successfully",
+	})
+}
+
+// UnsubscribeUserHandler unsubscribes a user
+func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID string `json:"userId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": userID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active":    false,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to unsubscribe user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "User unsubscribed successfully",
+	})
+}
