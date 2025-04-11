@@ -40,6 +40,7 @@ type Subscription struct {
 	Ads               string      `json:"ads" bson:"ads"`
 	CustomDepartments bool        `json:"customDepartments" bson:"customDepartments"`
 	Verified          bool        `json:"verified" bson:"verified"`
+	IsAnnual          bool        `json:"isAnnual" bson:"isAnnual"`
 	CreatedAt         interface{} `json:"createdAt" bson:"createdAt"`
 	ExpiresAt         interface{} `json:"expiresAt" bson:"expiresAt"`
 }
