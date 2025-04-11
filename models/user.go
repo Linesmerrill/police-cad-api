@@ -34,10 +34,14 @@ type UserDetails struct {
 
 // Subscription holds the structure for a user's subscription
 type Subscription struct {
-	Plan      string      `json:"plan" bson:"plan"`
-	Active    bool        `json:"active" bson:"active"`
-	CreatedAt interface{} `json:"createdAt" bson:"createdAt"`
-	ExpiresAt interface{} `json:"expiresAt" bson:"expiresAt"`
+	Plan              string      `json:"plan" bson:"plan"`
+	Active            bool        `json:"active" bson:"active"`
+	CommunitiesLimit  int         `json:"communitiesLimit" bson:"communitiesLimit"`
+	Ads               string      `json:"ads" bson:"ads"`
+	CustomDepartments bool        `json:"customDepartments" bson:"customDepartments"`
+	Verified          bool        `json:"verified" bson:"verified"`
+	CreatedAt         interface{} `json:"createdAt" bson:"createdAt"`
+	ExpiresAt         interface{} `json:"expiresAt" bson:"expiresAt"`
 }
 
 // Friend holds the structure for a friend
