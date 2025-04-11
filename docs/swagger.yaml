@@ -813,6 +813,9 @@ definitions:
       expiresAt:
         type: object
         x-go-name: ExpiresAt
+      isAnnual:
+        type: boolean
+        x-go-name: IsAnnual
       plan:
         type: string
         x-go-name: Plan

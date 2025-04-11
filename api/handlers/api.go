@@ -99,6 +99,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/unblock", api.Middleware(http.HandlerFunc(u.UnblockUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/unfriend", api.Middleware(http.HandlerFunc(u.UnfriendUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/last-accessed-community", api.Middleware(http.HandlerFunc(u.UpdateLastAccessedCommunityHandler))).Methods("PUT")
+	apiCreate.Handle("/user/subscribe", api.Middleware(http.HandlerFunc(u.SubscribeUserHandler))).Methods("POST")
+	apiCreate.Handle("/user/unsubscribe", api.Middleware(http.HandlerFunc(u.UnsubscribeUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/{userId}/add-friend", api.Middleware(http.HandlerFunc(u.AddFriendHandler))).Methods("POST")
 	apiCreate.Handle("/user/{user_id}/update-status", api.Middleware(http.HandlerFunc(u.UpdateFriendStatusHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.GetUserCommunitiesHandler))).Methods("GET")
