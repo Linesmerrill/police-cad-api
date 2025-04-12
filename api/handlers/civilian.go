@@ -343,21 +343,14 @@ func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Reque
 	newHistory.ID = primitive.NewObjectID()
 	newHistory.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
-	// Update the civilian document: initialize criminalHistory if null, then push the new entry
+	// Update the civilian document: push the new criminal history entry
 	filter := bson.M{"_id": cID}
 	update := bson.M{
-		"$set": bson.M{
-			"civilian.criminalHistory": bson.M{
-				"$cond": bson.M{
-					"if":   bson.M{"$eq": bson.A{"$civilian.criminalHistory", nil}},
-					"then": bson.A{},
-					"else": "$civilian.criminalHistory",
-				},
-			},
-			"civilian.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
 		"$push": bson.M{
 			"civilian.criminalHistory": newHistory,
+		},
+		"$set": bson.M{
+			"civilian.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 
@@ -379,7 +372,8 @@ func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Reque
 	// Respond with success
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Criminal history added successfully",
+		"message":         "Criminal history added successfully",
+		"criminalHistory": newHistory,
 	})
 }
 
