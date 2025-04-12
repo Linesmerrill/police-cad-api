@@ -145,10 +145,11 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	w.Write(b)
 }
 
-// CiviliansByNameSearchHandler returns paginated list of civilians that match the give name
+// CiviliansByNameSearchHandler returns paginated list of civilians that match the given name
 func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Request) {
 	firstName := r.URL.Query().Get("first_name")
 	lastName := r.URL.Query().Get("last_name")
+	name := r.URL.Query().Get("name")
 	activeCommunityID := r.URL.Query().Get("active_community_id") // optional
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
@@ -170,12 +171,27 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	// Likewise, if the user is not in a community, then we will display only the civilians
 	// that are not in a community
 	err = nil
-	dbResp, err = c.DB.Find(context.TODO(), bson.M{
-		"$text": bson.M{
-			"$search": fmt.Sprintf("%s %s", firstName, lastName),
-		},
-		"civilian.activeCommunityID": activeCommunityID,
-	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	var orConditions []bson.M
+
+	if firstName != "" {
+		orConditions = append(orConditions, bson.M{"civilian.firstName": bson.M{"$regex": firstName, "$options": "i"}})
+	}
+	if lastName != "" {
+		orConditions = append(orConditions, bson.M{"civilian.lastName": bson.M{"$regex": lastName, "$options": "i"}})
+	}
+	if name != "" {
+		orConditions = append(orConditions, bson.M{"civilian.name": bson.M{"$regex": name, "$options": "i"}})
+	}
+
+	filter := bson.M{}
+	if len(orConditions) > 0 {
+		filter["$or"] = orConditions
+	}
+	if activeCommunityID != "" {
+		filter["civilian.activeCommunityID"] = activeCommunityID
+	}
+
+	dbResp, err = c.DB.Find(context.TODO(), filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get civilian name search", http.StatusNotFound, w, err)
 		return
