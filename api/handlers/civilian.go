@@ -321,6 +321,8 @@ func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Generate a new ObjectID for the criminal history item
+	newHistory.ID = primitive.NewObjectID()
 	newHistory.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
 	filter := bson.M{"_id": cID}
@@ -349,16 +351,23 @@ func (c Civilian) UpdateCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var updatedHistory map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updatedHistory); err != nil {
+	historyID, err := primitive.ObjectIDFromHex(citationID) // Convert citationID to ObjectID
+	if err != nil {
+		config.ErrorStatus("invalid criminal history ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var updatedFields map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedFields); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
 
-	updatedHistory["civilian.criminalHistory.$.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+	// Add the updatedAt field to track the update time
+	updatedFields["civilian.criminalHistory.$.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
-	filter := bson.M{"_id": cID, "civilian.criminalHistory.citationID": citationID}
-	update := bson.M{"$set": updatedHistory}
+	filter := bson.M{"_id": cID, "civilian.criminalHistory._id": historyID} // Match by the new ID field
+	update := bson.M{"$set": updatedFields}                                 // Dynamically update only the provided fields
 
 	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {

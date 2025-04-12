@@ -333,9 +333,8 @@ definitions:
   CriminalHistory:
     description: CriminalHistory holds the structure for the criminal history
     properties:
-      citationID:
-        type: string
-        x-go-name: CitationID
+      _id:
+        $ref: '#/definitions/ObjectID'
       createdAt:
         $ref: '#/definitions/DateTime'
       fineAmount:
