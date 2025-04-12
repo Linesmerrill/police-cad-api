@@ -24,8 +24,8 @@ type VehicleDetails struct {
 	LinkedCivilianID  string             `json:"linkedCivilianID" bson:"linkedCivilianID"`
 	ValidRegistration string             `json:"validRegistration" bson:"validRegistration"` // TODO change to boolean
 	ValidInsurance    string             `json:"validInsurance" bson:"validInsurance"`       // TODO change to boolean
-	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`     // Deprecated, use the registeredOwnerID field
-	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"`
+	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`     // Deprecated, use linkedCivilianID
+	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"` // Deprecated, use linkedCivilianID
 	IsStolen          string             `json:"isStolen" bson:"isStolen"`
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	UserID            string             `json:"userID" bson:"userID"`

@@ -170,7 +170,10 @@ func (f Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 	// that are not in a community
 	err = nil
 	dbResp, err = f.DB.Find(context.TODO(), bson.M{
-		"firearm.registeredOwnerID": registeredOwnerID,
+		"$or": []bson.M{
+			{"firearm.registeredOwnerID": registeredOwnerID}, // Deprecated, use linkedCivilianID
+			{"firearm.linkedCivilianID": registeredOwnerID},
+		},
 	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get firearms with empty registered owner id", http.StatusNotFound, w, err)
