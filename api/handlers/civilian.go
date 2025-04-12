@@ -335,9 +335,15 @@ func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Reque
 	newHistory.ID = primitive.NewObjectID()
 	newHistory.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
+	// Check if the criminalHistory field exists and initialize it if null
 	filter := bson.M{"_id": cID}
-	update := bson.M{"$push": bson.M{"civilian.criminalHistory": newHistory}}
+	update := bson.M{
+		"$set": bson.M{"civilian.criminalHistory": bson.A{}},
+	}
+	_ = c.DB.UpdateOne(context.Background(), filter, update) // Ignore errors here, it will error if null, which just means it an empty record
 
+	// Push the new criminal history item
+	update = bson.M{"$push": bson.M{"civilian.criminalHistory": newHistory}}
 	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add criminal history", http.StatusInternalServerError, w, err)
