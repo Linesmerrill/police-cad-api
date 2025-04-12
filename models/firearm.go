@@ -17,8 +17,8 @@ type FirearmDetails struct {
 	WeaponType        string             `json:"weaponType" bson:"weaponType"`
 	Caliber           string             `json:"caliber" bson:"caliber"`
 	LinkedCivilianID  string             `json:"linkedCivilianID" bson:"linkedCivilianID"`
-	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`
-	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"`
+	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`     // Deprecated, use linkedCivilianID
+	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"` // Deprecated, use linkedCivilianID
 	IsStolen          string             `json:"isStolen" bson:"isStolen"`
 	Image             string             `json:"image" bson:"image"`
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`
