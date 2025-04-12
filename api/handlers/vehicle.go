@@ -157,7 +157,10 @@ func (v Vehicle) VehiclesByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 
 	err = nil
 	dbResp, err = v.DB.Find(context.TODO(), bson.M{
-		"vehicle.registeredOwnerID": registeredOwnerID,
+		"$or": []bson.M{
+			{"vehicle.registeredOwnerID": registeredOwnerID}, // Deprecated, use linkedCivilianID
+			{"vehicle.linkedCivilianID": registeredOwnerID},
+		},
 	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get vehicles by registered owner id", http.StatusNotFound, w, err)
