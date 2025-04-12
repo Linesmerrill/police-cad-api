@@ -304,3 +304,70 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		"message": "Civilian deleted successfully",
 	})
 }
+
+// AddCriminalHistoryHandler adds a new criminal history item to a civilian
+func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	civilianID := mux.Vars(r)["civilian_id"]
+
+	cID, err := primitive.ObjectIDFromHex(civilianID)
+	if err != nil {
+		config.ErrorStatus("invalid civilian ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var newHistory models.CriminalHistory
+	if err := json.NewDecoder(r.Body).Decode(&newHistory); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	newHistory.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$push": bson.M{"civilian.criminalHistory": newHistory}}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add criminal history", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Criminal history added successfully",
+	})
+}
+
+// UpdateCriminalHistoryHandler updates a specific criminal history item
+func (c Civilian) UpdateCriminalHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	civilianID := mux.Vars(r)["civilian_id"]
+	citationID := mux.Vars(r)["citation_id"]
+
+	cID, err := primitive.ObjectIDFromHex(civilianID)
+	if err != nil {
+		config.ErrorStatus("invalid civilian ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var updatedHistory map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedHistory); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	updatedHistory["civilian.criminalHistory.$.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+
+	filter := bson.M{"_id": cID, "civilian.criminalHistory.citationID": citationID}
+	update := bson.M{"$set": updatedHistory}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update criminal history", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Criminal history updated successfully",
+	})
+}

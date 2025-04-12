@@ -20,6 +20,7 @@ type CivilianDetails struct {
 	TicketCount          string             `json:"ticketCount" bson:"ticketCount"` // TODO may need to change the database definition
 	Birthday             string             `json:"birthday" bson:"birthday"`
 	Warrants             []interface{}      `json:"warrants" bson:"warrants"` // TODO replace with a concrete type
+	CriminalHistory      []CriminalHistory  `json:"criminalHistory" bson:"criminalHistory"`
 	Gender               string             `json:"gender" bson:"gender"`
 	Address              string             `json:"address" bson:"address"`
 	Race                 string             `json:"race" bson:"race"`
@@ -38,4 +39,17 @@ type CivilianDetails struct {
 	UserID               string             `json:"userID" bson:"userID"`
 	CreatedAt            primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// CriminalHistory holds the structure for the criminal history
+type CriminalHistory struct {
+	CitationID string             `json:"citationID" bson:"citationID"`
+	OfficerID  string             `json:"officerID" bson:"officerID"`
+	Type       string             `json:"type" bson:"type"`
+	FineType   string             `json:"fineType" bson:"fineType"`
+	FineAmount string             `json:"fineAmount" bson:"fineAmount"`
+	Redacted   bool               `json:"redacted" bson:"redacted"` // Rather than deleting records, we can mark them as redacted
+	Notes      string             `json:"notes" bson:"notes"`
+	CreatedAt  primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt  primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
