@@ -263,20 +263,30 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var civilian models.Civilian
-	if err := json.NewDecoder(r.Body).Decode(&civilian.Details); err != nil {
+	// Decode the incoming changes
+	var updatedFields map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedFields); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
 
-	civilian.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+	// Prepare the update document
+	update := bson.M{}
+	for key, value := range updatedFields {
+		update["civilian."+key] = value
+	}
 
-	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, bson.M{"$set": bson.M{"civilian": civilian.Details}})
+	// Add the updatedAt field to track the update time
+	update["civilian.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+
+	// Update the civilian in the database
+	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update civilian", http.StatusInternalServerError, w, err)
 		return
 	}
 
+	// Return success response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Civilian updated successfully",
