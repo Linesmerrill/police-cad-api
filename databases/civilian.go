@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -18,6 +19,7 @@ type CivilianDatabase interface {
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	FindOneAndUpdate(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) *mongo.SingleResult
 }
 
 type civilianDatabase struct {
@@ -65,4 +67,9 @@ func (c *civilianDatabase) UpdateOne(ctx context.Context, filter interface{}, up
 
 func (c *civilianDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
 	return c.db.Collection(civilianName).DeleteOne(ctx, filter, opts...)
+}
+
+func (c *civilianDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult {
+	res := c.db.Collection(civilianName).FindOneAndUpdate(ctx, filter, update, opts...)
+	return res
 }
