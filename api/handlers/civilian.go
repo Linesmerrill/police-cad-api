@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
@@ -317,38 +318,65 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 
 // AddCriminalHistoryHandler adds a new criminal history item to a civilian
 func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract civilian ID from URL parameters
 	civilianID := mux.Vars(r)["civilian_id"]
-
 	cID, err := primitive.ObjectIDFromHex(civilianID)
 	if err != nil {
 		config.ErrorStatus("invalid civilian ID", http.StatusBadRequest, w, err)
 		return
 	}
 
+	// Decode the request body into a new CriminalHistory struct
 	var newHistory models.CriminalHistory
 	if err := json.NewDecoder(r.Body).Decode(&newHistory); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
 
-	// Generate a new ObjectID for the criminal history item
+	// Validate the new criminal history entry
+	// if newHistory.Charge == "" || newHistory.Date == "" {
+	// 	config.ErrorStatus("charge and date are required fields", http.StatusBadRequest, w, nil)
+	// 	return
+	// }
+
+	// Generate a new ObjectID and set the creation time
 	newHistory.ID = primitive.NewObjectID()
 	newHistory.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
-	// Step 1: Initialize criminalHistory as an empty array if it is null
-	filter := bson.M{"_id": cID, "civilian.criminalHistory": bson.M{"$exists": false}}
-	update := bson.M{"$set": bson.M{"civilian.criminalHistory": bson.A{}}}
-	_ = c.DB.UpdateOne(context.Background(), filter, update) // Ignore errors here
+	// Update the civilian document: initialize criminalHistory if null, then push the new entry
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"civilian.criminalHistory": bson.M{
+				"$cond": bson.M{
+					"if":   bson.M{"$eq": bson.A{"$civilian.criminalHistory", nil}},
+					"then": bson.A{},
+					"else": "$civilian.criminalHistory",
+				},
+			},
+			"civilian.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+		"$push": bson.M{
+			"civilian.criminalHistory": newHistory,
+		},
+	}
 
-	// Step 2: Push the new criminal history item
-	filter = bson.M{"_id": cID}
-	update = bson.M{"$push": bson.M{"civilian.criminalHistory": newHistory}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		config.ErrorStatus("failed to add criminal history", http.StatusInternalServerError, w, err)
+	// Perform the update
+	result := c.DB.FindOneAndUpdate(
+		context.Background(),
+		filter,
+		update,
+	)
+	if result.Err() != nil {
+		if result.Err() == mongo.ErrNoDocuments {
+			config.ErrorStatus("civilian not found", http.StatusNotFound, w, result.Err())
+		} else {
+			config.ErrorStatus("failed to add criminal history", http.StatusInternalServerError, w, result.Err())
+		}
 		return
 	}
 
+	// Respond with success
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Criminal history added successfully",

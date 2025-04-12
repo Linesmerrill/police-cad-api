@@ -155,6 +155,11 @@ func (mc *MongoCollection) DeleteOne(ctx context.Context, filter interface{}, op
 	return err
 }
 
+// FindOneAndUpdate updates a single document and returns the result
+func (mc *MongoCollection) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult {
+	return mc.coll.FindOneAndUpdate(ctx, filter, update, opts...)
+}
+
 // UpdateOne updates a single document in the collection
 func (mc *MongoCollection) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	res, err := mc.coll.UpdateOne(ctx, filter, update, opts...)
