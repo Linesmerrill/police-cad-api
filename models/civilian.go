@@ -43,7 +43,7 @@ type CivilianDetails struct {
 
 // CriminalHistory holds the structure for the criminal history
 type CriminalHistory struct {
-	CitationID string             `json:"citationID" bson:"citationID"`
+	ID         primitive.ObjectID `json:"_id" bson:"_id"`
 	OfficerID  string             `json:"officerID" bson:"officerID"`
 	Type       string             `json:"type" bson:"type"`
 	FineType   string             `json:"fineType" bson:"fineType"`
