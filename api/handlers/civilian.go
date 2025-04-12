@@ -335,18 +335,13 @@ func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Reque
 	newHistory.ID = primitive.NewObjectID()
 	newHistory.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
-	// Use $ifNull to initialize the array only if it is null
-	filter := bson.M{"_id": cID}
-	update := bson.M{
-		"$set": bson.M{
-			"civilian.criminalHistory": bson.M{
-				"$ifNull": bson.A{"$civilian.criminalHistory", bson.A{}},
-			},
-		},
-	}
+	// Step 1: Initialize criminalHistory as an empty array if it is null
+	filter := bson.M{"_id": cID, "civilian.criminalHistory": bson.M{"$exists": false}}
+	update := bson.M{"$set": bson.M{"civilian.criminalHistory": bson.A{}}}
 	_ = c.DB.UpdateOne(context.Background(), filter, update) // Ignore errors here
 
-	// Push the new criminal history item
+	// Step 2: Push the new criminal history item
+	filter = bson.M{"_id": cID}
 	update = bson.M{"$push": bson.M{"civilian.criminalHistory": newHistory}}
 	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
