@@ -76,9 +76,5 @@ func (c *vehicleDatabase) UpdateOne(ctx context.Context, filter interface{}, upd
 }
 
 func (c *vehicleDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
-	count, err := c.db.Collection(vehicleName).CountDocuments(ctx, filter, opts...)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
+	return c.db.Collection(vehicleName).CountDocuments(ctx, filter, opts...)
 }

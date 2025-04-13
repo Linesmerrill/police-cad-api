@@ -151,23 +151,18 @@ func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 func (f Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
 	registeredOwnerID := mux.Vars(r)["registered_owner_id"]
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
 	}
 	limit64 := int64(Limit)
-	Page = getPage(Page, r)
+	Page := getPage(Page, r)
 	skip64 := int64(Page * Limit)
 
 	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
 
 	var dbResp []models.Firearm
 
-	// If the user is in a community then we want to search for firearms that
-	// are in that same community. This way each user can have different firearms
-	// across different communities.
-	//
-	// Likewise, if the user is not in a community, then we will display only the firearms
-	// that are not in a community
+	// Query to fetch firearms
 	err = nil
 	dbResp, err = f.DB.Find(context.TODO(), bson.M{
 		"$or": []bson.M{
@@ -180,12 +175,33 @@ func (f Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Because the frontend requires that the data elements inside models.Firearms exist, if
-	// len == 0 then we will just return an empty data object
+	// Count total firearms for pagination
+	total, err := f.DB.CountDocuments(context.TODO(), bson.M{
+		"$or": []bson.M{
+			{"firearm.registeredOwnerID": registeredOwnerID},
+			{"firearm.linkedCivilianID": registeredOwnerID},
+		},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to count firearms", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Ensure the response is always an array
 	if len(dbResp) == 0 {
 		dbResp = []models.Firearm{}
 	}
-	b, err := json.Marshal(dbResp)
+
+	// Build the response
+	response := map[string]interface{}{
+		"limit":    Limit,
+		"firearms": dbResp,
+		"page":     Page,
+		"total":    total,
+	}
+
+	// Marshal and send the response
+	b, err := json.Marshal(response)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
