@@ -18,6 +18,7 @@ type FirearmDatabase interface {
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
+	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
 }
 
 type firearmDatabase struct {
@@ -65,4 +66,8 @@ func (c *firearmDatabase) DeleteOne(ctx context.Context, filter interface{}, opt
 func (c *firearmDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
 	_, err := c.db.Collection(firearmName).UpdateOne(ctx, filter, update, opts...)
 	return err
+}
+
+func (c *firearmDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	return c.db.Collection(firearmName).CountDocuments(ctx, filter, opts...)
 }
