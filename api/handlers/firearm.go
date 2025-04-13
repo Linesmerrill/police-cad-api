@@ -310,3 +310,66 @@ func (f Firearm) DeleteFirearmHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "Firearm deleted successfully",
 	})
 }
+
+// FirearmsSearchHandler searches for firearms based on name or serial number
+func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	serialNumber := r.URL.Query().Get("serialNumber")
+	communityID := r.URL.Query().Get("communityId")
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
+	}
+	limit64 := int64(Limit)
+	Page := getPage(Page, r)
+	skip64 := int64(Page * Limit)
+
+	var dbResp []models.Firearm
+
+	// Build the query
+	query := bson.M{
+		"$or": []bson.M{
+			{"firearm.name": bson.M{"$regex": name, "$options": "i"}},
+			{"firearm.serialNumber": bson.M{"$regex": serialNumber, "$options": "i"}},
+		},
+	}
+	if communityID != "" {
+		query["firearm.communityId"] = communityID
+	}
+
+	// Fetch firearms
+	dbResp, err = f.DB.Find(context.TODO(), query, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	if err != nil {
+		config.ErrorStatus("failed to search firearms", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Count total firearms for pagination
+	total, err := f.DB.CountDocuments(context.TODO(), query)
+	if err != nil {
+		config.ErrorStatus("failed to count firearms", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Ensure the response is always an array
+	if len(dbResp) == 0 {
+		dbResp = []models.Firearm{}
+	}
+
+	// Build the response
+	response := map[string]interface{}{
+		"limit":    Limit,
+		"firearms": dbResp,
+		"page":     Page,
+		"total":    total,
+	}
+
+	// Marshal and send the response
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}

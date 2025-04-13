@@ -203,61 +203,71 @@ func (v Vehicle) VehiclesByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 	w.Write(b)
 }
 
-// VehiclesByPlateSearchHandler returns paginated list of vehicles that match the give plate
-func (v Vehicle) VehiclesByPlateSearchHandler(w http.ResponseWriter, r *http.Request) {
+// VehicleSearchHandler returns vehicles based on search
+func (v Vehicle) VehicleSearchHandler(w http.ResponseWriter, r *http.Request) {
 	plate := r.URL.Query().Get("plate")
+	vin := r.URL.Query().Get("vin")
+	vehMake := r.URL.Query().Get("make")
+	model := r.URL.Query().Get("model")
 	activeCommunityID := r.URL.Query().Get("active_community_id") // optional
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
 	}
 	limit64 := int64(Limit)
-	Page = getPage(Page, r)
+	Page := getPage(Page, r)
 	skip64 := int64(Page * Limit)
 
 	zap.S().Debugf("plate: '%v'", plate)
+	zap.S().Debugf("vin: '%v'", vin)
+	zap.S().Debugf("make: '%v'", vehMake)
+	zap.S().Debugf("model: '%v'", model)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
 	var dbResp []models.Vehicle
 
-	// If the user is in a community then we want to search for vehicles that
-	// are in that same community. This way each user can have different vehicles
-	// across different communities.
-	//
-	// Likewise, if the user is not in a community, then we will display only the vehicles
-	// that are not in a community
-	err = nil
-	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"$text": bson.M{
-				"$search": fmt.Sprintf("%s", plate),
-			},
-			"vehicle.activeCommunityID": activeCommunityID,
-		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-		if err != nil {
-			config.ErrorStatus("failed to get vehicle plate search with active community id", http.StatusNotFound, w, err)
-			return
-		}
-	} else {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"vehicle.plate": plate,
-			"$or": []bson.M{
-				{"vehicle.activeCommunityID": nil},
-				{"vehicle.activeCommunityID": ""},
-			},
-		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-		if err != nil {
-			config.ErrorStatus("failed to get vehicle plate search with empty active community id", http.StatusNotFound, w, err)
-			return
-		}
+	// Build the query
+	query := bson.M{
+		"$or": []bson.M{
+			{"vehicle.plate": bson.M{"$regex": plate, "$options": "i"}},
+			{"vehicle.vin": bson.M{"$regex": vin, "$options": "i"}},
+			{"vehicle.make": bson.M{"$regex": vehMake, "$options": "i"}},
+			{"vehicle.model": bson.M{"$regex": model, "$options": "i"}},
+		},
+	}
+	if activeCommunityID != "" {
+		query["vehicle.activeCommunityID"] = activeCommunityID
 	}
 
-	// Because the frontend requires that the data elements inside models.Vehicles exist, if
-	// len == 0 then we will just return an empty data object
+	// Fetch vehicles
+	dbResp, err = v.DB.Find(context.TODO(), query, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	if err != nil {
+		config.ErrorStatus("failed to search vehicles", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Count total vehicles for pagination
+	total, err := v.DB.CountDocuments(context.TODO(), query)
+	if err != nil {
+		config.ErrorStatus("failed to count vehicles", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Ensure the response is always an array
 	if len(dbResp) == 0 {
 		dbResp = []models.Vehicle{}
 	}
-	b, err := json.Marshal(dbResp)
+
+	// Build the response
+	response := map[string]interface{}{
+		"limit":    Limit,
+		"vehicles": dbResp,
+		"page":     Page,
+		"total":    total,
+	}
+
+	// Marshal and send the response
+	b, err := json.Marshal(response)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
