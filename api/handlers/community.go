@@ -761,50 +761,43 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Update the role members in the community
-	// Use a single $set operation to handle both initialization (if null) and appending new members
+	// Step 1: If members is null, set it to an empty array
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{
 		"$set": bson.M{
 			"community.roles.$[role].members": bson.M{
-				"$setUnion": []interface{}{
-					bson.M{
-						"$cond": bson.M{
-							"if":   bson.M{"$eq": []interface{}{"$community.roles.$[role].members", nil}},
-							"then": []string{},
-							"else": "$community.roles.$[role].members",
-						},
-					},
-					members,
-				},
+				"$ifNull": []interface{}{"$community.roles.$[role].members", []string{}},
 			},
 		},
 	}
 
-	// Create the array filters as []bson.M
+	// Create array filters for the first update
 	bsonFilters := []bson.M{{"role._id": rID}}
-
-	// Convert []bson.M to []interface{}
 	interfaceFilters := make([]interface{}, len(bsonFilters))
 	for i, filter := range bsonFilters {
 		interfaceFilters[i] = filter
 	}
-
-	// Create array filters and wrap them in options.ArrayFilters
-	arrayFilters := options.ArrayFilters{
-		Filters: interfaceFilters,
-	}
-
-	// Create update options and set the array filters
+	arrayFilters := options.ArrayFilters{Filters: interfaceFilters}
 	opts := options.Update().SetArrayFilters(arrayFilters)
 
-	// Perform the update with the options
-	err = c.DB.UpdateOne(
-		context.Background(),
-		filter,
-		update,
-		opts,
-	)
+	// Perform the first update to initialize members if null
+	err = c.DB.UpdateOne(context.Background(), filter, update, opts)
+	if err != nil {
+		config.ErrorStatus("failed to initialize role members", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Step 2: Append the new members to the array with $addToSet to avoid duplicates
+	update = bson.M{
+		"$addToSet": bson.M{
+			"community.roles.$[role].members": bson.M{
+				"$each": members,
+			},
+		},
+	}
+
+	// Perform the second update to append members
+	err = c.DB.UpdateOne(context.Background(), filter, update, opts)
 	if err != nil {
 		config.ErrorStatus("failed to update role members", http.StatusInternalServerError, w, err)
 		return
