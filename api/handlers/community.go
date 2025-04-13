@@ -664,6 +664,9 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 	// Generate a new _id for the role
 	role.ID = primitive.NewObjectID()
 
+	// Initialize the Members field as an empty array
+	role.Members = []string{}
+
 	var DefaultPermissions = []models.Permission{
 		{
 			ID:          primitive.NewObjectID(),
@@ -737,7 +740,7 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(response)
 }
 
-// UpdateRoleMembersHandler updates the members of a role in a communit
+// UpdateRoleMembersHandler updates the members of a role in a community
 func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	roleID := mux.Vars(r)["roleId"]
@@ -761,30 +764,16 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Step 1: Initialize `members` to an empty array if null
+	// Append new member IDs to the array
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
-
-	// Step 1: Ensure `members` is an array
-	initializeUpdate := bson.M{
-		"$set": bson.M{
-			"community.roles.$.members": bson.A{},
-		},
-	}
-	err = c.DB.UpdateOne(context.Background(), filter, initializeUpdate)
-	if err != nil {
-		config.ErrorStatus("failed to initialize role members", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Step 2: Append the new member IDs
-	appendUpdate := bson.M{
-		"$push": bson.M{
+	update := bson.M{
+		"$addToSet": bson.M{
 			"community.roles.$.members": bson.M{
 				"$each": memberIDs,
 			},
 		},
 	}
-	err = c.DB.UpdateOne(context.Background(), filter, appendUpdate)
+	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update role members", http.StatusInternalServerError, w, err)
 		return
