@@ -18,6 +18,7 @@ type VehicleDatabase interface {
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
+	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
 }
 
 type vehicleDatabase struct {
@@ -72,4 +73,12 @@ func (c *vehicleDatabase) UpdateOne(ctx context.Context, filter interface{}, upd
 		return err
 	}
 	return nil
+}
+
+func (c *vehicleDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	count, err := c.db.Collection(vehicleName).CountDocuments(ctx, filter, opts...)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
