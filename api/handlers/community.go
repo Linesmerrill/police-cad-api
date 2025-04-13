@@ -742,9 +742,9 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 	communityID := mux.Vars(r)["communityId"]
 	roleID := mux.Vars(r)["roleId"]
 
-	// Parse the request body to get the new members
-	var members []string
-	if err := json.NewDecoder(r.Body).Decode(&members); err != nil {
+	// Parse the request body to get the new member IDs
+	var memberIDs []string
+	if err := json.NewDecoder(r.Body).Decode(&memberIDs); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -761,43 +761,30 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Step 1: If members is null, set it to an empty array
+	// Step 1: Initialize `members` to an empty array if null
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
-	update := bson.M{
+
+	// Step 1: Ensure `members` is an array
+	initializeUpdate := bson.M{
 		"$set": bson.M{
-			"community.roles.$[role].members": bson.M{
-				"$ifNull": []interface{}{"$community.roles.$[role].members", []string{}},
-			},
+			"community.roles.$.members": bson.A{},
 		},
 	}
-
-	// Create array filters for the first update
-	bsonFilters := []bson.M{{"role._id": rID}}
-	interfaceFilters := make([]interface{}, len(bsonFilters))
-	for i, filter := range bsonFilters {
-		interfaceFilters[i] = filter
-	}
-	arrayFilters := options.ArrayFilters{Filters: interfaceFilters}
-	opts := options.Update().SetArrayFilters(arrayFilters)
-
-	// Perform the first update to initialize members if null
-	err = c.DB.UpdateOne(context.Background(), filter, update, opts)
+	err = c.DB.UpdateOne(context.Background(), filter, initializeUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to initialize role members", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Step 2: Append the new members to the array with $addToSet to avoid duplicates
-	update = bson.M{
-		"$addToSet": bson.M{
-			"community.roles.$[role].members": bson.M{
-				"$each": members,
+	// Step 2: Append the new member IDs
+	appendUpdate := bson.M{
+		"$push": bson.M{
+			"community.roles.$.members": bson.M{
+				"$each": memberIDs,
 			},
 		},
 	}
-
-	// Perform the second update to append members
-	err = c.DB.UpdateOne(context.Background(), filter, update, opts)
+	err = c.DB.UpdateOne(context.Background(), filter, appendUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to update role members", http.StatusInternalServerError, w, err)
 		return
