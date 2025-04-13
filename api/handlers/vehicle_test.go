@@ -962,7 +962,7 @@ func TestVehicle_VehiclesByPlateSearchHandlerJsonMarshalError(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(u.VehiclesByPlateSearchHandler)
+	handler := http.HandlerFunc(u.VehicleSearchHandler)
 
 	handler.ServeHTTP(rr, req)
 
@@ -1007,7 +1007,7 @@ func TestVehicle_VehiclesByPlateSearchHandlerFailedToFindOne(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(u.VehiclesByPlateSearchHandler)
+	handler := http.HandlerFunc(u.VehicleSearchHandler)
 
 	handler.ServeHTTP(rr, req)
 
@@ -1052,7 +1052,7 @@ func TestVehicle_VehiclesByPlateSearchHandlerFailedToFindOneWithEmptyCommunityID
 	}
 
 	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(u.VehiclesByPlateSearchHandler)
+	handler := http.HandlerFunc(u.VehicleSearchHandler)
 
 	handler.ServeHTTP(rr, req)
 
@@ -1101,7 +1101,7 @@ func TestVehicle_VehiclesByPlateSearchHandlerSuccess(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(u.VehiclesByPlateSearchHandler)
+	handler := http.HandlerFunc(u.VehicleSearchHandler)
 
 	handler.ServeHTTP(rr, req)
 
@@ -1148,7 +1148,7 @@ func TestVehicle_VehiclesByPlateSearchHandlerEmptyResponse(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(u.VehiclesByPlateSearchHandler)
+	handler := http.HandlerFunc(u.VehicleSearchHandler)
 
 	handler.ServeHTTP(rr, req)
 
