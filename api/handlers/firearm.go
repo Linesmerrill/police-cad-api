@@ -334,7 +334,7 @@ func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if communityID != "" {
-		query["firearm.communityId"] = communityID
+		query["firearm.activeCommunityID"] = communityID
 	}
 
 	// Fetch firearms
