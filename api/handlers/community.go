@@ -66,6 +66,9 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	// Set the createdAt and updatedAt fields to the current time
 	newCommunity.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	newCommunity.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
+	newCommunity.Details.InviteCodes = []models.InviteCode{}
+	newCommunity.Details.BanList = []string{}
+	newCommunity.Details.Departments = []models.Department{}
 
 	// Initialize the events slice if it is null
 	if newCommunity.Details.Events == nil {
