@@ -69,6 +69,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.InviteCodes = []models.InviteCode{}
 	newCommunity.Details.BanList = []string{}
 	newCommunity.Details.Departments = []models.Department{}
+	newCommunity.Details.TenCodes = defaultTenCodes()
 
 	// Initialize the events slice if it is null
 	if newCommunity.Details.Events == nil {
@@ -1290,9 +1291,6 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 	department.CreatedAt = now
 	department.UpdatedAt = now
 
-	// Set default ten codes
-	department.TenCodes = defaultTenCodes()
-
 	// Convert the community ID to a primitive.ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
@@ -1700,7 +1698,7 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 // DeleteTenCodeHandler deletes a Ten-Code from a department
 func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
-	departmentID := mux.Vars(r)["departmentId"]
+
 	codeID := mux.Vars(r)["codeId"]
 
 	cID, err := primitive.ObjectIDFromHex(communityID)
@@ -1708,11 +1706,7 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	dID, err := primitive.ObjectIDFromHex(departmentID)
-	if err != nil {
-		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
-		return
-	}
+
 	tID, err := primitive.ObjectIDFromHex(codeID)
 	if err != nil {
 		config.ErrorStatus("invalid Ten-Code ID", http.StatusBadRequest, w, err)
@@ -1720,11 +1714,10 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	filter := bson.M{
-		"_id":                       cID,
-		"community.departments._id": dID,
+		"_id": cID,
 	}
 	update := bson.M{
-		"$pull": bson.M{"community.departments.$.tenCodes": bson.M{"_id": tID}},
+		"$pull": bson.M{"community.tenCodes": bson.M{"_id": tID}},
 	}
 
 	err = c.DB.UpdateOne(context.Background(), filter, update)
@@ -1740,7 +1733,6 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 // UpdateTenCodeHandler updates a Ten-Code in a department
 func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
-	departmentID := mux.Vars(r)["departmentId"]
 	codeID := mux.Vars(r)["codeId"]
 
 	var requestBody map[string]interface{}
@@ -1754,11 +1746,6 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	dID, err := primitive.ObjectIDFromHex(departmentID)
-	if err != nil {
-		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
-		return
-	}
 	tID, err := primitive.ObjectIDFromHex(codeID)
 	if err != nil {
 		config.ErrorStatus("invalid Ten-Code ID", http.StatusBadRequest, w, err)
@@ -1766,14 +1753,13 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	filter := bson.M{
-		"_id":                                cID,
-		"community.departments._id":          dID,
-		"community.departments.tenCodes._id": tID,
+		"_id":                    cID,
+		"community.tenCodes._id": tID,
 	}
 
 	update := bson.M{}
 	for key, value := range requestBody {
-		update["community.departments.$.tenCodes.$[tenCode]."+key] = value
+		update["community.tenCodes.$[tenCode]."+key] = value
 	}
 
 	arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
@@ -1793,7 +1779,6 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 // AddTenCodeHandler adds a new Ten-Code to a department
 func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
-	departmentID := mux.Vars(r)["departmentId"]
 
 	var requestBody struct {
 		Code        string `json:"code"`
@@ -1809,11 +1794,6 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	dID, err := primitive.ObjectIDFromHex(departmentID)
-	if err != nil {
-		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
-		return
-	}
 
 	newTenCode := bson.M{
 		"_id":         primitive.NewObjectID(),
@@ -1822,11 +1802,10 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := bson.M{
-		"_id":                       cID,
-		"community.departments._id": dID,
+		"_id": cID,
 	}
 	update := bson.M{
-		"$push": bson.M{"community.departments.$.tenCodes": newTenCode},
+		"$push": bson.M{"community.tenCodes": newTenCode},
 	}
 
 	err = c.DB.UpdateOne(context.Background(), filter, update)

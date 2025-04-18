@@ -28,6 +28,7 @@ type CommunityDetails struct {
 	Members         map[string]MemberDetail `json:"members" bson:"members"`
 	Events          []Event                 `json:"events" bson:"events"`
 	Departments     []Department            `json:"departments" bson:"departments"`
+	TenCodes        []TenCodes              `json:"tenCodes" bson:"tenCodes"`
 	Templates       []Template              `json:"templates" bson:"templates"`
 	CreatedAt       primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
@@ -47,7 +48,6 @@ type Department struct {
 	Image            string             `json:"image" bson:"image"`
 	ApprovalRequired bool               `json:"approvalRequired" bson:"approvalRequired"`
 	Members          []MemberStatus     `json:"members" bson:"members"`
-	TenCodes         []TenCodes         `json:"tenCodes" bson:"tenCodes"`
 	Template         Template           `json:"template" bson:"template"`
 	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt        primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
