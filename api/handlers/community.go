@@ -1416,9 +1416,7 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	communityID := mux.Vars(r)["communityId"]
 	userID := mux.Vars(r)["userId"]
 
-	var requestBody struct {
-		TenCodeID string `json:"tenCodeID"`
-	}
+	var requestBody models.MemberDetail
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
@@ -1445,7 +1443,8 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	// Update or add the TenCodeID for the user
 	members := community.Details.Members
 	members[userID] = models.MemberDetail{
-		TenCodeID: requestBody.TenCodeID,
+		DepartmentID: requestBody.DepartmentID,
+		TenCodeID:    requestBody.TenCodeID,
 	}
 
 	// Update the community in the database
