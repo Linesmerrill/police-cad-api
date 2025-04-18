@@ -1,6 +1,8 @@
 package models
 
-import "go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 // Civilian holds the structure for the civilian collection in mongo
 type Civilian struct {
@@ -56,6 +58,6 @@ type CriminalHistory struct {
 // Fine holds the structure for the fine
 type Fine struct {
 	FineType   string `json:"fineType" bson:"fineType"`     // Speeding, Public Intoxication, etc.
-	FineAmount string `json:"fineAmount" bson:"fineAmount"` // 125, 150, etc.
+	FineAmount int    `json:"fineAmount" bson:"fineAmount"` // 125, 150, etc.
 	Category   string `json:"category" bson:"category"`     // Misdemeanor, Felony, etc.
 }
