@@ -1414,7 +1414,6 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 // SetMemberTenCodeHandler sets the Ten-Code for a member in a department
 func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
-	departmentID := mux.Vars(r)["departmentId"]
 	userID := mux.Vars(r)["userId"]
 
 	var requestBody struct {
@@ -1430,36 +1429,31 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	dID, err := primitive.ObjectIDFromHex(departmentID)
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
-		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
 	}
 
-	// Updated filter to properly match the nested structure
-	filter := bson.M{
-		"_id":                       cID,
-		"community.departments._id": dID,
+	// Ensure the members map is initialized
+	if community.Details.Members == nil {
+		community.Details.Members = make(map[string]models.MemberDetail)
 	}
 
-	// Updated update statement with proper nested path
-	update := bson.M{
-		"$set": bson.M{
-			"community.departments.$[dept].members.$[member].tenCodeID": requestBody.TenCodeID,
-		},
+	// Update or add the TenCodeID for the user
+	members := community.Details.Members
+	members[userID] = models.MemberDetail{
+		TenCodeID: requestBody.TenCodeID,
 	}
 
-	// Array filters to match both department and member
-	arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
-		Filters: []interface{}{
-			bson.M{"dept._id": dID},
-			bson.M{"member.userID": userID},
-		},
-	})
-
-	err = c.DB.UpdateOne(context.Background(), filter, update, arrayFilters)
+	// Update the community in the database
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$set": bson.M{"community.details.members": members}}
+	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
-		config.ErrorStatus("failed to set Ten-Code for member", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to update member Ten-Code", http.StatusInternalServerError, w, err)
 		return
 	}
 
