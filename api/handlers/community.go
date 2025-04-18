@@ -1783,6 +1783,7 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		Code        string `json:"code"`
 		Description string `json:"description"`
+		Category    string `json:"category"` // Example of a new field in the updated model
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -1795,10 +1796,11 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newTenCode := bson.M{
-		"_id":         primitive.NewObjectID(),
-		"code":        requestBody.Code,
-		"description": requestBody.Description,
+	// Create a new Ten-Code object based on the updated model
+	newTenCode := models.TenCodes{
+		ID:          primitive.NewObjectID(),
+		Code:        requestBody.Code,
+		Description: requestBody.Description,
 	}
 
 	filter := bson.M{
