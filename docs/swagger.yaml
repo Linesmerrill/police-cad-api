@@ -347,12 +347,11 @@ definitions:
         $ref: '#/definitions/ObjectID'
       createdAt:
         $ref: '#/definitions/DateTime'
-      fineAmount:
-        type: string
-        x-go-name: FineAmount
-      fineType:
-        type: string
-        x-go-name: FineType
+      fines:
+        items:
+          $ref: '#/definitions/Fine'
+        type: array
+        x-go-name: Fines
       notes:
         type: string
         x-go-name: Notes
@@ -565,6 +564,20 @@ definitions:
         x-go-name: Title
       updatedAt:
         $ref: '#/definitions/DateTime'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  Fine:
+    description: Fine holds the structure for the fine
+    properties:
+      category:
+        type: string
+        x-go-name: Category
+      fineAmount:
+        type: string
+        x-go-name: FineAmount
+      fineType:
+        type: string
+        x-go-name: FineType
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Firearm:
