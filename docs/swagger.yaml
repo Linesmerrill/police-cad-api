@@ -291,6 +291,11 @@ definitions:
           $ref: '#/definitions/InviteCode'
         type: array
         x-go-name: InviteCodes
+      members:
+        additionalProperties:
+          $ref: '#/definitions/MemberDetail'
+        type: object
+        x-go-name: Members
       name:
         type: string
         x-go-name: Name
@@ -719,6 +724,14 @@ definitions:
       userID:
         type: string
         x-go-name: UserID
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  MemberDetail:
+    description: MemberDetail holds the structure for a member detail
+    properties:
+      tenCodeID:
+        type: string
+        x-go-name: TenCodeID
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   MemberStatus:
