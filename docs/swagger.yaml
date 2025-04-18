@@ -315,6 +315,11 @@ definitions:
           $ref: '#/definitions/Template'
         type: array
         x-go-name: Templates
+      tenCodes:
+        items:
+          $ref: '#/definitions/TenCodes'
+        type: array
+        x-go-name: TenCodes
       updatedAt:
         $ref: '#/definitions/DateTime'
       visibility:
@@ -395,11 +400,6 @@ definitions:
         x-go-name: Name
       template:
         $ref: '#/definitions/Template'
-      tenCodes:
-        items:
-          $ref: '#/definitions/TenCodes'
-        type: array
-        x-go-name: TenCodes
       updatedAt:
         $ref: '#/definitions/DateTime'
     type: object
