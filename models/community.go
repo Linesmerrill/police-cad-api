@@ -35,7 +35,8 @@ type CommunityDetails struct {
 
 // MemberDetail holds the structure for a member detail
 type MemberDetail struct {
-	TenCodeID string `json:"tenCodeID" bson:"tenCodeID"`
+	DepartmentID string `json:"departmentID" bson:"departmentID"`
+	TenCodeID    string `json:"tenCodeID" bson:"tenCodeID"`
 }
 
 // Department holds the structure for a department

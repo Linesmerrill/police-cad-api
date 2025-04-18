@@ -729,6 +729,9 @@ definitions:
   MemberDetail:
     description: MemberDetail holds the structure for a member detail
     properties:
+      departmentID:
+        type: string
+        x-go-name: DepartmentID
       tenCodeID:
         type: string
         x-go-name: TenCodeID
