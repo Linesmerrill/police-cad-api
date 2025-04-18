@@ -1450,7 +1450,7 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 
 	// Update the community in the database
 	filter := bson.M{"_id": cID}
-	update := bson.M{"$set": bson.M{"community.details.members": members}}
+	update := bson.M{"$set": bson.M{"community.members": members}}
 	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update member Ten-Code", http.StatusInternalServerError, w, err)
