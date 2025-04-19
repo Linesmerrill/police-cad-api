@@ -174,7 +174,8 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	// Ensure the user's communities array is initialized
 	filter := bson.M{"_id": uID}
 
-	user, err := c.UDB.FindOne(context.Background(), filter)
+	user := models.User{}
+	err = c.UDB.FindOne(context.Background(), filter).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's communities", http.StatusInternalServerError, w, err)
 		return
