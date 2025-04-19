@@ -132,6 +132,21 @@ definitions:
         x-go-name: UpdatedBy
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Category:
+    description: Category holds the structure for a category
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      fines:
+        items:
+          $ref: '#/definitions/FineDetails'
+        type: array
+        x-go-name: Fines
+      name:
+        type: string
+        x-go-name: Name
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   Civilian:
     description: Civilian holds the structure for the civilian collection in mongo
     properties:
@@ -283,6 +298,8 @@ definitions:
           $ref: '#/definitions/Event'
         type: array
         x-go-name: Events
+      fines:
+        $ref: '#/definitions/CommunityFine'
       imageLink:
         type: string
         x-go-name: ImageLink
@@ -325,6 +342,19 @@ definitions:
       visibility:
         type: string
         x-go-name: Visibility
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  CommunityFine:
+    description: CommunityFine holds the structure for community fines
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/Category'
+        type: array
+        x-go-name: Categories
+      currency:
+        type: string
+        x-go-name: Currency
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Component:
@@ -573,11 +603,26 @@ definitions:
         type: string
         x-go-name: Category
       fineAmount:
-        type: string
+        format: int64
+        type: integer
         x-go-name: FineAmount
       fineType:
         type: string
         x-go-name: FineType
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  FineDetails:
+    description: FineDetails holds the structure for a fine detail
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      amount:
+        format: int64
+        type: integer
+        x-go-name: Amount
+      name:
+        type: string
+        x-go-name: Name
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Firearm:
