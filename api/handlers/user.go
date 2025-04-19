@@ -1269,16 +1269,23 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		}
 
 		filter := bson.M{"_id": uID}
-		update := bson.M{"$push": bson.M{"user.communities": newCommunity}}
 
-		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		// Ensure the `communities` array exists
+		update := bson.M{
+			"$setOnInsert": bson.M{"user.communities": []models.UserCommunity{}},
+			"$push":        bson.M{"user.communities": newCommunity},
+		}
+
+		opts := options.Update().SetUpsert(true)
+
+		_, err := u.DB.UpdateOne(context.Background(), filter, update, opts)
 		if err != nil {
-			config.ErrorStatus("failed to add community during migration", http.StatusInternalServerError, w, err)
+			config.ErrorStatus("failed to add community", http.StatusInternalServerError, w, err)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "Community added successfully during migration"}`))
+		w.Write([]byte(`{"message": "Community added successfully"}`))
 		return
 	}
 
