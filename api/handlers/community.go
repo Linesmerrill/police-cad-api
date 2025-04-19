@@ -70,6 +70,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.BanList = []string{}
 	newCommunity.Details.Departments = []models.Department{}
 	newCommunity.Details.TenCodes = defaultTenCodes()
+	newCommunity.Details.Fines = defaultCommunityFines()
 
 	// Initialize the events slice if it is null
 	if newCommunity.Details.Events == nil {
@@ -1892,6 +1893,45 @@ func defaultTenCodes() []models.TenCodes {
 		{ID: primitive.NewObjectID(), Code: "10-97", Description: "In Route"},
 		{ID: primitive.NewObjectID(), Code: "10-99", Description: "Officer in Distress Extreme Emergency Only"},
 		{ID: primitive.NewObjectID(), Code: "11-44", Description: "Person Deceased"},
+	}
+}
+
+func defaultCommunityFines() models.CommunityFine {
+	return models.CommunityFine{
+		Currency: "USD",
+		Categories: []models.Category{
+			{
+				Name: "Traffic Citations",
+				Fines: []models.FineDetails{
+					{Name: "Speeding", Amount: 150},
+					{Name: "Parking Violation", Amount: 50},
+					{Name: "Running a Stop Sign", Amount: 100},
+					{Name: "Expired Registration", Amount: 75},
+				},
+			},
+			{
+				Name: "Misdemeanors",
+				Fines: []models.FineDetails{
+					{Name: "Public Intoxication", Amount: 200},
+					{Name: "Disorderly Conduct", Amount: 250},
+					{Name: "Petty Theft", Amount: 300},
+				},
+			},
+			{
+				Name: "Felonies",
+				Fines: []models.FineDetails{
+					{Name: "Assault", Amount: 1000},
+					{Name: "Burglary", Amount: 1500},
+					{Name: "Drug Possession", Amount: 1200},
+				},
+			},
+			{
+				Name: "Other",
+				Fines: []models.FineDetails{
+					{Name: "Other Violation", Amount: 100},
+				},
+			},
+		},
 	}
 }
 
