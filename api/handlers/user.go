@@ -1292,6 +1292,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		if migration {
 			// Initialize communities array and insert the first record during migration
 			newCommunity := models.UserCommunity{
+				ID:          primitive.NewObjectID().Hex(),
 				CommunityID: requestBody.CommunityID,
 				Status:      requestBody.Status,
 			}
@@ -1313,6 +1314,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Handle communities array based on its length
 	newCommunity := models.UserCommunity{
+		ID:          primitive.NewObjectID().Hex(),
 		CommunityID: requestBody.CommunityID,
 		Status:      requestBody.Status,
 	}
