@@ -135,8 +135,6 @@ definitions:
   Category:
     description: Category holds the structure for a category
     properties:
-      _id:
-        $ref: '#/definitions/ObjectID'
       fines:
         items:
           $ref: '#/definitions/FineDetails'
@@ -614,8 +612,6 @@ definitions:
   FineDetails:
     description: FineDetails holds the structure for a fine detail
     properties:
-      _id:
-        $ref: '#/definitions/ObjectID'
       amount:
         format: int64
         type: integer

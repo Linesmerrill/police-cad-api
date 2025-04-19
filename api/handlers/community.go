@@ -28,7 +28,11 @@ type Community struct {
 func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 	commID := mux.Vars(r)["community_id"]
 
-	zap.S().Debugf("community_id: %v", commID)
+	// Retrieve optional query parameters
+	field := r.URL.Query().Get("field")
+	value := r.URL.Query().Get("value")
+
+	zap.S().Debugf("community_id: %v, field: %v, value: %v", commID, field, value)
 
 	cID, err := primitive.ObjectIDFromHex(commID)
 	if err != nil {
@@ -36,7 +40,15 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	// Base filter
+	filter := bson.M{"_id": cID}
+
+	// Add dynamic filter if field and value are provided
+	if field != "" && value != "" {
+		filter["community."+field] = value
+	}
+
+	dbResp, err := c.DB.FindOne(context.Background(), filter)
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
