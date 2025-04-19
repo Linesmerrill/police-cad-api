@@ -1250,10 +1250,35 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check for the migration query parameter
+	migration := r.URL.Query().Get("migration") == "true"
+
 	// Convert the user ID to primitive.ObjectID
 	uID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if migration {
+		// Directly insert the new community into the user's communities
+		newCommunity := models.UserCommunity{
+			ID:          primitive.NewObjectID().Hex(),
+			CommunityID: requestBody.CommunityID,
+			Status:      requestBody.Status,
+		}
+
+		filter := bson.M{"_id": uID}
+		update := bson.M{"$push": bson.M{"user.communities": newCommunity}}
+
+		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to add community during migration", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "Community added successfully during migration"}`))
 		return
 	}
 
