@@ -814,6 +814,23 @@ definitions:
         type: string
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  Note:
+    description: Note holds the structure for a note
+    properties:
+      _id:
+        $ref: '#/definitions/ObjectID'
+      content:
+        type: string
+        x-go-name: Content
+      createdAt:
+        $ref: '#/definitions/DateTime'
+      title:
+        type: string
+        x-go-name: Title
+      updatedAt:
+        $ref: '#/definitions/DateTime'
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   Notification:
     description: Notification holds the structure for a notification
     properties:
@@ -1034,6 +1051,11 @@ definitions:
       name:
         type: string
         x-go-name: Name
+      notes:
+        items:
+          $ref: '#/definitions/Note'
+        type: array
+        x-go-name: Notes
       notifications:
         items:
           $ref: '#/definitions/Notification'
