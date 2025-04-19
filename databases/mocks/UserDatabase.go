@@ -119,33 +119,23 @@ func (_m *UserDatabase) Find(ctx context.Context, filter interface{}, opts ...*o
 }
 
 // FindOne provides a mock function with given fields: ctx, filter
-func (_m *UserDatabase) FindOne(ctx context.Context, filter interface{}) (*models.User, error) {
+func (_m *UserDatabase) FindOne(ctx context.Context, filter interface{}) databases.SingleResultHelper {
 	ret := _m.Called(ctx, filter)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindOne")
 	}
 
-	var r0 *models.User
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) (*models.User, error)); ok {
-		return rf(ctx, filter)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) *models.User); ok {
+	var r0 databases.SingleResultHelper
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) databases.SingleResultHelper); ok {
 		r0 = rf(ctx, filter)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*models.User)
+			r0 = ret.Get(0).(databases.SingleResultHelper)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
-		r1 = rf(ctx, filter)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // InsertOne provides a mock function with given fields: ctx, userDetails

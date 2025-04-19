@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/shaj13/go-guardian/auth"
 	"github.com/shaj13/go-guardian/auth/strategies/bearer"
 
@@ -57,7 +58,8 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := m.DB.FindOne(context.Background(), bson.M{"user.email": email})
+	user := models.User{}
+	err := m.DB.FindOne(context.Background(), bson.M{"user.email": email}).Decode(&user)
 	if err != nil {
 		http.Error(w, "failed to get user by email", http.StatusNotFound)
 		return
@@ -97,7 +99,8 @@ func (m MiddlewareDB) SetupGoGuardian() {
 func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, password string) (auth.Info, error) {
 	usernameHash := sha256.Sum256([]byte(email))
 
-	dbEmailResp, err := m.DB.FindOne(context.Background(), bson.M{"user.email": email})
+	dbEmailResp := models.User{}
+	err := m.DB.FindOne(context.Background(), bson.M{"user.email": email}).Decode(&dbEmailResp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by email, %v", err)
 	}

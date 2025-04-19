@@ -39,7 +39,8 @@ func (u User) UserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := u.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": cID}).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -140,7 +141,8 @@ func (u User) UserLoginHandler(w http.ResponseWriter, r *http.Request) {
 		usernameHash := sha256.Sum256([]byte(email))
 
 		// fetch email & pass from db
-		dbEmailResp, err := u.DB.FindOne(context.Background(), bson.M{"user.email": email})
+		dbEmailResp := models.User{}
+		err := u.DB.FindOne(context.Background(), bson.M{"user.email": email}).Decode(&dbEmailResp)
 		if err != nil {
 			config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 			return
@@ -177,8 +179,9 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user already exists
-	existingUser, _ := u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email})
-	if existingUser != nil {
+	existingUser := models.User{}
+	_ = u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email}).Decode(&existingUser)
+	if existingUser.ID != "" {
 		config.ErrorStatus("email already exists", http.StatusConflict, w, fmt.Errorf("duplicate email"))
 		return
 	}
@@ -214,8 +217,9 @@ func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user already exists
-	existingUser, _ := u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email})
-	if existingUser != nil {
+	existingUser := models.User{}
+	_ = u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email}).Decode(&existingUser)
+	if existingUser.ID != "" {
 		config.ErrorStatus("email already exists", http.StatusConflict, w, fmt.Errorf("duplicate email"))
 		return
 	}
@@ -239,7 +243,8 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Retrieve the user's friends list
-	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	user := models.User{}
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
 		return
@@ -312,7 +317,8 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Find the user by userId
-	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	user := models.User{}
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to get user by userId", http.StatusNotFound, w, err)
 		return
@@ -382,8 +388,8 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := bson.M{"_id": uID}
-
-	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
 		// Return an empty array if no user is found
 		w.WriteHeader(http.StatusOK)
@@ -415,7 +421,8 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		friendDetails, err := u.DB.FindOne(context.Background(), bson.M{"_id": fID})
+		friendDetails := models.User{}
+		err = u.DB.FindOne(context.Background(), bson.M{"_id": fID}).Decode(&friendDetails)
 		if err != nil {
 			continue
 		}
@@ -462,7 +469,8 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Retrieve the user's details
 	filter := bson.M{"_id": uID}
-	user, err := u.DB.FindOne(context.Background(), filter)
+	user := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
 		return
@@ -485,8 +493,9 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// Check if the friend already exists
-		existingFriend, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID, "user.friends.friend_id": friend.FriendID})
-		if err == nil && existingFriend != nil {
+		existingFriend := models.User{}
+		err := u.DB.FindOne(context.Background(), bson.M{"_id": uID, "user.friends.friend_id": friend.FriendID}).Decode(&existingFriend)
+		if err == nil && existingFriend.Details.Friends != nil {
 			for _, f := range existingFriend.Details.Friends {
 				if f.FriendID == friend.FriendID {
 					if f.Status == "pending" {
@@ -538,7 +547,8 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		filter := bson.M{"_id": nID}
-		dbResp, err := u.DB.FindOne(context.Background(), filter)
+		dbResp := models.User{}
+		err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 		if err != nil {
 			config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 			return
@@ -575,7 +585,8 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := bson.M{"_id": nID}
-	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 		return
@@ -623,7 +634,8 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	filter := bson.M{"_id": uID}
-	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, err)
 		return
@@ -642,7 +654,8 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		sender, err := u.DB.FindOne(context.Background(), bson.M{"_id": senderID})
+		sender := models.User{}
+		err = u.DB.FindOne(context.Background(), bson.M{"_id": senderID}).Decode(&sender)
 		if err != nil {
 			// Skip this notification if the sender is not found
 			continue
@@ -753,7 +766,8 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Update the user's friend status
 	filter := bson.M{"_id": uID}
-	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -788,7 +802,8 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Update the friend's friend status
 	friendFilter := bson.M{"_id": fID}
-	friendResp, err := u.DB.FindOne(context.Background(), friendFilter)
+	friendResp := models.User{}
+	err = u.DB.FindOne(context.Background(), friendFilter).Decode(&friendResp)
 	if err != nil {
 		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
 		return
@@ -846,7 +861,8 @@ func (u User) MarkNotificationAsReadHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	filter := bson.M{"_id": uID}
-	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -901,7 +917,8 @@ func (u User) DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	filter := bson.M{"_id": uID}
-	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -955,7 +972,8 @@ func (u User) fetchUserFriendsByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := bson.M{"_id": uID}
-	dbResp, err := u.DB.FindOne(context.Background(), filter)
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1011,14 +1029,16 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 	}
 
 	friendFilter := bson.M{"_id": fID}
-	friendResp, err := u.DB.FindOne(context.Background(), friendFilter)
+	friendResp := models.User{}
+	err = u.DB.FindOne(context.Background(), friendFilter).Decode(&friendResp)
 	if err != nil {
 		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
 		return
 	}
 
 	userFilter := bson.M{"_id": uID}
-	userResp, err := u.DB.FindOne(context.Background(), userFilter)
+	userResp := models.User{}
+	err = u.DB.FindOne(context.Background(), userFilter).Decode(&userResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1080,8 +1100,10 @@ func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	user := models.User{}
+
 	// Find the user by ID
-	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1167,8 +1189,10 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	user := models.User{}
+
 	// Find the user by ID
-	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1263,13 +1287,13 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	if migration {
 		// Check if communities field exists
 		filter := bson.M{"_id": uID}
-		// var userDoc struct {
-		// 	User struct {
-		// 		Communities []models.UserCommunity `bson:"communities"`
-		// 	} `bson:"user"`
-		// }
+		var userDoc struct {
+			User struct {
+				Communities []models.UserCommunity `bson:"communities"`
+			} `bson:"user"`
+		}
 
-		userDoc, err := u.DB.FindOne(context.Background(), filter)
+		err := u.DB.FindOne(context.Background(), filter).Decode(&userDoc)
 		if err != nil {
 			config.ErrorStatus("failed to find user", http.StatusInternalServerError, w, err)
 			return
@@ -1282,7 +1306,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		}
 
 		// If communities field doesn't exist or is null, initialize it
-		if userDoc.Details.Communities == nil {
+		if userDoc.User.Communities == nil {
 			update := bson.M{
 				"$set": bson.M{
 					"user.communities": []models.UserCommunity{newCommunity},
@@ -1364,7 +1388,8 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	user := models.User{}
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's communities", http.StatusInternalServerError, w, err)
 		return
@@ -1387,15 +1412,16 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 		}
 	} else {
 		// Check if the communityId already exists in the user's pending community requests
-		existingUser, err := u.DB.FindOne(context.Background(), bson.M{
+		existingUser := models.User{}
+		err := u.DB.FindOne(context.Background(), bson.M{
 			"_id": uID,
 			"user.communities": bson.M{
 				"$elemMatch": bson.M{
 					"communityId": requestBody.CommunityID,
 				},
 			},
-		})
-		if err == nil && existingUser != nil {
+		}).Decode(&existingUser)
+		if err == nil && len(existingUser.Details.Communities) > 0 {
 			config.ErrorStatus("community request already exists", http.StatusConflict, w, fmt.Errorf("community request already exists"))
 			return
 		}
@@ -1600,7 +1626,8 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve the user's friends array
-	user, err := u.DB.FindOne(context.Background(), bson.M{"_id": uID})
+	user := models.User{}
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
 		return
