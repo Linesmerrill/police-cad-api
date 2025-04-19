@@ -213,7 +213,10 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"message": "Community created successfully"}`))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":   "Community created successfully",
+		"community": newUserCommunity,
+	})
 }
 
 // CommunityByCommunityAndOwnerIDHandler returns a community that contains the specified ownerID
