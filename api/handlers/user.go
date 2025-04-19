@@ -1261,35 +1261,58 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if migration {
-		// Directly insert the new community into the user's communities
+		// Check if communities field exists
+		filter := bson.M{"_id": uID}
+		// var userDoc struct {
+		// 	User struct {
+		// 		Communities []models.UserCommunity `bson:"communities"`
+		// 	} `bson:"user"`
+		// }
+
+		userDoc, err := u.DB.FindOne(context.Background(), filter)
+		if err != nil {
+			config.ErrorStatus("failed to find user", http.StatusInternalServerError, w, err)
+			return
+		}
+
 		newCommunity := models.UserCommunity{
 			ID:          primitive.NewObjectID().Hex(),
 			CommunityID: requestBody.CommunityID,
 			Status:      requestBody.Status,
 		}
 
-		filter := bson.M{"_id": uID}
-
-		// Ensure the `communities` array exists
-		update := bson.M{
-			"$setOnInsert": bson.M{"user.communities": []models.UserCommunity{}},
-			"$push":        bson.M{"user.communities": newCommunity},
-		}
-
-		opts := options.Update().SetUpsert(true)
-
-		_, err := u.DB.UpdateOne(context.Background(), filter, update, opts)
-		if err != nil {
-			config.ErrorStatus("failed to add community", http.StatusInternalServerError, w, err)
-			return
+		// If communities field doesn't exist or is null, initialize it
+		if userDoc.Details.Communities == nil {
+			update := bson.M{
+				"$set": bson.M{
+					"user.communities": []models.UserCommunity{newCommunity},
+				},
+			}
+			_, err = u.DB.UpdateOne(context.Background(), filter, update)
+			if err != nil {
+				config.ErrorStatus("failed to initialize and add community during migration", http.StatusInternalServerError, w, err)
+				return
+			}
+		} else {
+			// Communities exists, append to it
+			update := bson.M{
+				"$push": bson.M{
+					"user.communities": newCommunity,
+				},
+			}
+			_, err = u.DB.UpdateOne(context.Background(), filter, update)
+			if err != nil {
+				config.ErrorStatus("failed to add community during migration", http.StatusInternalServerError, w, err)
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "Community added successfully"}`))
+		w.Write([]byte(`{"message": "Community added successfully during migration"}`))
 		return
 	}
 
-	// Find the pending community request
+	// Find and update pending community request
 	filter := bson.M{
 		"_id": uID,
 		"user.communities": bson.M{
@@ -1306,15 +1329,19 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 
-	// Update the status to "approved"
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	result, err := u.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update community status", http.StatusInternalServerError, w, err)
 		return
 	}
 
+	if result.MatchedCount == 0 {
+		config.ErrorStatus("no pending community request found", http.StatusNotFound, w, nil)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Community request approved successfully"}`))
+	w.Write([]byte(`{"message": "Community request updated successfully"}`))
 }
 
 // PendingCommunityRequestHandler handles pending community requests for a user
