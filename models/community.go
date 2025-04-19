@@ -43,16 +43,14 @@ type CommunityFine struct {
 
 // Category holds the structure for a category
 type Category struct {
-	ID    primitive.ObjectID `json:"_id" bson:"_id"`
-	Name  string             `json:"name" bson:"name"` // Traffic Citations, Misdeameanors, etc.
-	Fines []FineDetails      `json:"fines" bson:"fines"`
+	Name  string        `json:"name" bson:"name"` // Traffic Citations, Misdeameanors, etc.
+	Fines []FineDetails `json:"fines" bson:"fines"`
 }
 
 // FineDetails holds the structure for a fine detail
 type FineDetails struct {
-	ID     primitive.ObjectID `json:"_id" bson:"_id"`
-	Name   string             `json:"name" bson:"name"`     // Speeding, Public Intoxication, etc.
-	Amount int                `json:"amount" bson:"amount"` // 50, 100, etc.
+	Name   string `json:"name" bson:"name"`     // Speeding, Public Intoxication, etc.
+	Amount int    `json:"amount" bson:"amount"` // 50, 100, etc.
 }
 
 // MemberDetail holds the structure for a member detail
