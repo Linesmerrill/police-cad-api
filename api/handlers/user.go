@@ -1854,3 +1854,130 @@ func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "User unsubscribed successfully",
 	})
 }
+
+// AddUserNoteHandler adds a note to a user's notes array
+func (u User) AddUserNoteHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Parse the request body
+	var newNote struct {
+		Title     string `json:"title"`
+		Content   string `json:"content"`
+		CreatedAt string `json:"createdAt"`
+		UpdatedAt string `json:"updatedAt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&newNote); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate user ID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Create a new note with a generated ID
+	note := models.Note{
+		ID:        primitive.NewObjectID(),
+		Title:     newNote.Title,
+		Content:   newNote.Content,
+		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+		UpdatedAt: primitive.NewDateTimeFromTime(time.Now()),
+	}
+
+	// Update the user's notes in the database
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$push": bson.M{"user.notes": note}}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to add note", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Note added successfully",
+		"note":    note,
+	})
+}
+
+// UpdateUserNoteHandler updates a specific note for a user
+func (u User) UpdateUserNoteHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+	noteID := mux.Vars(r)["noteId"]
+
+	// Parse the request body
+	var updatedNote struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&updatedNote); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate IDs
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+	nID, err := primitive.ObjectIDFromHex(noteID)
+	if err != nil {
+		config.ErrorStatus("invalid note ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Update the specific note
+	filter := bson.M{"_id": uID, "user.notes._id": nID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.notes.$.title":     updatedNote.Title,
+			"user.notes.$.content":   updatedNote.Content,
+			"user.notes.$.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update note", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Note updated successfully"}`))
+}
+
+// DeleteUserNoteHandler deletes a specific note for a user
+func (u User) DeleteUserNoteHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+	noteID := mux.Vars(r)["noteId"]
+
+	// Validate IDs
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+	nID, err := primitive.ObjectIDFromHex(noteID)
+	if err != nil {
+		config.ErrorStatus("invalid note ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Remove the specific note
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$pull": bson.M{"user.notes": bson.M{"_id": nID}}}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to delete note", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Note deleted successfully"}`))
+}

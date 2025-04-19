@@ -1,5 +1,7 @@
 package models
 
+import "go.mongodb.org/mongo-driver/bson/primitive"
+
 // User holds the structure for the user collection in mongo
 type User struct {
 	ID      string      `json:"_id" bson:"_id"`
@@ -17,6 +19,7 @@ type UserDetails struct {
 	LastAccessedCommunity LastAccessedCommunity `json:"lastAccessedCommunity" bson:"lastAccessedCommunity"`
 	Email                 string                `json:"email" bson:"email"`
 	Name                  string                `json:"name" bson:"name"`
+	Notes                 []Note                `json:"notes" bson:"notes"`
 	Username              string                `json:"username" bson:"username"`
 	Password              string                `json:"password" bson:"password"`
 	ProfilePicture        string                `json:"profilePicture" bson:"profilePicture"`
@@ -30,6 +33,15 @@ type UserDetails struct {
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt             interface{}           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Note holds the structure for a note
+type Note struct {
+	ID        primitive.ObjectID `json:"_id" bson:"_id"`
+	Title     string             `json:"title" bson:"title"`
+	Content   string             `json:"content" bson:"content"`
+	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Subscription holds the structure for a user's subscription
