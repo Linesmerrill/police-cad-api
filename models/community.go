@@ -29,9 +29,30 @@ type CommunityDetails struct {
 	Events          []Event                 `json:"events" bson:"events"`
 	Departments     []Department            `json:"departments" bson:"departments"`
 	TenCodes        []TenCodes              `json:"tenCodes" bson:"tenCodes"`
+	Fines           CommunityFine           `json:"fines" bson:"fines"`
 	Templates       []Template              `json:"templates" bson:"templates"`
 	CreatedAt       primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
+}
+
+// CommunityFine holds the structure for community fines
+type CommunityFine struct {
+	Categories []Category `json:"categories" bson:"categories"`
+	Currency   string     `json:"currency" bson:"currency"` // USD, EUR, etc.
+}
+
+// Category holds the structure for a category
+type Category struct {
+	ID    primitive.ObjectID `json:"_id" bson:"_id"`
+	Name  string             `json:"name" bson:"name"` // Traffic Citations, Misdeameanors, etc.
+	Fines []FineDetails      `json:"fines" bson:"fines"`
+}
+
+// FineDetails holds the structure for a fine detail
+type FineDetails struct {
+	ID     primitive.ObjectID `json:"_id" bson:"_id"`
+	Name   string             `json:"name" bson:"name"`     // Speeding, Public Intoxication, etc.
+	Amount int                `json:"amount" bson:"amount"` // 50, 100, etc.
 }
 
 // MemberDetail holds the structure for a member detail

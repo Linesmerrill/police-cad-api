@@ -1894,3 +1894,46 @@ func defaultTenCodes() []models.TenCodes {
 		{ID: primitive.NewObjectID(), Code: "11-44", Description: "Person Deceased"},
 	}
 }
+
+// SetCommunityFinesHandler updates the community fines
+func (c Community) SetCommunityFinesHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse the request body
+	var finesData struct {
+		Currency   string            `json:"currency"`
+		Categories []models.Category `json:"categories"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&finesData); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate community ID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Prepare the update
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.fines": models.CommunityFine{
+				Currency:   finesData.Currency,
+				Categories: finesData.Categories,
+			},
+		},
+	}
+
+	// Update the community in the database
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update community fines", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Community fines updated successfully"}`))
+}
