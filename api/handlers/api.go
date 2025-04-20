@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"github.com/stripe/stripe-go/v76"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
@@ -101,6 +104,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/unfriend", api.Middleware(http.HandlerFunc(u.UnfriendUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/last-accessed-community", api.Middleware(http.HandlerFunc(u.UpdateLastAccessedCommunityHandler))).Methods("PUT")
 	apiCreate.Handle("/user/subscribe", api.Middleware(http.HandlerFunc(u.SubscribeUserHandler))).Methods("POST")
+	apiCreate.Handle("/user/create-checkout-session", api.Middleware(http.HandlerFunc(u.CreateCheckoutSessionHandler))).Methods("POST")
+	apiCreate.Handle("/user/verify-subscription", api.Middleware(http.HandlerFunc(u.VerifySubscriptionHandler))).Methods("POST")
 	apiCreate.Handle("/user/unsubscribe", api.Middleware(http.HandlerFunc(u.UnsubscribeUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/{userId}/add-friend", api.Middleware(http.HandlerFunc(u.AddFriendHandler))).Methods("POST")
 	apiCreate.Handle("/user/{user_id}/update-status", api.Middleware(http.HandlerFunc(u.UpdateFriendStatusHandler))).Methods("PUT")
@@ -223,6 +228,13 @@ func (a *App) Initialize() error {
 		return err
 	}
 	zap.S().Info("police-cad-api has connected to the database")
+
+	// initialize stripe
+	stripeKey := os.Getenv("STRIPE_SECRET_KEY")
+	if stripeKey == "" {
+		return fmt.Errorf("stripe secret key is not set")
+	}
+	stripe.Key = stripeKey
 
 	// initialize api router
 	a.initializeRoutes()
