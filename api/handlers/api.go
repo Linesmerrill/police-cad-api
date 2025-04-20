@@ -106,6 +106,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/subscribe", api.Middleware(http.HandlerFunc(u.SubscribeUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/create-checkout-session", api.Middleware(http.HandlerFunc(u.CreateCheckoutSessionHandler))).Methods("POST")
 	apiCreate.Handle("/user/verify-subscription", api.Middleware(http.HandlerFunc(u.VerifySubscriptionHandler))).Methods("POST")
+	apiCreate.Handle("/user/cancel-subscription", api.Middleware(http.HandlerFunc(u.CancelSubscriptionHandler))).Methods("POST")
 	apiCreate.Handle("/user/unsubscribe", api.Middleware(http.HandlerFunc(u.UnsubscribeUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/{userId}/add-friend", api.Middleware(http.HandlerFunc(u.AddFriendHandler))).Methods("POST")
 	apiCreate.Handle("/user/{user_id}/update-status", api.Middleware(http.HandlerFunc(u.UpdateFriendStatusHandler))).Methods("PUT")
