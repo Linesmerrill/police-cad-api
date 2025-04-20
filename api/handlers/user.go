@@ -2156,7 +2156,7 @@ func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (u User) handleSuccessRedirect(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
-	redirectURL := fmt.Sprintf("linespolicecad://success?session_id=%s", sessionID)
+	redirectURL := fmt.Sprintf("exp+police-cad-app://success?session_id=%s", sessionID)
 	// Serve a page with JavaScript to attempt the redirect
 	fmt.Fprintf(w, `
 		<html>
@@ -2177,7 +2177,7 @@ func (u User) handleSuccessRedirect(w http.ResponseWriter, r *http.Request) {
 
 func (u User) handleCancelRedirect(w http.ResponseWriter, r *http.Request) {
 	// Redirect to the deep link for the app
-	redirectURL := "linespolicecad://cancel"
+	redirectURL := "exp+police-cad-app://cancel"
 	// Serve a page with JavaScript to attempt the redirect
 	fmt.Fprintf(w, `
 		<html>
