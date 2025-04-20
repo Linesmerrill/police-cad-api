@@ -2029,7 +2029,7 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 
 	if checkoutSession.PaymentStatus == "paid" {
 		// Fetch subscription details
-		sub, err := subscription.Get(checkoutSession.Subscription.ID, nil)
+		subs, err := subscription.Get(checkoutSession.Subscription.ID, nil)
 		if err != nil {
 			config.ErrorStatus("failed to retrieve subscription", http.StatusInternalServerError, w, err)
 			return
@@ -2038,7 +2038,7 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		// Map the Price ID back to the tier and billing interval
 		plan := "unknown"
 		billingInterval := "unknown"
-		switch sub.Items.Data[0].Price.ID {
+		switch subs.Items.Data[0].Price.ID {
 		case os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID"):
 			plan = "base"
 			billingInterval = "monthly"
@@ -2060,8 +2060,8 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 
 		resp.Success = true
-		resp.Subscription.ID = sub.ID
-		resp.Subscription.Status = string(sub.Status)
+		resp.Subscription.ID = subs.ID
+		resp.Subscription.Status = string(subs.Status)
 		resp.Subscription.Plan = plan
 		resp.Subscription.BillingInterval = billingInterval
 		resp.Subscription.UserID = checkoutSession.Metadata["userId"]
@@ -2120,6 +2120,49 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "User subscribed successfully",
 	})
+}
+
+// CancelSubscriptionHandler cancels a user's subscription
+func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Retrieve the user from the database
+	user := models.User{}
+	err := u.DB.FindOne(context.Background(), bson.M{"_id": req.UserID}).Decode(&user)
+	if err != nil {
+		config.ErrorStatus(fmt.Sprint("failed to find user", req.UserID), http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Update the subscription in Stripe to cancel at the end of the period
+	params := &stripe.SubscriptionParams{
+		CancelAtPeriodEnd: stripe.Bool(true),
+	}
+	sub, err := subscription.Update(user.Details.Subscription.ID, params)
+	if err != nil {
+		config.ErrorStatus(fmt.Sprint("Failed to cancel subscription", req.UserID), http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Respond with the end date of the current billing cycle
+	response := struct {
+		Success bool   `json:"success"`
+		EndDate int64  `json:"endDate"` // Unix timestamp
+		Message string `json:"message"`
+	}{
+		Success: true,
+		EndDate: sub.CurrentPeriodEnd,
+		Message: "Subscription will be canceled at the end of the current billing cycle.",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // UnsubscribeUserHandler unsubscribes a user
