@@ -2132,11 +2132,23 @@ func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if req.UserID == "" {
+		config.ErrorStatus("user ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Convert the user ID to a primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(req.UserID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
 	// Retrieve the user from the database
 	user := models.User{}
-	err := u.DB.FindOne(context.Background(), bson.M{"_id": req.UserID}).Decode(&user)
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
-		config.ErrorStatus(fmt.Sprint("failed to find user", req.UserID), http.StatusInternalServerError, w, err)
+		config.ErrorStatus(fmt.Sprint("failed to find user ", req.UserID), http.StatusInternalServerError, w, err)
 		return
 	}
 
