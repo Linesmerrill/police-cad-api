@@ -7,13 +7,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
+	"github.com/stripe/stripe-go/v76"
+	"github.com/stripe/stripe-go/v76/checkout/session"
+	"github.com/stripe/stripe-go/v76/subscription"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -1834,6 +1839,245 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User added to department with pending status successfully"}`))
+}
+
+// CreateCheckoutSessionHandler subscribes a user to a specific tier
+func (u User) CreateCheckoutSessionHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID   string `json:"userId"`
+		Tier     string `json:"tier"`
+		IsAnnual bool   `json:"isAnnual"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if requestBody.UserID == "" {
+		config.ErrorStatus("user ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	if requestBody.Tier == "" {
+		config.ErrorStatus("tier is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// userID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	// if err != nil {
+	// 	config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+	// 	return
+	// }
+
+	bInterval := "monthly"
+	if requestBody.IsAnnual {
+		bInterval = "annual"
+	}
+
+	cSession := &CheckoutRequest{
+		UserID:          requestBody.UserID,
+		Tier:            requestBody.Tier,
+		BillingInterval: bInterval,
+	}
+
+	checkoutSession, err := createCheckoutSession(cSession)
+
+	if err != nil {
+		config.ErrorStatus("failed to create checkout session", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// filter := bson.M{"_id": userID}
+	// update := bson.M{
+	// 	"$set": bson.M{
+	// 		"user.subscription.plan":      requestBody.Tier,
+	// 		"user.subscription.isAnnual":  requestBody.IsAnnual,
+	// 		"user.subscription.active":    true,
+	// 		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+	// 	},
+	// }
+	//
+	// _, err = u.DB.UpdateOne(context.Background(), filter, update)
+	// if err != nil {
+	// 	config.ErrorStatus("failed to subscribe user", http.StatusInternalServerError, w, err)
+	// 	return
+	// }
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"sessionId": checkoutSession.ID,
+	})
+}
+
+// CheckoutRequest represents the request body for creating a checkout session
+type CheckoutRequest struct {
+	UserID          string `json:"userId"`
+	Tier            string `json:"tier"`
+	BillingInterval string `json:"billingInterval"`
+}
+
+func createCheckoutSession(c *CheckoutRequest) (*stripe.CheckoutSession, error) {
+	var priceID string
+	tier := strings.ToLower(c.Tier)
+	billingInterval := strings.ToLower(c.BillingInterval)
+
+	if billingInterval != "monthly" && billingInterval != "annual" {
+		// http.Error(w, "Invalid billingInterval. Must be one of: monthly, annual", http.StatusBadRequest)
+		return nil, fmt.Errorf("invalid billingInterval. Must be one of: monthly, annual")
+	}
+
+	switch tier {
+	case "base":
+		if billingInterval == "monthly" {
+			priceID = os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID")
+		} else {
+			priceID = os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID")
+		}
+	case "premium":
+		if billingInterval == "monthly" {
+			priceID = os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID")
+		} else {
+			priceID = os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID")
+		}
+	case "premium_plus":
+		if billingInterval == "monthly" {
+			priceID = os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID")
+		} else {
+			priceID = os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID")
+		}
+	default:
+		// http.Error(w, "Invalid tier. Must be one of: base, premium, premium_plus", http.StatusBadRequest)
+		return nil, fmt.Errorf("invalid tier. Must be one of: base, premium, premium_plus")
+	}
+
+	if priceID == "" {
+		// http.Error(w, fmt.Sprintf("Price ID for tier %s and billing interval %s is not set", req.Tier, req.BillingInterval), http.StatusInternalServerError)
+		return nil, fmt.Errorf("price ID for tier %s and billing interval %s is not set", c.Tier, c.BillingInterval)
+	}
+
+	urlMode := os.Getenv("URL_MODE")
+	var successURL, cancelURL string
+	if urlMode == "testing" {
+		// Use placeholder HTTP URLs for testing with Postman
+		successURL = "https://www.linespolice-cad.com/success?session_id={CHECKOUT_SESSION_ID}"
+		cancelURL = "https://www.linespolice-cad.com/cancel"
+	} else {
+		// Use deep links for production (React Native app)
+		successURL = "linespolicecad://success?session_id={CHECKOUT_SESSION_ID}"
+		cancelURL = "linespolicecad://cancel"
+	}
+
+	// Create a Stripe Checkout Session
+	params := &stripe.CheckoutSessionParams{
+		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+		Mode:               stripe.String("subscription"),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Price:    stripe.String(priceID),
+				Quantity: stripe.Int64(1),
+			},
+		},
+		Metadata: map[string]string{
+			"userId":          c.UserID,
+			"tier":            tier,
+			"billingInterval": billingInterval,
+		},
+		SuccessURL: stripe.String(successURL),
+		CancelURL:  stripe.String(cancelURL),
+	}
+
+	return session.New(params)
+
+}
+
+// VerifyRequest represents the request body for verifying a subscription
+type VerifyRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
+// VerifyResponse represents the response body for verifying a subscription
+type VerifyResponse struct {
+	Success      bool `json:"success"`
+	Subscription struct {
+		ID              string `json:"id"`
+		Status          string `json:"status"`
+		Plan            string `json:"plan"`            // e.g., "base", "premium", "premium_plus"
+		BillingInterval string `json:"billingInterval"` // e.g., "monthly", "annual"
+		UserID          string `json:"userId"`
+	} `json:"subscription"`
+	Error string `json:"error,omitempty"`
+}
+
+// VerifySubscriptionHandler verifies a subscription by checking the payment status
+func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	var req VerifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if req.SessionID == "" {
+		config.ErrorStatus("sessionId is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Retrieve the Checkout Session
+	checkoutSession, err := session.Get(req.SessionID, nil)
+	if err != nil {
+		config.ErrorStatus("failed to retrieve checkout session", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Prepare the response
+	resp := VerifyResponse{}
+
+	if checkoutSession.PaymentStatus == "paid" {
+		// Fetch subscription details
+		sub, err := subscription.Get(checkoutSession.Subscription.ID, nil)
+		if err != nil {
+			config.ErrorStatus("failed to retrieve subscription", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		// Map the Price ID back to the tier and billing interval
+		plan := "unknown"
+		billingInterval := "unknown"
+		switch sub.Items.Data[0].Price.ID {
+		case os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID"):
+			plan = "base"
+			billingInterval = "monthly"
+		case os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID"):
+			plan = "base"
+			billingInterval = "annual"
+		case os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID"):
+			plan = "premium"
+			billingInterval = "monthly"
+		case os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID"):
+			plan = "premium"
+			billingInterval = "annual"
+		case os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID"):
+			plan = "premium_plus"
+			billingInterval = "monthly"
+		case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
+			plan = "premium_plus"
+			billingInterval = "annual"
+		}
+
+		resp.Success = true
+		resp.Subscription.ID = sub.ID
+		resp.Subscription.Status = string(sub.Status)
+		resp.Subscription.Plan = plan
+		resp.Subscription.BillingInterval = billingInterval
+		resp.Subscription.UserID = checkoutSession.Metadata["userId"]
+	} else {
+		resp.Success = false
+		resp.Error = "Payment not completed"
+	}
+
+	// Respond with the verification result
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // SubscribeUserHandler subscribes a user to a specific tier

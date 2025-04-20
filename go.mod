@@ -11,6 +11,7 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/shaj13/go-guardian v1.5.11
 	github.com/stretchr/testify v1.8.4
+	github.com/stripe/stripe-go/v76 v76.25.0
 	go.mongodb.org/mongo-driver v1.17.2
 	go.uber.org/zap v1.21.0
 	golang.org/x/crypto v0.26.0
