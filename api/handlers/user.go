@@ -2156,44 +2156,58 @@ func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (u User) handleSuccessRedirect(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
-	redirectURL := fmt.Sprintf("exp+police-cad-app://success?session_id=%s", sessionID)
-	// Serve a page with JavaScript to attempt the redirect
-	fmt.Fprintf(w, `
-		<html>
-		<head>
-			<script>
-				window.location.href = %q;
-				setTimeout(function() {
-					document.getElementById('fallback').style.display = 'block';
-				}, 1000);
-			</script>
-		</head>
-		<body>
-			<p id="fallback" style="display:none;">Payment Successful! Please return to the app.</p>
-		</body>
-		</html>
-	`, redirectURL)
+	if sessionID == "" {
+		http.Error(w, "Session ID is required", http.StatusBadRequest)
+		return
+	}
+
+	deepLink := fmt.Sprintf("exp+police-cad-app://success?session_id=%s", sessionID)
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(fmt.Sprintf(`
+        <html>
+        <head>
+            <meta http-equiv="refresh" content="0;url=%s">
+            <script>
+                window.location.href = "%s";
+                setTimeout(function() {
+                    document.getElementById('fallback').style.display = 'block';
+                }, 1000);
+            </script>
+        </head>
+        <body>
+            <p>Redirecting back to the app...</p>
+            <p id="fallback" style="display:none;">
+                Payment Successful! If you are not redirected, 
+                <a href="%s">click here to return to the app</a>.
+            </p>
+        </body>
+        </html>
+    `, deepLink, deepLink, deepLink)))
 }
 
 func (u User) handleCancelRedirect(w http.ResponseWriter, r *http.Request) {
-	// Redirect to the deep link for the app
-	redirectURL := "exp+police-cad-app://cancel"
-	// Serve a page with JavaScript to attempt the redirect
-	fmt.Fprintf(w, `
-		<html>
-		<head>
-			<script>
-				window.location.href = %q;
-				setTimeout(function() {
-					document.getElementById('fallback').style.display = 'block';
-				}, 1000);
-			</script>
-		</head>
-		<body>
-			<p id="fallback" style="display:none;">Payment Cancelled! Please return to the app.</p>
-		</body>
-		</html>
-	`, redirectURL)
+	deepLink := "exp+police-cad-app://cancel"
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(fmt.Sprintf(`
+        <html>
+        <head>
+            <meta http-equiv="refresh" content="0;url=%s">
+            <script>
+                window.location.href = "%s";
+                setTimeout(function() {
+                    document.getElementById('fallback').style.display = 'block';
+                }, 1000);
+            </script>
+        </head>
+        <body>
+            <p>Redirecting back to the app...</p>
+            <p id="fallback" style="display:none;">
+                Payment Cancelled. If you are not redirected, 
+                <a href="%s">click here to return to the app</a>.
+            </p>
+        </body>
+        </html>
+    `, deepLink, deepLink, deepLink)))
 }
 
 // AddUserNoteHandler adds a note to a user's notes array
