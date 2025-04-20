@@ -205,8 +205,8 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/generate-signature", api.Middleware(http.HandlerFunc(cloudinaryHandler.GenerateSignature))).Methods("POST")
 
-	apiCreate.Handle("/success", api.Middleware(http.HandlerFunc(u.handleSuccessRedirect))).Methods("GET")
-	apiCreate.Handle("/cancel", api.Middleware(http.HandlerFunc(u.handleCancelRedirect))).Methods("GET")
+	apiCreate.Handle("/success", http.HandlerFunc(u.handleSuccessRedirect)).Methods("GET")
+	apiCreate.Handle("/cancel", http.HandlerFunc(u.handleCancelRedirect)).Methods("GET")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
