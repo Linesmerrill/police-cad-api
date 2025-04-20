@@ -918,34 +918,25 @@ definitions:
       active:
         type: boolean
         x-go-name: Active
-      ads:
-        type: string
-        x-go-name: Ads
-      communitiesLimit:
-        format: int64
-        type: integer
-        x-go-name: CommunitiesLimit
       createdAt:
-        type: object
-        x-go-name: CreatedAt
-      customDepartments:
-        type: boolean
-        x-go-name: CustomDepartments
-      expiresAt:
-        type: object
-        x-go-name: ExpiresAt
+        $ref: '#/definitions/DateTime'
+      currentPeriodEnd:
+        $ref: '#/definitions/DateTime'
       id:
         type: string
         x-go-name: ID
       isAnnual:
+        description: |-
+          Ads               string             `json:"ads" bson:"ads"`
+          CustomDepartments bool               `json:"customDepartments" bson:"customDepartments"`
+          Verified          bool               `json:"verified" bson:"verified"`
         type: boolean
         x-go-name: IsAnnual
       plan:
         type: string
         x-go-name: Plan
-      verified:
-        type: boolean
-        x-go-name: Verified
+      updatedAt:
+        $ref: '#/definitions/DateTime'
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Template:
