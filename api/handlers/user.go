@@ -1956,16 +1956,11 @@ func createCheckoutSession(c *CheckoutRequest) (*stripe.CheckoutSession, error) 
 		return nil, fmt.Errorf("price ID for tier %s and billing interval %s is not set", c.Tier, c.BillingInterval)
 	}
 
-	urlMode := os.Getenv("URL_MODE")
-	var successURL, cancelURL string
-	if urlMode == "testing" {
-		// Use placeholder HTTP URLs for testing with Postman
-		successURL = "https://www.linespolice-cad.com/success?session_id={CHECKOUT_SESSION_ID}"
-		cancelURL = "https://www.linespolice-cad.com/cancel"
-	} else {
-		// Use deep links for production (React Native app)
-		successURL = "linespolicecad://success?session_id={CHECKOUT_SESSION_ID}"
-		cancelURL = "linespolicecad://cancel"
+	successURL := fmt.Sprintf("%v/api/v1/success?session_id={CHECKOUT_SESSION_ID}", os.Getenv("BASE_URL"))
+	cancelURL := fmt.Sprintf("%v/api/v1/cancel", os.Getenv("BASE_URL"))
+	if os.Getenv("URL_MODE") == "testing" {
+		successURL = fmt.Sprintf("http://%v/api/v1/success?session_id={CHECKOUT_SESSION_ID}", os.Getenv("BASE_URL"))
+		cancelURL = fmt.Sprintf("http://%v/api/v1/cancel", os.Getenv("BASE_URL"))
 	}
 
 	// Create a Stripe Checkout Session
@@ -2157,6 +2152,48 @@ func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "User unsubscribed successfully",
 	})
+}
+
+func (u User) handleSuccessRedirect(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session_id")
+	redirectURL := fmt.Sprintf("linespolicecad://success?session_id=%s", sessionID)
+	// Serve a page with JavaScript to attempt the redirect
+	fmt.Fprintf(w, `
+		<html>
+		<head>
+			<script>
+				window.location.href = %q;
+				setTimeout(function() {
+					document.getElementById('fallback').style.display = 'block';
+				}, 1000);
+			</script>
+		</head>
+		<body>
+			<p id="fallback" style="display:none;">Payment Successful! Please return to the app.</p>
+		</body>
+		</html>
+	`, redirectURL)
+}
+
+func (u User) handleCancelRedirect(w http.ResponseWriter, r *http.Request) {
+	// Redirect to the deep link for the app
+	redirectURL := "linespolicecad://cancel"
+	// Serve a page with JavaScript to attempt the redirect
+	fmt.Fprintf(w, `
+		<html>
+		<head>
+			<script>
+				window.location.href = %q;
+				setTimeout(function() {
+					document.getElementById('fallback').style.display = 'block';
+				}, 1000);
+			</script>
+		</head>
+		<body>
+			<p id="fallback" style="display:none;">Payment Cancelled! Please return to the app.</p>
+		</body>
+		</html>
+	`, redirectURL)
 }
 
 // AddUserNoteHandler adds a note to a user's notes array
