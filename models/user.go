@@ -46,16 +46,18 @@ type Note struct {
 
 // Subscription holds the structure for a user's subscription
 type Subscription struct {
-	ID                string      `json:"id" bson:"id"`
-	Plan              string      `json:"plan" bson:"plan"`
-	Active            bool        `json:"active" bson:"active"`
-	CommunitiesLimit  int         `json:"communitiesLimit" bson:"communitiesLimit"`
-	Ads               string      `json:"ads" bson:"ads"`
-	CustomDepartments bool        `json:"customDepartments" bson:"customDepartments"`
-	Verified          bool        `json:"verified" bson:"verified"`
-	IsAnnual          bool        `json:"isAnnual" bson:"isAnnual"`
-	CreatedAt         interface{} `json:"createdAt" bson:"createdAt"`
-	ExpiresAt         interface{} `json:"expiresAt" bson:"expiresAt"`
+	ID     string `json:"id" bson:"id"`
+	Plan   string `json:"plan" bson:"plan"`
+	Active bool   `json:"active" bson:"active"`
+	// CommunitiesLimit  int                `json:"communitiesLimit" bson:"communitiesLimit"`
+	CurrentPeriodEnd primitive.DateTime `json:"currentPeriodEnd" bson:"currentPeriodEnd"`
+	// Ads               string             `json:"ads" bson:"ads"`
+	// CustomDepartments bool               `json:"customDepartments" bson:"customDepartments"`
+	// Verified          bool               `json:"verified" bson:"verified"`
+	IsAnnual  bool               `json:"isAnnual" bson:"isAnnual"`
+	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	// ExpiresAt         primitive.DateTime `json:"expiresAt" bson:"expiresAt"`
 }
 
 // Friend holds the structure for a friend

@@ -2162,6 +2162,26 @@ func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Convert the Unix timestamp to time.Time
+	currentPeriodEndTime := time.Unix(sub.CurrentPeriodEnd, 0)
+
+	// Convert the time.Time to primitive.DateTime
+	currentPeriodEndPrimitive := primitive.NewDateTimeFromTime(currentPeriodEndTime)
+
+	filter := bson.M{"_id": uID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.currentPeriodEnd": currentPeriodEndPrimitive,
+			"user.subscription.updatedAt":        primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user subscription", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	// Respond with the end date of the current billing cycle
 	response := struct {
 		Success bool   `json:"success"`
