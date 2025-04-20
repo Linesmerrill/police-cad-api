@@ -1906,7 +1906,7 @@ func (u User) CreateCheckoutSessionHandler(w http.ResponseWriter, r *http.Reques
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"sessionId": checkoutSession.ID,
+		"checkoutSession": checkoutSession,
 	})
 }
 
