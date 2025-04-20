@@ -934,6 +934,9 @@ definitions:
       expiresAt:
         type: object
         x-go-name: ExpiresAt
+      id:
+        type: string
+        x-go-name: ID
       isAnnual:
         type: boolean
         x-go-name: IsAnnual
