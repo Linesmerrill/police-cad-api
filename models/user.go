@@ -46,6 +46,7 @@ type Note struct {
 
 // Subscription holds the structure for a user's subscription
 type Subscription struct {
+	ID                string      `json:"id" bson:"id"`
 	Plan              string      `json:"plan" bson:"plan"`
 	Active            bool        `json:"active" bson:"active"`
 	CommunitiesLimit  int         `json:"communitiesLimit" bson:"communitiesLimit"`

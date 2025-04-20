@@ -2078,9 +2078,11 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 // SubscribeUserHandler subscribes a user to a specific tier
 func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
-		UserID   string `json:"userId"`
-		Tier     string `json:"tier"`
-		IsAnnual bool   `json:"isAnnual"`
+		UserID         string `json:"userId"`
+		SubscriptionID string `json:"subscriptionId"`
+		Status         string `json:"status"`
+		Tier           string `json:"tier"`
+		IsAnnual       bool   `json:"isAnnual"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -2094,12 +2096,16 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isActive := requestBody.Status == "active"
+
 	filter := bson.M{"_id": userID}
 	update := bson.M{
 		"$set": bson.M{
+			"user.subscription.id":        requestBody.SubscriptionID,
 			"user.subscription.plan":      requestBody.Tier,
 			"user.subscription.isAnnual":  requestBody.IsAnnual,
-			"user.subscription.active":    true,
+			"user.subscription.active":    isActive,
+			"user.subscription.createdAt": primitive.NewDateTimeFromTime(time.Now()),
 			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
