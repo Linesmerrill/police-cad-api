@@ -918,18 +918,18 @@ definitions:
       active:
         type: boolean
         x-go-name: Active
+      cancelAt:
+        $ref: '#/definitions/DateTime'
       createdAt:
         $ref: '#/definitions/DateTime'
       currentPeriodEnd:
+        $ref: '#/definitions/DateTime'
+      currentPeriodStart:
         $ref: '#/definitions/DateTime'
       id:
         type: string
         x-go-name: ID
       isAnnual:
-        description: |-
-          Ads               string             `json:"ads" bson:"ads"`
-          CustomDepartments bool               `json:"customDepartments" bson:"customDepartments"`
-          Verified          bool               `json:"verified" bson:"verified"`
         type: boolean
         x-go-name: IsAnnual
       plan:

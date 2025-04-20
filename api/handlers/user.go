@@ -2162,17 +2162,22 @@ func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Convert the Unix timestamp to time.Time
-	currentPeriodEndTime := time.Unix(sub.CurrentPeriodEnd, 0)
+	currentPeriodStartTime := time.Unix(sub.CurrentPeriodStart, 0)
+	currentPeriodStartPrimitive := primitive.NewDateTimeFromTime(currentPeriodStartTime)
 
-	// Convert the time.Time to primitive.DateTime
+	currentPeriodEndTime := time.Unix(sub.CurrentPeriodEnd, 0)
 	currentPeriodEndPrimitive := primitive.NewDateTimeFromTime(currentPeriodEndTime)
+
+	cancelAtTime := time.Unix(sub.CancelAt, 0)
+	cancelAtPrimitive := primitive.NewDateTimeFromTime(cancelAtTime)
 
 	filter := bson.M{"_id": uID}
 	update := bson.M{
 		"$set": bson.M{
-			"user.subscription.currentPeriodEnd": currentPeriodEndPrimitive,
-			"user.subscription.updatedAt":        primitive.NewDateTimeFromTime(time.Now()),
+			"user.subscription.cancelAt":           cancelAtPrimitive,
+			"user.subscription.currentPeriodStart": currentPeriodStartPrimitive,
+			"user.subscription.currentPeriodEnd":   currentPeriodEndPrimitive,
+			"user.subscription.updatedAt":          primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 

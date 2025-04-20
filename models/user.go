@@ -46,17 +46,19 @@ type Note struct {
 
 // Subscription holds the structure for a user's subscription
 type Subscription struct {
-	ID     string `json:"id" bson:"id"`
-	Plan   string `json:"plan" bson:"plan"`
-	Active bool   `json:"active" bson:"active"`
-	// CommunitiesLimit  int                `json:"communitiesLimit" bson:"communitiesLimit"`
-	CurrentPeriodEnd primitive.DateTime `json:"currentPeriodEnd" bson:"currentPeriodEnd"`
+	ID                 string             `json:"id" bson:"id"`
+	Plan               string             `json:"plan" bson:"plan"`
+	Active             bool               `json:"active" bson:"active"`
+	CancelAt           primitive.DateTime `json:"cancelAt" bson:"cancelAt"`
+	CurrentPeriodStart primitive.DateTime `json:"currentPeriodStart" bson:"currentPeriodStart"`
+	CurrentPeriodEnd   primitive.DateTime `json:"currentPeriodEnd" bson:"currentPeriodEnd"`
+	IsAnnual           bool               `json:"isAnnual" bson:"isAnnual"`
+	CreatedAt          primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt          primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 	// Ads               string             `json:"ads" bson:"ads"`
 	// CustomDepartments bool               `json:"customDepartments" bson:"customDepartments"`
 	// Verified          bool               `json:"verified" bson:"verified"`
-	IsAnnual  bool               `json:"isAnnual" bson:"isAnnual"`
-	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	// CommunitiesLimit  int                `json:"communitiesLimit" bson:"communitiesLimit"`
 	// ExpiresAt         primitive.DateTime `json:"expiresAt" bson:"expiresAt"`
 }
 
