@@ -208,6 +208,7 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/success", http.HandlerFunc(u.handleSuccessRedirect)).Methods("GET")
 	apiCreate.Handle("/cancel", http.HandlerFunc(u.handleCancelRedirect)).Methods("GET")
+	apiCreate.Handle("/webhook-subscription-deleted", http.HandlerFunc(u.HandleWebhook)).Methods("POST")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
