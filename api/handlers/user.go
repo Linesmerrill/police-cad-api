@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/stripe/stripe-go/v76"
 	"github.com/stripe/stripe-go/v76/checkout/session"
 	"github.com/stripe/stripe-go/v76/subscription"
+	"github.com/stripe/stripe-go/v76/webhook"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -2120,6 +2122,49 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "User subscribed successfully",
 	})
+}
+
+// HandleWebhook handles Stripe webhook events
+func (u User) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	payload, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read webhook payload", http.StatusBadRequest)
+		return
+	}
+
+	event, err := webhook.ConstructEvent(payload, r.Header.Get("Stripe-Signature"), os.Getenv("WEBHOOK_SECRET"))
+	if err != nil {
+		http.Error(w, "Failed to verify webhook signature", http.StatusBadRequest)
+		return
+	}
+
+	if event.Type == "customer.subscription.deleted" {
+		var subscription stripe.Subscription
+		if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
+			http.Error(w, "Failed to parse subscription", http.StatusBadRequest)
+			return
+		}
+		// Find the user by subscription ID and update their plan to Free
+		_, err := u.DB.UpdateOne(
+			context.Background(),
+			bson.M{"subscription.subscriptionId": subscription.ID},
+			bson.M{"$set": bson.M{
+				"subscription": bson.M{
+					"active":    false,
+					"plan":      "free",
+					"isAnnual":  false,
+					"cancelAt":  nil,
+					"createdAt": nil,
+				},
+			}},
+		)
+		if err != nil {
+			http.Error(w, "Failed to update user", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // CancelSubscriptionHandler cancels a user's subscription
