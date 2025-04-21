@@ -45,6 +45,7 @@ func (a *App) New() *mux.Router {
 	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper)}
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
 	bolo := Bolo{DB: databases.NewBoloDatabase(a.dbHelper)}
+	arrestReport := ArrestReport{DB: databases.NewArrestReportDatabase(a.dbHelper)}
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
@@ -196,6 +197,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/bolo/{bolo_id}", api.Middleware(http.HandlerFunc(bolo.DeleteBoloHandler))).Methods("DELETE")
 	apiCreate.Handle("/bolo", api.Middleware(http.HandlerFunc(bolo.CreateBoloHandler))).Methods("POST")
 	apiCreate.Handle("/bolos", api.Middleware(http.HandlerFunc(bolo.FetchDepartmentBolosHandler))).Methods("GET")
+
+	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.GetArrestReportByIDHandler))).Methods("GET")
+	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.UpdateArrestReportHandler))).Methods("PUT")
+	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.DeleteArrestReportHandler))).Methods("DELETE")
+	apiCreate.Handle("/arrest-report", api.Middleware(http.HandlerFunc(arrestReport.CreateArrestReportHandler))).Methods("POST")
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")

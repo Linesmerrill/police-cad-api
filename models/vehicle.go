@@ -14,6 +14,7 @@ type Vehicle struct {
 type VehicleDetails struct {
 	Email             string             `json:"email" bson:"email"`
 	Plate             string             `json:"plate" bson:"plate"`
+	LicensePlateState string             `json:"licensePlateState" bson:"licensePlateState"`
 	Vin               string             `json:"vin" bson:"vin"`
 	Type              string             `json:"type" bson:"type"`
 	Make              string             `json:"make" bson:"make"`
