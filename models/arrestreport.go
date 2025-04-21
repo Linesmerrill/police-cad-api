@@ -52,9 +52,9 @@ type Officer struct {
 
 // AttachedForm represents a form attached to the arrest report
 type AttachedForm struct {
-	FormID string      `json:"formId" bson:"formId"`
-	Type   string      `json:"type" bson:"type"` // e.g., "evidence_booking", "tow_form"
-	Data   interface{} `json:"data" bson:"data"` // Dynamic data based on form type
+	FormID primitive.ObjectID `json:"_id" bson:"_id"`
+	Type   string             `json:"type" bson:"type"` // e.g., "evidence_booking", "tow_form"
+	Data   interface{}        `json:"data" bson:"data"` // Dynamic data based on form type
 }
 
 // EvidenceBookingForm represents the data for an evidence booking form
