@@ -67,5 +67,9 @@ type TowForm struct {
 
 // PropertyReportForm represents the data for a property report form (placeholder)
 type PropertyReportForm struct {
-	Note string `json:"note" bson:"note"`
+	Description  string `json:"description" bson:"description"`
+	Location     string `json:"location" bson:"location"`
+	Value        string `json:"value" bson:"value"`
+	Owner        string `json:"owner" bson:"owner"`
+	OwnerContact string `json:"ownerContact" bson:"ownerContact"`
 }
