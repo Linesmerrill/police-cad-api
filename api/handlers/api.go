@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/linesmerrill/police-cad-api/models"
-	"github.com/stripe/stripe-go/v76"
+	"github.com/stripe/stripe-go/v82"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
