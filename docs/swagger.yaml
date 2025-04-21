@@ -1118,6 +1118,9 @@ definitions:
       isStolen:
         type: string
         x-go-name: IsStolen
+      licensePlateState:
+        type: string
+        x-go-name: LicensePlateState
       linkedCivilianID:
         type: string
         x-go-name: LinkedCivilianID
