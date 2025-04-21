@@ -72,12 +72,12 @@ func (b Bolo) FetchDepartmentBolosHandler(w http.ResponseWriter, r *http.Request
 		"$or": []bson.M{
 			{
 				"bolo.communityID": communityID,
-				"bolo.scope":       "community",
+				"bolo.scope":       "Community",
 			},
 			{
 				"bolo.communityID":  communityID,
 				"bolo.departmentID": departmentID,
-				"bolo.scope":        "department",
+				"bolo.scope":        "Department",
 			},
 		},
 	}
