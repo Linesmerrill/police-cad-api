@@ -218,15 +218,15 @@ definitions:
       occupation:
         type: string
         x-go-name: Occupation
+      onParole:
+        type: boolean
+        x-go-name: OnParole
+      onProbation:
+        type: boolean
+        x-go-name: OnProbation
       organDonor:
         type: boolean
         x-go-name: OrganDonor
-      paroleStatus:
-        type: boolean
-        x-go-name: ParoleStatus
-      probationStatus:
-        type: boolean
-        x-go-name: ProbationStatus
       race:
         type: string
         x-go-name: Race
