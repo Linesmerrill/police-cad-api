@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -18,6 +20,13 @@ import (
 // ArrestReport exported for testing purposes
 type ArrestReport struct {
 	DB databases.ArrestReportDatabase
+}
+
+// PaginatedDataResponse holds the structure for paginated responses
+type PaginatedDataResponse struct {
+	Page       int         `json:"page"`
+	TotalCount int64       `json:"totalCount"`
+	Data       interface{} `json:"data"`
 }
 
 // GetArrestReportByIDHandler retrieves a Arrest report by its ID
@@ -119,4 +128,54 @@ func (a ArrestReport) DeleteArrestReportHandler(w http.ResponseWriter, r *http.R
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Arrest report deleted successfully"}`))
+}
+
+// GetArrestReportsByArresteeIDHandler retrieves all Arrest reports that contain the given arresteeID
+func (a ArrestReport) GetArrestReportsByArresteeIDHandler(w http.ResponseWriter, r *http.Request) {
+	arresteeID := mux.Vars(r)["arrestee_id"]
+
+	// Parse pagination parameters
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
+	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 0 {
+		Page = 0 // Default page
+	}
+	skip := int64(Page * Limit)
+	limit64 := int64(Limit)
+
+	// Create the filter
+	filter := bson.M{
+		"arrestReport.arrestee.id": arresteeID,
+	}
+
+	// Fetch total count
+	totalCount, err := a.DB.CountDocuments(context.TODO(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get total count of arrest reports", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Fetch paginated data
+	dbResp, err := a.DB.Find(context.TODO(), filter, &options.FindOptions{
+		Limit: &limit64,
+		Skip:  &skip,
+	})
+	if err != nil {
+		config.ErrorStatus("failed to get arrest reports", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Create paginated response
+	paginatedResponse := PaginatedDataResponse{
+		Page:       Page,
+		TotalCount: totalCount,
+		Data:       dbResp,
+	}
+
+	// Encode and send the response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(paginatedResponse)
 }

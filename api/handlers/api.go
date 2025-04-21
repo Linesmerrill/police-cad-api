@@ -202,6 +202,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.UpdateArrestReportHandler))).Methods("PUT")
 	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.DeleteArrestReportHandler))).Methods("DELETE")
 	apiCreate.Handle("/arrest-report", api.Middleware(http.HandlerFunc(arrestReport.CreateArrestReportHandler))).Methods("POST")
+	apiCreate.Handle("/arrest-report/arrestee/{arrestee_id}", api.Middleware(http.HandlerFunc(arrestReport.GetArrestReportsByArresteeIDHandler))).Methods("GET")
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
