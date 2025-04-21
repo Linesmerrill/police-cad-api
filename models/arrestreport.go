@@ -6,7 +6,13 @@ import (
 
 // ArrestReport represents the main arrest report structure
 type ArrestReport struct {
-	ID               primitive.ObjectID `json:"_id" bson:"_id"`
+	ID      primitive.ObjectID  `json:"_id" bson:"_id"`
+	Details ArrestReportDetails `json:"arrestReport" bson:"arrestReport"`
+	Version int32               `json:"__v" bson:"__v"`
+}
+
+// ArrestReportDetails holds the structure for the inner arrest report details
+type ArrestReportDetails struct {
 	ReportNumber     string             `json:"reportNumber" bson:"reportNumber"`
 	ArrestDate       string             `json:"arrestDate" bson:"arrestDate"` // Format: MM/DD/YYYY
 	ArrestTime       string             `json:"arrestTime" bson:"arrestTime"` // Format: HH:MM (24-hour)

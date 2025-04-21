@@ -50,7 +50,7 @@ func (a ArrestReport) CreateArrestReportHandler(w http.ResponseWriter, r *http.R
 	}
 
 	newArrestReport.ID = primitive.NewObjectID()
-	newArrestReport.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	newArrestReport.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
 	_, err := a.DB.InsertOne(context.TODO(), newArrestReport)
 	if err != nil {
