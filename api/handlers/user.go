@@ -2128,20 +2128,20 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 func (u User) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read webhook payload", http.StatusBadRequest)
+		config.ErrorStatus("failed to read webhook payload", http.StatusBadRequest, w, err)
 		return
 	}
 
 	event, err := webhook.ConstructEvent(payload, r.Header.Get("Stripe-Signature"), os.Getenv("WEBHOOK_SECRET"))
 	if err != nil {
-		http.Error(w, "Failed to verify webhook signature", http.StatusBadRequest)
+		config.ErrorStatus("failed to verify webhook signature", http.StatusBadRequest, w, err)
 		return
 	}
 
 	if event.Type == "customer.subscription.deleted" {
 		var subscription stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
-			http.Error(w, "Failed to parse subscription", http.StatusBadRequest)
+			config.ErrorStatus("failed to parse subscription", http.StatusBadRequest, w, err)
 			return
 		}
 		// Find the user by subscription ID and update their plan to Free
@@ -2159,7 +2159,7 @@ func (u User) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 			}},
 		)
 		if err != nil {
-			http.Error(w, "Failed to update user", http.StatusInternalServerError)
+			config.ErrorStatus("failed to update user", http.StatusInternalServerError, w, err)
 			return
 		}
 	}
