@@ -34,8 +34,8 @@ type CivilianDetails struct {
 	EyeColor             string             `json:"eyeColor" bson:"eyeColor"`
 	OrganDonor           bool               `json:"organDonor" bson:"organDonor"`
 	Veteran              bool               `json:"veteran" bson:"veteran"`
-	ProbationStatus      bool               `json:"probationStatus" bson:"probationStatus"`
-	ParoleStatus         bool               `json:"paroleStatus" bson:"paroleStatus"`
+	OnProbation          bool               `json:"onProbation" bson:"onProbation"`
+	OnParole             bool               `json:"onParole" bson:"onParole"`
 	Image                string             `json:"image" bson:"image"`
 	Occupation           string             `json:"occupation" bson:"occupation"`
 	FirearmLicense       string             `json:"firearmLicense" bson:"firearmLicense"`
