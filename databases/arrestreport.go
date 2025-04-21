@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const arrestReportName = "arrestReports"
+const arrestReportName = "arrestreports"
 
 // ArrestReportDatabase contains the methods to use with the arrestReport database
 type ArrestReportDatabase interface {
