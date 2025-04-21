@@ -17,10 +17,10 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
-	"github.com/stripe/stripe-go/v76"
-	"github.com/stripe/stripe-go/v76/checkout/session"
-	"github.com/stripe/stripe-go/v76/subscription"
-	"github.com/stripe/stripe-go/v76/webhook"
+	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/subscription"
+	"github.com/stripe/stripe-go/v82/webhook"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -2207,22 +2207,14 @@ func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	currentPeriodStartTime := time.Unix(sub.CurrentPeriodStart, 0)
-	currentPeriodStartPrimitive := primitive.NewDateTimeFromTime(currentPeriodStartTime)
-
-	currentPeriodEndTime := time.Unix(sub.CurrentPeriodEnd, 0)
-	currentPeriodEndPrimitive := primitive.NewDateTimeFromTime(currentPeriodEndTime)
-
 	cancelAtTime := time.Unix(sub.CancelAt, 0)
 	cancelAtPrimitive := primitive.NewDateTimeFromTime(cancelAtTime)
 
 	filter := bson.M{"_id": uID}
 	update := bson.M{
 		"$set": bson.M{
-			"user.subscription.cancelAt":           cancelAtPrimitive,
-			"user.subscription.currentPeriodStart": currentPeriodStartPrimitive,
-			"user.subscription.currentPeriodEnd":   currentPeriodEndPrimitive,
-			"user.subscription.updatedAt":          primitive.NewDateTimeFromTime(time.Now()),
+			"user.subscription.cancelAt":  cancelAtPrimitive,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 
@@ -2239,7 +2231,7 @@ func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		Message string `json:"message"`
 	}{
 		Success: true,
-		EndDate: sub.CurrentPeriodEnd,
+		EndDate: sub.CancelAt,
 		Message: "Subscription will be canceled at the end of the current billing cycle.",
 	}
 
