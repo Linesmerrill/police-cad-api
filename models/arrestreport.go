@@ -27,6 +27,7 @@ type ArrestReport struct {
 
 // Arrestee represents the arrestee's details
 type Arrestee struct {
+	ID        string `json:"id" bson:"id"`
 	Name      string `json:"name" bson:"name"`
 	DOB       string `json:"dob" bson:"dob"` // Format: MM/DD/YYYY
 	Address   string `json:"address" bson:"address"`
