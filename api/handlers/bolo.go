@@ -69,8 +69,17 @@ func (b Bolo) FetchDepartmentBolosHandler(w http.ResponseWriter, r *http.Request
 
 	// Create the base filter
 	filter := bson.M{
-		"bolo.communityID":  communityID,
-		"bolo.departmentID": departmentID,
+		"$or": []bson.M{
+			{
+				"bolo.communityID": communityID,
+				"bolo.scope":       "community",
+			},
+			{
+				"bolo.communityID":  communityID,
+				"bolo.departmentID": departmentID,
+				"bolo.scope":        "department",
+			},
+		},
 	}
 
 	// Add optional key-value filter
