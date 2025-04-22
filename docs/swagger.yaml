@@ -267,6 +267,19 @@ definitions:
         $ref: '#/definitions/CommunityDetails'
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  CommunityAnalytics:
+    description: CommunityAnalytics holds the structure for community analytics
+    properties:
+      cardViews:
+        format: int64
+        type: integer
+        x-go-name: CardViews
+      homePageViews:
+        format: int64
+        type: integer
+        x-go-name: HomePageViews
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   CommunityDetails:
     description: CommunityDetails holds the structure for the inner community collection
       in mongo
@@ -279,6 +292,11 @@ definitions:
       activeSignal100:
         type: boolean
         x-go-name: ActiveSignal100
+      activityLevel:
+        type: string
+        x-go-name: ActivityLevel
+      analytics:
+        $ref: '#/definitions/CommunityAnalytics'
       banList:
         items:
           type: string
@@ -323,6 +341,9 @@ definitions:
       ownerID:
         type: string
         x-go-name: OwnerID
+      promotionalDescription:
+        type: string
+        x-go-name: PromotionalDescription
       promotionalText:
         type: string
         x-go-name: PromotionalText
@@ -331,6 +352,11 @@ definitions:
           $ref: '#/definitions/Role'
         type: array
         x-go-name: Roles
+      subscription:
+        $ref: '#/definitions/Subscription'
+      subscriptionCreatedBy:
+        type: string
+        x-go-name: SubscriptionCreatedBy
       templates:
         items:
           $ref: '#/definitions/Template'

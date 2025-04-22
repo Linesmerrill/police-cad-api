@@ -13,26 +13,37 @@ type Community struct {
 
 // CommunityDetails holds the structure for the inner community collection in mongo
 type CommunityDetails struct {
-	Name            string                  `json:"name" bson:"name"`
-	OwnerID         string                  `json:"ownerID" bson:"ownerID"`
-	Code            string                  `json:"code" bson:"code"`
-	ActivePanics    map[string]interface{}  `json:"activePanics" bson:"activePanics"`
-	ActiveSignal100 bool                    `json:"activeSignal100" bson:"activeSignal100"`
-	ImageLink       string                  `json:"imageLink" bson:"imageLink"`
-	Visibility      string                  `json:"visibility" bson:"visibility"`
-	PromotionalText string                  `json:"promotionalText" bson:"promotionalText"`
-	InviteCodes     []InviteCode            `json:"inviteCodes" bson:"inviteCodes"`
-	Roles           []Role                  `json:"roles" bson:"roles"`
-	BanList         []string                `json:"banList" bson:"banList"`
-	Description     string                  `json:"description" bson:"description"`
-	Members         map[string]MemberDetail `json:"members" bson:"members"`
-	Events          []Event                 `json:"events" bson:"events"`
-	Departments     []Department            `json:"departments" bson:"departments"`
-	TenCodes        []TenCodes              `json:"tenCodes" bson:"tenCodes"`
-	Fines           CommunityFine           `json:"fines" bson:"fines"`
-	Templates       []Template              `json:"templates" bson:"templates"`
-	CreatedAt       primitive.DateTime      `json:"createdAt" bson:"createdAt"`
-	UpdatedAt       primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
+	Name                   string                  `json:"name" bson:"name"`
+	OwnerID                string                  `json:"ownerID" bson:"ownerID"`
+	Code                   string                  `json:"code" bson:"code"`
+	ActivePanics           map[string]interface{}  `json:"activePanics" bson:"activePanics"`
+	ActiveSignal100        bool                    `json:"activeSignal100" bson:"activeSignal100"`
+	ImageLink              string                  `json:"imageLink" bson:"imageLink"`
+	Visibility             string                  `json:"visibility" bson:"visibility"`
+	PromotionalText        string                  `json:"promotionalText" bson:"promotionalText"`
+	PromotionalDescription string                  `json:"promotionalDescription" bson:"promotionalDescription"`
+	InviteCodes            []InviteCode            `json:"inviteCodes" bson:"inviteCodes"`
+	Roles                  []Role                  `json:"roles" bson:"roles"`
+	BanList                []string                `json:"banList" bson:"banList"`
+	Description            string                  `json:"description" bson:"description"`
+	Members                map[string]MemberDetail `json:"members" bson:"members"`
+	Events                 []Event                 `json:"events" bson:"events"`
+	Departments            []Department            `json:"departments" bson:"departments"`
+	TenCodes               []TenCodes              `json:"tenCodes" bson:"tenCodes"`
+	Fines                  CommunityFine           `json:"fines" bson:"fines"`
+	Templates              []Template              `json:"templates" bson:"templates"`
+	Subscription           Subscription            `json:"subscription" bson:"subscription"`
+	SubscriptionCreatedBy  string                  `json:"subscriptionCreatedBy" bson:"subscriptionCreatedBy"`
+	Analytics              CommunityAnalytics      `json:"analytics" bson:"analytics"`
+	ActivityLevel          string                  `json:"activityLevel" bson:"activityLevel"`
+	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
+	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
+}
+
+// CommunityAnalytics holds the structure for community analytics
+type CommunityAnalytics struct {
+	CardViews     int `json:"cardViews" bson:"cardViews"`
+	HomePageViews int `json:"homePageViews" bson:"homePageViews"`
 }
 
 // CommunityFine holds the structure for community fines

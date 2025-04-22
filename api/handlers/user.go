@@ -23,6 +23,7 @@ import (
 	"github.com/stripe/stripe-go/v82/webhook"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -2380,6 +2381,80 @@ func (u User) AddUserNoteHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "Note added successfully",
 		"note":    note,
 	})
+}
+
+// GetPrioritizedCommunitiesHandler retrieves communities sorted by subscription tier
+func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse pagination parameters
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
+	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 0 {
+		Page = 0 // Default page
+	}
+	skip := int64(Page * Limit)
+	limit64 := int64(Limit)
+
+	// Define the subscription tier order
+	subscriptionOrder := bson.M{
+		"elite":    1,
+		"premium":  2,
+		"standard": 3,
+		"basic":    4,
+		"":         5, // Empty subscription tier
+	}
+
+	// MongoDB aggregation pipeline
+	pipeline := mongo.Pipeline{
+		// Add a numeric rank for subscription tiers
+		{{"$addFields", bson.M{
+			"subscriptionRank": bson.M{
+				"$switch": bson.M{
+					"branches": []bson.M{
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "elite"}}, "then": subscriptionOrder["elite"]},
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "premium"}}, "then": subscriptionOrder["premium"]},
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "standard"}}, "then": subscriptionOrder["standard"]},
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "basic"}}, "then": subscriptionOrder["basic"]},
+					},
+					"default": subscriptionOrder[""],
+				},
+			},
+		}}},
+		// Sort by subscription rank
+		{{"$sort", bson.M{"subscriptionRank": 1}}},
+		// Skip and limit for pagination
+		{{"$skip", skip}},
+		{{"$limit", limit64}},
+	}
+
+	// Execute the aggregation
+	cursor, err := u.CDB.Aggregate(context.TODO(), pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to fetch prioritized communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	// Decode the results
+	var communities []models.Community
+	if err := cursor.All(context.TODO(), &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Create the paginated response
+	totalCount, _ := u.CDB.CountDocuments(context.TODO(), bson.M{}) // Total count of communities
+	paginatedResponse := PaginatedDataResponse{
+		Page:       Page,
+		TotalCount: totalCount,
+		Data:       communities,
+	}
+
+	// Send the response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(paginatedResponse)
 }
 
 // UpdateUserNoteHandler updates a specific note for a user
