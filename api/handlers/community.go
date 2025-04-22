@@ -83,6 +83,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.Departments = []models.Department{}
 	newCommunity.Details.TenCodes = defaultTenCodes()
 	newCommunity.Details.Fines = defaultCommunityFines()
+	newCommunity.Details.MembersCount = 1
 
 	// Initialize the events slice if it is null
 	if newCommunity.Details.Events == nil {
