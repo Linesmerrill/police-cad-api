@@ -60,6 +60,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
 
 	apiCreate.Handle("/community", api.Middleware(http.HandlerFunc(c.CreateCommunityHandler))).Methods("POST")
+	apiCreate.Handle("/community/subscribe", api.Middleware(http.HandlerFunc(c.SubscribeCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(c.CommunityHandler))).Methods("GET")
 	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(c.UpdateCommunityFieldHandler))).Methods("PATCH")
 	apiCreate.Handle("/community/{community_id}", api.Middleware(http.HandlerFunc(c.DeleteCommunityByIDHandler))).Methods("DELETE")
