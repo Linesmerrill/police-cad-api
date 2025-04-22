@@ -1967,6 +1967,22 @@ func createCheckoutSession(c *CheckoutRequest) (*stripe.CheckoutSession, error) 
 		} else {
 			priceID = os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID")
 		}
+	case "promotion_basic":
+		if billingInterval == "monthly" {
+			priceID = os.Getenv("STRIPE_BASIC_PROMOTION_MONTHLY_PRICE_ID")
+		}
+	case "promotion_standard":
+		if billingInterval == "monthly" {
+			priceID = os.Getenv("STRIPE_STANDARD_PROMOTION_MONTHLY_PRICE_ID")
+		}
+	case "promotion_premium":
+		if billingInterval == "monthly" {
+			priceID = os.Getenv("STRIPE_PREMIUM_PROMOTION_MONTHLY_PRICE_ID")
+		}
+	case "promotion_elite":
+		if billingInterval == "monthly" {
+			priceID = os.Getenv("STRIPE_ELITE_PROMOTION_MONTHLY_PRICE_ID")
+		}
 	default:
 		// http.Error(w, "Invalid tier. Must be one of: base, premium, premium_plus", http.StatusBadRequest)
 		return nil, fmt.Errorf("invalid tier. Must be one of: base, premium, premium_plus")
