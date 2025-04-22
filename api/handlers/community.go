@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
@@ -1993,4 +1994,62 @@ func (c Community) SetCommunityFinesHandler(w http.ResponseWriter, r *http.Reque
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community fines updated successfully"}`))
+}
+
+// GetEliteCommunitiesHandler returns a paginated list of elite communities
+func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse pagination parameters
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
+	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 0 {
+		Page = 0 // Default page
+	}
+	skip := int64(Page * Limit)
+	limit64 := int64(Limit)
+
+	// Build the aggregation pipeline
+	pipeline := mongo.Pipeline{
+		// Match communities with "elite" subscription and "public" visibility
+		{{"$match", bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}}},
+
+		// Add a random field for sorting
+		{{"$addFields", bson.M{"randomSort": bson.M{"$rand": bson.M{}}}}},
+
+		// Sort by the random field
+		{{"$sort", bson.M{"randomSort": 1}}},
+
+		// Skip and limit for pagination
+		{{"$skip", skip}},
+		{{"$limit", limit64}},
+	}
+
+	// Execute the aggregation
+	cursor, err := c.DB.Aggregate(context.TODO(), pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to fetch elite communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	// Decode the results
+	var communities []models.Community
+	if err := cursor.All(context.TODO(), &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Create the paginated response
+	totalCount, _ := c.DB.CountDocuments(context.TODO(), bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})
+	paginatedResponse := PaginatedDataResponse{
+		Page:       Page,
+		TotalCount: totalCount,
+		Data:       communities,
+	}
+
+	// Send the response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(paginatedResponse)
 }
