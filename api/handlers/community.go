@@ -2057,12 +2057,14 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 // SubscribeCommunityHandler subscribes a community to a specific tier
 func (c Community) SubscribeCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
-		UserID         string `json:"userId"`
-		CommunityID    string `json:"communityId"`
-		SubscriptionID string `json:"subscriptionId"`
-		Status         string `json:"status"`
-		Tier           string `json:"tier"`
-		IsAnnual       bool   `json:"isAnnual"`
+		UserID                 string `json:"userId"`
+		CommunityID            string `json:"communityId"`
+		SubscriptionID         string `json:"subscriptionId"`
+		Status                 string `json:"status"`
+		Tier                   string `json:"tier"`
+		IsAnnual               bool   `json:"isAnnual"`
+		PromotionalText        string `json:"promotionalText"`
+		PromotionalDescription string `json:"promotionalDescription"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -2082,6 +2084,8 @@ func (c Community) SubscribeCommunityHandler(w http.ResponseWriter, r *http.Requ
 	update := bson.M{
 		"$set": bson.M{
 			"community.subscriptionCreatedBy":  requestBody.UserID,
+			"community.promotionalText":        requestBody.PromotionalText,
+			"community.promotionalDescription": requestBody.PromotionalDescription,
 			"community.subscription.id":        requestBody.SubscriptionID,
 			"community.subscription.plan":      requestBody.Tier,
 			"community.subscription.isAnnual":  requestBody.IsAnnual,
