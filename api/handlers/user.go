@@ -2423,6 +2423,27 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 				},
 			},
 		}}},
+		// Lookup users to calculate membersCount
+		{{"$lookup", bson.M{
+			"from": "users",
+			"let":  bson.M{"communityId": "$_id"},
+			"pipeline": []bson.M{
+				{"$unwind": "$user.communities"},
+				{"$match": bson.M{
+					"$expr": bson.M{
+						"$and": []bson.M{
+							{"$eq": []interface{}{"$user.communities.communityId", "$$communityId"}},
+							{"$eq": []interface{}{"$user.communities.status", "approved"}},
+						},
+					},
+				}},
+			},
+			"as": "members",
+		}}},
+		// Add the membersCount field
+		{{"$addFields", bson.M{
+			"membersCount": bson.M{"$size": "$members"},
+		}}},
 		// Sort by subscription rank
 		{{"$sort", bson.M{"subscriptionRank": 1}}},
 		// Skip and limit for pagination
