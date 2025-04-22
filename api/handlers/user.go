@@ -2398,17 +2398,20 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	limit64 := int64(Limit)
 
 	// Define the subscription tier order
-	subscriptionOrder := bson.M{
-		"elite":    1,
-		"premium":  2,
-		"standard": 3,
-		"basic":    4,
-		"":         5, // Empty subscription tier
+	// Define the subscription order for sorting
+	subscriptionOrder := map[string]int{
+		"elite":    4,
+		"premium":  3,
+		"standard": 2,
+		"basic":    1,
+		"":         0, // Default for no subscription
 	}
 
-	// MongoDB aggregation pipeline
+	// Build the aggregation pipeline
 	pipeline := mongo.Pipeline{
+		// Filter for communities with visibility set to public
 		{{"$match", bson.M{"community.visibility": "public"}}},
+
 		// Add a numeric rank for subscription tiers
 		{{"$addFields", bson.M{
 			"subscriptionRank": bson.M{
@@ -2423,12 +2426,15 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 				},
 			},
 		}}},
+
 		// Lookup users to calculate membersCount
 		{{"$lookup", bson.M{
 			"from": "users",
 			"let":  bson.M{"communityId": "$_id"},
 			"pipeline": []bson.M{
+				// Unwind the communities array to evaluate each community entry
 				{"$unwind": "$user.communities"},
+				// Match users who are approved members of this community
 				{"$match": bson.M{
 					"$expr": bson.M{
 						"$and": []bson.M{
@@ -2437,15 +2443,25 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 						},
 					},
 				}},
+				// Optionally project only necessary fields to reduce data size
+				{"$project": bson.M{
+					"_id": 1, // Include user ID for counting
+				}},
 			},
 			"as": "members",
 		}}},
-		// Add the membersCount field
+
+		// Add the membersCount field by counting the matched users
 		{{"$addFields", bson.M{
 			"membersCount": bson.M{"$size": "$members"},
 		}}},
-		// Sort by subscription rank
-		{{"$sort", bson.M{"subscriptionRank": 1}}},
+
+		// Sort by subscription rank (descending) and then by name (ascending)
+		{{"$sort", bson.M{
+			"subscriptionRank": -1, // Descending to prioritize higher tiers
+			"community.name":   1,  // Ascending for alphabetical order within tiers
+		}}},
+
 		// Skip and limit for pagination
 		{{"$skip", skip}},
 		{{"$limit", limit64}},
@@ -2467,7 +2483,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Create the paginated response
-	totalCount, _ := u.CDB.CountDocuments(context.TODO(), bson.M{}) // Total count of communities
+	totalCount, _ := u.CDB.CountDocuments(context.TODO(), bson.M{"community.visibility": "public"})
 	paginatedResponse := PaginatedDataResponse{
 		Page:       Page,
 		TotalCount: totalCount,
