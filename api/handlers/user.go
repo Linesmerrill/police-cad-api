@@ -1346,6 +1346,22 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Convert the user ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Increment the membersCount in the community document
+	communityFilter := bson.M{"_id": cID}
+	communityUpdate := bson.M{"$inc": bson.M{"membersCount": 1}}
+	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community added successfully"}`))
 }
@@ -1463,13 +1479,15 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Find the community by community ID
+	// Find the community by community ID and decrement the membersCount
 	communityFilter := bson.M{"_id": cID}
-	community, err := u.CDB.FindOne(context.Background(), communityFilter)
+	communityUpdate := bson.M{"$inc": bson.M{"membersCount": -1}}
+	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
 	if err != nil {
-		config.ErrorStatus("failed to find community by ID", http.StatusNotFound, w, err)
+		config.ErrorStatus("failed to decrement community membersCount", http.StatusInternalServerError, w, err)
 		return
 	}
+	community, err := u.CDB.FindOne(context.Background(), communityFilter)
 
 	// Iterate through the roles and remove the user ID from the members array
 	for _, role := range community.Details.Roles {

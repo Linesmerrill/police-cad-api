@@ -335,6 +335,10 @@ definitions:
           $ref: '#/definitions/MemberDetail'
         type: object
         x-go-name: Members
+      membersCount:
+        format: int64
+        type: integer
+        x-go-name: MembersCount
       name:
         type: string
         x-go-name: Name
