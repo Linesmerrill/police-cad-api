@@ -2053,3 +2053,52 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(paginatedResponse)
 }
+
+// SubscribeCommunityHandler subscribes a community to a specific tier
+func (c Community) SubscribeCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID         string `json:"userId"`
+		CommunityID    string `json:"communityId"`
+		SubscriptionID string `json:"subscriptionId"`
+		Status         string `json:"status"`
+		Tier           string `json:"tier"`
+		IsAnnual       bool   `json:"isAnnual"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	isActive := requestBody.Status == "active"
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.subscriptionCreatedBy":  requestBody.UserID,
+			"community.subscription.id":        requestBody.SubscriptionID,
+			"community.subscription.plan":      requestBody.Tier,
+			"community.subscription.isAnnual":  requestBody.IsAnnual,
+			"community.subscription.active":    isActive,
+			"community.subscription.createdAt": primitive.NewDateTimeFromTime(time.Now()),
+			"community.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to subscribe community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Community subscribed successfully",
+	})
+}
