@@ -27,6 +27,7 @@ type CommunityDetails struct {
 	BanList                []string                `json:"banList" bson:"banList"`
 	Description            string                  `json:"description" bson:"description"`
 	Members                map[string]MemberDetail `json:"members" bson:"members"`
+	MembersCount           int                     `json:"membersCount" bson:"membersCount"`
 	Events                 []Event                 `json:"events" bson:"events"`
 	Departments            []Department            `json:"departments" bson:"departments"`
 	TenCodes               []TenCodes              `json:"tenCodes" bson:"tenCodes"`
