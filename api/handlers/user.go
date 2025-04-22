@@ -2408,6 +2408,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 
 	// MongoDB aggregation pipeline
 	pipeline := mongo.Pipeline{
+		{{"$match", bson.M{"community.visibility": "public"}}},
 		// Add a numeric rank for subscription tiers
 		{{"$addFields", bson.M{
 			"subscriptionRank": bson.M{
