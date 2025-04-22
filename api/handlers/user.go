@@ -2094,6 +2094,18 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
 			plan = "premium_plus"
 			billingInterval = "annual"
+		case os.Getenv("STRIPE_BASIC_PROMOTION_MONTHLY_PRICE_ID"):
+			plan = "basic"
+			billingInterval = "monthly"
+		case os.Getenv("STRIPE_STANDARD_PROMOTION_MONTHLY_PRICE_ID"):
+			plan = "standard"
+			billingInterval = "monthly"
+		case os.Getenv("STRIPE_PREMIUM_PROMOTION_MONTHLY_PRICE_ID"):
+			plan = "premium"
+			billingInterval = "monthly"
+		case os.Getenv("STRIPE_ELITE_PROMOTION_MONTHLY_PRICE_ID"):
+			plan = "elite"
+			billingInterval = "monthly"
 		}
 
 		resp.Success = true
@@ -2101,7 +2113,7 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		resp.Subscription.Status = string(subs.Status)
 		resp.Subscription.Plan = plan
 		resp.Subscription.BillingInterval = billingInterval
-		resp.Subscription.UserID = checkoutSession.Metadata["userId"]
+		resp.Subscription.UserID = checkoutSession.Metadata["userId"] // For User subscriptions this will be the userID, for Community subscriptions this will be the communityID
 	} else {
 		resp.Success = false
 		resp.Error = "Payment not completed"
