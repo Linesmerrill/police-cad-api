@@ -2125,14 +2125,14 @@ func (c Community) GetCommunityUserSubscriptions(w http.ResponseWriter, r *http.
 	limit64 := int64(Limit)
 
 	// Validate user_id
-	uID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
-		return
-	}
+	// uID, err := primitive.ObjectIDFromHex(userID)
+	// if err != nil {
+	// 	config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+	// 	return
+	// }
 
 	// Build the filter to match communities with subscriptionCreatedBy equal to user_id
-	filter := bson.M{"community.subscriptionCreatedBy": uID}
+	filter := bson.M{"community.subscriptionCreatedBy": userID}
 
 	// Count the total number of matching communities
 	totalCount, err := c.DB.CountDocuments(context.TODO(), filter)
