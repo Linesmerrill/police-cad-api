@@ -2106,3 +2106,65 @@ func (c Community) SubscribeCommunityHandler(w http.ResponseWriter, r *http.Requ
 		"message": "Community subscribed successfully",
 	})
 }
+
+// GetCommunityUserSubscriptions returns the list of communities a user is subscribed to
+func (c Community) GetCommunityUserSubscriptions(w http.ResponseWriter, r *http.Request) {
+	// Extract user_id from the path
+	userID := mux.Vars(r)["user_id"]
+
+	// Parse pagination parameters
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
+	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 0 {
+		Page = 0 // Default page
+	}
+	skip := int64(Page * Limit)
+	limit64 := int64(Limit)
+
+	// Validate user_id
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Build the filter to match communities with subscriptionCreatedBy equal to user_id
+	filter := bson.M{"community.subscriptionCreatedBy": uID}
+
+	// Count the total number of matching communities
+	totalCount, err := c.DB.CountDocuments(context.TODO(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Fetch the paginated list of communities
+	options := options.Find().SetSkip(skip).SetLimit(limit64)
+	cursor, err := c.DB.Find(context.TODO(), filter, options)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	// Decode the results
+	var communities []models.Community
+	if err := cursor.All(context.TODO(), &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Create the paginated response
+	paginatedResponse := PaginatedDataResponse{
+		Page:       Page,
+		TotalCount: totalCount,
+		Data:       communities,
+	}
+
+	// Send the response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(paginatedResponse)
+}
