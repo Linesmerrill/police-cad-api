@@ -1355,7 +1355,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Increment the membersCount in the community document
 	communityFilter := bson.M{"_id": cID}
-	communityUpdate := bson.M{"$inc": bson.M{"membersCount": 1}}
+	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": 1}}
 	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, err)
@@ -1481,7 +1481,7 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 
 	// Find the community by community ID and decrement the membersCount
 	communityFilter := bson.M{"_id": cID}
-	communityUpdate := bson.M{"$inc": bson.M{"membersCount": -1}}
+	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": -1}}
 	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to decrement community membersCount", http.StatusInternalServerError, w, err)
@@ -2499,7 +2499,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 
 		// Add the membersCount field by counting the matched users
 		{{"$addFields", bson.M{
-			"membersCount": bson.M{"$size": "$members"},
+			"community.membersCount": bson.M{"$size": "$members"},
 		}}},
 
 		// Sort by subscription rank (descending) and then by name (ascending)
