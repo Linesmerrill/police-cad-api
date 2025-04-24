@@ -3,11 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/subscription"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -2167,4 +2170,76 @@ func (c Community) GetCommunityUserSubscriptions(w http.ResponseWriter, r *http.
 	// Send the response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(paginatedResponse)
+}
+
+// CancelCommunitySubscriptionHandler cancels a user's subscription
+func (c Community) CancelCommunitySubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CommunityID string `json:"communityId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if req.CommunityID == "" {
+		config.ErrorStatus("community ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Convert the community ID to a primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(req.CommunityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Retrieve the user from the database
+	// comm := models.Community{}
+	comm, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus(fmt.Sprint("failed to find community ", req.CommunityID), http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Update the subscription in Stripe to cancel at the end of the period
+	params := &stripe.SubscriptionParams{
+		CancelAtPeriodEnd: stripe.Bool(true),
+	}
+	sub, err := subscription.Update(comm.Details.Subscription.ID, params)
+	if err != nil {
+		config.ErrorStatus(fmt.Sprint("Failed to cancel subscription", req.CommunityID), http.StatusInternalServerError, w, err)
+		return
+	}
+
+	cancelAtTime := time.Unix(sub.CancelAt, 0)
+	cancelAtPrimitive := primitive.NewDateTimeFromTime(cancelAtTime)
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.subscription.cancelAt":  cancelAtPrimitive,
+			"community.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user subscription", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Respond with the end date of the current billing cycle
+	response := struct {
+		Success bool   `json:"success"`
+		EndDate int64  `json:"endDate"` // Unix timestamp
+		Message string `json:"message"`
+	}{
+		Success: true,
+		EndDate: sub.CancelAt,
+		Message: "Subscription will be canceled at the end of the current billing cycle.",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
