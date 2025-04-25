@@ -32,6 +32,8 @@ func (re Report) CreateReportHandler(w http.ResponseWriter, r *http.Request) {
 	report.ID = primitive.NewObjectID()
 	// Set the createdAt field to the current time
 	report.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	// Set the report to active by default
+	report.Active = true
 
 	// Insert the new report into the database
 	_, err := re.RDB.InsertOne(context.Background(), report)

@@ -9,6 +9,8 @@ type Report struct {
 	ItemType          ItemType           `bson:"itemType" json:"itemType"`           // user report, ad report, etc.
 	ReportedIssue     string             `bson:"reportedIssue" json:"reportedIssue"` // hate, scan, etc.
 	AdditionalDetails string             `bson:"additionalDetails" json:"additionalDetails"`
-	CreatedAt         primitive.DateTime `bson:"createdAt" json:"createdAt"`
 	ReportedByID      string             `bson:"reportedById" json:"reportedById"`
+	Active            bool               `bson:"active" json:"active"`
+	ActionTaken       string             `bson:"actionTaken" json:"actionTaken"` // warning, ban, etc.
+	CreatedAt         primitive.DateTime `bson:"createdAt" json:"createdAt"`
 }
