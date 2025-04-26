@@ -1,27 +1,27 @@
 package models
 
-// ItemType represents the standardized types of items in the system
-type ItemType string
+// ReportType represents the standardized types of items in the system
+type ReportType string
 
-// Predefined ItemType values
+// Predefined ReportType values
 const (
-	ItemTypeUserReport  ItemType = "USER_REPORT"
-	ItemTypeAdReport    ItemType = "AD_REPORT"
-	ItemTypeContentFlag ItemType = "CONTENT_FLAG"
+	ReportTypeUserReport  ReportType = "USER_REPORT"
+	ReportTypeAdReport    ReportType = "AD_REPORT"
+	ReportTypeContentFlag ReportType = "CONTENT_FLAG"
 )
 
-// ValidItemTypes returns all valid ItemType values
-func ValidItemTypes() []ItemType {
-	return []ItemType{
-		ItemTypeUserReport,
-		ItemTypeAdReport,
-		ItemTypeContentFlag,
+// ValidReportTypes returns all valid ReportType values
+func ValidReportTypes() []ReportType {
+	return []ReportType{
+		ReportTypeUserReport,
+		ReportTypeAdReport,
+		ReportTypeContentFlag,
 	}
 }
 
-// IsValid checks if the ItemType value is one of the predefined constants
-func (t ItemType) IsValid() bool {
-	for _, validType := range ValidItemTypes() {
+// IsValid checks if the ReportType value is one of the predefined constants
+func (t ReportType) IsValid() bool {
+	for _, validType := range ValidReportTypes() {
 		if t == validType {
 			return true
 		}
@@ -29,7 +29,7 @@ func (t ItemType) IsValid() bool {
 	return false
 }
 
-// String returns the string representation of the ItemType
-func (t ItemType) String() string {
+// String returns the string representation of the ReportType
+func (t ReportType) String() string {
 	return string(t)
 }
