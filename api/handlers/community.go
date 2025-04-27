@@ -2252,9 +2252,22 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Parse pagination parameters
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 10 // Default limit
+	}
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default page
+	}
+	skip := (page - 1) * limit
+
 	// Query to find communities with the specified tag
 	filter := bson.M{"community.tags": tag}
-	cursor, err := c.DB.Find(context.Background(), filter)
+	options := options.Find().SetLimit(int64(limit)).SetSkip(int64(skip))
+
+	cursor, err := c.DB.Find(context.Background(), filter, options)
 	if err != nil {
 		config.ErrorStatus("failed to fetch communities by tag", http.StatusInternalServerError, w, err)
 		return
