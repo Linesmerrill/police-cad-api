@@ -361,6 +361,11 @@ definitions:
       subscriptionCreatedBy:
         type: string
         x-go-name: SubscriptionCreatedBy
+      tags:
+        items:
+          type: string
+        type: array
+        x-go-name: Tags
       templates:
         items:
           $ref: '#/definitions/Template'
