@@ -2473,35 +2473,6 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 			},
 		}}},
 
-		// Lookup users to calculate membersCount
-		{{"$lookup", bson.M{
-			"from": "users",
-			"let":  bson.M{"communityId": "$_id"},
-			"pipeline": []bson.M{
-				// Unwind the communities array to evaluate each community entry
-				{"$unwind": "$user.communities"},
-				// Match users who are approved members of this community
-				{"$match": bson.M{
-					"$expr": bson.M{
-						"$and": []bson.M{
-							{"$eq": []interface{}{"$user.communities.communityId", "$$communityId"}},
-							{"$eq": []interface{}{"$user.communities.status", "approved"}},
-						},
-					},
-				}},
-				// Optionally project only necessary fields to reduce data size
-				{"$project": bson.M{
-					"_id": 1, // Include user ID for counting
-				}},
-			},
-			"as": "members",
-		}}},
-
-		// Add the membersCount field by counting the matched users
-		{{"$addFields", bson.M{
-			"community.membersCount": bson.M{"$size": "$members"},
-		}}},
-
 		// Sort by subscription rank (descending) and then by name (ascending)
 		{{"$sort", bson.M{
 			"subscriptionRank": -1, // Descending to prioritize higher tiers
