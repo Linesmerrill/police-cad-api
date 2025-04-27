@@ -2282,6 +2282,12 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Return the results
+	if len(communities) == 0 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(communities)
 }
