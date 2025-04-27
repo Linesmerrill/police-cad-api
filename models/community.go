@@ -23,6 +23,7 @@ type CommunityDetails struct {
 	PromotionalText        string                  `json:"promotionalText" bson:"promotionalText"`
 	PromotionalDescription string                  `json:"promotionalDescription" bson:"promotionalDescription"`
 	InviteCodes            []InviteCode            `json:"inviteCodes" bson:"inviteCodes"`
+	Tags                   []string                `json:"tags" bson:"tags"`
 	Roles                  []Role                  `json:"roles" bson:"roles"`
 	BanList                []string                `json:"banList" bson:"banList"`
 	Description            string                  `json:"description" bson:"description"`
