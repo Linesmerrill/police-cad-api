@@ -100,6 +100,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandler))).Methods("GET")
 
 	apiCreate.Handle("/user/create-user", http.HandlerFunc(u.UserCreateHandler)).Methods("POST")
 	apiCreate.Handle("/user/check-user", http.HandlerFunc(u.UserCheckEmailHandler)).Methods("POST")

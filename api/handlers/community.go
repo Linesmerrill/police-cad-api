@@ -2243,3 +2243,32 @@ func (c Community) CancelCommunitySubscriptionHandler(w http.ResponseWriter, r *
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+// FetchCommunitiesByTagHandler returns communities by tag
+func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.Request) {
+	tag := mux.Vars(r)["tag"]
+	if tag == "" {
+		config.ErrorStatus("tag is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Query to find communities with the specified tag
+	filter := bson.M{"community.tags": tag}
+	cursor, err := c.DB.Find(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities by tag", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	// Decode the results
+	var communities []models.Community
+	if err = cursor.All(context.Background(), &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Return the results
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(communities)
+}
