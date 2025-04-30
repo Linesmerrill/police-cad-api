@@ -2171,6 +2171,10 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleWebhook handles Stripe webhook events
+// Note: Delivery Delays
+// Most webhooks are usually delivered within 5 to 60 seconds of the event occurring -
+// **cancellation events usually are delivered within 2hrs** of the user cancelling their subscription.
+// You should be aware of these delivery times when designing your app.
 func (u User) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := ioutil.ReadAll(r.Body)
 	if err != nil {
