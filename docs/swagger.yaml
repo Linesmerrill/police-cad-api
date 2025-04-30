@@ -967,6 +967,13 @@ definitions:
         $ref: '#/definitions/DateTime'
       currentPeriodStart:
         $ref: '#/definitions/DateTime'
+      durationMonths:
+        format: int64
+        type: integer
+        x-go-name: DurationMonths
+      expirationDate:
+        type: string
+        x-go-name: ExpirationDate
       id:
         type: string
         x-go-name: ID
@@ -976,6 +983,9 @@ definitions:
       plan:
         type: string
         x-go-name: Plan
+      purchaseDate:
+        type: string
+        x-go-name: PurchaseDate
       updatedAt:
         $ref: '#/definitions/DateTime'
     type: object
