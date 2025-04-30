@@ -2589,3 +2589,50 @@ func (u User) DeleteUserNoteHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Note deleted successfully"}`))
 }
+
+// UpdateUserSubscriptionHandler updates a user's subscription details
+func (u User) UpdateUserSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+
+	// Parse the request body to get the subscription details
+	var subscriptionData struct {
+		SubscriptionID string `json:"subscriptionId"`
+		Plan           string `json:"plan"`
+		IsAnnual       bool   `json:"isAnnual"`
+		Status         string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&subscriptionData); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the user ID to a primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Prepare the update document
+	isActive := subscriptionData.Status == "active"
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.id":        subscriptionData.SubscriptionID,
+			"user.subscription.plan":      subscriptionData.Plan,
+			"user.subscription.isAnnual":  subscriptionData.IsAnnual,
+			"user.subscription.active":    isActive,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	// Update the user's subscription in the database
+	filter := bson.M{"_id": uID}
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update user subscription", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User subscription updated successfully"}`))
+}
