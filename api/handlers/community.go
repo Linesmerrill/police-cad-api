@@ -2068,6 +2068,9 @@ func (c Community) SubscribeCommunityHandler(w http.ResponseWriter, r *http.Requ
 		IsAnnual               bool   `json:"isAnnual"`
 		PromotionalText        string `json:"promotionalText"`
 		PromotionalDescription string `json:"promotionalDescription"`
+		PurchaseDate           string `json:"purchaseDate"`
+		ExpirationDate         string `json:"expirationDate"`
+		DurationMonths         int    `json:"durationMonths"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -2086,15 +2089,18 @@ func (c Community) SubscribeCommunityHandler(w http.ResponseWriter, r *http.Requ
 	filter := bson.M{"_id": cID}
 	update := bson.M{
 		"$set": bson.M{
-			"community.subscriptionCreatedBy":  requestBody.UserID,
-			"community.promotionalText":        requestBody.PromotionalText,
-			"community.promotionalDescription": requestBody.PromotionalDescription,
-			"community.subscription.id":        requestBody.SubscriptionID,
-			"community.subscription.plan":      requestBody.Tier,
-			"community.subscription.isAnnual":  requestBody.IsAnnual,
-			"community.subscription.active":    isActive,
-			"community.subscription.createdAt": primitive.NewDateTimeFromTime(time.Now()),
-			"community.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+			"community.subscriptionCreatedBy":       requestBody.UserID,
+			"community.promotionalText":             requestBody.PromotionalText,
+			"community.promotionalDescription":      requestBody.PromotionalDescription,
+			"community.subscription.id":             requestBody.SubscriptionID,
+			"community.subscription.plan":           requestBody.Tier,
+			"community.subscription.isAnnual":       requestBody.IsAnnual,
+			"community.subscription.active":         isActive,
+			"community.subscription.purchaseDate":   requestBody.PurchaseDate,
+			"community.subscription.expirationDate": requestBody.ExpirationDate,
+			"community.subscription.durationMonths": requestBody.DurationMonths,
+			"community.subscription.createdAt":      primitive.NewDateTimeFromTime(time.Now()),
+			"community.subscription.updatedAt":      primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 
