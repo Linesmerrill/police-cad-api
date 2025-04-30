@@ -52,6 +52,9 @@ type Subscription struct {
 	CancelAt           primitive.DateTime `json:"cancelAt" bson:"cancelAt"`
 	CurrentPeriodStart primitive.DateTime `json:"currentPeriodStart" bson:"currentPeriodStart"`
 	CurrentPeriodEnd   primitive.DateTime `json:"currentPeriodEnd" bson:"currentPeriodEnd"`
+	PurchaseDate       string             `json:"purchaseDate" bson:"purchaseDate"`     // Used for Community In-App Purchases
+	ExpirationDate     string             `json:"expirationDate" bson:"expirationDate"` // Used for Community In-App Purchases
+	DurationMonths     int                `json:"durationMonths" bson:"durationMonths"` // Used for Community In-App Purchases
 	IsAnnual           bool               `json:"isAnnual" bson:"isAnnual"`
 	CreatedAt          primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt          primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
