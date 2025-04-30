@@ -20,7 +20,6 @@ import (
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/subscription"
-	"github.com/stripe/stripe-go/v82/webhook"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -2179,39 +2178,42 @@ func (u User) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := webhook.ConstructEvent(payload, r.Header.Get("Stripe-Signature"), os.Getenv("WEBHOOK_SECRET"))
-	if err != nil {
-		config.ErrorStatus("failed to verify webhook signature", http.StatusBadRequest, w, err)
+	// Parse the RevenueCat webhook payload
+	var event struct {
+		EventType      string `json:"event_type"`
+		SubscriberID   string `json:"subscriber_id"`
+		CancellationAt string `json:"cancellation_at"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		config.ErrorStatus("failed to parse webhook payload", http.StatusBadRequest, w, err)
 		return
 	}
 
-	if event.Type == "customer.subscription.deleted" {
-		var subscription stripe.Subscription
-		if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
-			config.ErrorStatus("failed to parse subscription", http.StatusBadRequest, w, err)
+	// Handle cancellation event
+	if event.EventType == "CANCELLATION" {
+		cancellationTime, err := time.Parse(time.RFC3339, event.CancellationAt)
+		if err != nil {
+			config.ErrorStatus("invalid cancellation time format", http.StatusBadRequest, w, err)
 			return
 		}
-		// Find the user by subscription ID and update their plan to Free
-		_, err := u.DB.UpdateOne(
+
+		// Update the user's subscription to reflect pending cancellation
+		_, err = u.DB.UpdateOne(
 			context.Background(),
-			bson.M{"subscription.subscriptionId": subscription.ID},
+			bson.M{"subscription.subscriptionId": event.SubscriberID},
 			bson.M{"$set": bson.M{
-				"subscription": bson.M{
-					"active":    false,
-					"plan":      "free",
-					"isAnnual":  false,
-					"cancelAt":  nil,
-					"createdAt": nil,
-				},
+				"subscription.active":   true,
+				"subscription.cancelAt": primitive.NewDateTimeFromTime(cancellationTime),
 			}},
 		)
 		if err != nil {
-			config.ErrorStatus("failed to update user", http.StatusInternalServerError, w, err)
+			config.ErrorStatus("failed to update user subscription", http.StatusInternalServerError, w, err)
 			return
 		}
 	}
 
 	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Webhook processed successfully"}`))
 }
 
 // CancelSubscriptionHandler cancels a user's subscription
