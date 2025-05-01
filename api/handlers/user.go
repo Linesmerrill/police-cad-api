@@ -237,75 +237,139 @@ func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
 // UsersDiscoverPeopleHandler returns a list of users that we suggest to the user to follow
 func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	// Parse query parameters
 	userID := r.URL.Query().Get("userId")
 	if userID == "" {
 		config.ErrorStatus("query param userId is required", http.StatusBadRequest, w, fmt.Errorf("query param userId is required"))
 		return
 	}
 
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 10 // Default limit
+	}
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default page
+	}
+	skip := (page - 1) * limit
+
+	// Convert userID to ObjectID
 	uID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		config.ErrorStatus("invalid userId", http.StatusBadRequest, w, err)
 		return
 	}
 
-	// Retrieve the user's friends list
-	user := models.User{}
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	// Aggregation pipeline to get approved and pending friend IDs
+	pipeline := []bson.M{
+		{
+			"$match": bson.M{"_id": uID},
+		},
+		{
+			"$unwind": bson.M{
+				"path":                       "$user.friends",
+				"preserveNullAndEmptyArrays": true,
+			},
+		},
+		{
+			"$match": bson.M{
+				"$or": []bson.M{
+					{"user.friends.status": "approved"},
+					{"user.friends.status": "pending"},
+				},
+			},
+		},
+		{
+			"$group": bson.M{
+				"_id":       nil,
+				"friendIDs": bson.M{"$addToSet": "$user.friends.friend_id"},
+			},
+		},
+	}
+
+	// Execute the pipeline to get friend IDs
+	cursor, err := u.DB.Aggregate(context.Background(), pipeline)
 	if err != nil {
-		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to fetch friends", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	// Define the result struct
+	type friendResult struct {
+		FriendIDs []string `bson:"friendIDs"`
+	}
+	var results []friendResult
+	if err = cursor.All(context.Background(), &results); err != nil {
+		config.ErrorStatus("failed to decode friends", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Extract the list of approved friends' IDs
-	var approvedFriendIDs []primitive.ObjectID
-	if user.Details.Friends != nil {
-		for _, friend := range user.Details.Friends {
-			if friend.Status == "approved" {
-				fID, err := primitive.ObjectIDFromHex(friend.FriendID)
-				if err == nil {
-					approvedFriendIDs = append(approvedFriendIDs, fID)
-				}
-			}
+	// Extract friendIDs from results
+	friendIDs := []string{}
+	if len(results) > 0 {
+		friendIDs = results[0].FriendIDs
+	}
+	if friendIDs == nil {
+		friendIDs = []string{}
+	}
+
+	// Convert friend IDs to ObjectIDs
+	friendObjectIDs := make([]primitive.ObjectID, 0, len(friendIDs))
+	for _, fid := range friendIDs {
+		if oid, err := primitive.ObjectIDFromHex(fid); err == nil {
+			friendObjectIDs = append(friendObjectIDs, oid)
 		}
 	}
 
-	// Ensure approvedFriendIDs is initialized
-	if approvedFriendIDs == nil {
-		approvedFriendIDs = []primitive.ObjectID{}
+	// Pipeline to find random users excluding friends and the current user
+	pipeline = []bson.M{
+		{
+			"$match": bson.M{
+				"_id": bson.M{
+					"$nin": append(friendObjectIDs, uID), // Exclude friends and current user
+				},
+			},
+		},
+		{
+			"$sample": bson.M{"size": limit}, // Randomly select 'limit' users
+		},
+		{
+			"$skip": skip, // Pagination: skip for the current page
+		},
+		{
+			"$limit": limit, // Pagination: limit to requested size
+		},
 	}
 
-	// Modify the pipeline to exclude approved friends
-	pipeline := []bson.M{
-		{"$match": bson.M{"_id": bson.M{"$ne": uID, "$nin": approvedFriendIDs}}},
-		{"$sample": bson.M{"size": 4}},
-	}
-
-	cursor, err := u.DB.Aggregate(context.Background(), pipeline)
+	// Execute the aggregation
+	cursor, err = u.DB.Aggregate(context.Background(), pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to get discover people recommendations", http.StatusInternalServerError, w, err)
 		return
 	}
 	defer cursor.Close(context.Background())
 
+	// Decode the results
 	var users []models.User
-	err = cursor.All(context.Background(), &users)
-	if err != nil {
+	if err = cursor.All(context.Background(), &users); err != nil {
 		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
 
+	// Return the results
 	if len(users) == 0 {
 		users = []models.User{}
 	}
-
-	b, err := json.Marshal(users)
-	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
-		return
-	}
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"users": users,
+		"page":  page,
+		"limit": limit,
+	})
 }
 
 // UsersLastAccessedCommunityHandler returns the last accessed community details for a user
