@@ -129,6 +129,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/users/{userId}/notes/{noteId}", api.Middleware(http.HandlerFunc(u.DeleteUserNoteHandler))).Methods("DELETE")
 	apiCreate.Handle("/user/{userId}/pending-community-request", api.Middleware(http.HandlerFunc(u.PendingCommunityRequestHandler))).Methods("POST")
 	apiCreate.Handle("/user/{userId}/pending-department-request", api.Middleware(http.HandlerFunc(u.AddUserToPendingDepartmentHandler))).Methods("POST")
+	apiCreate.Handle("/user/{user_id}/deactivate", api.Middleware(http.HandlerFunc(u.DeactivateUserHandler))).Methods("DELETE")
 	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}/read", api.Middleware(http.HandlerFunc(u.MarkNotificationAsReadHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}", api.Middleware(http.HandlerFunc(u.DeleteNotificationHandler))).Methods("DELETE")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UpdateUserByIDHandler))).Methods("PUT")

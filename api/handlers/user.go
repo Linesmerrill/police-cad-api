@@ -2706,3 +2706,36 @@ func (u User) UpdateUserSubscriptionHandler(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User subscription updated successfully"}`))
 }
+
+// DeactivateUserHandler deactivates a user's account
+func (u User) DeactivateUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+
+	// Convert the user ID to a primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Set the deactivation fields
+	deactivationTime := primitive.NewDateTimeFromTime(time.Now())
+	update := bson.M{
+		"$set": bson.M{
+			"user.isDeactivated": true,
+			"user.deactivatedAt": deactivationTime,
+			"user.restoreUntil":  primitive.NewDateTimeFromTime(time.Now().AddDate(0, 0, 30)), // 30 days to restore
+		},
+	}
+
+	// Update the user's account in the database
+	filter := bson.M{"_id": uID}
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to deactivate user account", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "User account deactivated successfully"}`))
+}
