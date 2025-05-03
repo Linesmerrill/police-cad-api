@@ -105,11 +105,6 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		return nil, fmt.Errorf("failed to get user by email, %v", err)
 	}
 
-	// Check if the user is deactivated
-	if dbEmailResp.Details.IsDeactivated {
-		return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
-	}
-
 	expectedUsernameHash := sha256.Sum256([]byte(dbEmailResp.Details.Email))
 	usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1
 
@@ -119,6 +114,11 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 	}
 
 	if usernameMatch {
+		// Check if the user is deactivated
+		if dbEmailResp.Details.IsDeactivated {
+			return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
+		}
+
 		return auth.NewDefaultUser(email, "1", nil, nil), nil
 	}
 	return nil, fmt.Errorf("invalid credentials")
