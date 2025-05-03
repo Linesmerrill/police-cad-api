@@ -41,7 +41,7 @@ func Middleware(next http.Handler) http.Handler {
 			zap.S().Errorw("unauthorized",
 				"url", r.URL, "error", err)
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error": "unauthorized"}`))
+			w.Write([]byte(fmt.Sprintf(`{"error": "unauthorized", "message": "%s"}`, err.Error())))
 			return
 		}
 		zap.S().Debugf("User %s Authenticated\n", user.UserName())
