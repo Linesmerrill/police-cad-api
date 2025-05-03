@@ -1074,6 +1074,8 @@ definitions:
       createdAt:
         type: object
         x-go-name: CreatedAt
+      deactivatedAt:
+        $ref: '#/definitions/DateTime'
       dispatchStatus:
         type: string
         x-go-name: DispatchStatus
@@ -1088,6 +1090,9 @@ definitions:
           $ref: '#/definitions/Friend'
         type: array
         x-go-name: Friends
+      isDeactivated:
+        type: boolean
+        x-go-name: IsDeactivated
       isOnline:
         type: boolean
         x-go-name: IsOnline
@@ -1118,6 +1123,8 @@ definitions:
       resetPasswordToken:
         type: string
         x-go-name: ResetPasswordToken
+      restoreUntil:
+        $ref: '#/definitions/DateTime'
       subscription:
         $ref: '#/definitions/Subscription'
       updatedAt:

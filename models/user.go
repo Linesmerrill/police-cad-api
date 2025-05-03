@@ -29,6 +29,9 @@ type UserDetails struct {
 	Communities           []UserCommunity       `json:"communities" bson:"communities"`
 	IsOnline              bool                  `json:"isOnline" bson:"isOnline"`
 	Subscription          Subscription          `json:"subscription" bson:"subscription"`
+	IsDeactivated         bool                  `json:"isDeactivated" bson:"isDeactivated"`
+	DeactivatedAt         primitive.DateTime    `json:"deactivatedAt" bson:"deactivatedAt"`
+	RestoreUntil          primitive.DateTime    `json:"restoreUntil" bson:"restoreUntil"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
