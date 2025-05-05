@@ -30,8 +30,8 @@ type UserDetails struct {
 	IsOnline              bool                  `json:"isOnline" bson:"isOnline"`
 	Subscription          Subscription          `json:"subscription" bson:"subscription"`
 	IsDeactivated         bool                  `json:"isDeactivated" bson:"isDeactivated"`
-	DeactivatedAt         primitive.DateTime    `json:"deactivatedAt" bson:"deactivatedAt"`
-	RestoreUntil          primitive.DateTime    `json:"restoreUntil" bson:"restoreUntil"`
+	DeactivatedAt         interface{}           `json:"deactivatedAt" bson:"deactivatedAt"`
+	RestoreUntil          interface{}           `json:"restoreUntil" bson:"restoreUntil"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
@@ -49,18 +49,18 @@ type Note struct {
 
 // Subscription holds the structure for a user's subscription
 type Subscription struct {
-	ID                 string             `json:"id" bson:"id"`
-	Plan               string             `json:"plan" bson:"plan"`
-	Active             bool               `json:"active" bson:"active"`
-	CancelAt           primitive.DateTime `json:"cancelAt" bson:"cancelAt"`
-	CurrentPeriodStart primitive.DateTime `json:"currentPeriodStart" bson:"currentPeriodStart"`
-	CurrentPeriodEnd   primitive.DateTime `json:"currentPeriodEnd" bson:"currentPeriodEnd"`
-	PurchaseDate       string             `json:"purchaseDate" bson:"purchaseDate"`     // Used for Community In-App Purchases
-	ExpirationDate     string             `json:"expirationDate" bson:"expirationDate"` // Used for Community In-App Purchases
-	DurationMonths     int                `json:"durationMonths" bson:"durationMonths"` // Used for Community In-App Purchases
-	IsAnnual           bool               `json:"isAnnual" bson:"isAnnual"`
-	CreatedAt          primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt          primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	ID                 string      `json:"id" bson:"id"`
+	Plan               string      `json:"plan" bson:"plan"`
+	Active             bool        `json:"active" bson:"active"`
+	CancelAt           interface{} `json:"cancelAt" bson:"cancelAt"`
+	CurrentPeriodStart interface{} `json:"currentPeriodStart" bson:"currentPeriodStart"`
+	CurrentPeriodEnd   interface{} `json:"currentPeriodEnd" bson:"currentPeriodEnd"`
+	PurchaseDate       string      `json:"purchaseDate" bson:"purchaseDate"`     // Used for Community In-App Purchases
+	ExpirationDate     string      `json:"expirationDate" bson:"expirationDate"` // Used for Community In-App Purchases
+	DurationMonths     int         `json:"durationMonths" bson:"durationMonths"` // Used for Community In-App Purchases
+	IsAnnual           bool        `json:"isAnnual" bson:"isAnnual"`
+	CreatedAt          interface{} `json:"createdAt" bson:"createdAt"`
+	UpdatedAt          interface{} `json:"updatedAt" bson:"updatedAt"`
 	// Ads               string             `json:"ads" bson:"ads"`
 	// CustomDepartments bool               `json:"customDepartments" bson:"customDepartments"`
 	// Verified          bool               `json:"verified" bson:"verified"`
