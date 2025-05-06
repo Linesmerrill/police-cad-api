@@ -148,6 +148,13 @@ func (pv PendingVerification) VerifyCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Delete the verified item from the database
+	err = pv.PVDB.DeleteOne(context.Background(), bson.M{"email": requestBody.Email})
+	if err != nil {
+		config.ErrorStatus("failed to delete verified item", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	// Respond with success if the code matches
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
