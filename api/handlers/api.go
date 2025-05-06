@@ -42,6 +42,7 @@ func (a *App) New() *mux.Router {
 	l := License{DB: databases.NewLicenseDatabase(a.dbHelper)}
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
 	ev := EmsVehicle{DB: databases.NewEmsVehicleDatabase(a.dbHelper)}
+	pv := PendingVerification{PVDB: databases.NewPendingVerificationDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper)}
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
 	bolo := Bolo{DB: databases.NewBoloDatabase(a.dbHelper)}
@@ -58,6 +59,10 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
 	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
+
+	apiCreate.Handle("/verify/send-verification-code", http.HandlerFunc(pv.CreatePendingVerificationHandler)).Methods("POST")
+	apiCreate.Handle("/verify/verify-code", http.HandlerFunc(pv.VerifyCodeHandler)).Methods("POST")
+	apiCreate.Handle("/verify/resend-verification-code", http.HandlerFunc(pv.ResendVerificationCodeHandler)).Methods("POST")
 
 	apiCreate.Handle("/community", api.Middleware(http.HandlerFunc(c.CreateCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/subscribe", api.Middleware(http.HandlerFunc(c.SubscribeCommunityHandler))).Methods("POST")
