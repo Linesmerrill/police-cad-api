@@ -285,7 +285,7 @@ func CorsMiddleware(next http.Handler) http.Handler {
 		if os.Getenv("ENV") == "local" {
 			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
 		} else if os.Getenv("ENV") == "development" {
-			w.Header().Set("Access-Control-Allow-Origin", "https://police-cad-dev.herokuapp.com/")
+			w.Header().Set("Access-Control-Allow-Origin", "https://police-cad-dev.herokuapp.com")
 		} else {
 			w.Header().Set("Access-Control-Allow-Origin", "https://www.linespolice-cad.com")
 		}
