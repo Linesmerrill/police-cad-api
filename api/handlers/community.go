@@ -26,6 +26,7 @@ import (
 type Community struct {
 	DB  databases.CommunityDatabase
 	UDB databases.UserDatabase
+	ADB databases.ArchivedCommunityDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -2296,4 +2297,41 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(communities)
+}
+
+// ArchiveCommunityHandler archives a community
+func (c *Community) ArchiveCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["community_id"]
+
+	// Fetch community details
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		http.Error(w, "Invalid community ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		http.Error(w, "Failed to fetch community: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Write to archivedcommunities collection
+	_, err = c.ADB.InsertOne(context.Background(), *community)
+	if err != nil {
+		http.Error(w, "Failed to archive community: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Delete from communities collection
+	err = c.DB.DeleteOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		http.Error(w, "Failed to delete community: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"success": true, "message": "Community archived successfully"}`))
 }
