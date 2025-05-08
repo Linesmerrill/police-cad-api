@@ -278,3 +278,28 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	_, _ = io.WriteString(w, string(b))
 }
+
+// CorsMiddleware is a middleware that adds CORS headers to the response
+func CorsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if os.Getenv("ENV") == "local" {
+			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+		} else if os.Getenv("ENV") == "development" {
+			w.Header().Set("Access-Control-Allow-Origin", "https://police-cad-dev.herokuapp.com/")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "https://www.linespolice-cad.com")
+		}
+
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		// Handle preflight requests
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
