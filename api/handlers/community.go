@@ -2271,8 +2271,19 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 	skip := (page - 1) * limit
 
 	// Query to find communities with the specified tag
-	filter := bson.M{"community.tags": tag}
-	options := options.Find().SetLimit(int64(limit)).SetSkip(int64(skip))
+	filter := bson.M{
+		"community.tags":       tag,
+		"community.visibility": "public",
+	}
+
+	options := options.Find().
+		SetSort(bson.D{
+			{"community.subscription.plan", 1},    // Sort by plan (Elite, Premium, Standard, Basic)
+			{"community.membersCount", -1},        // Secondary sort by membersCount (descending)
+			{"community.subscription.active", -1}, // Sort by active subscription (active first)
+		}).
+		SetLimit(int64(limit)).
+		SetSkip(int64(skip))
 
 	cursor, err := c.DB.Find(context.Background(), filter, options)
 	if err != nil {
