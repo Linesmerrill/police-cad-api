@@ -222,6 +222,7 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/report", api.Middleware(http.HandlerFunc(report.CreateReportHandler))).Methods("POST")
 
+	apiCreate.Handle("/search/communities", api.Middleware(http.HandlerFunc(search.SearchCommunityHandler))).Methods("GET")
 	apiCreate.Handle("/search", api.Middleware(http.HandlerFunc(search.SearchHandler))).Methods("GET")
 
 	apiCreate.Handle("/generate-signature", api.Middleware(http.HandlerFunc(cloudinaryHandler.GenerateSignature))).Methods("POST")
