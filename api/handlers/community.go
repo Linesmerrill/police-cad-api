@@ -2266,163 +2266,98 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 		limit = 10 // Default limit
 	}
 
-	// Channels for results and errors
-	eliteChan := make(chan []models.Community, 1)
-	premiumChan := make(chan []models.Community, 1)
-	standardChan := make(chan []models.Community, 1)
-	basicChan := make(chan []models.Community, 1)
-	topChan := make(chan []models.Community, 1)
-	randomChan := make(chan []models.Community, 1)
-	errorChan := make(chan error, 6)
-
-	// Helper function to fetch random communities by plan
-	fetchByPlan := func(plan string, ch chan<- []models.Community) {
-		pipeline := mongo.Pipeline{
-			{{"$match", bson.D{
-				{"community.subscription.plan", plan},
-				{"community.subscription.active", true},
-				{"community.visibility", "public"},
-			}}},
-			{{"$sample", bson.D{
-				{"size", 1},
-			}}},
-			{{"$project", bson.D{
-				{"community.name", 1},
-				{"_id", 1},
-				{"community.tags", 1},
-				{"community.imageLink", 1},
-				{"community.membersCount", 1},
-				{"community.promotionalText", 1},
-				{"community.subscription", 1},
-				{"community.visibility", 1},
-			}}},
-		}
-
-		var communities []models.Community
-		cursor, err := c.DB.Aggregate(context.Background(), pipeline)
-		if err != nil {
-			errorChan <- err
-			return
-		}
-		defer cursor.Close(context.Background())
-
-		if err := cursor.All(context.Background(), &communities); err != nil {
-			errorChan <- err
-			return
-		}
-		ch <- communities
+	// Step 1: Fetch a large pool of public communities
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.D{
+			{"community.visibility", "public"},
+		}}},
+		{{"$sample", bson.D{
+			{"size", 50},
+		}}},
+		{{"$project", bson.D{
+			{"community.name", 1},
+			{"_id", 1},
+			{"community.tags", 1},
+			{"community.imageLink", 1},
+			{"community.membersCount", 1},
+			{"community.subscription", 1},
+			{"community.visibility", 1},
+		}}},
 	}
 
-	// Start goroutines for each subscription plan
-	go fetchByPlan("elite", eliteChan)
-	go fetchByPlan("premium", premiumChan)
-	go fetchByPlan("standard", standardChan)
-	go fetchByPlan("basic", basicChan)
+	cursor, err := c.DB.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
 
-	// Fetch top 10 by membersCount and randomly select 3
-	go func() {
-		filter := bson.M{"community.visibility": "public"}
-		findOptions := options.Find().SetSort(bson.D{{"community.membersCount", -1}}).SetLimit(10).SetProjection(bson.M{
-			"community.name":            1,
-			"_id":                       1,
-			"community.tags":            1,
-			"community.imageLink":       1,
-			"community.membersCount":    1,
-			"community.promotionalText": 1,
-			"community.subscription":    1,
-			"community.visibility":      1,
-		})
+	var allCommunities []models.Community
+	if err := cursor.All(context.Background(), &allCommunities); err != nil {
+		config.ErrorStatus("failed to parse communities", http.StatusInternalServerError, w, err)
+		return
+	}
 
-		var topCommunities []models.Community
-		cursor, err := c.DB.Find(context.Background(), filter, findOptions)
-		if err != nil {
-			errorChan <- err
-			return
+	// Step 2: Group communities by subscription plan
+	var elites, premiums, standards, basics, others []models.Community
+	for _, community := range allCommunities {
+		plan := community.Details.Subscription.Plan
+		switch plan {
+		case "elite":
+			elites = append(elites, community)
+		case "premium":
+			premiums = append(premiums, community)
+		case "standard":
+			standards = append(standards, community)
+		case "basic":
+			basics = append(basics, community)
+		default:
+			others = append(others, community)
 		}
-		defer cursor.Close(context.Background())
+	}
 
-		if err := cursor.All(context.Background(), &topCommunities); err != nil {
-			errorChan <- err
-			return
-		}
-
-		if len(topCommunities) > 3 {
-			rand.Seed(time.Now().UnixNano())
-			rand.Shuffle(len(topCommunities), func(i, j int) {
-				topCommunities[i], topCommunities[j] = topCommunities[j], topCommunities[i]
-			})
-			topCommunities = topCommunities[:3]
-		}
-		topChan <- topCommunities
-	}()
-
-	// Fetch random filler communities
-	go func() {
-		remainingLimit := limit - 7 // 4 paid + 3 top
-		if remainingLimit <= 0 {
-			randomChan <- []models.Community{}
-			return
-		}
-
-		pipeline := mongo.Pipeline{
-			{{"$match", bson.D{
-				{"community.visibility", "public"},
-			}}},
-			{{"$sample", bson.D{
-				{"size", remainingLimit},
-			}}},
-			{{"$project", bson.D{
-				{"community.name", 1},
-				{"_id", 1},
-				{"community.tags", 1},
-				{"community.imageLink", 1},
-				{"community.membersCount", 1},
-				{"community.promotionalText", 1},
-				{"community.subscription", 1},
-				{"community.visibility", 1},
-			}}},
-		}
-
-		var randomCommunities []models.Community
-		cursor, err := c.DB.Aggregate(context.Background(), pipeline)
-		if err != nil {
-			errorChan <- err
-			return
-		}
-		defer cursor.Close(context.Background())
-
-		if err := cursor.All(context.Background(), &randomCommunities); err != nil {
-			errorChan <- err
-			return
-		}
-		randomChan <- randomCommunities
-	}()
-
-	// Collect results in the desired order
+	// Step 3: Assemble the final list
 	var finalResults []models.Community
-	for i := 0; i < 6; i++ {
-		select {
-		case res := <-eliteChan:
-			finalResults = append(finalResults, res...)
-		case res := <-premiumChan:
-			finalResults = append(finalResults, res...)
-		case res := <-standardChan:
-			finalResults = append(finalResults, res...)
-		case res := <-basicChan:
-			finalResults = append(finalResults, res...)
-		case res := <-topChan:
-			finalResults = append(finalResults, res...)
-		case res := <-randomChan:
-			finalResults = append(finalResults, res...)
-		case err := <-errorChan:
-			config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
-			return
+	pickRandom := func(list []models.Community) {
+		if len(list) > 0 {
+			rand.Seed(time.Now().UnixNano())
+			finalResults = append(finalResults, list[rand.Intn(len(list))])
 		}
 	}
 
-	// Send the response
+	// Priority order
+	pickRandom(elites)
+	pickRandom(premiums)
+	pickRandom(standards)
+	pickRandom(basics)
+
+	// Step 4: Fill the rest with random picks from others
+	remainingSlots := limit - len(finalResults)
+	if remainingSlots > 0 && len(others) > 0 {
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(others), func(i, j int) {
+			others[i], others[j] = others[j], others[i]
+		})
+		if remainingSlots > len(others) {
+			remainingSlots = len(others)
+		}
+		finalResults = append(finalResults, others[:remainingSlots]...)
+	}
+
+	// Step 5: Deduplicate by _id
+	unique := make(map[string]bool)
+	var dedupedResults []models.Community
+	for _, community := range finalResults {
+		id := community.ID.Hex()
+		if !unique[id] {
+			unique[id] = true
+			dedupedResults = append(dedupedResults, community)
+		}
+	}
+
+	// Step 6: Send response
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(finalResults)
+	json.NewEncoder(w).Encode(dedupedResults)
 }
 
 // ArchiveCommunityHandler archives a community
