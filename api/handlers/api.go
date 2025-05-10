@@ -180,9 +180,10 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/firearms/search", api.Middleware(http.HandlerFunc(f.FirearmsSearchHandler))).Methods("GET")
 
 	apiCreate.Handle("/license/{license_id}", api.Middleware(http.HandlerFunc(l.LicenseByIDHandler))).Methods("GET")
-	apiCreate.Handle("/licenses", api.Middleware(http.HandlerFunc(l.LicenseHandler))).Methods("GET")
-	apiCreate.Handle("/licenses/user/{user_id}", api.Middleware(http.HandlerFunc(l.LicensesByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/licenses/owner/{owner_id}", api.Middleware(http.HandlerFunc(l.LicensesByOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/license/{license_id}", api.Middleware(http.HandlerFunc(l.UpdateLicenseByIDHandler))).Methods("PUT")
+	apiCreate.Handle("/license/{license_id}", api.Middleware(http.HandlerFunc(l.DeleteLicenseByIDHandler))).Methods("DELETE")
+	apiCreate.Handle("/license", api.Middleware(http.HandlerFunc(l.CreateLicenseHandler))).Methods("POST")
+	apiCreate.Handle("/licenses/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(l.LicensesByCivilianIDHandler))).Methods("GET")
 
 	apiCreate.Handle("/warrant/{warrant_id}", api.Middleware(http.HandlerFunc(w.WarrantByIDHandler))).Methods("GET")
 	apiCreate.Handle("/warrants", api.Middleware(http.HandlerFunc(w.WarrantHandler))).Methods("GET")
