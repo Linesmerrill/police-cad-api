@@ -788,29 +788,24 @@ definitions:
       LicenseDetails holds the structure for the inner user structure as
       defined in the license collection in mongo
     properties:
-      additionalNotes:
-        type: string
-        x-go-name: AdditionalNotes
       civilianID:
         type: string
         x-go-name: CivilianID
       createdAt:
-        description: |-
-          OwnerID         string `json:"ownerID" bson:"ownerID"`
-          OwnerName         string      `json:"ownerName" bson:"ownerName"`
-          ActiveCommunityID string      `json:"activeCommunityID" bson:"activeCommunityID"`
-          UserID    string      `json:"userID" bson:"userID"`
         type: object
         x-go-name: CreatedAt
       expirationDate:
         type: string
         x-go-name: ExpirationDate
-      licenseType:
+      notes:
         type: string
-        x-go-name: LicenseType
+        x-go-name: Notes
       status:
         type: string
         x-go-name: Status
+      type:
+        type: string
+        x-go-name: Type
       updatedAt:
         type: object
         x-go-name: UpdatedAt
