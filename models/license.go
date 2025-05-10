@@ -12,15 +12,11 @@ type License struct {
 // LicenseDetails holds the structure for the inner user structure as
 // defined in the license collection in mongo
 type LicenseDetails struct {
-	LicenseType     string `json:"licenseType" bson:"licenseType"`
-	Status          string `json:"status" bson:"status"`
-	ExpirationDate  string `json:"expirationDate" bson:"expirationDate"`
-	AdditionalNotes string `json:"additionalNotes" bson:"additionalNotes"`
-	CivilianID      string `json:"civilianID" bson:"civilianID"`
-	// OwnerID         string `json:"ownerID" bson:"ownerID"`
-	// OwnerName         string      `json:"ownerName" bson:"ownerName"`
-	// ActiveCommunityID string      `json:"activeCommunityID" bson:"activeCommunityID"`
-	// UserID    string      `json:"userID" bson:"userID"`
-	CreatedAt interface{} `json:"createdAt" bson:"createdAt"`
-	UpdatedAt interface{} `json:"updatedAt" bson:"updatedAt"`
+	Type           string      `json:"type" bson:"type"`
+	Status         string      `json:"status" bson:"status"`
+	ExpirationDate string      `json:"expirationDate" bson:"expirationDate"`
+	Notes          string      `json:"notes" bson:"notes"`
+	CivilianID     string      `json:"civilianID" bson:"civilianID"`
+	CreatedAt      interface{} `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      interface{} `json:"updatedAt" bson:"updatedAt"`
 }
