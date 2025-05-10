@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
@@ -2264,50 +2265,164 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 	if err != nil || limit <= 0 {
 		limit = 10 // Default limit
 	}
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
-	if err != nil || page < 1 {
-		page = 1 // Default page
+
+	// Channels for results and errors
+	eliteChan := make(chan []models.Community, 1)
+	premiumChan := make(chan []models.Community, 1)
+	standardChan := make(chan []models.Community, 1)
+	basicChan := make(chan []models.Community, 1)
+	topChan := make(chan []models.Community, 1)
+	randomChan := make(chan []models.Community, 1)
+	errorChan := make(chan error, 6)
+
+	// Helper function to fetch random communities by plan
+	fetchByPlan := func(plan string, ch chan<- []models.Community) {
+		pipeline := mongo.Pipeline{
+			{{"$match", bson.D{
+				{"community.subscription.plan", plan},
+				{"community.subscription.active", true},
+				{"community.visibility", "public"},
+			}}},
+			{{"$sample", bson.D{
+				{"size", 1},
+			}}},
+			{{"$project", bson.D{
+				{"community.name", 1},
+				{"_id", 1},
+				{"community.tags", 1},
+				{"community.imageLink", 1},
+				{"community.membersCount", 1},
+				{"community.promotionalText", 1},
+				{"community.subscription", 1},
+				{"community.visibility", 1},
+			}}},
+		}
+
+		var communities []models.Community
+		cursor, err := c.DB.Aggregate(context.Background(), pipeline)
+		if err != nil {
+			errorChan <- err
+			return
+		}
+		defer cursor.Close(context.Background())
+
+		if err := cursor.All(context.Background(), &communities); err != nil {
+			errorChan <- err
+			return
+		}
+		ch <- communities
 	}
-	skip := (page - 1) * limit
 
-	// Query to find communities with the specified tag
-	filter := bson.M{
-		"community.tags":       tag,
-		"community.visibility": "public",
+	// Start goroutines for each subscription plan
+	go fetchByPlan("elite", eliteChan)
+	go fetchByPlan("premium", premiumChan)
+	go fetchByPlan("standard", standardChan)
+	go fetchByPlan("basic", basicChan)
+
+	// Fetch top 10 by membersCount and randomly select 3
+	go func() {
+		filter := bson.M{"community.visibility": "public"}
+		findOptions := options.Find().SetSort(bson.D{{"community.membersCount", -1}}).SetLimit(10).SetProjection(bson.M{
+			"community.name":            1,
+			"_id":                       1,
+			"community.tags":            1,
+			"community.imageLink":       1,
+			"community.membersCount":    1,
+			"community.promotionalText": 1,
+			"community.subscription":    1,
+			"community.visibility":      1,
+		})
+
+		var topCommunities []models.Community
+		cursor, err := c.DB.Find(context.Background(), filter, findOptions)
+		if err != nil {
+			errorChan <- err
+			return
+		}
+		defer cursor.Close(context.Background())
+
+		if err := cursor.All(context.Background(), &topCommunities); err != nil {
+			errorChan <- err
+			return
+		}
+
+		if len(topCommunities) > 3 {
+			rand.Seed(time.Now().UnixNano())
+			rand.Shuffle(len(topCommunities), func(i, j int) {
+				topCommunities[i], topCommunities[j] = topCommunities[j], topCommunities[i]
+			})
+			topCommunities = topCommunities[:3]
+		}
+		topChan <- topCommunities
+	}()
+
+	// Fetch random filler communities
+	go func() {
+		remainingLimit := limit - 7 // 4 paid + 3 top
+		if remainingLimit <= 0 {
+			randomChan <- []models.Community{}
+			return
+		}
+
+		pipeline := mongo.Pipeline{
+			{{"$match", bson.D{
+				{"community.visibility", "public"},
+			}}},
+			{{"$sample", bson.D{
+				{"size", remainingLimit},
+			}}},
+			{{"$project", bson.D{
+				{"community.name", 1},
+				{"_id", 1},
+				{"community.tags", 1},
+				{"community.imageLink", 1},
+				{"community.membersCount", 1},
+				{"community.promotionalText", 1},
+				{"community.subscription", 1},
+				{"community.visibility", 1},
+			}}},
+		}
+
+		var randomCommunities []models.Community
+		cursor, err := c.DB.Aggregate(context.Background(), pipeline)
+		if err != nil {
+			errorChan <- err
+			return
+		}
+		defer cursor.Close(context.Background())
+
+		if err := cursor.All(context.Background(), &randomCommunities); err != nil {
+			errorChan <- err
+			return
+		}
+		randomChan <- randomCommunities
+	}()
+
+	// Collect results in the desired order
+	var finalResults []models.Community
+	for i := 0; i < 6; i++ {
+		select {
+		case res := <-eliteChan:
+			finalResults = append(finalResults, res...)
+		case res := <-premiumChan:
+			finalResults = append(finalResults, res...)
+		case res := <-standardChan:
+			finalResults = append(finalResults, res...)
+		case res := <-basicChan:
+			finalResults = append(finalResults, res...)
+		case res := <-topChan:
+			finalResults = append(finalResults, res...)
+		case res := <-randomChan:
+			finalResults = append(finalResults, res...)
+		case err := <-errorChan:
+			config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
-	options := options.Find().
-		SetSort(bson.D{
-			{"community.subscription.plan", 1},    // Sort by plan (Elite, Premium, Standard, Basic)
-			{"community.membersCount", -1},        // Secondary sort by membersCount (descending)
-			{"community.subscription.active", -1}, // Sort by active subscription (active first)
-		}).
-		SetLimit(int64(limit)).
-		SetSkip(int64(skip))
-
-	cursor, err := c.DB.Find(context.Background(), filter, options)
-	if err != nil {
-		config.ErrorStatus("failed to fetch communities by tag", http.StatusInternalServerError, w, err)
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	// Decode the results
-	var communities []models.Community
-	if err = cursor.All(context.Background(), &communities); err != nil {
-		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Return the results
-	if len(communities) == 0 {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`[]`))
-		return
-	}
-
+	// Send the response
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(communities)
+	json.NewEncoder(w).Encode(finalResults)
 }
 
 // ArchiveCommunityHandler archives a community
