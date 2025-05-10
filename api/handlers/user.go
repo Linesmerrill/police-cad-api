@@ -1186,8 +1186,30 @@ func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) 
 		communities = []models.UserCommunity{}
 	}
 
-	// Marshal the community IDs to JSON
-	b, err := json.Marshal(communities)
+	// Parse pagination parameters
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 10 // Default limit
+	}
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default page
+	}
+
+	// Apply pagination
+	start := (page - 1) * limit
+	end := start + limit
+	if start > len(communities) {
+		start = len(communities)
+	}
+	if end > len(communities) {
+		end = len(communities)
+	}
+	paginatedCommunities := communities[start:end]
+
+	// Marshal the paginated communities to JSON
+	b, err := json.Marshal(paginatedCommunities)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
