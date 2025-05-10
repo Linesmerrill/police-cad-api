@@ -2266,10 +2266,11 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 		limit = 10 // Default limit
 	}
 
-	// Step 1: Fetch a large pool of public communities
+	// Step 1: Fetch a large random pool of public communities that match the tag
 	pipeline := mongo.Pipeline{
 		{{"$match", bson.D{
 			{"community.visibility", "public"},
+			{"community.tags", tag},
 		}}},
 		{{"$sample", bson.D{
 			{"size", 50},
@@ -2280,7 +2281,6 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 			{"community.tags", 1},
 			{"community.imageLink", 1},
 			{"community.membersCount", 1},
-			{"community.promotionalText", 1},
 			{"community.subscription", 1},
 			{"community.visibility", 1},
 		}}},
@@ -2317,7 +2317,7 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Step 3: Assemble the final list
+	// Step 3: Assemble the final prioritized list
 	var finalResults []models.Community
 	pickRandom := func(list []models.Community) {
 		if len(list) > 0 {
@@ -2326,13 +2326,12 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Priority order
 	pickRandom(elites)
 	pickRandom(premiums)
 	pickRandom(standards)
 	pickRandom(basics)
 
-	// Step 4: Fill the rest with random picks from others
+	// Step 4: Fill the rest randomly from others
 	remainingSlots := limit - len(finalResults)
 	if remainingSlots > 0 && len(others) > 0 {
 		rand.Seed(time.Now().UnixNano())
@@ -2356,7 +2355,7 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Step 6: Send response
+	// Step 6: Send the response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(dedupedResults)
 }
