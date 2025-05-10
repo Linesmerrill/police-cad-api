@@ -778,8 +778,7 @@ definitions:
         type: integer
         x-go-name: Version
       _id:
-        type: string
-        x-go-name: ID
+        $ref: '#/definitions/ObjectID'
       license:
         $ref: '#/definitions/LicenseDetails'
     type: object
@@ -789,13 +788,18 @@ definitions:
       LicenseDetails holds the structure for the inner user structure as
       defined in the license collection in mongo
     properties:
-      activeCommunityID:
-        type: string
-        x-go-name: ActiveCommunityID
       additionalNotes:
         type: string
         x-go-name: AdditionalNotes
+      civilianID:
+        type: string
+        x-go-name: CivilianID
       createdAt:
+        description: |-
+          OwnerID         string `json:"ownerID" bson:"ownerID"`
+          OwnerName         string      `json:"ownerName" bson:"ownerName"`
+          ActiveCommunityID string      `json:"activeCommunityID" bson:"activeCommunityID"`
+          UserID    string      `json:"userID" bson:"userID"`
         type: object
         x-go-name: CreatedAt
       expirationDate:
@@ -804,21 +808,12 @@ definitions:
       licenseType:
         type: string
         x-go-name: LicenseType
-      ownerID:
-        type: string
-        x-go-name: OwnerID
-      ownerName:
-        type: string
-        x-go-name: OwnerName
       status:
         type: string
         x-go-name: Status
       updatedAt:
         type: object
         x-go-name: UpdatedAt
-      userID:
-        type: string
-        x-go-name: UserID
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   MemberDetail:

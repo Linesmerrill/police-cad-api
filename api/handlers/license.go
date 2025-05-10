@@ -3,9 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -23,54 +23,19 @@ type License struct {
 	DB databases.LicenseDatabase
 }
 
-// LicenseList paginated response with a list of items and next page id
-type LicenseList struct {
-	Items      []*models.License `json:"items"`
-	NextPageID int               `json:"next_page_id,omitempty" example:"10"`
-}
-
-// LicenseHandler returns all licenses
-func (v License) LicenseHandler(w http.ResponseWriter, r *http.Request) {
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
-	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-	if err != nil {
-		config.ErrorStatus("failed to get licenses", http.StatusNotFound, w, err)
-		return
-	}
-
-	// Because the frontend requires that the data elements inside models.Licenses exist, if
-	// len == 0 then we will just return an empty data object
-	if len(dbResp) == 0 {
-		dbResp = []models.License{}
-	}
-	b, err := json.Marshal(dbResp)
-	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(b)
-}
-
 // LicenseByIDHandler returns a license by ID
-func (v License) LicenseByIDHandler(w http.ResponseWriter, r *http.Request) {
-	civID := mux.Vars(r)["license_id"]
+func (l License) LicenseByIDHandler(w http.ResponseWriter, r *http.Request) {
+	licID := mux.Vars(r)["license_id"]
 
-	zap.S().Debugf("license_id: %v", civID)
+	zap.S().Debugf("license_id: %v", licID)
 
-	cID, err := primitive.ObjectIDFromHex(civID)
+	lID, err := primitive.ObjectIDFromHex(licID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 		return
 	}
 
-	dbResp, err := v.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	dbResp, err := l.DB.FindOne(context.Background(), bson.M{"_id": lID})
 	if err != nil {
 		config.ErrorStatus("failed to get license by ID", http.StatusNotFound, w, err)
 		return
@@ -85,107 +50,145 @@ func (v License) LicenseByIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
-// LicensesByUserIDHandler returns all licenses that contain the given userID
-func (v License) LicensesByUserIDHandler(w http.ResponseWriter, r *http.Request) {
-	userID := mux.Vars(r)["user_id"]
-	activeCommunityID := r.URL.Query().Get("active_community_id")
+// LicensesByCivilianIDHandler returns all licenses that contain the given civilianID
+func (l License) LicensesByCivilianIDHandler(w http.ResponseWriter, r *http.Request) {
+	civID := mux.Vars(r)["civilian_id"]
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	if err != nil || Limit <= 0 {
+		Limit = 10 // Default limit
 	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 1 {
+		Page = 1 // Default page
+	}
+	skip := int64((Page - 1) * Limit)
 	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
 
-	zap.S().Debugf("user_id: '%v'", userID)
-	zap.S().Debugf("active_community: '%v'", activeCommunityID)
-
-	var dbResp []models.License
-
-	// If the user is in a community then we want to search for licenses that
-	// are in that same community. This way each user can have different licenses
-	// across different communities.
-	//
-	// Likewise, if the user is not in a community, then we will display only the licenses
-	// that are not in a community
-	err = nil
-	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"license.userID":            userID,
-			"license.activeCommunityID": activeCommunityID,
-		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-		if err != nil {
-			config.ErrorStatus("failed to get licenses with active community id", http.StatusNotFound, w, err)
-			return
-		}
-	} else {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"license.userID": userID,
-			"$or": []bson.M{
-				{"license.activeCommunityID": nil},
-				{"license.activeCommunityID": ""},
-			},
-		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-		if err != nil {
-			config.ErrorStatus("failed to get licenses with empty active community id", http.StatusNotFound, w, err)
-			return
-		}
+	// Fetch total count
+	totalCount, err := l.DB.CountDocuments(context.TODO(), bson.M{
+		"license.civilianID": civID,
+	})
+	if err != nil {
+		config.ErrorStatus("failed to get total count of licenses", http.StatusInternalServerError, w, err)
+		return
 	}
 
-	// Because the frontend requires that the data elements inside models.Licenses exist, if
-	// len == 0 then we will just return an empty data object
+	// Fetch paginated data
+	dbResp, err := l.DB.Find(context.TODO(), bson.M{
+		"license.civilianID": civID,
+	}, &options.FindOptions{Limit: &limit64, Skip: &skip})
+	if err != nil {
+		config.ErrorStatus("failed to get licenses by civilian id", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Ensure the response is not nil
 	if len(dbResp) == 0 {
 		dbResp = []models.License{}
 	}
-	b, err := json.Marshal(dbResp)
-	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
-		return
+
+	// Create paginated response
+	paginatedResponse := PaginatedDataResponse{
+		Page:       Page,
+		TotalCount: totalCount,
+		Data:       dbResp,
 	}
+
+	// Send the response
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	json.NewEncoder(w).Encode(paginatedResponse)
 }
 
-// LicensesByOwnerIDHandler returns all licenses that contain the given OwnerID
-func (v License) LicensesByOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
-	ownerID := mux.Vars(r)["owner_id"]
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+// CreateLicenseHandler creates a new license
+func (l License) CreateLicenseHandler(w http.ResponseWriter, r *http.Request) {
+	// Create a new license object with generated ID and timestamps
+	licenseID := primitive.NewObjectID()
+	newLicense := models.License{
+		ID: licenseID,
+		Details: models.LicenseDetails{
+			CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+			UpdatedAt: primitive.NewDateTimeFromTime(time.Now()),
+		},
 	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
 
-	zap.S().Debugf("owner_id: '%v'", ownerID)
-
-	var dbResp []models.License
-
-	// If the user is in a community then we want to search for licenses that
-	// are in that same community. This way each user can have different licenses
-	// across different communities.
-	//
-	// Likewise, if the user is not in a community, then we will display only the licenses
-	// that are not in a community
-	err = nil
-	dbResp, err = v.DB.Find(context.TODO(), bson.M{
-		"license.ownerID": ownerID,
-	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-	if err != nil {
-		config.ErrorStatus("failed to get licenses with empty owner id", http.StatusNotFound, w, err)
+	// Decode the request body into the LicenseDetails field
+	if err := json.NewDecoder(r.Body).Decode(&newLicense.Details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
 
-	// Because the frontend requires that the data elements inside models.Licenses exist, if
-	// len == 0 then we will just return an empty data object
-	if len(dbResp) == 0 {
-		dbResp = []models.License{}
-	}
-	b, err := json.Marshal(dbResp)
+	// Insert the new license into the database
+	_, err := l.DB.InsertOne(context.Background(), newLicense)
 	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to create license", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Respond with the ID of the newly created license
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "License created successfully",
+		"id":      licenseID.Hex(),
+	})
+}
+
+// UpdateLicenseByIDHandler updates a license by ID
+func (l License) UpdateLicenseByIDHandler(w http.ResponseWriter, r *http.Request) {
+	licID := mux.Vars(r)["license_id"]
+
+	zap.S().Debugf("license_id: %v", licID)
+
+	lID, err := primitive.ObjectIDFromHex(licID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var updatedFields map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedFields); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	update := bson.M{"$set": bson.M{}}
+	for key, value := range updatedFields {
+		update["$set"].(bson.M)["license."+key] = value
+	}
+
+	filter := bson.M{"_id": lID}
+
+	err = l.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update license by ID", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	w.Write([]byte(`{"message": "license updated successfully"}`))
+}
+
+// DeleteLicenseByIDHandler deletes a license by ID
+func (l License) DeleteLicenseByIDHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract the license ID from the URL parameters
+	licID := mux.Vars(r)["license_id"]
+
+	// Convert the license ID to an ObjectID
+	lID, err := primitive.ObjectIDFromHex(licID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Delete the license from the database
+	err = l.DB.DeleteOne(context.Background(), bson.M{"_id": lID})
+	if err != nil {
+		config.ErrorStatus("failed to delete license", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Respond with a success message
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "License deleted successfully",
+	})
 }
