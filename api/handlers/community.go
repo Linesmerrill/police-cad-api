@@ -2280,6 +2280,7 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 			{"community.tags", 1},
 			{"community.imageLink", 1},
 			{"community.membersCount", 1},
+			{"community.promotionalText", 1},
 			{"community.subscription", 1},
 			{"community.visibility", 1},
 		}}},
