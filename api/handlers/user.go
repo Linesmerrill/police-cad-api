@@ -1186,6 +1186,22 @@ func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) 
 		communities = []models.UserCommunity{}
 	}
 
+	// Parse optional filter query parameter
+	filter := r.URL.Query().Get("filter")
+	if filter != "" {
+		parts := strings.SplitN(filter, ":", 2)
+		if len(parts) == 2 {
+			filterKey, filterValue := parts[0], parts[1]
+			var filteredCommunities []models.UserCommunity
+			for _, community := range communities {
+				if filterKey == "status" && community.Status == filterValue {
+					filteredCommunities = append(filteredCommunities, community)
+				}
+			}
+			communities = filteredCommunities
+		}
+	}
+
 	// Parse pagination parameters
 	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || limit <= 0 {
