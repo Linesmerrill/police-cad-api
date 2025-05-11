@@ -16,6 +16,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/shaj13/go-guardian/auth"
 	"github.com/shaj13/go-guardian/auth/strategies/bearer"
+	"go.uber.org/zap"
 
 	"github.com/shaj13/go-guardian/auth/strategies/basic"
 	"github.com/shaj13/go-guardian/store"
