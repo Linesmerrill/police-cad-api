@@ -286,7 +286,7 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 func CorsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if os.Getenv("ENV") == "local" {
-			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 		} else if os.Getenv("ENV") == "development" {
 			w.Header().Set("Access-Control-Allow-Origin", "https://police-cad-dev.herokuapp.com")
 		} else {
