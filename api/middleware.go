@@ -68,8 +68,17 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	email = strings.ToLower(email)
+
 	user := models.User{}
-	err := m.DB.FindOne(context.Background(), bson.M{"user.email": email}).Decode(&user)
+	err := m.DB.FindOne(context.Background(), bson.M{
+		"$expr": bson.M{
+			"$eq": []interface{}{
+				bson.M{"$toLower": "$user.email"},
+				email,
+			},
+		},
+	}).Decode(&user)
 	if err != nil {
 		http.Error(w, "failed to get user by email", http.StatusNotFound)
 		return
@@ -107,15 +116,24 @@ func (m MiddlewareDB) SetupGoGuardian() {
 
 // ValidateUser validates a user
 func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, password string) (auth.Info, error) {
-	usernameHash := sha256.Sum256([]byte(email))
+	usernameHash := sha256.Sum256([]byte(strings.ToLower(email)))
+
+	email = strings.ToLower(email)
 
 	dbEmailResp := models.User{}
-	err := m.DB.FindOne(context.Background(), bson.M{"user.email": email}).Decode(&dbEmailResp)
+	err := m.DB.FindOne(context.Background(), bson.M{
+		"$expr": bson.M{
+			"$eq": []interface{}{
+				bson.M{"$toLower": "$user.email"},
+				email,
+			},
+		},
+	}).Decode(&dbEmailResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user by email, %v", err)
+		return nil, fmt.Errorf("failed to validate user by email, %v", err)
 	}
 
-	expectedUsernameHash := sha256.Sum256([]byte(dbEmailResp.Details.Email))
+	expectedUsernameHash := sha256.Sum256([]byte(strings.ToLower(dbEmailResp.Details.Email)))
 	usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1
 
 	err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp.Details.Password), []byte(password))
