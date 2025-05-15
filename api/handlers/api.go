@@ -56,6 +56,7 @@ func (a *App) New() *mux.Router {
 	r.HandleFunc("/health", healthCheckHandler)
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
+	apiV2 := r.PathPrefix("/api/v2").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
 	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
@@ -145,6 +146,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/users/last-accessed-community", api.Middleware(http.HandlerFunc(u.UsersLastAccessedCommunityHandler))).Methods("GET")
 	apiCreate.Handle("/users/friends", api.Middleware(http.HandlerFunc(u.UserFriendsHandler))).Methods("GET")
 	apiCreate.Handle("/users/notifications", api.Middleware(http.HandlerFunc(u.AddNotificationHandler))).Methods("POST")
+	apiV2.Handle("/users/{user_id}/notifications", api.Middleware(http.HandlerFunc(u.GetUserNotificationsHandlerV2))).Methods("GET")
 	apiCreate.Handle("/users/{user_id}/notifications", api.Middleware(http.HandlerFunc(u.GetUserNotificationsHandler))).Methods("GET")
 	apiCreate.Handle("/users/{userId}/friends", api.Middleware(http.HandlerFunc(u.fetchUserFriendsByID))).Methods("GET")
 	apiCreate.Handle("/users/{friend_id}/friends-and-mutual-friends", api.Middleware(http.HandlerFunc(u.fetchFriendsAndMutualFriendsCount))).Methods("GET")

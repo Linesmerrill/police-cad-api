@@ -688,7 +688,154 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"message": "notification created successfully"}`))
 }
 
+// GetUserNotificationsHandlerV2 returns all notifications for a user with pagination
+func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["user_id"]
+
+	if userID == "" {
+		config.ErrorStatus("user_id is required", http.StatusBadRequest, w, fmt.Errorf("user_id is required"))
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Parse pagination parameters
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 50 // Default limit TODO: change this to 10
+	}
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default page
+	}
+	skip := (page - 1) * limit
+
+	filter := bson.M{"_id": uID}
+	dbResp := models.User{}
+	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	notifications := dbResp.Details.Notifications
+	if notifications == nil {
+		notifications = []models.Notification{}
+	}
+
+	// Apply pagination
+	start := skip
+	end := skip + limit
+	if start > len(notifications) {
+		start = len(notifications)
+	}
+	if end > len(notifications) {
+		end = len(notifications)
+	}
+	paginatedNotifications := notifications[start:end]
+
+	var detailedNotifications []map[string]interface{}
+	for _, notification := range paginatedNotifications {
+		senderID, err := primitive.ObjectIDFromHex(notification.SentFromID)
+		if err != nil {
+			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+			return
+		}
+
+		sender := models.User{}
+		err = u.DB.FindOne(context.Background(), bson.M{"_id": senderID}).Decode(&sender)
+		if err != nil {
+			// Skip this notification if the sender is not found
+			continue
+		}
+
+		// Calculate timeAgo
+		now := time.Now()
+		var createdAtTime time.Time
+
+		// Check if CreatedAt is a string and parse it
+		if createdAtStr, ok := notification.CreatedAt.(string); ok {
+			parsedTime, err := time.Parse(time.RFC3339, createdAtStr)
+			if err != nil {
+				config.ErrorStatus("failed to parse createdAt", http.StatusInternalServerError, w, err)
+				return
+			}
+			createdAtTime = parsedTime
+		} else {
+			switch v := notification.CreatedAt.(type) {
+			case time.Time:
+				createdAtTime = v
+			case primitive.DateTime:
+				createdAtTime = v.Time()
+			default:
+				config.ErrorStatus("invalid last accessed time", http.StatusInternalServerError, w, fmt.Errorf("invalid last accessed time"))
+				return
+			}
+		}
+		duration := now.Sub(createdAtTime)
+		var timeAgo string
+		seconds := duration.Seconds()
+		minutes := duration.Minutes()
+		hours := duration.Hours()
+		if seconds < 60 {
+			timeAgo = fmt.Sprintf("%.0f seconds ago", seconds)
+		} else if minutes < 60 {
+			timeAgo = fmt.Sprintf("%.0f minutes ago", minutes)
+		} else if hours <= 24 {
+			timeAgo = fmt.Sprintf("%.0f hours ago", hours)
+		} else if hours <= 24*365 {
+			days := hours / 24
+			timeAgo = fmt.Sprintf("%.0f days ago", days)
+		} else {
+			years := hours / (24 * 365)
+			timeAgo = fmt.Sprintf("%.0f years ago", years)
+		}
+
+		detailedNotification := map[string]interface{}{
+			"notificationId":       notification.ID,
+			"friendId":             notification.SentFromID,
+			"type":                 notification.Type,
+			"message":              notification.Message,
+			"data1":                notification.Data1,
+			"data2":                notification.Data2,
+			"data3":                notification.Data3,
+			"data4":                notification.Data4,
+			"seen":                 notification.Seen,
+			"createdAt":            notification.CreatedAt,
+			"senderName":           sender.Details.Name,
+			"senderUsername":       sender.Details.Username,
+			"senderProfilePicture": sender.Details.ProfilePicture,
+			"timeAgo":              timeAgo,
+		}
+		detailedNotifications = append(detailedNotifications, detailedNotification)
+	}
+
+	// Prepare the response
+	response := map[string]interface{}{
+		"notifications": detailedNotifications,
+		"page":          page,
+		"limit":         limit,
+		"total":         len(notifications),
+	}
+
+	responseBody, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBody)
+}
+
 // GetUserNotificationsHandler returns all notifications for a user
+// Deprecated: use GetUserNotificationsHandlerV2 instead
 func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["user_id"]
