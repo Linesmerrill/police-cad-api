@@ -35,6 +35,7 @@ func (a *App) New() *mux.Router {
 	r := mux.NewRouter()
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
+	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
@@ -109,6 +110,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandler))).Methods("GET")
+
+	apiV2.Handle("/departments-screen-data", api.Middleware(http.HandlerFunc(dept.GetDepartmentsScreenDataHandler))).Methods("GET")
 
 	apiCreate.Handle("/user/create-user", http.HandlerFunc(u.UserCreateHandler)).Methods("POST")
 	apiCreate.Handle("/user/check-user", http.HandlerFunc(u.UserCheckEmailHandler)).Methods("POST")
