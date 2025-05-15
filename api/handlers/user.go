@@ -707,7 +707,7 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 	// Parse pagination parameters
 	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || limit <= 0 {
-		limit = 50 // Default limit TODO: change this to 10
+		limit = 10 // Default limit
 	}
 
 	page, err := strconv.Atoi(r.URL.Query().Get("page"))
