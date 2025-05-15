@@ -49,6 +49,14 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Filter communities with the status "approved"
+	var approvedCommunities []models.UserCommunity
+	for _, community := range user.Details.Communities {
+		if community.Status == "approved" {
+			approvedCommunities = append(approvedCommunities, community)
+		}
+	}
+
 	// Prepare the response
 	response := map[string]interface{}{
 		"community": map[string]interface{}{
@@ -56,7 +64,7 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 			"roles": community.Details.Roles, // Assuming roles are already structured as required
 		},
 		"user": map[string]interface{}{
-			"communities": user.Details.Communities, // Assuming communities are already structured as required
+			"communities": approvedCommunities, // Assuming communities are already structured as required
 		},
 	}
 
