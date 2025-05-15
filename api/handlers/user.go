@@ -729,6 +729,14 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 		notifications = []models.Notification{}
 	}
 
+	// Calculate total unseen notifications
+	unseenCount := 0
+	for _, notification := range notifications {
+		if !notification.Seen {
+			unseenCount++
+		}
+	}
+
 	// Apply pagination
 	start := skip
 	end := skip + limit
@@ -822,6 +830,7 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 		"page":          page,
 		"limit":         limit,
 		"total":         len(notifications),
+		"unseenCount":   unseenCount,
 	}
 
 	responseBody, err := json.Marshal(response)
