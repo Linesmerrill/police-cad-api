@@ -83,6 +83,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members/{memberId}", api.Middleware(http.HandlerFunc(c.DeleteRoleMemberHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}", api.Middleware(http.HandlerFunc(c.DeleteRoleByIDHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/banned-users", api.Middleware(http.HandlerFunc(c.GetBannedUsersHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/online-users", api.Middleware(http.HandlerFunc(c.GetOnlineUsersHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/add-invite-code", api.Middleware(http.HandlerFunc(c.AddInviteCodeHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.FetchAllCommunityDepartmentsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.CreateCommunityDepartmentHandler))).Methods("POST")

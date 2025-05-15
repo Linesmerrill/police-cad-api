@@ -2396,3 +2396,66 @@ func (c *Community) ArchiveCommunityHandler(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"success": true, "message": "Community archived successfully"}`))
 }
+
+// GetOnlineUsersHandler returns a list of online users in a community
+func (c *Community) GetOnlineUsersHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default to page 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10 // Default limit
+	}
+	skip := (page - 1) * limit
+
+	// Query for users with the specified communityId and status "online" in the communities array
+	filter := bson.M{
+		"user.communities": bson.M{
+			"$elemMatch": bson.M{
+				"communityId": communityID,
+				"status":      "approved",
+			},
+		},
+		"user.isOnline": true,
+	}
+	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
+
+	cursor, err := c.UDB.Find(context.Background(), filter, opts)
+	if err != nil {
+		config.ErrorStatus("Failed to fetch online users", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var users []models.User
+	if err := cursor.All(context.Background(), &users); err != nil {
+		config.ErrorStatus("Failed to parse users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Get the total count of online users
+	total, err := c.UDB.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("Failed to count online users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Prepare the response
+	response := struct {
+		Total int           `json:"total"`
+		Page  int           `json:"page"`
+		Users []models.User `json:"users"`
+	}{
+		Total: int(total),
+		Page:  page,
+		Users: users,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
