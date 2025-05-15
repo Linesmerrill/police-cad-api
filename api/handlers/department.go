@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/linesmerrill/police-cad-api/config"
-	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -22,53 +21,78 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Fetch community details
+	// Fetch community details with only _id and roles
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
 		config.ErrorStatus("Invalid communityId", http.StatusBadRequest, w, err)
 		return
 	}
 
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(
+		context.Background(),
+		bson.M{
+			"_id":             cID,
+			"community.roles": bson.M{"$exists": true}, // Ensures roles field exists
+		},
+	)
 	if err != nil {
 		config.ErrorStatus("Failed to fetch community", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Fetch user details
-	uID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		config.ErrorStatus("Invalid userId", http.StatusBadRequest, w, err)
-		return
-	}
-
-	user := models.User{}
-	err = c.UDB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
-	if err != nil {
-		config.ErrorStatus("Failed to fetch user", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Filter communities with the status "approved"
-	var approvedCommunities []models.UserCommunity
-	for _, community := range user.Details.Communities {
-		if community.Status == "approved" {
-			approvedCommunities = append(approvedCommunities, community)
+	// Check if the user is a member of the community
+	isMember := false
+	for _, role := range community.Details.Roles {
+		for _, member := range role.Members {
+			if member == userID {
+				isMember = true
+				break
+			}
+		}
+		if isMember {
+			break
 		}
 	}
 
-	// Prepare the response
-	response := map[string]interface{}{
-		"community": map[string]interface{}{
-			"_id":   community.ID.Hex(),
-			"roles": community.Details.Roles, // Assuming roles are already structured as required
-		},
-		"user": map[string]interface{}{
-			"communities": approvedCommunities, // Assuming communities are already structured as required
-		},
+	if !isMember {
+		response := map[string]bool{
+			"isMember":             false,
+			"canManageDepartments": false,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+		return
 	}
 
-	// Send the response
+	// Check if the user has permission to manage departments
+	canManageDepartments := false
+	for _, role := range community.Details.Roles {
+		isMember := false
+		for _, member := range role.Members {
+			if member == userID {
+				isMember = true
+				break
+			}
+		}
+		if isMember {
+			for _, permission := range role.Permissions {
+				if (permission.Name == "manage departments" || permission.Name == "administrator") && permission.Enabled {
+					canManageDepartments = true
+					break
+				}
+			}
+		}
+		if canManageDepartments {
+			break
+		}
+	}
+
+	// Return the response
+	response := map[string]bool{
+		"isMember":             true,
+		"canManageDepartments": canManageDepartments,
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
