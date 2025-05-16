@@ -2459,3 +2459,72 @@ func (c *Community) GetOnlineUsersHandler(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+// GetActiveTenCodeHandler returns the active Ten-Code for a user in a community
+func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse query parameters
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+	userID := r.URL.Query().Get("userId")
+
+	if communityID == "" || userID == "" {
+		config.ErrorStatus("communityId and userId are required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Convert communityID to ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("Invalid communityId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Fetch the community
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
+		} else {
+			config.ErrorStatus("Failed to fetch community", http.StatusInternalServerError, w, err)
+		}
+		return
+	}
+
+	// Retrieve the user's tenCodeID from the members map
+	memberDetails, exists := community.Details.Members[userID]
+	if !exists {
+		config.ErrorStatus("[GetActiveTenCodeHandler] User not found in community members", http.StatusNotFound, w, nil)
+		return
+	}
+	tenCodeID := memberDetails.TenCodeID
+
+	tenCodeIDObjectID, err := primitive.ObjectIDFromHex(tenCodeID)
+	if err != nil {
+		config.ErrorStatus("Invalid tenCodeId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the tenCode by ID
+	var code, description string
+	for _, tenCode := range community.Details.TenCodes {
+		if tenCode.ID == tenCodeIDObjectID {
+			code = tenCode.Code
+			description = tenCode.Description
+			break
+		}
+	}
+
+	if code == "" || description == "" {
+		config.ErrorStatus("TenCode not found", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// Return the response
+	response := map[string]string{
+		"code":        code,
+		"description": description,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
