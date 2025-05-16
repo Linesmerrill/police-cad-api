@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -28,6 +29,12 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("Invalid userId", http.StatusBadRequest, w, err)
+		return
+	}
+
 	community, err := c.DB.FindOne(
 		context.Background(),
 		bson.M{
@@ -40,16 +47,19 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	userFilter := bson.M{"_id": uID}
+	userData := models.User{}
+	err = c.UDB.FindOne(context.Background(), userFilter).Decode(&userData)
+	if err != nil {
+		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
+		return
+	}
+
 	// Check if the user is a member of the community
 	isMember := false
-	for _, role := range community.Details.Roles {
-		for _, member := range role.Members {
-			if member == userID {
-				isMember = true
-				break
-			}
-		}
-		if isMember {
+	for _, communityDetails := range userData.Details.Communities {
+		if communityDetails.CommunityID == communityID && communityDetails.Status == "approved" {
+			isMember = true
 			break
 		}
 	}
