@@ -1535,7 +1535,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		Status      string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, fmt.Errorf("failed to decode body: %w", err))
 		return
 	}
 
@@ -1545,7 +1545,26 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	// Convert the user ID to primitive.ObjectID
 	uID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, fmt.Errorf("failed to get objectID from Hex: %s", userID))
+		return
+	}
+
+	// Convert the community ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("failed to get community objectID from Hex", http.StatusBadRequest, w, fmt.Errorf("failed to get community objectID: %s", requestBody.CommunityID))
+		return
+	}
+
+	// Check if the community exists
+	communityFilter := bson.M{"_id": cID}
+	_, err = u.CDB.FindOne(context.Background(), communityFilter)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			config.ErrorStatus("community does not exist", http.StatusBadRequest, w, fmt.Errorf("community does not exist: %s", requestBody.CommunityID))
+		} else {
+			config.ErrorStatus("failed to fetch community", http.StatusInternalServerError, w, fmt.Errorf("failed to fetch community: %w", err))
+		}
 		return
 	}
 
@@ -1566,23 +1585,84 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			_, err = u.DB.UpdateOne(context.Background(), filter, update)
 			if err != nil {
-				config.ErrorStatus("failed to initialize communities during migration", http.StatusInternalServerError, w, err)
+				config.ErrorStatus("failed to initialize communities during migration", http.StatusInternalServerError, w, fmt.Errorf("failed to initialize communities during migration: %w", err))
+				return
+			}
+			// Increment membersCount for the community during migration
+			communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": 1}}
+			err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+			if err != nil {
+				config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, fmt.Errorf("failed to increment community membersCount: %w", err))
 				return
 			}
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"message": "Community added successfully during migration"}`))
 			return
 		}
-		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, fmt.Errorf("failed to fetch user: %w", err))
 		return
 	}
 
-	// Handle communities array based on its length
+	// Check if the communityId already exists in user.communities
+	communityExists := false
+	var existingCommunity models.UserCommunity
+	if user.Details.Communities != nil {
+		for _, community := range user.Details.Communities {
+			if community.CommunityID == requestBody.CommunityID {
+				communityExists = true
+				existingCommunity = community
+				break
+			}
+		}
+	}
+
+	if communityExists {
+		// Update the status of the existing community
+		update := bson.M{
+			"$set": bson.M{
+				"user.communities.$[elem].status": requestBody.Status,
+			},
+		}
+		arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
+			Filters: []interface{}{
+				bson.M{"elem.communityId": requestBody.CommunityID},
+			},
+		})
+		result, err := u.DB.UpdateOne(context.Background(), filter, update, arrayFilters)
+		if err != nil {
+			config.ErrorStatus("failed to update community status", http.StatusInternalServerError, w, fmt.Errorf("failed to update community status: %w", err))
+			return
+		}
+		if result.ModifiedCount == 0 {
+			config.ErrorStatus("no community status updated", http.StatusBadRequest, w, fmt.Errorf("community status not updated, communityId: %s with status: %s", requestBody.CommunityID, requestBody.Status))
+			return
+		}
+
+		// Increment membersCount only if transitioning to "approved" from a non-approved state
+		if requestBody.Status == "approved" && existingCommunity.Status != "approved" {
+			communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": 1}}
+			err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+			if err != nil {
+				config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, fmt.Errorf("failed to increment community membersCount: %w", err))
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "Community status updated successfully"}`))
+		return
+	}
+
+	// Add new community with status "pending" (or provided status)
 	newCommunity := models.UserCommunity{
 		ID:          primitive.NewObjectID().Hex(),
 		CommunityID: requestBody.CommunityID,
-		Status:      requestBody.Status,
+		Status:      "pending", // Default to pending for new joins
 	}
+	if requestBody.Status != "" {
+		newCommunity.Status = requestBody.Status
+	}
+
+	// Handle communities array based on its length
 	if user.Details.Communities == nil || len(user.Details.Communities) == 0 {
 		// Initialize communities array and insert the first record
 		update := bson.M{
@@ -1590,7 +1670,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		_, err = u.DB.UpdateOne(context.Background(), filter, update)
 		if err != nil {
-			config.ErrorStatus("failed to initialize communities", http.StatusInternalServerError, w, err)
+			config.ErrorStatus("failed to initialize communities", http.StatusInternalServerError, w, fmt.Errorf("failed to initialize communities: %w", err))
 			return
 		}
 	} else {
@@ -1598,24 +1678,16 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		update := bson.M{"$push": bson.M{"user.communities": newCommunity}}
 		_, err = u.DB.UpdateOne(context.Background(), filter, update)
 		if err != nil {
-			config.ErrorStatus("failed to add community", http.StatusInternalServerError, w, err)
+			config.ErrorStatus("failed to add community", http.StatusInternalServerError, w, fmt.Errorf("failed to add community: %w", err))
 			return
 		}
 	}
 
-	// Convert the user ID to primitive.ObjectID
-	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
-	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-		return
-	}
-
 	// Increment the membersCount in the community document
-	communityFilter := bson.M{"_id": cID}
 	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": 1}}
 	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
 	if err != nil {
-		config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, fmt.Errorf("failed to increment community membersCount: %w", err))
 		return
 	}
 

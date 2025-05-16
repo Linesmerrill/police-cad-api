@@ -5,12 +5,15 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
 	mocksdb "github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -482,4 +485,181 @@ func TestUser_UsersFindAllHandlerEmptyResponse(t *testing.T) {
 	if rr.Body.String() != expected {
 		t.Errorf("handler returned unexpected body: \ngot: %v \nwant: %v", rr.Body.String(), expected)
 	}
+}
+
+func TestUser_AddCommunityToUserHandler_Success(t *testing.T) {
+	// Setup request
+	reqBody := `{"communityId": "608cafd695eb9dc05379b7f4", "status": "approved"}`
+	req, err := http.NewRequest("PUT", "/api/v1/user/608cafd695eb9dc05379b7f3/communities", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req = mux.SetURLVars(req, map[string]string{"userId": "608cafd695eb9dc05379b7f3"})
+	req.Header.Set("Content-Type", "application/json")
+
+	// Setup mocks
+	db := &mocksdb.DatabaseHelper{}
+	userConn := &mocksdb.CollectionHelper{}
+	communityConn := &mocksdb.CollectionHelper{}
+	singleResultHelper := &mocksdb.SingleResultHelper{}
+
+	// Mock user and community collections
+	db.On("Collection", "users").Return(userConn)
+	db.On("Collection", "communities").Return(communityConn)
+
+	// Mock community exists
+	communityConn.On("FindOne", mock.Anything, bson.M{"_id": mock.Anything}).Return(singleResultHelper)
+	singleResultHelper.On("Decode", mock.Anything).Return(nil)
+
+	// Mock user fetch
+	user := models.User{
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{}, // Empty communities array
+		},
+	}
+	singleResultHelper.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		// Populate the user struct
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = user
+	}).Return(nil)
+
+	// Mock user update ($set or $push)
+	userConn.On("UpdateOne", mock.Anything, bson.M{"_id": mock.Anything}, mock.Anything, mock.Anything).Return(&mongo.UpdateResult{ModifiedCount: 1}, nil)
+
+	// Mock community membersCount increment
+	communityConn.On("UpdateOne", mock.Anything, bson.M{"_id": mock.Anything}, bson.M{"$inc": bson.M{"community.membersCount": 1}}, mock.Anything).Return(&mongo.UpdateResult{ModifiedCount: 1}, nil)
+
+	// Initialize handler
+	userDatabase := databases.NewUserDatabase(db)
+	communityDatabase := databases.NewCommunityDatabase(db)
+	u := handlers.User{
+		DB:  userDatabase,
+		CDB: communityDatabase,
+	}
+
+	// Execute handler
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(u.AddCommunityToUserHandler)
+	handler.ServeHTTP(rr, req)
+
+	// Assertions
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `{"message": "Community added successfully"}`, rr.Body.String())
+
+	// Verify mocks
+	db.AssertExpectations(t)
+	userConn.AssertExpectations(t)
+	communityConn.AssertExpectations(t)
+	singleResultHelper.AssertExpectations(t)
+}
+
+func TestUser_AddCommunityToUserHandler_InvalidUserID(t *testing.T) {
+	reqBody := `{"communityId": "608cafd695eb9dc05379b7f4", "status": "approved"}`
+	req, err := http.NewRequest("PUT", "/api/v1/user/invalidUserId/communities", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req = mux.SetURLVars(req, map[string]string{"userId": "invalidUserId"})
+	req.Header.Set("Content-Type", "application/json")
+
+	var db databases.DatabaseHelper
+	db = &MockDatabaseHelper{}
+
+	userDatabase := databases.NewUserDatabase(db)
+	communityDatabase := databases.NewCommunityDatabase(db)
+	u := handlers.User{
+		DB:  userDatabase,
+		CDB: communityDatabase,
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(u.AddCommunityToUserHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "failed to get objectID from Hex")
+}
+
+func TestUser_AddCommunityToUserHandler_InvalidCommunityID(t *testing.T) {
+	reqBody := `{"communityId": "invalidCommunityId", "status": "approved"}`
+	req, err := http.NewRequest("PUT", "/api/v1/user/608cafd695eb9dc05379b7f3/communities", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req = mux.SetURLVars(req, map[string]string{"userId": "608cafd695eb9dc05379b7f3"})
+	req.Header.Set("Content-Type", "application/json")
+
+	var db databases.DatabaseHelper
+	db = &MockDatabaseHelper{}
+
+	userDatabase := databases.NewUserDatabase(db)
+	communityDatabase := databases.NewCommunityDatabase(db)
+	u := handlers.User{
+		DB:  userDatabase,
+		CDB: communityDatabase,
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(u.AddCommunityToUserHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "failed to get community objectID from Hex")
+}
+
+func TestUser_AddCommunityToUserHandler_CommunityAlreadyExists(t *testing.T) {
+	reqBody := `{"communityId": "608cafd695eb9dc05379b7f4", "status": "approved"}`
+	req, err := http.NewRequest("PUT", "/api/v1/user/608cafd695eb9dc05379b7f3/communities", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req = mux.SetURLVars(req, map[string]string{"userId": "608cafd695eb9dc05379b7f3"})
+	req.Header.Set("Content-Type", "application/json")
+
+	var db databases.DatabaseHelper
+	var userConn, communityConn databases.CollectionHelper
+	var singleResultHelper databases.SingleResultHelper
+
+	db = &MockDatabaseHelper{}
+	userConn = &mocksdb.CollectionHelper{}
+	communityConn = &mocksdb.CollectionHelper{}
+	singleResultHelper = &mocksdb.SingleResultHelper{}
+
+	// Mock user and community database interactions
+	db.(*MockDatabaseHelper).On("Collection", "users").Return(userConn)
+	db.(*MockDatabaseHelper).On("Collection", "communities").Return(communityConn)
+
+	// Mock community exists
+	communityConn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil)
+
+	// Mock user already has the community
+	userConn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
+	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		arg := args.Get(0).(*models.User)
+		arg.Details.Communities = []models.UserCommunity{
+			{CommunityID: "608cafd695eb9dc05379b7f4", Status: "approved"},
+		}
+	})
+
+	userDatabase := databases.NewUserDatabase(db)
+	communityDatabase := databases.NewCommunityDatabase(db)
+	u := handlers.User{
+		DB:  userDatabase,
+		CDB: communityDatabase,
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(u.AddCommunityToUserHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "community status not updated")
 }

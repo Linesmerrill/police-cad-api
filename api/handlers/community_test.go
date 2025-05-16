@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -186,7 +187,11 @@ func TestCommunity_CommunityHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Community)
-		(*arg).ID = "608cafe595eb9dc05379b7f4"
+		cID, err := primitive.ObjectIDFromHex("608cafe595eb9dc05379b7f4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		(*arg).ID = cID
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -381,7 +386,11 @@ func TestCommunity_CommunityByOwnerHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Community)
-		(*arg).ID = "608cafe595eb9dc05379b7f4"
+		cID, err := primitive.ObjectIDFromHex("608cafe595eb9dc05379b7f4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		(*arg).ID = cID
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -529,7 +538,11 @@ func TestCommunity_CommunitiesByOwnerIDHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Community)
-		*arg = []models.Community{{ID: "608cafe595eb9dc05379b7f4"}}
+		cID, err := primitive.ObjectIDFromHex("608cafe595eb9dc05379b7f4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Community{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)

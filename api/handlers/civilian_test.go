@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -82,9 +84,7 @@ func TestCivilian_CivilianByIDHandlerJsonMarshalError(t *testing.T) {
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -186,7 +186,11 @@ func TestCivilian_CivilianByIDHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Civilian)
-		(*arg).ID = "5fc51f36c72ff10004dca381"
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		(*arg).ID = cID
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -229,9 +233,7 @@ func TestCivilian_CivilianHandlerJsonMarshalError(t *testing.T) {
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -330,7 +332,11 @@ func TestCivilian_CivilianHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -378,7 +384,11 @@ func TestCivilian_CivilianHandlerPaginationSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -426,7 +436,11 @@ func TestCivilian_CivilianHandlerPaginationInvalidPageEntry(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -474,7 +488,11 @@ func TestCivilian_CivilianHandlerPaginationInvalidPageEntryLessThan1(t *testing.
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -564,9 +582,7 @@ func TestCivilian_CiviliansByUserIDHandlerJsonMarshalError(t *testing.T) {
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -710,7 +726,11 @@ func TestCivilian_CiviliansByUserIDHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -758,7 +778,11 @@ func TestCivilian_CiviliansByUserIDHandlerSuccessWithActiveCommunityID(t *testin
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -806,7 +830,11 @@ func TestCivilian_CiviliansByUserIDHandlerSuccessWithNullCommunityID(t *testing.
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -896,9 +924,7 @@ func TestCivilian_CiviliansByNameSearchHandlerJsonMarshalError(t *testing.T) {
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -1042,7 +1068,11 @@ func TestCivilian_CiviliansByNameSearchHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -1090,7 +1120,11 @@ func TestCivilian_CiviliansByNameSearchHandlerSuccessWithActiveCommunityID(t *te
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -1138,7 +1172,11 @@ func TestCivilian_CiviliansByNameSearchHandlerSuccessWithNullCommunityID(t *test
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Civilian)
-		*arg = []models.Civilian{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Civilian{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)

@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -82,9 +84,7 @@ func TestFirearm_FirearmByIDHandlerJsonMarshalError(t *testing.T) {
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -186,7 +186,11 @@ func TestFirearm_FirearmByIDHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(**models.Firearm)
-		(*arg).ID = "5fc51f58c72ff10004dca382"
+		cID, err := primitive.ObjectIDFromHex("5fc51f58c72ff10004dca382")
+		if err != nil {
+			t.Fatal(err)
+		}
+		(*arg).ID = cID
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("FindOne", mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -229,9 +233,7 @@ func TestFirearm_FirearmHandlerJsonMarshalError(t *testing.T) {
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -330,7 +332,11 @@ func TestFirearm_FirearmHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Firearm)
-		*arg = []models.Firearm{{ID: "5fc51f58c72ff10004dca382"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f58c72ff10004dca382")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Firearm{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -420,9 +426,7 @@ func TestFirearm_FirearmsByUserIDHandlerJsonMarshalError(t *testing.T) {
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -566,7 +570,11 @@ func TestFirearm_FirearmsByUserIDHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Firearm)
-		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Firearm{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -614,7 +622,11 @@ func TestFirearm_FirearmsByUserIDHandlerSuccessWithActiveCommunityID(t *testing.
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Firearm)
-		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Firearm{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -662,7 +674,11 @@ func TestFirearm_FirearmsByUserIDHandlerSuccessWithNullCommunityID(t *testing.T)
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Firearm)
-		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Firearm{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
@@ -752,9 +768,7 @@ func TestFirearm_FirearmsByRegisteredOwnerIDHandlerJsonMarshalError(t *testing.T
 	conn = &mocksdb.CollectionHelper{}
 	singleResultHelper = &mocksdb.SingleResultHelper{}
 
-	x := map[string]interface{}{
-		"foo": make(chan int),
-	}
+	x := primitive.NewDateTimeFromTime(time.Now())
 
 	client.(*mocksdb.ClientHelper).On("StartSession").Return(nil, errors.New("mocked-error"))
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
@@ -853,7 +867,11 @@ func TestFirearm_FirearmsByRegisteredOwnerIDHandlerSuccess(t *testing.T) {
 	db.(*mocksdb.DatabaseHelper).On("Client").Return(client)
 	singleResultHelper.(*mocksdb.SingleResultHelper).On("Decode", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		arg := args.Get(0).(*[]models.Firearm)
-		*arg = []models.Firearm{{ID: "5fc51f36c72ff10004dca381"}}
+		cID, err := primitive.ObjectIDFromHex("5fc51f36c72ff10004dca381")
+		if err != nil {
+			t.Fatal(err)
+		}
+		*arg = []models.Firearm{{ID: cID}}
 
 	})
 	conn.(*mocksdb.CollectionHelper).On("Find", mock.Anything, mock.Anything, mock.Anything).Return(singleResultHelper)
