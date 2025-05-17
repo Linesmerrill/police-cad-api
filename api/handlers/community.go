@@ -2529,25 +2529,6 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
-// TODO 1: replace with a DB Call
-// params: communityId, userId
-// returns: array of paginated department objects with the name, image, _id
-// const data = await fetchUserDepartments(communityId, userId);
-
-// TODO 2: replace with a DB Call
-// params: communityId
-// returns: number of online members
-// const membersData = await fetchCommunityMembersById(communityId, 5);
-
-// TODO 3: replace with a DB Call
-// params: departmentId, communityId
-// returns: number of online members
-// const getOnlineApprovedMembersCount = async (department) => {
-
-func (c Community) GetYourDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
-
-}
-
 // GetPaginatedDepartmentsHandler returns a paginated list of departments by communityId
 func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
@@ -2601,6 +2582,83 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 			"name":  department.Name,
 			"image": department.Image,
 		})
+	}
+
+	// Apply pagination
+	start := offset
+	end := offset + limit
+	if start > len(filteredDepartments) {
+		start = len(filteredDepartments)
+	}
+	if end > len(filteredDepartments) {
+		end = len(filteredDepartments)
+	}
+	paginatedDepartments := filteredDepartments[start:end]
+
+	// Return the response
+	response := map[string]interface{}{
+		"page":       page,
+		"limit":      limit,
+		"totalCount": len(filteredDepartments),
+		"data":       paginatedDepartments,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetPaginatedAllDepartmentsHandler returns a paginated list of all departments by communityId
+func (c Community) GetPaginatedAllDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	userID := r.URL.Query().Get("userId")
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default to page 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10 // Default limit
+	}
+	offset := (page - 1) * limit
+
+	// Convert communityID to ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		http.Error(w, "Invalid community ID", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch the community
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		http.Error(w, "Community not found", http.StatusNotFound)
+		return
+	}
+
+	// Filter departments
+	var filteredDepartments []map[string]interface{}
+	for _, department := range community.Details.Departments {
+		if department.ApprovalRequired {
+			// Check if user is not in the members list or status is not "approved"
+			isMember := false
+			for _, member := range department.Members {
+				if member.UserID == userID && member.Status == "approved" {
+					isMember = true
+					break
+				}
+			}
+			if isMember {
+				continue
+			}
+
+			// Add department with only required fields
+			filteredDepartments = append(filteredDepartments, map[string]interface{}{
+				"_id":   department.ID,
+				"name":  department.Name,
+				"image": department.Image,
+			})
+		}
 	}
 
 	// Apply pagination
