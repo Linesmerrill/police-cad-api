@@ -158,16 +158,24 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Paginate the members
+	// Filter members with status "approved"
+	var approvedMembers []models.MemberStatus
+	for _, member := range department.Members {
+		if member.Status == "approved" {
+			approvedMembers = append(approvedMembers, member)
+		}
+	}
+
+	// Paginate the approved members
 	start := offset
 	end := offset + limit
-	if start > len(department.Members) {
-		start = len(department.Members)
+	if start > len(approvedMembers) {
+		start = len(approvedMembers)
 	}
-	if end > len(department.Members) {
-		end = len(department.Members)
+	if end > len(approvedMembers) {
+		end = len(approvedMembers)
 	}
-	paginatedMembers := department.Members[start:end]
+	paginatedMembers := approvedMembers[start:end]
 
 	// Enrich members with user data
 	var enrichedMembers []map[string]interface{}
@@ -196,7 +204,7 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 	response := map[string]interface{}{
 		"page":       page,
 		"limit":      limit,
-		"totalCount": len(department.Members),
+		"totalCount": len(approvedMembers),
 		"data":       enrichedMembers,
 	}
 	w.Header().Set("Content-Type", "application/json")
