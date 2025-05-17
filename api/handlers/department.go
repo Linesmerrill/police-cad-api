@@ -202,10 +202,11 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 
 	// Return the response
 	response := map[string]interface{}{
-		"page":       page,
-		"limit":      limit,
-		"totalCount": len(approvedMembers),
-		"data":       enrichedMembers,
+		"page":             page,
+		"limit":            limit,
+		"totalCount":       len(approvedMembers),
+		"approvalRequired": department.ApprovalRequired,
+		"data":             enrichedMembers,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
