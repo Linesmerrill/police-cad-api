@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
@@ -105,5 +107,98 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetDepartmentMembersHandler handles the request to get department members
+func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default to page 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10 // Default limit
+	}
+	offset := (page - 1) * limit
+
+	// Convert communityID and departmentID to ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		http.Error(w, "Invalid community ID", http.StatusBadRequest)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		http.Error(w, "Invalid department ID", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch the community
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		http.Error(w, "Community not found", http.StatusNotFound)
+		return
+	}
+
+	// Find the department by ID
+	var department *models.Department
+	for _, dept := range community.Details.Departments {
+		if dept.ID == dID {
+			department = &dept
+			break
+		}
+	}
+	if department == nil {
+		http.Error(w, "Department not found", http.StatusNotFound)
+		return
+	}
+
+	// Paginate the members
+	start := offset
+	end := offset + limit
+	if start > len(department.Members) {
+		start = len(department.Members)
+	}
+	if end > len(department.Members) {
+		end = len(department.Members)
+	}
+	paginatedMembers := department.Members[start:end]
+
+	// Enrich members with user data
+	var enrichedMembers []map[string]interface{}
+	for _, member := range paginatedMembers {
+		userID, err := primitive.ObjectIDFromHex(member.UserID)
+		if err != nil {
+			continue // Skip invalid user IDs
+		}
+
+		// Fetch user details
+		var user models.User
+		err = c.UDB.FindOne(context.Background(), bson.M{"_id": userID}).Decode(&user)
+		if err != nil {
+			continue // Skip if user not found
+		}
+
+		// Add enriched member data
+		enrichedMembers = append(enrichedMembers, map[string]interface{}{
+			"userID":       member.UserID,
+			"username":     user.Details.Username,
+			"subscription": user.Details.Subscription,
+		})
+	}
+
+	// Return the response
+	response := map[string]interface{}{
+		"page":       page,
+		"limit":      limit,
+		"totalCount": len(department.Members),
+		"data":       enrichedMembers,
+	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
