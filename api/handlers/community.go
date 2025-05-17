@@ -2544,248 +2544,83 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 // returns: number of online members
 // const getOnlineApprovedMembersCount = async (department) => {
 
-// YourDepartment is the department object returned from the DB
-type YourDepartment struct {
-	ID                primitive.ObjectID `json:"_id"`
-	Name              string             `json:"name"`
-	Image             string             `json:"image"`
-	OnlineMemberCount int                `json:"onlineMemberCount"`
-}
-
-// YourDepartmentsResponse returns the department details for a user in a community
-type YourDepartmentsResponse struct {
-	Departments            []YourDepartment `json:"departments"`
-	OnlineCommunityMembers int              `json:"onlineCommunityMembers"`
-}
-
-// GetYourDepartmentsHandler returns the departments for a user in a community
 func (c Community) GetYourDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
-	params := mux.Vars(r)
-	communityID := params["communityId"]
+
+}
+
+// GetPaginatedDepartmentsHandler returns a paginated list of departments by communityId
+func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
 	userID := r.URL.Query().Get("userId")
-	page := r.URL.Query().Get("page")
-	limit := r.URL.Query().Get("limit")
 
-	if communityID == "" || userID == "" {
-		http.Error(w, "communityId and userId are required", http.StatusBadRequest)
-		return
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default to page 1
 	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10 // Default limit
+	}
+	offset := (page - 1) * limit
 
+	// Convert communityID to ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
-		http.Error(w, "Invalid communityId", http.StatusBadRequest)
+		http.Error(w, "Invalid community ID", http.StatusBadRequest)
 		return
 	}
 
-	// Parse pagination params
-	pageNum := 1
-	if page != "" {
-		pageNum, err = strconv.Atoi(page)
-		if err != nil || pageNum < 1 {
-			pageNum = 1
-		}
-	}
-
-	limitNum := 2
-	if limit != "" {
-		limitNum, err = strconv.Atoi(limit)
-		if err != nil || limitNum < 1 {
-			limitNum = 2
-		}
-	}
-
-	offset := (pageNum - 1) * limitNum
-
-	// Aggregation pipeline to filter and paginate departments
-	pipeline := mongo.Pipeline{
-		// Match the community by _id
-		bson.D{{"$match", bson.M{"_id": cID}}},
-		// Unwind the departments array to process each department individually
-		bson.D{{"$unwind", "$community.departments"}},
-		// Filter departments where approvalRequired: false OR user is an approved member
-		bson.D{{
-			"$match",
-			bson.M{
-				"$or": []bson.M{
-					{"community.departments.approvalRequired": false},
-					{
-						"community.departments.members": bson.M{
-							"$elemMatch": bson.M{
-								"userID": userID,
-								"status": "approved",
-							},
-						},
-					},
-				},
-			},
-		}},
-		// Skip for pagination
-		bson.D{{"$skip", offset}},
-		// Limit for pagination
-		bson.D{{"$limit", limitNum}},
-		// Project the necessary fields
-		bson.D{{
-			"$project",
-			bson.M{
-				"_id":              "$community.departments._id",
-				"name":             "$community.departments.name",
-				"image":            "$community.departments.image",
-				"promotionalText":  "$community.departments.promotionalText",
-				"approvalRequired": "$community.departments.approvalRequired",
-				"members":          "$community.departments.members",
-			},
-		}},
-	}
-
-	cursor, err := c.DB.Aggregate(context.Background(), pipeline)
+	// Fetch the community
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
-		http.Error(w, "Failed to fetch departments: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	var departments []struct {
-		ID               primitive.ObjectID `bson:"_id"`
-		Name             string             `bson:"name"`
-		Image            string             `bson:"image"`
-		PromotionalText  string             `bson:"promotionalText"`
-		ApprovalRequired bool               `bson:"approvalRequired"`
-		Members          []struct {
-			UserID string `bson:"userID"`
-			Status string `bson:"status"`
-		} `bson:"members"`
-	}
-	if err := cursor.All(context.Background(), &departments); err != nil {
-		http.Error(w, "Failed to decode departments: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Community not found", http.StatusNotFound)
 		return
 	}
 
-	// Collect unique userIDs from approved members
-	userIDMap := make(map[string]struct{})
-	for _, dept := range departments {
-		for _, member := range dept.Members {
-			if member.Status == "approved" {
-				userIDMap[member.UserID] = struct{}{}
-			}
-		}
-	}
-
-	var userIDList []string
-	for userID := range userIDMap {
-		userIDList = append(userIDList, userID)
-	}
-
-	// Fetch online statuses in a separate goroutine
-	type onlineStatus struct {
-		userID   string
-		isOnline bool
-	}
-	onlineStatusesChan := make(chan []onlineStatus)
-	errChan := make(chan error)
-
-	go func() {
-		if len(userIDList) == 0 {
-			onlineStatusesChan <- []onlineStatus{}
-			return
-		}
-
-		// Query users collection for online status
-		cursor, err := c.UDB.Find(context.Background(), bson.M{
-			"_id":      bson.M{"$in": userIDList},
-			"isOnline": true, // Ensure only online users are fetched
-		}, options.Find().SetProjection(bson.M{
-			"_id": 1,
-		}))
-		if err != nil {
-			errChan <- err
-			return
-		}
-		defer cursor.Close(context.Background())
-
-		var users []struct {
-			ID primitive.ObjectID `bson:"_id"`
-		}
-		if err := cursor.All(context.Background(), &users); err != nil {
-			errChan <- err
-			return
-		}
-
-		statuses := make([]onlineStatus, len(users))
-		for i, user := range users {
-			statuses[i] = onlineStatus{
-				userID:   user.ID.Hex(),
-				isOnline: true,
-			}
-		}
-
-		onlineStatusesChan <- statuses
-	}()
-
-	// Wait for online statuses
-	var onlineStatuses []onlineStatus
-	select {
-	case statuses := <-onlineStatusesChan:
-		onlineStatuses = statuses
-	case err := <-errChan:
-		http.Error(w, "Failed to fetch online statuses: "+err.Error(), http.StatusInternalServerError)
-		return
-	case <-time.After(5 * time.Second):
-		http.Error(w, "Timeout fetching online statuses", http.StatusInternalServerError)
-		return
-	}
-
-	// Map online statuses to departments
-	responseDepartments := make([]YourDepartment, len(departments))
-	for i, dept := range departments {
-		onlineCount := 0
-		for _, member := range dept.Members {
-			if member.Status == "approved" {
-				for _, status := range onlineStatuses {
-					if member.UserID == status.userID {
-						onlineCount++
-						break
-					}
+	// Filter and paginate departments
+	var filteredDepartments []map[string]interface{}
+	for _, department := range community.Details.Departments {
+		if department.ApprovalRequired {
+			// Check if user is in the members list with status "approved"
+			isApproved := false
+			for _, member := range department.Members {
+				if member.UserID == userID && member.Status == "approved" {
+					isApproved = true
+					break
 				}
 			}
+			if !isApproved {
+				continue
+			}
 		}
 
-		responseDepartments[i] = YourDepartment{
-			ID:                dept.ID,
-			Name:              dept.Name,
-			Image:             dept.Image,
-			OnlineMemberCount: onlineCount,
-		}
+		// Add department with only required fields
+		filteredDepartments = append(filteredDepartments, map[string]interface{}{
+			"_id":   department.ID,
+			"name":  department.Name,
+			"image": department.Image,
+		})
 	}
 
-	// Fetch online community members
-	filter := bson.M{
-		"communities.communityId": communityID, // Corrected filter: communities is directly under the user document
-		"isOnline":                true,        // Corrected field: isOnline is directly under the user document
+	// Apply pagination
+	start := offset
+	end := offset + limit
+	if start > len(filteredDepartments) {
+		start = len(filteredDepartments)
 	}
-
-	cursor2, err := c.UDB.Find(context.Background(), filter)
-	if err != nil {
-		http.Error(w, "Failed to get users by ID: "+err.Error(), http.StatusInternalServerError)
-		return
+	if end > len(filteredDepartments) {
+		end = len(filteredDepartments)
 	}
-	defer cursor2.Close(context.Background())
+	paginatedDepartments := filteredDepartments[start:end]
 
-	onlineCommunityMembers := 0
-	for cursor2.Next(context.Background()) {
-		onlineCommunityMembers++
+	// Return the response
+	response := map[string]interface{}{
+		"page":       page,
+		"limit":      limit,
+		"totalCount": len(filteredDepartments),
+		"data":       paginatedDepartments,
 	}
-
-	if err := cursor2.Err(); err != nil {
-		http.Error(w, "Error iterating over users: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := YourDepartmentsResponse{
-		Departments:            responseDepartments,
-		OnlineCommunityMembers: onlineCommunityMembers,
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }

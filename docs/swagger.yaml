@@ -466,6 +466,10 @@ definitions:
       name:
         type: string
         x-go-name: Name
+      onlineMemberCount:
+        format: int64
+        type: integer
+        x-go-name: OnlineMemberCount
       template:
         $ref: '#/definitions/Template'
       updatedAt:
@@ -817,6 +821,9 @@ definitions:
       departmentID:
         type: string
         x-go-name: DepartmentID
+      isOnline:
+        type: boolean
+        x-go-name: IsOnline
       tenCodeID:
         type: string
         x-go-name: TenCodeID

@@ -70,19 +70,21 @@ type FineDetails struct {
 type MemberDetail struct {
 	DepartmentID string `json:"departmentID" bson:"departmentID"`
 	TenCodeID    string `json:"tenCodeID" bson:"tenCodeID"`
+	IsOnline     bool   `json:"isOnline" bson:"isOnline"`
 }
 
 // Department holds the structure for a department
 type Department struct {
-	ID               primitive.ObjectID `json:"_id" bson:"_id"`
-	Name             string             `json:"name" bson:"name"`
-	Description      string             `json:"description" bson:"description"`
-	Image            string             `json:"image" bson:"image"`
-	ApprovalRequired bool               `json:"approvalRequired" bson:"approvalRequired"`
-	Members          []MemberStatus     `json:"members" bson:"members"`
-	Template         Template           `json:"template" bson:"template"`
-	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt        primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	ID                primitive.ObjectID `json:"_id" bson:"_id"`
+	Name              string             `json:"name" bson:"name"`
+	Description       string             `json:"description" bson:"description"`
+	Image             string             `json:"image" bson:"image"`
+	ApprovalRequired  bool               `json:"approvalRequired" bson:"approvalRequired"`
+	Members           []MemberStatus     `json:"members" bson:"members"`
+	Template          Template           `json:"template" bson:"template"`
+	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt         primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	OnlineMemberCount int                `json:"onlineMemberCount" bson:"onlineMemberCount"`
 }
 
 // TenCodes holds the structure for ten-codes used in departments
