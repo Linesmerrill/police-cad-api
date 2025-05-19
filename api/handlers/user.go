@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -700,27 +701,41 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 
 	uID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, fmt.Errorf("failed to get objectID from Hex: %w", err))
 		return
 	}
 
 	// Parse pagination parameters
-	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || limit <= 0 {
-		limit = 10 // Default limit
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10 // Default limit
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit <= 0 || limit > 100 {
+			config.ErrorStatus("invalid limit parameter", http.StatusBadRequest, w, fmt.Errorf("invalid limit: %s", limitStr))
+			return
+		}
 	}
 
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
-	if err != nil || page < 1 {
-		page = 1 // Default page
+	pageStr := r.URL.Query().Get("page")
+	page := 1 // Default page
+	if pageStr != "" {
+		page, err = strconv.Atoi(pageStr)
+		if err != nil {
+			config.ErrorStatus("invalid page parameter", http.StatusBadRequest, w, fmt.Errorf("invalid page: %s", pageStr))
+			return
+		}
+		if page < 1 {
+			page = 1
+		}
 	}
 	skip := (page - 1) * limit
 
+	// Fetch user notifications
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
 	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
 	if err != nil {
-		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, fmt.Errorf("failed to fetch user notifications: %w", err))
 		return
 	}
 
@@ -729,9 +744,53 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 		notifications = []models.Notification{}
 	}
 
+	// Sort notifications by createdAt descending
+	sortedNotifications := make([]models.Notification, len(notifications))
+	copy(sortedNotifications, notifications)
+	sort.Slice(sortedNotifications, func(i, j int) bool {
+		var timeI, timeJ time.Time
+		switch v := sortedNotifications[i].CreatedAt.(type) {
+		case string:
+			timeI, _ = time.Parse(time.RFC3339, v)
+		case time.Time:
+			timeI = v
+		case primitive.DateTime:
+			timeI = v.Time()
+		}
+		switch v := sortedNotifications[j].CreatedAt.(type) {
+		case string:
+			timeJ, _ = time.Parse(time.RFC3339, v)
+		case time.Time:
+			timeJ = v
+		case primitive.DateTime:
+			timeJ = v.Time()
+		}
+		return timeI.After(timeJ)
+	})
+
+	// Early exit if skip exceeds total notifications
+	if skip >= len(sortedNotifications) {
+		response := map[string]interface{}{
+			"notifications": []map[string]interface{}{},
+			"page":          page,
+			"limit":         limit,
+			"total":         len(sortedNotifications),
+			"unseenCount":   0,
+		}
+		responseBody, err := json.Marshal(response)
+		if err != nil {
+			config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, fmt.Errorf("failed to marshal response: %w", err))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseBody)
+		return
+	}
+
 	// Calculate total unseen notifications
+	totalCount := len(sortedNotifications)
 	unseenCount := 0
-	for _, notification := range notifications {
+	for _, notification := range sortedNotifications {
 		if !notification.Seen {
 			unseenCount++
 		}
@@ -740,38 +799,50 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 	// Apply pagination
 	start := skip
 	end := skip + limit
-	if start > len(notifications) {
-		start = len(notifications)
+	if end > len(sortedNotifications) {
+		end = len(sortedNotifications)
 	}
-	if end > len(notifications) {
-		end = len(notifications)
-	}
-	paginatedNotifications := notifications[start:end]
+	paginatedNotifications := sortedNotifications[start:end]
 
 	var detailedNotifications []map[string]interface{}
 	for _, notification := range paginatedNotifications {
 		senderID, err := primitive.ObjectIDFromHex(notification.SentFromID)
 		if err != nil {
-			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, fmt.Errorf("failed to get objectID from Hex: %w", err))
 			return
 		}
 
 		sender := models.User{}
 		err = u.DB.FindOne(context.Background(), bson.M{"_id": senderID}).Decode(&sender)
-		if err != nil {
-			// Skip this notification if the sender is not found
+		if err == mongo.ErrNoDocuments {
+			// Sender doesn't exist, remove the notification
+			filter := bson.M{"_id": uID}
+			update := bson.M{"$pull": bson.M{"user.notifications": bson.M{"_id": notification.ID}}}
+			_, err = u.DB.UpdateOne(context.Background(), filter, update)
+			if err != nil {
+				config.ErrorStatus("failed to remove invalid notification", http.StatusInternalServerError, w, err)
+				return
+			}
+			// Decrement the total notifications count
+			totalCount--
+			// Decrement the unseen count if the notification was unseen
+			if !notification.Seen {
+				unseenCount--
+			}
 			continue
+		} else if err != nil {
+			// Handle other errors
+			config.ErrorStatus("failed to fetch sender", http.StatusInternalServerError, w, err)
+			return
 		}
 
 		// Calculate timeAgo
 		now := time.Now()
 		var createdAtTime time.Time
-
-		// Check if CreatedAt is a string and parse it
 		if createdAtStr, ok := notification.CreatedAt.(string); ok {
 			parsedTime, err := time.Parse(time.RFC3339, createdAtStr)
 			if err != nil {
-				config.ErrorStatus("failed to parse createdAt", http.StatusInternalServerError, w, err)
+				config.ErrorStatus("failed to parse createdAt", http.StatusInternalServerError, w, fmt.Errorf("failed to parse createdAt: %w", err))
 				return
 			}
 			createdAtTime = parsedTime
@@ -782,7 +853,7 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 			case primitive.DateTime:
 				createdAtTime = v.Time()
 			default:
-				config.ErrorStatus("invalid last accessed time", http.StatusInternalServerError, w, fmt.Errorf("invalid last accessed time"))
+				config.ErrorStatus("invalid createdAt time", http.StatusInternalServerError, w, fmt.Errorf("invalid createdAt time"))
 				return
 			}
 		}
@@ -805,21 +876,27 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 			timeAgo = fmt.Sprintf("%.0f years ago", years)
 		}
 
+		// Handle sender details with fallback
+		senderName := sender.Details.Name
+		senderUsername := sender.Details.Username
+		senderProfilePicture := sender.Details.ProfilePicture
+
 		detailedNotification := map[string]interface{}{
-			"notificationId":       notification.ID,
-			"friendId":             notification.SentFromID,
-			"type":                 notification.Type,
-			"message":              notification.Message,
-			"data1":                notification.Data1,
-			"data2":                notification.Data2,
-			"data3":                notification.Data3,
-			"data4":                notification.Data4,
-			"seen":                 notification.Seen,
-			"createdAt":            notification.CreatedAt,
-			"senderName":           sender.Details.Name,
-			"senderUsername":       sender.Details.Username,
-			"senderProfilePicture": sender.Details.ProfilePicture,
-			"timeAgo":              timeAgo,
+			"id":               notification.ID,
+			"sentFromID":       notification.SentFromID,
+			"sentToID":         notification.SentToID,
+			"type":             notification.Type,
+			"message":          notification.Message,
+			"data1":            notification.Data1,
+			"data2":            notification.Data2,
+			"data3":            notification.Data3,
+			"data4":            notification.Data4,
+			"seen":             notification.Seen,
+			"createdAt":        notification.CreatedAt,
+			"timeAgo":          timeAgo,
+			"senderName":       senderName,
+			"senderUsername":   senderUsername,
+			"senderProfilePic": senderProfilePicture,
 		}
 		detailedNotifications = append(detailedNotifications, detailedNotification)
 	}
@@ -829,13 +906,13 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 		"notifications": detailedNotifications,
 		"page":          page,
 		"limit":         limit,
-		"total":         len(notifications),
+		"total":         totalCount,
 		"unseenCount":   unseenCount,
 	}
 
 	responseBody, err := json.Marshal(response)
 	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, fmt.Errorf("failed to marshal response: %w", err))
 		return
 	}
 
