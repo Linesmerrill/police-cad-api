@@ -882,7 +882,7 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 		senderProfilePicture := sender.Details.ProfilePicture
 
 		detailedNotification := map[string]interface{}{
-			"id":               notification.ID,
+			"notificationId":   notification.ID,
 			"sentFromID":       notification.SentFromID,
 			"sentToID":         notification.SentToID,
 			"type":             notification.Type,
