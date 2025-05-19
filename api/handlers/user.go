@@ -1634,6 +1634,10 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if result.ModifiedCount == 0 {
+			if existingCommunity.CommunityID == requestBody.CommunityID {
+				config.ErrorStatus("Member already exists", http.StatusConflict, w, fmt.Errorf("member: %v, already has status: %v, for community: %v", userID, requestBody.Status, requestBody.CommunityID))
+				return
+			}
 			config.ErrorStatus("no community status updated", http.StatusBadRequest, w, fmt.Errorf("community status not updated, communityId: %s with status: %s", requestBody.CommunityID, requestBody.Status))
 			return
 		}
