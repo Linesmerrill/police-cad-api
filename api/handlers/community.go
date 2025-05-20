@@ -1407,22 +1407,57 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 	}
 
 	for _, memberID := range requestBody.Members {
-		mID := primitive.NewObjectID()
-		filter := bson.M{
-			"_id":                                  cID,
-			"community.departments._id":            dID,
-			"community.departments.members.userID": bson.M{"$ne": memberID},
+		// Step 1: Load the community document
+		communityDoc, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+		if err != nil {
+			config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+			return
 		}
+
+		// Step 2: Loop through departments to find the right one
+		departments := communityDoc.Details.Departments
+		var deptIndex = -1
+		var userAlreadyExists = false
+
+		for i, dep := range departments {
+
+			if dep.ID == dID {
+				deptIndex = i
+				members := dep.Members
+				for _, m := range members {
+
+					if m.UserID == memberID {
+						userAlreadyExists = true
+						break
+					}
+				}
+				break
+			}
+		}
+
+		if deptIndex == -1 {
+			config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
+			return
+		}
+
+		if userAlreadyExists {
+			config.ErrorStatus("member already exists in the department", http.StatusConflict, w, fmt.Errorf("member already exists in the department"))
+			return
+		}
+
+		// Step 3: Add the member if not already there
 		update := bson.M{
 			"$addToSet": bson.M{
-				"community.departments.$.members": bson.M{
-					"_id":    mID,
-					"status": "approved",
-					"userID": memberID,
+				fmt.Sprintf("community.departments.%d.members", deptIndex): bson.M{
+					"_id":       primitive.NewObjectID(),
+					"userID":    memberID,
+					"status":    "approved",
+					"tenCodeID": "",
 				},
 			},
 		}
-		err = c.DB.UpdateOne(context.Background(), filter, update)
+
+		err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
 		if err != nil {
 			config.ErrorStatus("failed to update department members", http.StatusInternalServerError, w, err)
 			return
