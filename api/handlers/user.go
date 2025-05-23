@@ -1394,6 +1394,7 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 }
 
 // GetUserCommunitiesHandler returns the communities a user is a part of
+// Deprecated: use FetchUserCommunitiesHandler instead for better performance, pagination, and filtering
 func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["userId"]
 
@@ -3155,6 +3156,7 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		ID        primitive.ObjectID `bson:"_id"`
 		Community struct {
 			Name         string `bson:"name"`
+			ImageLink    string `bson:"imageLink"`
 			MembersCount int    `bson:"membersCount"`
 			Subscription struct {
 				Active bool `bson:"active"`
@@ -3173,6 +3175,7 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		communities = append(communities, map[string]interface{}{
 			"_id":             item.ID,
 			"name":            item.Community.Name,
+			"imageLink":       item.Community.ImageLink,
 			"membersCount":    item.Community.MembersCount,
 			"subscription":    item.Community.Subscription.Active,
 			"promotionalText": item.Community.PromotionalText,
