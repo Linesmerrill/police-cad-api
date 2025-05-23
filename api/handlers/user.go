@@ -2848,6 +2848,7 @@ func (u User) AddUserNoteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetPrioritizedCommunitiesHandler retrieves communities sorted by subscription tier
+// Deprecated: Use FetchPrioritizedCommunitiesHandler instead
 func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination parameters
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -2928,6 +2929,110 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	// Send the response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(paginatedResponse)
+}
+
+// FetchPrioritizedCommunitiesHandler retrieves communities sorted by subscription tier with pagination and optimization
+func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse pagination parameters
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 10
+	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 0 {
+		Page = 0
+	}
+	skip := int64(Page * Limit)
+	limit64 := int64(Limit)
+
+	// Subscription tier priority
+	subscriptionOrder := map[string]int{
+		"elite":    4,
+		"premium":  3,
+		"standard": 2,
+		"basic":    1,
+		"":         0,
+	}
+
+	// Aggregation pipeline
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.M{"community.visibility": "public"}}},
+		{{"$addFields", bson.M{
+			"subscriptionRank": bson.M{
+				"$switch": bson.M{
+					"branches": []bson.M{
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "elite"}}, "then": subscriptionOrder["elite"]},
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "premium"}}, "then": subscriptionOrder["premium"]},
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "standard"}}, "then": subscriptionOrder["standard"]},
+						{"case": bson.M{"$eq": []interface{}{"$community.subscription.plan", "basic"}}, "then": subscriptionOrder["basic"]},
+					},
+					"default": subscriptionOrder[""],
+				},
+			},
+		}}},
+		{{"$sort", bson.M{"subscriptionRank": -1, "community.name": 1}}},
+		{{"$skip", skip}},
+		{{"$limit", limit64}},
+	}
+
+	cursor, err := u.CDB.Aggregate(context.TODO(), pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to fetch prioritized communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	// Decode results
+	var decodedCommunities []struct {
+		ID        primitive.ObjectID `bson:"_id"`
+		Community struct {
+			Name                   string   `bson:"name"`
+			ImageLink              string   `bson:"imageLink"`
+			MembersCount           int      `bson:"membersCount"`
+			Tags                   []string `bson:"tags"`
+			PromotionalText        string   `bson:"promotionalText"`
+			PromotionalDescription string   `bson:"promotionalDescription"`
+			Subscription           struct {
+				Active bool   `bson:"active"`
+				Plan   string `bson:"plan"`
+			} `bson:"subscription"`
+		} `bson:"community"`
+	}
+	if err := cursor.All(context.TODO(), &decodedCommunities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Format response
+	var responseData []map[string]interface{}
+	for _, item := range decodedCommunities {
+		responseData = append(responseData, map[string]interface{}{
+			"_id":                    item.ID,
+			"name":                   item.Community.Name,
+			"imageLink":              item.Community.ImageLink,
+			"membersCount":           item.Community.MembersCount,
+			"tags":                   item.Community.Tags,
+			"promotionalText":        item.Community.PromotionalText,
+			"promotionalDescription": item.Community.PromotionalDescription,
+			"subscription": map[string]interface{}{
+				"active": item.Community.Subscription.Active,
+				"plan":   item.Community.Subscription.Plan,
+			},
+		})
+	}
+
+	// Count total matching documents
+	totalCount, _ := u.CDB.CountDocuments(context.TODO(), bson.M{"community.visibility": "public"})
+
+	// Return response
+	response := map[string]interface{}{
+		"page":       Page,
+		"totalCount": totalCount,
+		"data":       responseData,
+		"limit":      Limit,
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // UpdateUserNoteHandler updates a specific note for a user
