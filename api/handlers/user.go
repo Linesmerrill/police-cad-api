@@ -3086,3 +3086,106 @@ func (u User) DeactivateUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User account deactivated successfully"}`))
 }
+
+// FetchUserCommunitiesHandler retrieves a user's communities with pagination and filtering
+func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse query parameters
+	userID := mux.Vars(r)["userId"]
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 10
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	skip := (page - 1) * limit
+	filter := r.URL.Query().Get("filter")
+
+	// Convert the user ID to ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Fetch the user document
+	var user models.User
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Filter user's communities
+	var (
+		filteredCommunities []primitive.ObjectID
+		totalFilteredCount  int
+	)
+	for _, community := range user.Details.Communities {
+		matchesFilter := true
+		if filter != "" {
+			parts := strings.Split(filter, ":")
+			if len(parts) >= 2 {
+				matchesFilter = strings.Contains(community.Status, parts[1])
+			} else {
+				matchesFilter = false
+			}
+		}
+
+		if matchesFilter {
+			cID, _ := primitive.ObjectIDFromHex(community.CommunityID)
+			filteredCommunities = append(filteredCommunities, cID)
+			totalFilteredCount++
+		}
+	}
+
+	// Build Mongo filter and fetch communities
+	communityFilter := bson.M{"_id": bson.M{"$in": filteredCommunities}}
+	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
+	cursor, err := u.CDB.Find(context.Background(), communityFilter, opts)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	// Decode all documents
+	var decodedCommunities []struct {
+		ID        primitive.ObjectID `bson:"_id"`
+		Community struct {
+			Name         string `bson:"name"`
+			MembersCount int    `bson:"membersCount"`
+			Subscription struct {
+				Active bool `bson:"active"`
+			} `bson:"subscription"`
+			PromotionalText string `bson:"promotionalText"`
+		} `bson:"community"`
+	}
+	if err := cursor.Decode(&decodedCommunities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Transform into response format
+	var communities []map[string]interface{}
+	for _, item := range decodedCommunities {
+		communities = append(communities, map[string]interface{}{
+			"_id":             item.ID,
+			"name":            item.Community.Name,
+			"membersCount":    item.Community.MembersCount,
+			"subscription":    item.Community.Subscription.Active,
+			"promotionalText": item.Community.PromotionalText,
+		})
+	}
+
+	// Return paginated response
+	response := map[string]interface{}{
+		"data":       communities,
+		"page":       page,
+		"limit":      limit,
+		"totalCount": totalFilteredCount,
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}

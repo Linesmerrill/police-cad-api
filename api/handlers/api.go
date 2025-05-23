@@ -134,6 +134,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{user_id}/subscription", api.Middleware(http.HandlerFunc(u.UpdateUserSubscriptionHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}/update-status", api.Middleware(http.HandlerFunc(u.UpdateFriendStatusHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.GetUserCommunitiesHandler))).Methods("GET")
+	apiV2.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.FetchUserCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.AddCommunityToUserHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/random-communities", api.Middleware(http.HandlerFunc(u.GetRandomCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/prioritized-communities", api.Middleware(http.HandlerFunc(u.GetPrioritizedCommunitiesHandler))).Methods("GET")
