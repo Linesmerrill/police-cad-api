@@ -2037,6 +2037,7 @@ func (c Community) SetCommunityFinesHandler(w http.ResponseWriter, r *http.Reque
 }
 
 // GetEliteCommunitiesHandler returns a paginated list of elite communities
+// Deprecated: Use FetchEliteCommunitiesHandler instead
 func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination parameters
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -2092,6 +2093,84 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 	// Send the response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(paginatedResponse)
+}
+
+// FetchEliteCommunitiesHandler returns a paginated list of elite communities with reduced data for speed and performance
+func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse pagination parameters
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 10
+	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 0 {
+		Page = 0
+	}
+	skip := int64(Page * Limit)
+	limit64 := int64(Limit)
+
+	// Aggregation pipeline for elite + public communities
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}}},
+		{{"$addFields", bson.M{"randomSort": bson.M{"$rand": bson.M{}}}}},
+		{{"$sort", bson.M{"randomSort": 1}}},
+		{{"$skip", skip}},
+		{{"$limit", limit64}},
+	}
+
+	cursor, err := c.DB.Aggregate(context.TODO(), pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to fetch elite communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	// Decode all results
+	var decodedCommunities []struct {
+		ID        primitive.ObjectID `bson:"_id"`
+		Community struct {
+			Name                   string   `bson:"name"`
+			ImageLink              string   `bson:"imageLink"`
+			MembersCount           int      `bson:"membersCount"`
+			Tags                   []string `bson:"tags"`
+			PromotionalText        string   `bson:"promotionalText"`
+			PromotionalDescription string   `bson:"promotionalDescription"`
+		} `bson:"community"`
+	}
+	if err := cursor.All(context.TODO(), &decodedCommunities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Trimmed down result structure
+	var responseData []map[string]interface{}
+	for _, item := range decodedCommunities {
+		responseData = append(responseData, map[string]interface{}{
+			"_id":                    item.ID,
+			"name":                   item.Community.Name,
+			"imageLink":              item.Community.ImageLink,
+			"membersCount":           item.Community.MembersCount,
+			"tags":                   item.Community.Tags,
+			"promotionalText":        item.Community.PromotionalText,
+			"promotionalDescription": item.Community.PromotionalDescription,
+		})
+	}
+
+	// Count total matching documents
+	totalCount, _ := c.DB.CountDocuments(context.TODO(), bson.M{
+		"community.subscription.plan": "elite",
+		"community.visibility":        "public",
+	})
+
+	// Return paginated response
+	response := map[string]interface{}{
+		"page":       Page,
+		"totalCount": totalCount,
+		"data":       responseData,
+		"limit":      Limit,
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // SubscribeCommunityHandler subscribes a community to a specific tier
