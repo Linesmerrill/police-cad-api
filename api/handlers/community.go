@@ -2367,6 +2367,7 @@ func (c Community) CancelCommunitySubscriptionHandler(w http.ResponseWriter, r *
 }
 
 // FetchCommunitiesByTagHandler returns communities by tag
+// Deprecated: Use FetchCommunitiesByTagHandlerV2 instead
 func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.Request) {
 	tag := mux.Vars(r)["tag"]
 	if tag == "" {
@@ -2472,6 +2473,115 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 	// Step 6: Send the response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(dedupedResults)
+}
+
+// FetchCommunitiesByTagHandlerV2 returns communities by tag with pagination and optimized data
+func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http.Request) {
+	tag := mux.Vars(r)["tag"]
+	if tag == "" {
+		config.ErrorStatus("tag is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 10
+	}
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 0 {
+		page = 0
+	}
+	skip := int64(page * limit)
+
+	// Struct for decoding
+	type liteCommunity struct {
+		ID        primitive.ObjectID `bson:"_id"`
+		Community struct {
+			Name                   string   `bson:"name"`
+			ImageLink              string   `bson:"imageLink"`
+			MembersCount           int      `bson:"membersCount"`
+			Tags                   []string `bson:"tags"`
+			PromotionalText        string   `bson:"promotionalText"`
+			PromotionalDescription string   `bson:"promotionalDescription"`
+			Subscription           struct {
+				Active bool   `bson:"active"`
+				Plan   string `bson:"plan"`
+			} `bson:"subscription"`
+		} `bson:"community"`
+	}
+
+	// Build match stage
+	matchStage := bson.D{{"community.visibility", "public"}}
+	if tag != "all" {
+		matchStage = append(matchStage, bson.E{"community.tags", tag})
+	}
+
+	// Aggregation pipeline with paging
+	pipeline := mongo.Pipeline{
+		{{"$match", matchStage}},
+		{{"$sort", bson.D{{"community.name", 1}}}}, // consistent order for pagination
+		{{"$skip", skip}},
+		{{"$limit", int64(limit)}},
+		{{"$project", bson.D{
+			{"_id", 1},
+			{"community.name", 1},
+			{"community.imageLink", 1},
+			{"community.membersCount", 1},
+			{"community.tags", 1},
+			{"community.promotionalText", 1},
+			{"community.promotionalDescription", 1},
+			{"community.subscription", 1},
+		}}},
+	}
+
+	cursor, err := c.DB.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var results []liteCommunity
+	if err := cursor.All(context.Background(), &results); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Format response
+	var data []map[string]interface{}
+	for _, item := range results {
+		data = append(data, map[string]interface{}{
+			"_id":                    item.ID,
+			"name":                   item.Community.Name,
+			"imageLink":              item.Community.ImageLink,
+			"membersCount":           item.Community.MembersCount,
+			"tags":                   item.Community.Tags,
+			"promotionalText":        item.Community.PromotionalText,
+			"promotionalDescription": item.Community.PromotionalDescription,
+			"subscription": map[string]interface{}{
+				"active": item.Community.Subscription.Active,
+				"plan":   item.Community.Subscription.Plan,
+			},
+		})
+	}
+
+	// Count total matching documents
+	countFilter := bson.M{"community.visibility": "public"}
+	if tag != "all" {
+		countFilter["community.tags"] = tag
+	}
+	totalCount, _ := c.DB.CountDocuments(context.Background(), countFilter)
+
+	// Return response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tag":        tag,
+		"limit":      limit,
+		"page":       page,
+		"totalCount": totalCount,
+		"data":       data,
+	})
 }
 
 // ArchiveCommunityHandler archives a community

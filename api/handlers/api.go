@@ -116,6 +116,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.FetchEliteCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandler))).Methods("GET")
+	apiV2.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandlerV2))).Methods("GET")
 
 	apiV2.Handle("/departments-screen-data", api.Middleware(http.HandlerFunc(dept.GetDepartmentsScreenDataHandler))).Methods("GET")
 
