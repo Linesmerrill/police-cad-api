@@ -22,8 +22,8 @@ type Config struct {
 // New sets up all config related services
 func New() *Config {
 
-	//setup zap logger and replace default logger
-	logger, err := setLogger(os.Getenv("ENV"))
+	// setup zap logger and replace default logger
+	logger, err := setLogger(os.Getenv("LOG_LEVEL"))
 	if err != nil {
 		// if we get an error, we will just set the default to debug and move on
 		zap.S().With(err).Warn("issue setting logger")
