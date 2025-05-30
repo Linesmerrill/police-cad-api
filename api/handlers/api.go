@@ -58,6 +58,7 @@ func (a *App) New() *mux.Router {
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 	apiV2 := r.PathPrefix("/api/v2").Subrouter()
+	ws := r.PathPrefix("/ws").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
 	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
@@ -246,6 +247,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/success", http.HandlerFunc(u.handleSuccessRedirect)).Methods("GET")
 	apiCreate.Handle("/cancel", http.HandlerFunc(u.handleCancelRedirect)).Methods("GET")
 	apiCreate.Handle("/webhook-subscription-deleted", http.HandlerFunc(u.HandleWebhook)).Methods("POST")
+
+	// Websocket routes
+	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))

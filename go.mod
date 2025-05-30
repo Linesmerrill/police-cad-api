@@ -9,6 +9,7 @@ require (
 	github.com/cloudinary/cloudinary-go/v2 v2.9.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/sendgrid/sendgrid-go v3.16.0+incompatible
 	github.com/shaj13/go-guardian v1.5.11
 	github.com/stretchr/testify v1.8.4
