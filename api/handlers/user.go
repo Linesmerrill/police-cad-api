@@ -674,6 +674,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 			config.ErrorStatus("failed to initialize user's notifications", http.StatusInternalServerError, w, err)
 			return
 		}
+		sendNotificationToUser(notification.SentToID, newNotification)
 	} else {
 		update := bson.M{"$push": bson.M{"user.notifications": newNotification}}
 		opts := options.Update().SetUpsert(false)
@@ -683,6 +684,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 			config.ErrorStatus("failed to create notification", http.StatusInternalServerError, w, err)
 			return
 		}
+		sendNotificationToUser(notification.SentToID, newNotification)
 	}
 
 	w.WriteHeader(http.StatusOK)
