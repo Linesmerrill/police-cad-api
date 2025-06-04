@@ -451,7 +451,7 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 
 	// Define the filter and update for removing the citation
 	filter := bson.M{"_id": cID}
-	update := bson.M{"$pull": bson.M{"criminalHistory": bson.M{"_id": citID}}}
+	update := bson.M{"$pull": bson.M{"civilian.criminalHistory": bson.M{"_id": citID}}}
 
 	// Perform the update operation
 	err = c.DB.UpdateOne(context.Background(), filter, update)
