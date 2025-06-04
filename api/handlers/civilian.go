@@ -429,3 +429,38 @@ func (c Civilian) UpdateCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 		"message": "Criminal history updated successfully",
 	})
 }
+
+// DeleteCriminalHistoryHandler deletes a specific criminal history item
+func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract `civilian_id` and `citation_id` from the URL
+	civilianID := mux.Vars(r)["civilian_id"]
+	citationID := mux.Vars(r)["citation_id"]
+
+	// Convert IDs to `primitive.ObjectID`
+	cID, err := primitive.ObjectIDFromHex(civilianID)
+	if err != nil {
+		config.ErrorStatus("invalid civilian ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	citID, err := primitive.ObjectIDFromHex(citationID)
+	if err != nil {
+		config.ErrorStatus("invalid citation ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Define the filter and update for removing the citation
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$pull": bson.M{"criminalHistory": bson.M{"_id": citID}}}
+
+	// Perform the update operation
+	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to delete criminal history", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Respond with success
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Criminal history deleted successfully"}`))
+}

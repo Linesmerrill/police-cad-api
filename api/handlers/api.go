@@ -172,6 +172,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.DeleteCivilianHandler))).Methods("DELETE")
 	apiCreate.Handle("/civilian/{civilian_id}/criminal-history", api.Middleware(http.HandlerFunc(civ.AddCriminalHistoryHandler))).Methods("POST")
 	apiCreate.Handle("/civilian/{civilian_id}/criminal-history/{citation_id}", api.Middleware(http.HandlerFunc(civ.UpdateCriminalHistoryHandler))).Methods("PUT")
+	apiCreate.Handle("/civilian/{civilian_id}/criminal-history/{citation_id}", api.Middleware(http.HandlerFunc(civ.DeleteCriminalHistoryHandler))).Methods("DELETE")
 	apiCreate.Handle("/civilian", api.Middleware(http.HandlerFunc(civ.CreateCivilianHandler))).Methods("POST")
 	apiCreate.Handle("/civilians", api.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
 	apiCreate.Handle("/civilians/user/{user_id}", api.Middleware(http.HandlerFunc(civ.CiviliansByUserIDHandler))).Methods("GET")
