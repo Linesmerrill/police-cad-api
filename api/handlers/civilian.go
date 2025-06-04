@@ -454,7 +454,7 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	update := bson.M{"$pull": bson.M{"criminalHistory": bson.M{"_id": citID}}}
 
 	// Perform the update operation
-	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete criminal history", http.StatusInternalServerError, w, err)
 		return
