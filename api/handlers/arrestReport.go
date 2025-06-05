@@ -31,7 +31,7 @@ type PaginatedDataResponse struct {
 
 // GetArrestReportByIDHandler retrieves a Arrest report by its ID
 func (a ArrestReport) GetArrestReportByIDHandler(w http.ResponseWriter, r *http.Request) {
-	arrestReportID := mux.Vars(r)["arrestReport_id"]
+	arrestReportID := mux.Vars(r)["arrest_report_id"]
 
 	bID, err := primitive.ObjectIDFromHex(arrestReportID)
 	if err != nil {
@@ -76,7 +76,7 @@ func (a ArrestReport) CreateArrestReportHandler(w http.ResponseWriter, r *http.R
 
 // UpdateArrestReportHandler updates the details of an existing Arrest report
 func (a ArrestReport) UpdateArrestReportHandler(w http.ResponseWriter, r *http.Request) {
-	arrestReportID := mux.Vars(r)["arrestReport_id"]
+	arrestReportID := mux.Vars(r)["arrest_report_id"]
 
 	var updatedDetails map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updatedDetails); err != nil {
