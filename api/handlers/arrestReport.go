@@ -111,7 +111,7 @@ func (a ArrestReport) UpdateArrestReportHandler(w http.ResponseWriter, r *http.R
 
 // DeleteArrestReportHandler deletes an existing Arrest report
 func (a ArrestReport) DeleteArrestReportHandler(w http.ResponseWriter, r *http.Request) {
-	arrestReportID := mux.Vars(r)["arrestReport_id"]
+	arrestReportID := mux.Vars(r)["arrest_report_id"]
 
 	bID, err := primitive.ObjectIDFromHex(arrestReportID)
 	if err != nil {
