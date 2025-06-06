@@ -752,10 +752,18 @@ definitions:
         type: string
         x-go-name: Code
       createdAt:
-        $ref: '#/definitions/DateTime'
+        type: object
+        x-go-name: CreatedAt
       createdBy:
         type: string
         x-go-name: CreatedBy
+      expiresAt:
+        type: object
+        x-go-name: ExpiresAt
+      maxUses:
+        format: int64
+        type: integer
+        x-go-name: MaxUses
       remainingUses:
         format: int64
         type: integer
