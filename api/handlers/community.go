@@ -28,6 +28,7 @@ type Community struct {
 	DB  databases.CommunityDatabase
 	UDB databases.UserDatabase
 	ADB databases.ArchivedCommunityDatabase
+	IDB databases.InviteCodeDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -84,7 +85,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	// Set the createdAt and updatedAt fields to the current time
 	newCommunity.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	newCommunity.Details.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
-	newCommunity.Details.InviteCodes = []models.InviteCode{}
+	newCommunity.Details.InviteCodeIds = []string{}
 	newCommunity.Details.BanList = []string{}
 	newCommunity.Details.Departments = []models.Department{}
 	newCommunity.Details.TenCodes = defaultTenCodes()
@@ -1070,36 +1071,62 @@ func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Reque
 
 // AddInviteCodeHandler adds a new invite code to the community's inviteCodes array
 func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) {
-	communityID := mux.Vars(r)["communityId"]
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
 
-	// Parse the request body to get the invite code details
-	var newInviteCode models.InviteCode
-	if err := json.NewDecoder(r.Body).Decode(&newInviteCode); err != nil {
-		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+	// Decode the request body directly into InviteCode
+	var inviteCode models.InviteCode
+	if err := json.NewDecoder(r.Body).Decode(&inviteCode); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Convert the community ID to a primitive.ObjectID
-	cID, err := primitive.ObjectIDFromHex(communityID)
+	// Convert ExpiresAt from *time.Time to *primitive.DateTime if provided (no conversion needed since struct matches)
+	var expiresAt *time.Time
+	if inviteCode.ExpiresAt != nil {
+		expiresAt = inviteCode.ExpiresAt // No conversion needed if JSON provides *time.Time
+	}
+
+	inviteCodeObj := primitive.NewObjectID() // Generate a new ObjectID for the invite code
+	inviteCodeID := inviteCodeObj.Hex()      // Convert ObjectID to string for storage
+
+	// Create the invite code document
+	inviteCodeDoc := models.InviteCode{
+		ID:            inviteCodeObj,
+		Code:          inviteCode.Code,
+		CommunityID:   communityID, // Store as string
+		ExpiresAt:     expiresAt,
+		MaxUses:       inviteCode.MaxUses,
+		RemainingUses: inviteCode.MaxUses,
+		CreatedBy:     inviteCode.CreatedBy,
+		CreatedAt:     time.Now(),
+	}
+
+	// Insert into inviteCodes collection
+	_, err := c.IDB.InsertOne(context.Background(), inviteCodeDoc)
 	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		http.Error(w, "Failed to save invite code", http.StatusInternalServerError)
 		return
 	}
 
-	// Set the CreatedAt field to the current time
-	newInviteCode.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
-
-	// Update the community's inviteCodes array
-	filter := bson.M{"_id": cID}
-	update := bson.M{"$addToSet": bson.M{"community.inviteCodes": newInviteCode}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	// Update the community with the inviteCodeID (correct field name: inviteCodeIds)
+	communityObjID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
-		config.ErrorStatus("failed to add invite code to community", http.StatusInternalServerError, w, err)
+		http.Error(w, "Invalid community ID", http.StatusBadRequest)
+		return
+	}
+	if err := c.DB.UpdateOne(
+		context.Background(),
+		bson.M{"_id": communityObjID},
+		bson.M{"$push": bson.M{"inviteCodeIds": inviteCodeID}},
+	); err != nil {
+		http.Error(w, "Failed to update community", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Invite code added successfully"}`))
+	// Respond with the created invite code
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(inviteCodeDoc)
 }
 
 // DeleteRoleMemberHandler deletes a member from a role in a community

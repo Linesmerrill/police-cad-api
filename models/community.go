@@ -22,7 +22,7 @@ type CommunityDetails struct {
 	Visibility             string                  `json:"visibility" bson:"visibility"`
 	PromotionalText        string                  `json:"promotionalText" bson:"promotionalText"`
 	PromotionalDescription string                  `json:"promotionalDescription" bson:"promotionalDescription"`
-	InviteCodes            []InviteCode            `json:"inviteCodes" bson:"inviteCodes"`
+	InviteCodeIds          []string                `json:"inviteCodeIds" bson:"inviteCodeIds"`
 	Tags                   []string                `json:"tags" bson:"tags"`
 	Roles                  []Role                  `json:"roles" bson:"roles"`
 	BanList                []string                `json:"banList" bson:"banList"`
@@ -138,16 +138,6 @@ type Attendance struct {
 	Confirmed []string `json:"confirmed" bson:"confirmed"`
 	Maybe     []string `json:"maybe" bson:"maybe"`
 	Declined  []string `json:"declined" bson:"declined"`
-}
-
-// InviteCode holds the structure for invite codes
-type InviteCode struct {
-	Code          string      `json:"code" bson:"code"`
-	RemainingUses int         `json:"remainingUses" bson:"remainingUses"`
-	ExpiresAt     interface{} `json:"expiresAt" bson:"expiresAt"`
-	MaxUses       int         `json:"maxUses" bson:"maxUses"`
-	CreatedBy     string      `json:"createdBy" bson:"createdBy"`
-	CreatedAt     interface{} `json:"createdAt" bson:"createdAt"`
 }
 
 // Role holds the structure for a role
