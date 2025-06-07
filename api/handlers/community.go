@@ -1129,6 +1129,56 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(inviteCodeDoc)
 }
 
+// GetInviteCodeHandler validates an invite code and returns community details
+func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	inviteCode := vars["invite_code"]
+
+	// Query the inviteCodes collection
+	// var invite models.InviteCode
+	invite, err := c.IDB.FindOne(context.Background(), bson.M{"code": inviteCode})
+	if err != nil {
+		config.ErrorStatus("Invite code not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Check expiration
+	currentTime := time.Now() // 09:35 AM MST, June 07, 2025
+	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
+		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, fmt.Errorf("invite code has expired"))
+		return
+	}
+
+	// Check remaining uses
+	if invite.RemainingUses <= 0 {
+		config.ErrorStatus("Invite code has no remaining uses", http.StatusBadRequest, w, fmt.Errorf("invite code has no remaining uses"))
+		return
+	}
+
+	// Fetch community details
+	communityObjID, err := primitive.ObjectIDFromHex(invite.CommunityID)
+	if err != nil {
+		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	// var community models.Community
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": communityObjID})
+	if err != nil {
+		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Prepare response
+	response := map[string]interface{}{
+		"communityName": community.Details.Name,
+		"expiresAt":     invite.ExpiresAt,
+		"remainingUses": invite.RemainingUses,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // DeleteRoleMemberHandler deletes a member from a role in a community
 func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
