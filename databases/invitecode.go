@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -14,6 +15,7 @@ const inviteCodeName = "inviteCodes"
 // InviteCodeDatabase contains the methods to use with the inviteCode database
 type InviteCodeDatabase interface {
 	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.InviteCode, error)
+	FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.InviteCode, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	InsertOne(ctx context.Context, inviteCode models.InviteCode, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
@@ -73,4 +75,8 @@ func (c *inviteCodeDatabase) UpdateOne(ctx context.Context, filter interface{}, 
 
 func (c *inviteCodeDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
 	return c.db.Collection(inviteCodeName).DeleteOne(ctx, filter, opts...)
+}
+
+func (c *inviteCodeDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult {
+	return c.db.Collection(inviteCodeName).FindOneAndUpdate(ctx, filter, update, opts...)
 }
