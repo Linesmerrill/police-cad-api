@@ -844,12 +844,14 @@ definitions:
         type: string
         x-go-name: Content
       createdAt:
-        $ref: '#/definitions/DateTime'
+        type: object
+        x-go-name: CreatedAt
       title:
         type: string
         x-go-name: Title
       updatedAt:
-        $ref: '#/definitions/DateTime'
+        type: object
+        x-go-name: UpdatedAt
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   Notification:
