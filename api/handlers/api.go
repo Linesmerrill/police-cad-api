@@ -36,10 +36,11 @@ func (a *App) New() *mux.Router {
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
-	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper)}
+	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
+	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper)}
 	l := License{DB: databases.NewLicenseDatabase(a.dbHelper)}
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
 	ev := EmsVehicle{DB: databases.NewEmsVehicleDatabase(a.dbHelper)}
@@ -237,6 +238,8 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
+
+	apiCreate.Handle("/invite/{invite_code}", api.Middleware(http.HandlerFunc(ic.InviteCodeByCodeHandler))).Methods("GET")
 
 	apiCreate.Handle("/report", api.Middleware(http.HandlerFunc(report.CreateReportHandler))).Methods("POST")
 
