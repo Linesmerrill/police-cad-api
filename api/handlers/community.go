@@ -1113,7 +1113,7 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Update the community with the inviteCodeID (correct field name: inviteCodeIds)
+	// Update the community with the inviteCodeID
 	communityObjID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
 		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
@@ -1128,9 +1128,13 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Respond with the created invite code
+	// Respond with minimal data for security
+	response := map[string]string{
+		"code":        inviteCodeDoc.Code,
+		"communityId": inviteCodeDoc.CommunityID,
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(inviteCodeDoc)
+	json.NewEncoder(w).Encode(response)
 }
 
 // GetInviteCodeHandler validates an invite code and returns community details
@@ -1147,19 +1151,16 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check expiration
-	currentTime := time.Now() // 11:14 AM MST, June 07, 2025
+	currentTime := time.Now() // 12:40 PM MST, June 07, 2025
 	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
-		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, fmt.Errorf("invite code has expired"))
+		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, nil)
 		return
 	}
 
-	if invite.MaxUses == 0 {
-
-	} else if invite.RemainingUses < -1 { // Reject if less than -1, allow -1 for infinite
-		// Check remaining uses, allow -1 for infinite
-		config.ErrorStatus("Invite code has no remaining uses", http.StatusBadRequest, w, fmt.Errorf("invite code has no remaining uses"))
+	// Check remaining uses, allow -1 for infinite
+	if invite.RemainingUses < -1 {
+		config.ErrorStatus("Invite code has no remaining uses", http.StatusBadRequest, w, nil)
 		return
-	} else {
 	}
 
 	// Fetch community details
@@ -1175,11 +1176,9 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Prepare response
+	// Prepare response, exclude expiresAt and remainingUses
 	response := map[string]interface{}{
-		"communityName": community.Details.Name, // Assuming Community has a Details struct with Name
-		"expiresAt":     invite.ExpiresAt,
-		"remainingUses": invite.RemainingUses,
+		"communityName": community.Details.Name, // Adjust to community.Community.Name if nested
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1197,12 +1196,25 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Step 1: Validate the invite code
+	// Step 1: Validate the invite code with conditional decrement
 	var invite models.InviteCode
+	pipeline := bson.A{
+		bson.M{
+			"$set": bson.M{
+				"remainingUses": bson.M{
+					"$cond": bson.M{
+						"if":   bson.M{"$eq": []interface{}{"$remainingUses", -1}},
+						"then": -1,
+						"else": bson.M{"$subtract": []interface{}{"$remainingUses", 1}},
+					},
+				},
+			},
+		},
+	}
 	if err := c.IDB.FindOneAndUpdate(
 		context.Background(),
-		bson.M{"code": req.InviteCode, "remainingUses": bson.M{"$gte": -1}}, // Allow -1 for infinite
-		bson.M{"$inc": bson.M{"remainingUses": -1}},
+		bson.M{"code": req.InviteCode, "remainingUses": bson.M{"$gte": -1}},
+		pipeline, // Pass the pipeline array directly
 	).Decode(&invite); err != nil {
 		if err == mongo.ErrNoDocuments {
 			config.ErrorStatus("Invalid or expired invite code", http.StatusBadRequest, w, err)
@@ -1212,9 +1224,9 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	currentTime := time.Now() // 11:17 AM MST, June 07, 2025
+	currentTime := time.Now() // 12:42 PM MST, June 07, 2025
 	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
-		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, fmt.Errorf("invite code has expired"))
+		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, nil)
 		return
 	}
 
@@ -1280,7 +1292,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		// Step 4: Insert new entry if not banned
 		if !contains(community.Details.BanList, req.UserID) {
 			newCommunityEntry := bson.M{
-				"_id":         primitive.NewObjectID().Hex(), // Use Hex for consistency with ID field
+				"_id":         primitive.NewObjectID().Hex(),
 				"communityId": invite.CommunityID,
 				"status":      "approved",
 			}
@@ -1297,7 +1309,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		} else {
-			config.ErrorStatus("User is banned from this community", http.StatusForbidden, w, fmt.Errorf("user is banned from this community"))
+			config.ErrorStatus("User is banned from this community", http.StatusForbidden, w, nil)
 			return
 		}
 	}
