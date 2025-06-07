@@ -43,8 +43,8 @@ type Note struct {
 	ID        primitive.ObjectID `json:"_id" bson:"_id"`
 	Title     string             `json:"title" bson:"title"`
 	Content   string             `json:"content" bson:"content"`
-	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	CreatedAt interface{}        `json:"createdAt" bson:"createdAt"`
+	UpdatedAt interface{}        `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Subscription holds the structure for a user's subscription
