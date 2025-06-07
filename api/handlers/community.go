@@ -1091,20 +1091,24 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	inviteCodeID := inviteCodeObj.Hex()      // Convert ObjectID to string for storage
 
 	// Create the invite code document
+	// Handle infinite use case (maxUses = 0) by setting RemainingUses to -1
+	remainingUses := inviteCode.MaxUses
+	if inviteCode.MaxUses == 0 {
+		remainingUses = -1 // Sentinel value for infinite uses
+	}
 	inviteCodeDoc := models.InviteCode{
 		ID:            inviteCodeObj,
 		Code:          inviteCode.Code,
 		CommunityID:   communityID, // Store as string
 		ExpiresAt:     expiresAt,
 		MaxUses:       inviteCode.MaxUses,
-		RemainingUses: inviteCode.MaxUses,
+		RemainingUses: remainingUses,
 		CreatedBy:     inviteCode.CreatedBy,
 		CreatedAt:     time.Now(),
 	}
 
 	// Insert into inviteCodes collection
-	_, err := c.IDB.InsertOne(context.Background(), inviteCodeDoc)
-	if err != nil {
+	if _, err := c.IDB.InsertOne(context.Background(), inviteCodeDoc); err != nil {
 		config.ErrorStatus("Failed to save invite code", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -1143,14 +1147,14 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check expiration
-	currentTime := time.Now() // 09:35 AM MST, June 07, 2025
+	currentTime := time.Now() // 11:14 AM MST, June 07, 2025
 	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
 		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, fmt.Errorf("invite code has expired"))
 		return
 	}
 
-	// Check remaining uses
-	if invite.RemainingUses <= 0 {
+	// Check remaining uses, allow -1 for infinite
+	if invite.RemainingUses < -1 { // Reject if less than -1, allow -1 for infinite
 		config.ErrorStatus("Invite code has no remaining uses", http.StatusBadRequest, w, fmt.Errorf("invite code has no remaining uses"))
 		return
 	}
@@ -1170,23 +1174,13 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Prepare response
 	response := map[string]interface{}{
-		"communityName": community.Details.Name,
+		"communityName": community.Details.Name, // Assuming Community has a Details struct with Name
 		"expiresAt":     invite.ExpiresAt,
 		"remainingUses": invite.RemainingUses,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-}
-
-// Helper function to check if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 // JoinCommunityHandler processes a join request using an invite code
@@ -1204,7 +1198,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	var invite models.InviteCode
 	if err := c.IDB.FindOneAndUpdate(
 		context.Background(),
-		bson.M{"code": req.InviteCode, "remainingUses": bson.M{"$gt": 0}},
+		bson.M{"code": req.InviteCode, "remainingUses": bson.M{"$gte": -1}}, // Allow -1 for infinite
 		bson.M{"$inc": bson.M{"remainingUses": -1}},
 	).Decode(&invite); err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -1215,7 +1209,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	currentTime := time.Now() // 10:53 AM MST, June 07, 2025
+	currentTime := time.Now() // 11:17 AM MST, June 07, 2025
 	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
 		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, fmt.Errorf("invite code has expired"))
 		return
@@ -1283,7 +1277,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		// Step 4: Insert new entry if not banned
 		if !contains(community.Details.BanList, req.UserID) {
 			newCommunityEntry := bson.M{
-				"_id":         primitive.NewObjectID().Hex(),
+				"_id":         primitive.NewObjectID().Hex(), // Use Hex for consistency with ID field
 				"communityId": invite.CommunityID,
 				"status":      "approved",
 			}
@@ -1321,6 +1315,16 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	// Respond with success
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "joined"})
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteRoleMemberHandler deletes a member from a role in a community
