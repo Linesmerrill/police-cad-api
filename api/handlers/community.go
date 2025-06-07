@@ -1153,10 +1153,13 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check remaining uses, allow -1 for infinite
-	if invite.RemainingUses < -1 { // Reject if less than -1, allow -1 for infinite
+	if invite.MaxUses == 0 {
+
+	} else if invite.RemainingUses < -1 { // Reject if less than -1, allow -1 for infinite
+		// Check remaining uses, allow -1 for infinite
 		config.ErrorStatus("Invite code has no remaining uses", http.StatusBadRequest, w, fmt.Errorf("invite code has no remaining uses"))
 		return
+	} else {
 	}
 
 	// Fetch community details
