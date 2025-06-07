@@ -1118,7 +1118,7 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	if err := c.DB.UpdateOne(
 		context.Background(),
 		bson.M{"_id": communityObjID},
-		bson.M{"$push": bson.M{"inviteCodeIds": inviteCodeID}},
+		bson.M{"$push": bson.M{"community.inviteCodeIds": inviteCodeID}},
 	); err != nil {
 		http.Error(w, "Failed to update community", http.StatusInternalServerError)
 		return
