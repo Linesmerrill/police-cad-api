@@ -1077,7 +1077,7 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	// Decode the request body directly into InviteCode
 	var inviteCode models.InviteCode
 	if err := json.NewDecoder(r.Body).Decode(&inviteCode); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
 
@@ -1105,14 +1105,14 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	// Insert into inviteCodes collection
 	_, err := c.IDB.InsertOne(context.Background(), inviteCodeDoc)
 	if err != nil {
-		http.Error(w, "Failed to save invite code", http.StatusInternalServerError)
+		config.ErrorStatus("Failed to save invite code", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Update the community with the inviteCodeID (correct field name: inviteCodeIds)
 	communityObjID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
-		http.Error(w, "Invalid community ID", http.StatusBadRequest)
+		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
 	if err := c.DB.UpdateOne(
@@ -1120,7 +1120,7 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		bson.M{"_id": communityObjID},
 		bson.M{"$push": bson.M{"community.inviteCodeIds": inviteCodeID}},
 	); err != nil {
-		http.Error(w, "Failed to update community", http.StatusInternalServerError)
+		config.ErrorStatus("Failed to update community", http.StatusInternalServerError, w, err)
 		return
 	}
 
@@ -1177,6 +1177,150 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// JoinCommunityHandler processes a join request using an invite code
+func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		InviteCode string `json:"inviteCode"`
+		UserID     string `json:"userId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Step 1: Validate the invite code
+	var invite models.InviteCode
+	if err := c.IDB.FindOneAndUpdate(
+		context.Background(),
+		bson.M{"code": req.InviteCode, "remainingUses": bson.M{"$gt": 0}},
+		bson.M{"$inc": bson.M{"remainingUses": -1}},
+	).Decode(&invite); err != nil {
+		if err == mongo.ErrNoDocuments {
+			config.ErrorStatus("Invalid or expired invite code", http.StatusBadRequest, w, err)
+		} else {
+			config.ErrorStatus("Database error", http.StatusInternalServerError, w, err)
+		}
+		return
+	}
+
+	currentTime := time.Now() // 10:53 AM MST, June 07, 2025
+	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
+		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, fmt.Errorf("invite code has expired"))
+		return
+	}
+
+	// Convert IDs to ObjectID
+	userObjID, err := primitive.ObjectIDFromHex(req.UserID)
+	if err != nil {
+		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+	communityObjID, err := primitive.ObjectIDFromHex(invite.CommunityID)
+	if err != nil {
+		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Fetch user and community
+	var user models.User
+	if err := c.UDB.FindOne(context.Background(), bson.M{"_id": userObjID}).Decode(&user); err != nil {
+		config.ErrorStatus("Failed to fetch user", http.StatusInternalServerError, w, err)
+		return
+	}
+	// var community models.Community
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": communityObjID})
+	if err != nil {
+		config.ErrorStatus("Failed to fetch community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Step 2 & 3: Check existing community status
+	var existingCommunity *models.UserCommunity
+	for i := range user.Details.Communities {
+		if user.Details.Communities[i].CommunityID == invite.CommunityID {
+			existingCommunity = &user.Details.Communities[i]
+			break
+		}
+	}
+
+	update := bson.M{}
+	if existingCommunity != nil {
+		// Step 3: Update status to approved if not approved and not banned, preserve other fields
+		if existingCommunity.Status != "approved" && existingCommunity.Status != "banned" {
+			update = bson.M{
+				"$set": bson.M{
+					"user.communities.$": bson.M{
+						"_id":         existingCommunity.ID,
+						"status":      "approved",
+						"communityId": existingCommunity.CommunityID,
+					},
+				},
+			}
+			// Match the specific communityId in the query
+			_, err = c.UDB.UpdateOne(
+				context.Background(),
+				bson.M{"_id": userObjID, "user.communities.communityId": invite.CommunityID},
+				update,
+			)
+			if err != nil {
+				config.ErrorStatus("Failed to update user status", http.StatusInternalServerError, w, err)
+				return
+			}
+		}
+	} else {
+		// Step 4: Insert new entry if not banned
+		if !contains(community.Details.BanList, req.UserID) {
+			newCommunityEntry := bson.M{
+				"_id":         primitive.NewObjectID().Hex(),
+				"communityId": invite.CommunityID,
+				"status":      "approved",
+			}
+			update = bson.M{
+				"$push": bson.M{"user.communities": newCommunityEntry},
+			}
+			_, err = c.UDB.UpdateOne(
+				context.Background(),
+				bson.M{"_id": userObjID},
+				update,
+			)
+			if err != nil {
+				config.ErrorStatus("Failed to update user", http.StatusInternalServerError, w, err)
+				return
+			}
+		} else {
+			config.ErrorStatus("User is banned from this community", http.StatusForbidden, w, fmt.Errorf("user is banned from this community"))
+			return
+		}
+	}
+
+	// Step 5: Increment membersCount if new entry
+	isNewEntry := existingCommunity == nil && !contains(community.Details.BanList, req.UserID)
+	if isNewEntry {
+		if err := c.DB.UpdateOne(
+			context.Background(),
+			bson.M{"_id": communityObjID},
+			bson.M{"$inc": bson.M{"community.membersCount": 1}},
+		); err != nil {
+			config.ErrorStatus("Failed to update community members count", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
+	// Respond with success
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "joined"})
 }
 
 // DeleteRoleMemberHandler deletes a member from a role in a community
@@ -2669,27 +2813,27 @@ func (c *Community) ArchiveCommunityHandler(w http.ResponseWriter, r *http.Reque
 	// Fetch community details
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
-		http.Error(w, "Invalid community ID: "+err.Error(), http.StatusBadRequest)
+		config.ErrorStatus("Invalid community ID: "+err.Error(), http.StatusBadRequest, w, err)
 		return
 	}
 
 	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
-		http.Error(w, "Failed to fetch community: "+err.Error(), http.StatusInternalServerError)
+		config.ErrorStatus("Failed to fetch community: "+err.Error(), http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Write to archivedcommunities collection
 	_, err = c.ADB.InsertOne(context.Background(), *community)
 	if err != nil {
-		http.Error(w, "Failed to archive community: "+err.Error(), http.StatusInternalServerError)
+		config.ErrorStatus("Failed to archive community: "+err.Error(), http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Delete from communities collection
 	err = c.DB.DeleteOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
-		http.Error(w, "Failed to delete community: "+err.Error(), http.StatusInternalServerError)
+		config.ErrorStatus("Failed to delete community: "+err.Error(), http.StatusInternalServerError, w, err)
 		return
 	}
 
@@ -2849,14 +2993,14 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 	// Convert communityID to ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
-		http.Error(w, "Invalid community ID", http.StatusBadRequest)
+		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
 
 	// Fetch the community
 	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
-		http.Error(w, "Community not found", http.StatusNotFound)
+		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
 
@@ -2926,14 +3070,14 @@ func (c Community) GetPaginatedAllDepartmentsHandler(w http.ResponseWriter, r *h
 	// Convert communityID to ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
-		http.Error(w, "Invalid community ID", http.StatusBadRequest)
+		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
 
 	// Fetch the community
 	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
-		http.Error(w, "Community not found", http.StatusNotFound)
+		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
 

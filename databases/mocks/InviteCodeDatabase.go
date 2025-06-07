@@ -10,6 +10,8 @@ import (
 
 	models "github.com/linesmerrill/police-cad-api/models"
 
+	mongo "go.mongodb.org/mongo-driver/mongo"
+
 	options "go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -150,6 +152,33 @@ func (_m *InviteCodeDatabase) FindOne(ctx context.Context, filter interface{}, o
 	}
 
 	return r0, r1
+}
+
+// FindOneAndUpdate provides a mock function with given fields: ctx, filter, update, opts
+func (_m *InviteCodeDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter, update)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindOneAndUpdate")
+	}
+
+	var r0 *mongo.SingleResult
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) *mongo.SingleResult); ok {
+		r0 = rf(ctx, filter, update, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*mongo.SingleResult)
+		}
+	}
+
+	return r0
 }
 
 // InsertOne provides a mock function with given fields: ctx, inviteCode, opts
