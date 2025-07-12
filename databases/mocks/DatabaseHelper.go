@@ -33,19 +33,19 @@ func (_m *DatabaseHelper) Client() databases.ClientHelper {
 }
 
 // Collection provides a mock function with given fields: name
-func (_m *DatabaseHelper) Collection(name string) *databases.MongoCollection {
+func (_m *DatabaseHelper) Collection(name string) databases.MongoCollectionHelper {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Collection")
 	}
 
-	var r0 *databases.MongoCollection
-	if rf, ok := ret.Get(0).(func(string) *databases.MongoCollection); ok {
+	var r0 databases.MongoCollectionHelper
+	if rf, ok := ret.Get(0).(func(string) databases.MongoCollectionHelper); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*databases.MongoCollection)
+			r0 = ret.Get(0).(databases.MongoCollectionHelper)
 		}
 	}
 
