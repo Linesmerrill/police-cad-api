@@ -25,7 +25,7 @@ type UserPreferences struct {
 
 // GetUserPreferencesHandler returns user preferences for a given userID
 func (up UserPreferences) GetUserPreferencesHandler(w http.ResponseWriter, r *http.Request) {
-	userID := mux.Vars(r)["user_id"]
+	userID := mux.Vars(r)["user_id"]GenerateSignature
 
 	zap.S().Debugf("user_id: %v", userID)
 

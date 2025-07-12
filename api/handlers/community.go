@@ -1377,7 +1377,7 @@ func (c Community) sortDepartmentsByUserPreferences(departments []models.Departm
 	copy(sortedDepartments, departments)
 
 	// Sort departments based on user preferences
-	sort.Slice(sortedDepartments, func(i, j int) bool {
+	sort.SliceStable(sortedDepartments, func(i, j int) bool {
 		orderI, existsI := orderMap[sortedDepartments[i].ID.Hex()]
 		orderJ, existsJ := orderMap[sortedDepartments[j].ID.Hex()]
 
