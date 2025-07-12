@@ -66,9 +66,16 @@ func (up UserPreferences) CreateUserPreferencesHandler(w http.ResponseWriter, r 
 
 	// Check if preferences already exist for this user
 	existingPreferences := models.UserPreferences{}
-	_ = up.DB.FindOne(context.Background(), bson.M{"userId": userPreferences.UserID}).Decode(&existingPreferences)
+	dbErr := up.DB.FindOne(context.Background(), bson.M{"userId": userPreferences.UserID}).Decode(&existingPreferences)
+	if dbErr != nil && !errors.Is(dbErr, mongo.ErrNoDocuments) {
+		// If there's a database error (other than no documents found), return it
+		config.ErrorStatus("failed to check existing preferences", http.StatusInternalServerError, w, dbErr)
+		return
+	}
+	
+	// If preferences exist (no error or error was ErrNoDocuments but we found a document)
 	if existingPreferences.ID != primitive.NilObjectID {
-		config.ErrorStatus("user preferences already exist", http.StatusConflict, w, err)
+		config.ErrorStatus("user preferences already exist", http.StatusConflict, w, nil)
 		return
 	}
 
