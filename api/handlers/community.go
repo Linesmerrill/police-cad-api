@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -29,6 +30,7 @@ type Community struct {
 	UDB databases.UserDatabase
 	ADB databases.ArchivedCommunityDatabase
 	IDB databases.InviteCodeDatabase
+	UPDB databases.UserPreferencesDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -1342,6 +1344,63 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+// sortDepartmentsByUserPreferences sorts departments based on user's custom order preference
+func (c Community) sortDepartmentsByUserPreferences(departments []models.Department, userID, communityID string) []models.Department {
+	// If no userID provided, return departments as-is
+	if userID == "" {
+		return departments
+	}
+
+	// Get user preferences
+	var userPreferences models.UserPreferences
+	err := c.UPDB.FindOne(context.Background(), bson.M{"userId": userID}).Decode(&userPreferences)
+	if err != nil {
+		// If no preferences found, return departments as-is
+		return departments
+	}
+
+	// Get department order for this community
+	communityPref, exists := userPreferences.CommunityPreferences[communityID]
+	if !exists || len(communityPref.DepartmentOrder) == 0 {
+		// If no preferences for this community, return departments as-is
+		return departments
+	}
+
+	// Create a map of department ID to order for quick lookup
+	orderMap := make(map[string]int)
+	for _, deptOrder := range communityPref.DepartmentOrder {
+		orderMap[deptOrder.DepartmentID] = deptOrder.Order
+	}
+
+	// Create a copy of departments to sort
+	sortedDepartments := make([]models.Department, len(departments))
+	copy(sortedDepartments, departments)
+
+	// Sort departments based on user preferences
+	sort.Slice(sortedDepartments, func(i, j int) bool {
+		orderI, existsI := orderMap[sortedDepartments[i].ID.Hex()]
+		orderJ, existsJ := orderMap[sortedDepartments[j].ID.Hex()]
+
+		// If both departments have preferences, sort by order
+		if existsI && existsJ {
+			return orderI < orderJ
+		}
+
+		// If only one has preferences, prioritize the one with preferences
+		if existsI && !existsJ {
+			return true
+		}
+		if !existsI && existsJ {
+			return false
+		}
+
+		// If neither has preferences, maintain original order
+		return i < j
+	})
+
+	return sortedDepartments
+}
+
 // DeleteRoleMemberHandler deletes a member from a role in a community
 func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
@@ -1451,11 +1510,14 @@ func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Re
 		community.Details.Departments = []models.Department{}
 	}
 
+	// Sort departments based on user preferences first
+	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+
 	// Initialize the userDepartments slice
 	var userDepartments []models.Department
 
 	// Filter departments where the user is a member with status "approved" or approval is not required
-	for _, department := range community.Details.Departments {
+	for _, department := range sortedDepartments {
 		zap.S().Debugf("Fetch department by department name %s", department.Name)
 		if !department.ApprovalRequired {
 			userDepartments = append(userDepartments, department)
@@ -1487,6 +1549,7 @@ func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Re
 // FetchAllCommunityDepartmentsHandler returns all departments of a community
 func (c Community) FetchAllCommunityDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
+	userID := r.URL.Query().Get("userId")
 
 	// Convert the community ID to primitive.ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
@@ -1507,9 +1570,12 @@ func (c Community) FetchAllCommunityDepartmentsHandler(w http.ResponseWriter, r 
 		community.Details.Departments = []models.Department{}
 	}
 
+	// Sort departments based on user preferences if userID is provided
+	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+
 	// Return the departments array
 	response := map[string]interface{}{
-		"departments": community.Details.Departments,
+		"departments": sortedDepartments,
 	}
 
 	b, err := json.Marshal(response)
@@ -3023,9 +3089,12 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Sort departments based on user preferences first
+	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+
 	// Filter and paginate departments
 	var filteredDepartments []map[string]interface{}
-	for _, department := range community.Details.Departments {
+	for _, department := range sortedDepartments {
 		if department.ApprovalRequired {
 			// Check if user is in the members list with status "approved"
 			isApproved := false
@@ -3100,9 +3169,12 @@ func (c Community) GetPaginatedAllDepartmentsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Sort departments based on user preferences first
+	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+
 	// Filter departments
 	var filteredDepartments []map[string]interface{}
-	for _, department := range community.Details.Departments {
+	for _, department := range sortedDepartments {
 		if department.ApprovalRequired {
 			// Check if user is not in the members list or status is not "approved"
 			isMember := false

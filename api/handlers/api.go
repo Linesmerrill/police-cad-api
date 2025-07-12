@@ -36,7 +36,7 @@ func (a *App) New() *mux.Router {
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
-	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper)}
+	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
@@ -53,6 +53,7 @@ func (a *App) New() *mux.Router {
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
 	cloudinaryHandler := CloudinaryHandler{}
+	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper)}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -169,6 +170,14 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/users/{active_community_id}", api.Middleware(http.HandlerFunc(u.UsersFindAllHandler))).Methods("GET")
 	apiCreate.Handle("/users", api.Middleware(http.HandlerFunc(u.FetchUsersByIdsHandler))).Methods("POST")
 	// All routes for user must go above this line
+
+	// User Preferences routes
+	apiCreate.Handle("/user-preferences/{user_id}", api.Middleware(http.HandlerFunc(userPrefs.GetUserPreferencesHandler))).Methods("GET")
+	apiCreate.Handle("/user-preferences", api.Middleware(http.HandlerFunc(userPrefs.CreateUserPreferencesHandler))).Methods("POST")
+	apiCreate.Handle("/user-preferences/{user_id}", api.Middleware(http.HandlerFunc(userPrefs.UpdateUserPreferencesHandler))).Methods("PUT")
+	apiCreate.Handle("/user-preferences/{user_id}", api.Middleware(http.HandlerFunc(userPrefs.DeleteUserPreferencesHandler))).Methods("DELETE")
+	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.GetDepartmentOrderHandler))).Methods("GET")
+	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.UpdateDepartmentOrderHandler))).Methods("PUT")
 
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.UpdateCivilianHandler))).Methods("PUT")
