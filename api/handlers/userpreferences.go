@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 )
@@ -31,7 +33,7 @@ func (up UserPreferences) GetUserPreferencesHandler(w http.ResponseWriter, r *ht
 	err := up.DB.FindOne(context.Background(), bson.M{"userId": userID}).Decode(&userPreferences)
 	if err != nil {
 		// If no preferences found, return empty preferences structure
-		if err.Error() == "mongo: no documents in result" {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			userPreferences = models.UserPreferences{
 				UserID:               userID,
 				CommunityPreferences: make(map[string]models.CommunityPreference),
@@ -176,7 +178,7 @@ func (up UserPreferences) GetDepartmentOrderHandler(w http.ResponseWriter, r *ht
 	var userPreferences models.UserPreferences
 	err := up.DB.FindOne(context.Background(), bson.M{"userId": userID}).Decode(&userPreferences)
 	if err != nil {
-		if err.Error() == "mongo: no documents in result" {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			// Return empty department order if no preferences exist
 			response := map[string]interface{}{
 				"departmentOrder": []models.DepartmentOrder{},
