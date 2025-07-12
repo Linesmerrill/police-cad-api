@@ -88,7 +88,18 @@ func (up UserPreferences) CreateUserPreferencesHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	userPreferences.ID = res.Decode().(primitive.ObjectID)
+	insertedID := res.Decode()
+	if insertedID == nil {
+		config.ErrorStatus("failed to retrieve inserted ID", http.StatusInternalServerError, w, nil)
+		return
+	}
+
+	objectID, ok := insertedID.(primitive.ObjectID)
+	if !ok {
+		config.ErrorStatus("failed to convert inserted ID to ObjectID", http.StatusInternalServerError, w, nil)
+		return
+	}
+	userPreferences.ID = objectID
 
 	b, err := json.Marshal(userPreferences)
 	if err != nil {

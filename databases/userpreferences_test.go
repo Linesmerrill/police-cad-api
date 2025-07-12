@@ -1,4 +1,4 @@
-gspackage databases
+package databases
 
 import (
 	"testing"
