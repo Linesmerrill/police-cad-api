@@ -15,10 +15,10 @@ const userPreferencesName = "userpreferences"
 // UserPreferencesDatabase contains the methods to use with the user preferences database
 type UserPreferencesDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) SingleResultHelper
-	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	InsertOne(ctx context.Context, userPreferences models.UserPreferences) (InsertOneResultHelper, error)
-	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
+	Aggregate(ctx context.Context, pipeline interface{}) (*MongoCursor, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
@@ -39,12 +39,12 @@ func (up *userPreferencesDatabase) FindOne(ctx context.Context, filter interface
 	return up.db.Collection(userPreferencesName).FindOne(ctx, filter)
 }
 
-func (up *userPreferencesDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error) {
+func (up *userPreferencesDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error) {
 	cursor, err := up.db.Collection(userPreferencesName).Find(ctx, filter, opts...)
 	if err != nil {
-		return MongoCursor{}, err
+		return nil, err
 	}
-	return *cursor, err
+	return cursor, err
 }
 
 func (up *userPreferencesDatabase) InsertOne(ctx context.Context, userPreferences models.UserPreferences) (InsertOneResultHelper, error) {
@@ -52,12 +52,12 @@ func (up *userPreferencesDatabase) InsertOne(ctx context.Context, userPreference
 	return res, err
 }
 
-func (up *userPreferencesDatabase) Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error) {
+func (up *userPreferencesDatabase) Aggregate(ctx context.Context, pipeline interface{}) (*MongoCursor, error) {
 	cursor, err := up.db.Collection(userPreferencesName).Aggregate(ctx, pipeline)
 	if err != nil {
-		return MongoCursor{}, err
+		return nil, err
 	}
-	return *cursor, nil
+	return cursor, err
 }
 
 func (up *userPreferencesDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
