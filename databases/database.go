@@ -9,10 +9,22 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 )
 
+// MongoCollectionHelper defines the methods required for collection operations (for real and mock collections)
+type MongoCollectionHelper interface {
+	FindOne(context.Context, interface{}, ...*options.FindOneOptions) SingleResultHelper
+	Find(context.Context, interface{}, ...*options.FindOptions) (*MongoCursor, error)
+	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
+	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (*MongoCursor, error)
+	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	UpdateMany(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	FindOneAndUpdate(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) *mongo.SingleResult
+}
+
 // DatabaseHelper contains the collection and client to be used to access the methods
-// defined below
 type DatabaseHelper interface {
-	Collection(name string) *MongoCollection
+	Collection(name string) MongoCollectionHelper
 	Client() ClientHelper
 }
 
@@ -106,7 +118,7 @@ func (mc *mongoClient) Connect() error {
 	return mc.cl.Connect(nil)
 }
 
-func (md *mongoDatabase) Collection(name string) *MongoCollection {
+func (md *mongoDatabase) Collection(name string) MongoCollectionHelper {
 	collection := md.db.Collection(name)
 	return &MongoCollection{coll: collection}
 }
