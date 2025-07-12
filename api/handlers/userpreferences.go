@@ -25,7 +25,7 @@ type UserPreferences struct {
 
 // GetUserPreferencesHandler returns user preferences for a given userID
 func (up UserPreferences) GetUserPreferencesHandler(w http.ResponseWriter, r *http.Request) {
-	userID := mux.Vars(r)["user_id"]GenerateSignature
+	userID := mux.Vars(r)["user_id"]
 
 	zap.S().Debugf("user_id: %v", userID)
 
@@ -56,7 +56,7 @@ func (up UserPreferences) GetUserPreferencesHandler(w http.ResponseWriter, r *ht
 // CreateUserPreferencesHandler creates new user preferences
 func (up UserPreferences) CreateUserPreferencesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	var userPreferences models.UserPreferences
 	err := json.NewDecoder(r.Body).Decode(&userPreferences)
 	if err != nil {
@@ -72,7 +72,7 @@ func (up UserPreferences) CreateUserPreferencesHandler(w http.ResponseWriter, r 
 		config.ErrorStatus("failed to check existing preferences", http.StatusInternalServerError, w, dbErr)
 		return
 	}
-	
+
 	// If preferences exist (no error or error was ErrNoDocuments but we found a document)
 	if existingPreferences.ID != primitive.NilObjectID {
 		config.ErrorStatus("user preferences already exist", http.StatusConflict, w, nil)
@@ -236,4 +236,4 @@ func (up UserPreferences) DeleteUserPreferencesHandler(w http.ResponseWriter, r 
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-} 
+}

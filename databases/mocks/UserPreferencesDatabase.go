@@ -21,22 +21,24 @@ type UserPreferencesDatabase struct {
 }
 
 // Aggregate provides a mock function with given fields: ctx, pipeline
-func (_m *UserPreferencesDatabase) Aggregate(ctx context.Context, pipeline interface{}) (databases.MongoCursor, error) {
+func (_m *UserPreferencesDatabase) Aggregate(ctx context.Context, pipeline interface{}) (*databases.MongoCursor, error) {
 	ret := _m.Called(ctx, pipeline)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Aggregate")
 	}
 
-	var r0 databases.MongoCursor
+	var r0 *databases.MongoCursor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) (databases.MongoCursor, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) (*databases.MongoCursor, error)); ok {
 		return rf(ctx, pipeline)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) databases.MongoCursor); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) *databases.MongoCursor); ok {
 		r0 = rf(ctx, pipeline)
 	} else {
-		r0 = ret.Get(0).(databases.MongoCursor)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*databases.MongoCursor)
+		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
@@ -109,7 +111,7 @@ func (_m *UserPreferencesDatabase) DeleteOne(ctx context.Context, filter interfa
 }
 
 // Find provides a mock function with given fields: ctx, filter, opts
-func (_m *UserPreferencesDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (databases.MongoCursor, error) {
+func (_m *UserPreferencesDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*databases.MongoCursor, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -123,15 +125,17 @@ func (_m *UserPreferencesDatabase) Find(ctx context.Context, filter interface{},
 		panic("no return value specified for Find")
 	}
 
-	var r0 databases.MongoCursor
+	var r0 *databases.MongoCursor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) (databases.MongoCursor, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) (*databases.MongoCursor, error)); ok {
 		return rf(ctx, filter, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) databases.MongoCursor); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) *databases.MongoCursor); ok {
 		r0 = rf(ctx, filter, opts...)
 	} else {
-		r0 = ret.Get(0).(databases.MongoCursor)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*databases.MongoCursor)
+		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, interface{}, ...*options.FindOptions) error); ok {
