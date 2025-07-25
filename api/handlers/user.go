@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -20,6 +22,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
+
 	"github.com/stripe/stripe-go/v82/subscription"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -2584,54 +2587,346 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleWebhook handles Stripe webhook events
+// HandleStripeWebhook handles Stripe webhook events
 // Note: Delivery Delays
 // Most webhooks are usually delivered within 5 to 60 seconds of the event occurring -
 // **cancellation events usually are delivered within 2hrs** of the user cancelling their subscription.
 // You should be aware of these delivery times when designing your app.
-func (u User) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+func (u User) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		config.ErrorStatus("failed to read webhook payload", http.StatusBadRequest, w, err)
 		return
 	}
 
-	// Parse the RevenueCat webhook payload
-	var event struct {
-		EventType      string `json:"event_type"`
-		SubscriberID   string `json:"subscriber_id"`
-		CancellationAt string `json:"cancellation_at"`
-	}
-	if err := json.Unmarshal(payload, &event); err != nil {
-		config.ErrorStatus("failed to parse webhook payload", http.StatusBadRequest, w, err)
+	// Get the webhook secret from environment
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+	if webhookSecret == "" {
+		config.ErrorStatus("webhook secret not configured", http.StatusInternalServerError, w, nil)
 		return
 	}
 
-	// Handle cancellation event
-	if event.EventType == "CANCELLATION" {
-		cancellationTime, err := time.Parse(time.RFC3339, event.CancellationAt)
-		if err != nil {
-			config.ErrorStatus("invalid cancellation time format", http.StatusBadRequest, w, err)
-			return
-		}
+	// Get the Stripe signature from headers
+	signature := r.Header.Get("Stripe-Signature")
+	if signature == "" {
+		config.ErrorStatus("missing stripe signature", http.StatusBadRequest, w, nil)
+		return
+	}
 
-		// Update the user's subscription to reflect pending cancellation
-		_, err = u.DB.UpdateOne(
-			context.Background(),
-			bson.M{"subscription.subscriptionId": event.SubscriberID},
-			bson.M{"$set": bson.M{
-				"subscription.active":   true,
-				"subscription.cancelAt": primitive.NewDateTimeFromTime(cancellationTime),
-			}},
-		)
-		if err != nil {
-			config.ErrorStatus("failed to update user subscription", http.StatusInternalServerError, w, err)
-			return
-		}
+	// Verify the webhook signature
+	event, err := verifyWebhookSignature(payload, signature, webhookSecret)
+	if err != nil {
+		config.ErrorStatus("invalid webhook signature", http.StatusBadRequest, w, err)
+		return
+	}
+
+	zap.S().Infof("Received Stripe webhook event: %s", event.Type)
+
+	// Handle different event types
+	switch event.Type {
+	case "checkout.session.completed":
+		err = u.handleCheckoutSessionCompleted(*event)
+	case "invoice.payment_succeeded":
+		err = u.handleInvoicePaymentSucceeded(*event)
+	case "invoice.payment_failed":
+		err = u.handleInvoicePaymentFailed(*event)
+	case "customer.subscription.updated":
+		err = u.handleSubscriptionUpdated(*event)
+	case "customer.subscription.deleted":
+		err = u.handleSubscriptionDeleted(*event)
+	case "customer.subscription.trial_will_end":
+		err = u.handleSubscriptionTrialWillEnd(*event)
+	default:
+		zap.S().Infof("Unhandled event type: %s", event.Type)
+	}
+
+	if err != nil {
+		zap.S().Errorf("Error handling webhook event %s: %v", event.Type, err)
+		config.ErrorStatus("failed to process webhook", http.StatusInternalServerError, w, err)
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Webhook processed successfully"}`))
+}
+
+// verifyWebhookSignature verifies the Stripe webhook signature
+func verifyWebhookSignature(payload []byte, signature string, secret string) (*stripe.Event, error) {
+	// Parse the signature header
+	// Format: t=timestamp,v1=signature
+	parts := strings.Split(signature, ",")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid signature format")
+	}
+
+	// Extract timestamp and signature
+	var timestamp, sig string
+	for _, part := range parts {
+		if strings.HasPrefix(part, "t=") {
+			timestamp = strings.TrimPrefix(part, "t=")
+		} else if strings.HasPrefix(part, "v1=") {
+			sig = strings.TrimPrefix(part, "v1=")
+		}
+	}
+
+	if timestamp == "" || sig == "" {
+		return nil, fmt.Errorf("missing timestamp or signature")
+	}
+
+	// Create the signed payload
+	signedPayload := timestamp + "." + string(payload)
+
+	// Create HMAC-SHA256 hash
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(signedPayload))
+	expectedSignature := hex.EncodeToString(h.Sum(nil))
+
+	// Compare signatures
+	if !hmac.Equal([]byte(sig), []byte(expectedSignature)) {
+		return nil, fmt.Errorf("signature verification failed")
+	}
+
+	// Parse the event
+	var event stripe.Event
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, fmt.Errorf("failed to parse event: %v", err)
+	}
+
+	return &event, nil
+}
+
+// handleCheckoutSessionCompleted handles successful checkout sessions
+func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
+	var session stripe.CheckoutSession
+	err := json.Unmarshal(event.Data.Raw, &session)
+	if err != nil {
+		return fmt.Errorf("failed to parse checkout session: %v", err)
+	}
+
+	// Extract metadata
+	userID := session.Metadata["userId"]
+	billingInterval := session.Metadata["billingInterval"]
+
+	if userID == "" {
+		return fmt.Errorf("missing userId in session metadata")
+	}
+
+	// Get subscription details
+	sub, err := subscription.Get(session.Subscription.ID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get subscription: %v", err)
+	}
+
+	// Map the Price ID back to the tier and billing interval
+	plan := "unknown"
+	isAnnual := false
+	switch sub.Items.Data[0].Price.ID {
+	case os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID"):
+		plan = "base"
+		isAnnual = false
+	case os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID"):
+		plan = "base"
+		isAnnual = true
+	case os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID"):
+		plan = "premium"
+		isAnnual = false
+	case os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID"):
+		plan = "premium"
+		isAnnual = true
+	case os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID"):
+		plan = "premium_plus"
+		isAnnual = false
+	case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
+		plan = "premium_plus"
+		isAnnual = true
+	case os.Getenv("STRIPE_BASIC_PROMOTION_MONTHLY_PRICE_ID"):
+		plan = "basic"
+		isAnnual = false
+	case os.Getenv("STRIPE_STANDARD_PROMOTION_MONTHLY_PRICE_ID"):
+		plan = "standard"
+		isAnnual = false
+	case os.Getenv("STRIPE_PREMIUM_PROMOTION_MONTHLY_PRICE_ID"):
+		plan = "premium"
+		isAnnual = false
+	case os.Getenv("STRIPE_ELITE_PROMOTION_MONTHLY_PRICE_ID"):
+		plan = "elite"
+		isAnnual = false
+	}
+
+	// Update user subscription in database
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %v", err)
+	}
+
+	filter := bson.M{"_id": userObjID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.id":        sub.ID,
+			"user.subscription.plan":      plan,
+			"user.subscription.isAnnual":  isAnnual,
+			"user.subscription.active":    sub.Status == "active",
+			"user.subscription.createdAt": primitive.NewDateTimeFromTime(time.Now()),
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Successfully updated subscription for user %s: %s (%s)", userID, plan, billingInterval)
+	return nil
+}
+
+// handleInvoicePaymentSucceeded handles successful invoice payments
+func (u User) handleInvoicePaymentSucceeded(event stripe.Event) error {
+	var invoice stripe.Invoice
+	err := json.Unmarshal(event.Data.Raw, &invoice)
+	if err != nil {
+		return fmt.Errorf("failed to parse invoice: %v", err)
+	}
+
+	// Only handle subscription invoices
+	var subscriptionID string
+	if invoice.Parent != nil && invoice.Parent.SubscriptionDetails != nil && invoice.Parent.SubscriptionDetails.Subscription != nil {
+		subscriptionID = invoice.Parent.SubscriptionDetails.Subscription.ID
+	}
+	if subscriptionID == "" {
+		return nil
+	}
+
+	// Get subscription details
+	sub, err := subscription.Get(subscriptionID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get subscription: %v", err)
+	}
+
+	// Find user by subscription ID
+	filter := bson.M{"user.subscription.id": sub.ID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active":    sub.Status == "active",
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Successfully processed payment for subscription %s", sub.ID)
+	return nil
+}
+
+// handleInvoicePaymentFailed handles failed invoice payments
+func (u User) handleInvoicePaymentFailed(event stripe.Event) error {
+	var invoice stripe.Invoice
+	err := json.Unmarshal(event.Data.Raw, &invoice)
+	if err != nil {
+		return fmt.Errorf("failed to parse invoice: %v", err)
+	}
+
+	// Only handle subscription invoices
+	var subscriptionID string
+	if invoice.Parent != nil && invoice.Parent.SubscriptionDetails != nil && invoice.Parent.SubscriptionDetails.Subscription != nil {
+		subscriptionID = invoice.Parent.SubscriptionDetails.Subscription.ID
+	}
+	if subscriptionID == "" {
+		return nil
+	}
+
+	// Find user by subscription ID and mark as inactive
+	filter := bson.M{"user.subscription.id": subscriptionID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active":    false,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Marked subscription %s as inactive due to payment failure", subscriptionID)
+	return nil
+}
+
+// handleSubscriptionUpdated handles subscription updates
+func (u User) handleSubscriptionUpdated(event stripe.Event) error {
+	var sub stripe.Subscription
+	err := json.Unmarshal(event.Data.Raw, &sub)
+	if err != nil {
+		return fmt.Errorf("failed to parse subscription: %v", err)
+	}
+
+	// Find user by subscription ID
+	filter := bson.M{"user.subscription.id": sub.ID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active":    sub.Status == "active",
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	// Add cancelAt if subscription is set to cancel at period end
+	if sub.CancelAt > 0 {
+		cancelAtTime := time.Unix(sub.CancelAt, 0)
+		update["$set"].(bson.M)["user.subscription.cancelAt"] = primitive.NewDateTimeFromTime(cancelAtTime)
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Successfully updated subscription %s", sub.ID)
+	return nil
+}
+
+// handleSubscriptionDeleted handles subscription deletions
+func (u User) handleSubscriptionDeleted(event stripe.Event) error {
+	var sub stripe.Subscription
+	err := json.Unmarshal(event.Data.Raw, &sub)
+	if err != nil {
+		return fmt.Errorf("failed to parse subscription: %v", err)
+	}
+
+	// Find user by subscription ID and mark as inactive
+	filter := bson.M{"user.subscription.id": sub.ID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active":    false,
+			"user.subscription.plan":      "free",
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Successfully deactivated subscription %s", sub.ID)
+	return nil
+}
+
+// handleSubscriptionTrialWillEnd handles trial ending notifications
+func (u User) handleSubscriptionTrialWillEnd(event stripe.Event) error {
+	var sub stripe.Subscription
+	err := json.Unmarshal(event.Data.Raw, &sub)
+	if err != nil {
+		return fmt.Errorf("failed to parse subscription: %v", err)
+	}
+
+	// You can add logic here to send notifications to users about trial ending
+	// For now, just log the event
+	zap.S().Infof("Trial ending for subscription %s", sub.ID)
+	return nil
 }
 
 // CancelSubscriptionHandler cancels a user's subscription
@@ -3298,4 +3593,267 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// HandleRevenueCatWebhook handles RevenueCat webhook events for subscription management
+func (u User) HandleRevenueCatWebhook(w http.ResponseWriter, r *http.Request) {
+	payload, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		config.ErrorStatus("failed to read webhook payload", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Parse the RevenueCat webhook payload
+	var webhookData map[string]interface{}
+	if err := json.Unmarshal(payload, &webhookData); err != nil {
+		config.ErrorStatus("failed to parse webhook payload", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Extract event type
+	eventType, ok := webhookData["event"].(map[string]interface{})
+	if !ok {
+		config.ErrorStatus("invalid webhook event structure", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	eventName, ok := eventType["type"].(string)
+	if !ok {
+		config.ErrorStatus("missing event type", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	zap.S().Infof("Received RevenueCat webhook event: %s", eventName)
+
+	// Handle different RevenueCat event types
+	switch eventName {
+	case "INITIAL_PURCHASE":
+		err = u.handleRevenueCatInitialPurchase(webhookData)
+	case "RENEWAL":
+		err = u.handleRevenueCatRenewal(webhookData)
+	case "CANCELLATION":
+		err = u.handleRevenueCatCancellation(webhookData)
+	case "UNCANCELLATION":
+		err = u.handleRevenueCatUncancellation(webhookData)
+	case "NON_RENEWING_PURCHASE":
+		err = u.handleRevenueCatNonRenewingPurchase(webhookData)
+	case "EXPIRATION":
+		err = u.handleRevenueCatExpiration(webhookData)
+	case "BILLING_ISSUE":
+		err = u.handleRevenueCatBillingIssue(webhookData)
+	case "PRODUCT_CHANGE":
+		err = u.handleRevenueCatProductChange(webhookData)
+	default:
+		zap.S().Infof("Unhandled RevenueCat event type: %s", eventName)
+	}
+
+	if err != nil {
+		zap.S().Errorf("Error handling RevenueCat webhook event %s: %v", eventName, err)
+		config.ErrorStatus("failed to process webhook", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "RevenueCat webhook processed successfully"}`))
+}
+
+// handleRevenueCatInitialPurchase handles initial purchase events
+func (u User) handleRevenueCatInitialPurchase(webhookData map[string]interface{}) error {
+	// Extract user ID and subscription details
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": true,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription to active (initial purchase)", appUserID)
+	return nil
+}
+
+// handleRevenueCatRenewal handles renewal events
+func (u User) handleRevenueCatRenewal(webhookData map[string]interface{}) error {
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": true,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription to active (renewal)", appUserID)
+	return nil
+}
+
+// handleRevenueCatCancellation handles cancellation events
+func (u User) handleRevenueCatCancellation(webhookData map[string]interface{}) error {
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": false,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription to inactive (cancellation)", appUserID)
+	return nil
+}
+
+// handleRevenueCatUncancellation handles uncancellation events
+func (u User) handleRevenueCatUncancellation(webhookData map[string]interface{}) error {
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": true,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription to active (uncancellation)", appUserID)
+	return nil
+}
+
+// handleRevenueCatNonRenewingPurchase handles non-renewing purchase events
+func (u User) handleRevenueCatNonRenewingPurchase(webhookData map[string]interface{}) error {
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": true,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription to active (non-renewing purchase)", appUserID)
+	return nil
+}
+
+// handleRevenueCatExpiration handles expiration events
+func (u User) handleRevenueCatExpiration(webhookData map[string]interface{}) error {
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": false,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription to inactive (expiration)", appUserID)
+	return nil
+}
+
+// handleRevenueCatBillingIssue handles billing issue events
+func (u User) handleRevenueCatBillingIssue(webhookData map[string]interface{}) error {
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": false,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription to inactive (billing issue)", appUserID)
+	return nil
+}
+
+// handleRevenueCatProductChange handles product change events
+func (u User) handleRevenueCatProductChange(webhookData map[string]interface{}) error {
+	appUserID, ok := webhookData["app_user_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing app_user_id")
+	}
+
+	// Update user subscription status
+	filter := bson.M{"user.id": appUserID}
+	update := bson.M{
+		"$set": bson.M{
+			"user.subscription.active": true,
+			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user subscription: %v", err)
+	}
+
+	zap.S().Infof("Updated user %s subscription (product change)", appUserID)
+	return nil
 }
