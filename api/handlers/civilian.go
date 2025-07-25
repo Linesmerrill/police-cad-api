@@ -219,7 +219,7 @@ func getPage(Page int, r *http.Request) int {
 		var err error
 		Page, err = strconv.Atoi(r.URL.Query().Get("page"))
 		if err != nil {
-			zap.S().Errorf(fmt.Sprintf("error parsing page number: %v", err))
+			zap.S().Warnf(fmt.Sprintf("warning parsing page number: %v", err))
 		}
 		if Page < 0 {
 			zap.S().Warnf(fmt.Sprintf("cannot process page number less than 1. Got: %v", Page))
