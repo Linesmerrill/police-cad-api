@@ -2653,9 +2653,11 @@ func (u User) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 // verifyWebhookSignature verifies the Stripe webhook signature
 func verifyWebhookSignature(payload []byte, signature string, secret string) (*stripe.Event, error) {
 	// Parse the signature header
-	// Format: t=timestamp,v1=signature
+	// Format: t=timestamp,v1=signature,v0=signature (newer format)
+	// or: t=timestamp,v1=signature (older format)
 	parts := strings.Split(signature, ",")
-	if len(parts) != 2 {
+	
+	if len(parts) < 2 || len(parts) > 3 {
 		return nil, fmt.Errorf("invalid signature format")
 	}
 
@@ -2667,6 +2669,7 @@ func verifyWebhookSignature(payload []byte, signature string, secret string) (*s
 		} else if strings.HasPrefix(part, "v1=") {
 			sig = strings.TrimPrefix(part, "v1=")
 		}
+		// Note: We ignore v0 signatures as they're for older webhook versions
 	}
 
 	if timestamp == "" || sig == "" {
@@ -2693,6 +2696,14 @@ func verifyWebhookSignature(payload []byte, signature string, secret string) (*s
 	}
 
 	return &event, nil
+}
+
+// min helper function
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // handleCheckoutSessionCompleted handles successful checkout sessions
