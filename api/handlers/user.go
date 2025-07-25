@@ -2718,8 +2718,10 @@ func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
 	userID := session.Metadata["userId"]
 	billingInterval := session.Metadata["billingInterval"]
 
+	// For test events or sessions without metadata, log and skip processing
 	if userID == "" {
-		return fmt.Errorf("missing userId in session metadata")
+		zap.S().Infof("Skipping checkout session %s: missing userId in metadata (likely a test event)", session.ID)
+		return nil
 	}
 
 	// Get subscription details
