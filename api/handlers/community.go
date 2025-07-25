@@ -2998,7 +2998,7 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	userID := r.URL.Query().Get("userId")
 
 	if communityID == "" || userID == "" {
-		config.ErrorStatus("communityId and userId are required", http.StatusBadRequest, w, nil)
+		config.ErrorStatus("communityId and userId are required", http.StatusBadRequest, w, fmt.Errorf("communityId and userId are required"))
 		return
 	}
 
@@ -3023,7 +3023,7 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	// Retrieve the user's tenCodeID from the members map
 	memberDetails, exists := community.Details.Members[userID]
 	if !exists {
-		config.ErrorStatus("[GetActiveTenCodeHandler] User not found in community members", http.StatusNotFound, w, nil)
+		config.ErrorStatus("[GetActiveTenCodeHandler] User not found in community members", http.StatusNotFound, w, fmt.Errorf("user not found in community members"))
 		return
 	}
 	tenCodeID := memberDetails.TenCodeID
@@ -3045,7 +3045,7 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if code == "" || description == "" {
-		config.ErrorStatus("TenCode not found", http.StatusNotFound, w, nil)
+		config.ErrorStatus("TenCode not found", http.StatusNotFound, w, fmt.Errorf("tenCode not found"))
 		return
 	}
 
