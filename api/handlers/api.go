@@ -54,6 +54,11 @@ func (a *App) New() *mux.Router {
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
 	cloudinaryHandler := CloudinaryHandler{}
 	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper)}
+	announcement := Announcement{
+		ADB: databases.NewAnnouncementDatabase(a.dbHelper),
+		UDB: databases.NewUserDatabase(a.dbHelper),
+		CDB: databases.NewCommunityDatabase(a.dbHelper),
+	}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -116,6 +121,19 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.GetEventByIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.UpdateEventByIDHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.DeleteEventByIDHandler))).Methods("DELETE")
+	
+	// Announcement routes
+	apiCreate.Handle("/community/{communityId}/announcements", api.Middleware(http.HandlerFunc(announcement.GetAnnouncementsHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/announcements", api.Middleware(http.HandlerFunc(announcement.CreateAnnouncementHandler))).Methods("POST")
+	apiCreate.Handle("/announcement/{announcementId}", api.Middleware(http.HandlerFunc(announcement.GetAnnouncementHandler))).Methods("GET")
+	apiCreate.Handle("/announcement/{announcementId}", api.Middleware(http.HandlerFunc(announcement.UpdateAnnouncementHandler))).Methods("PUT")
+	apiCreate.Handle("/announcement/{announcementId}", api.Middleware(http.HandlerFunc(announcement.DeleteAnnouncementHandler))).Methods("DELETE")
+	apiCreate.Handle("/announcement/{announcementId}/reactions", api.Middleware(http.HandlerFunc(announcement.AddReactionHandler))).Methods("POST")
+	apiCreate.Handle("/announcement/{announcementId}/reactions", api.Middleware(http.HandlerFunc(announcement.RemoveReactionHandler))).Methods("DELETE")
+	apiCreate.Handle("/announcement/{announcementId}/comments", api.Middleware(http.HandlerFunc(announcement.AddCommentHandler))).Methods("POST")
+	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", api.Middleware(http.HandlerFunc(announcement.UpdateCommentHandler))).Methods("PUT")
+	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", api.Middleware(http.HandlerFunc(announcement.DeleteCommentHandler))).Methods("DELETE")
+	
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.FetchEliteCommunitiesHandler))).Methods("GET")
