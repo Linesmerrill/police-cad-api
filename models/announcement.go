@@ -43,6 +43,7 @@ type Comment struct {
 
 // CreateAnnouncementRequest holds the structure for creating a new announcement
 type CreateAnnouncementRequest struct {
+	UserID    string             `json:"userId" validate:"required"`
 	Type      string             `json:"type" validate:"required,oneof=main session training"`
 	Title     string             `json:"title" validate:"required,min=1,max=200"`
 	Content   string             `json:"content" validate:"required,min=1"`
@@ -54,6 +55,7 @@ type CreateAnnouncementRequest struct {
 
 // UpdateAnnouncementRequest holds the structure for updating an announcement
 type UpdateAnnouncementRequest struct {
+	UserID    string              `json:"userId" validate:"required"`
 	Title     *string             `json:"title,omitempty" validate:"omitempty,min=1,max=200"`
 	Content   *string             `json:"content,omitempty" validate:"omitempty,min=1"`
 	Priority  *string             `json:"priority,omitempty" validate:"omitempty,oneof=low medium high urgent"`
@@ -65,16 +67,19 @@ type UpdateAnnouncementRequest struct {
 
 // AddReactionRequest holds the structure for adding a reaction
 type AddReactionRequest struct {
-	Emoji string `json:"emoji" validate:"required"`
+	UserID string `json:"userId" validate:"required"`
+	Emoji  string `json:"emoji" validate:"required"`
 }
 
 // AddCommentRequest holds the structure for adding a comment
 type AddCommentRequest struct {
+	UserID  string `json:"userId" validate:"required"`
 	Content string `json:"content" validate:"required,min=1,max=1000"`
 }
 
 // UpdateCommentRequest holds the structure for updating a comment
 type UpdateCommentRequest struct {
+	UserID  string `json:"userId" validate:"required"`
 	Content string `json:"content" validate:"required,min=1,max=1000"`
 }
 

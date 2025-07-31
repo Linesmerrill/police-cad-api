@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -23,6 +22,7 @@ func TestCreateAnnouncementRequest_Validation(t *testing.T) {
 		{
 			name: "Valid announcement request",
 			request: models.CreateAnnouncementRequest{
+				UserID:   "507f1f77bcf86cd799439011",
 				Type:     "main",
 				Title:    "Test Announcement",
 				Content:  "This is a test announcement",
@@ -34,6 +34,7 @@ func TestCreateAnnouncementRequest_Validation(t *testing.T) {
 		{
 			name: "Invalid type",
 			request: models.CreateAnnouncementRequest{
+				UserID:   "507f1f77bcf86cd799439011",
 				Type:     "invalid",
 				Title:    "Test Announcement",
 				Content:  "This is a test announcement",
@@ -45,6 +46,7 @@ func TestCreateAnnouncementRequest_Validation(t *testing.T) {
 		{
 			name: "Empty title",
 			request: models.CreateAnnouncementRequest{
+				UserID:   "507f1f77bcf86cd799439011",
 				Type:     "main",
 				Title:    "",
 				Content:  "This is a test announcement",
@@ -56,6 +58,7 @@ func TestCreateAnnouncementRequest_Validation(t *testing.T) {
 		{
 			name: "Empty content",
 			request: models.CreateAnnouncementRequest{
+				UserID:   "507f1f77bcf86cd799439011",
 				Type:     "main",
 				Title:    "Test Announcement",
 				Content:  "",
@@ -67,6 +70,7 @@ func TestCreateAnnouncementRequest_Validation(t *testing.T) {
 		{
 			name: "Invalid priority",
 			request: models.CreateAnnouncementRequest{
+				UserID:   "507f1f77bcf86cd799439011",
 				Type:     "main",
 				Title:    "Test Announcement",
 				Content:  "This is a test announcement",
@@ -176,26 +180,32 @@ func TestPaginationInfo_Structure(t *testing.T) {
 
 func TestAddReactionRequest_Validation(t *testing.T) {
 	request := models.AddReactionRequest{
-		Emoji: "👍",
+		UserID: "507f1f77bcf86cd799439011",
+		Emoji:  "👍",
 	}
 
+	assert.NotEmpty(t, request.UserID)
 	assert.NotEmpty(t, request.Emoji)
 }
 
 func TestAddCommentRequest_Validation(t *testing.T) {
 	request := models.AddCommentRequest{
+		UserID:  "507f1f77bcf86cd799439011",
 		Content: "This is a test comment content",
 	}
 
+	assert.NotEmpty(t, request.UserID)
 	assert.NotEmpty(t, request.Content)
 	assert.LessOrEqual(t, len(request.Content), 1000)
 }
 
 func TestUpdateCommentRequest_Validation(t *testing.T) {
 	request := models.UpdateCommentRequest{
+		UserID:  "507f1f77bcf86cd799439011",
 		Content: "This is an updated comment content",
 	}
 
+	assert.NotEmpty(t, request.UserID)
 	assert.NotEmpty(t, request.Content)
 	assert.LessOrEqual(t, len(request.Content), 1000)
 }
@@ -222,8 +232,7 @@ func createTestRequest(method, path string, body interface{}) (*http.Request, er
 		}
 	}
 
-	// Add user context for authenticated requests
-	req = req.WithContext(context.WithValue(req.Context(), "user_id", "507f1f77bcf86cd799439011"))
+	// No authentication context needed since we're getting userID from request body
 
 	return req, nil
 }
@@ -231,6 +240,7 @@ func createTestRequest(method, path string, body interface{}) (*http.Request, er
 func TestCreateTestRequest(t *testing.T) {
 	// Test the helper function
 	body := models.CreateAnnouncementRequest{
+		UserID:   "507f1f77bcf86cd799439011",
 		Type:     "main",
 		Title:    "Test Announcement",
 		Content:  "This is a test announcement",

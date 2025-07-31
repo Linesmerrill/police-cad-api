@@ -238,15 +238,15 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	
-	// Get user ID from context (set by middleware)
-	userID := r.Context().Value("user_id").(string)
-	
 	// Parse request body
 	var req models.CreateAnnouncementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
+	
+	// Get user ID from request body
+	userID := req.UserID
 	
 	// Convert community ID to ObjectID
 	commID, err := primitive.ObjectIDFromHex(communityID)
@@ -348,15 +348,15 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 	
-	// Get user ID from context
-	userID := r.Context().Value("user_id").(string)
-	
 	// Parse request body
 	var req models.UpdateAnnouncementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
+	
+	// Get user ID from request body
+	userID := req.UserID
 	
 	// Convert announcement ID to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
@@ -465,8 +465,16 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 func (a Announcement) DeleteAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 	
-	// Get user ID from context
-	userID := r.Context().Value("user_id").(string)
+	// Parse request body to get user ID
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	
+	userID := req.UserID
 	
 	// Convert announcement ID to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
@@ -509,15 +517,15 @@ func (a Announcement) DeleteAnnouncementHandler(w http.ResponseWriter, r *http.R
 func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 	
-	// Get user ID from context
-	userID := r.Context().Value("user_id").(string)
-	
 	// Parse request body
 	var req models.AddReactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
+	
+	// Get user ID from request body
+	userID := req.UserID
 	
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
@@ -601,8 +609,16 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 	
-	// Get user ID from context
-	userID := r.Context().Value("user_id").(string)
+	// Parse request body to get user ID
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	
+	userID := req.UserID
 	
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
@@ -640,15 +656,15 @@ func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Reque
 func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 	
-	// Get user ID from context
-	userID := r.Context().Value("user_id").(string)
-	
 	// Parse request body
 	var req models.AddCommentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
+	
+	// Get user ID from request body
+	userID := req.UserID
 	
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
@@ -719,15 +735,15 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 	announcementID := mux.Vars(r)["announcementId"]
 	commentID := mux.Vars(r)["commentId"]
 	
-	// Get user ID from context
-	userID := r.Context().Value("user_id").(string)
-	
 	// Parse request body
 	var req models.UpdateCommentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
+	
+	// Get user ID from request body
+	userID := req.UserID
 	
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
@@ -824,8 +840,16 @@ func (a Announcement) DeleteCommentHandler(w http.ResponseWriter, r *http.Reques
 	announcementID := mux.Vars(r)["announcementId"]
 	commentID := mux.Vars(r)["commentId"]
 	
-	// Get user ID from context
-	userID := r.Context().Value("user_id").(string)
+	// Parse request body to get user ID
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	
+	userID := req.UserID
 	
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
