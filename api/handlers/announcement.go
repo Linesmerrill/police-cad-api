@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -28,40 +29,40 @@ type Announcement struct {
 // GetAnnouncementsHandler returns paginated announcements for a community
 func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
-	
+
 	// Parse query parameters
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
 	}
-	
+
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 || limit > 100 {
 		limit = 10
 	}
-	
+
 	announcementType := r.URL.Query().Get("type")
-	
+
 	// Convert community ID to ObjectID
 	commID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
 		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Build filter
 	filter := bson.M{
 		"community": commID,
 		"isActive":  true,
 	}
-	
+
 	if announcementType != "" {
 		filter["type"] = announcementType
 	}
-	
+
 	// Calculate skip value for pagination
 	skip := (page - 1) * limit
-	
+
 	// Get announcements with populated user data
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: filter}},
@@ -74,15 +75,15 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		{{Key: "$unwind", Value: "$creatorData"}},
 		{{Key: "$addFields", Value: bson.M{
 			"creator": bson.M{
-				"_id":             "$creatorData._id",
-				"username":        "$creatorData.user.username",
-				"profilePicture":  "$creatorData.user.profilePicture",
+				"_id":            "$creatorData._id",
+				"username":       "$creatorData.user.username",
+				"profilePicture": "$creatorData.user.profilePicture",
 			},
 		}}},
 		{{Key: "$skip", Value: int64(skip)}},
 		{{Key: "$limit", Value: int64(limit)}},
 	}
-	
+
 	// Execute aggregation
 	cursor, err := a.ADB.Aggregate(context.Background(), pipeline)
 	if err != nil {
@@ -90,26 +91,26 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	defer cursor.Close(context.Background())
-	
+
 	// Decode results
 	var announcements []models.AnnouncementResponse
 	if err := cursor.All(context.Background(), &announcements); err != nil {
 		config.ErrorStatus("Failed to decode announcements", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Get total count for pagination
 	totalCount, err := a.ADB.CountDocuments(context.Background(), filter)
 	if err != nil {
 		config.ErrorStatus("Failed to count announcements", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Calculate pagination info
 	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
 	hasNextPage := page < totalPages
 	hasPrevPage := page > 1
-	
+
 	response := models.PaginatedAnnouncementsResponse{
 		Success:       true,
 		Announcements: announcements,
@@ -121,7 +122,7 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 			HasPrevPage:        hasPrevPage,
 		},
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -131,18 +132,18 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 // GetAnnouncementHandler returns a single announcement and increments view count
 func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
-	
+
 	// Convert announcement ID to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Increment view count and get announcement
 	filter := bson.M{"_id": annID}
 	update := bson.M{"$inc": bson.M{"viewCount": 1}}
-	
+
 	announcement, err := a.ADB.FindOneAndUpdate(
 		context.Background(),
 		filter,
@@ -153,7 +154,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		config.ErrorStatus("Announcement not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Get creator user data
 	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": announcement.Creator.Hex()})
 	var creator models.User
@@ -161,7 +162,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		config.ErrorStatus("Failed to fetch creator data", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Build response with populated user data
 	response := models.AnnouncementResponse{
 		ID:        announcement.ID,
@@ -183,7 +184,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		CreatedAt: announcement.CreatedAt,
 		UpdatedAt: announcement.UpdatedAt,
 	}
-	
+
 	// Populate reactions
 	for _, reaction := range announcement.Reactions {
 		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User.Hex()})
@@ -191,7 +192,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		if err := userResult.Decode(&user); err != nil {
 			continue // Skip if user not found
 		}
-		
+
 		response.Reactions = append(response.Reactions, models.ReactionResponse{
 			User: models.UserSummary{
 				ID:             reaction.User,
@@ -202,7 +203,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 			Timestamp: reaction.Timestamp,
 		})
 	}
-	
+
 	// Populate comments
 	for _, comment := range announcement.Comments {
 		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User.Hex()})
@@ -210,7 +211,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		if err := userResult.Decode(&user); err != nil {
 			continue // Skip if user not found
 		}
-		
+
 		response.Comments = append(response.Comments, models.CommentResponse{
 			ID: comment.ID,
 			User: models.UserSummary{
@@ -224,7 +225,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 			EditedAt:  comment.EditedAt,
 		})
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -237,44 +238,44 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 // CreateAnnouncementHandler creates a new announcement
 func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
-	
+
 	// Parse request body
 	var req models.CreateAnnouncementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get user ID from request body
 	userID := req.UserID
-	
+
 	// Convert community ID to ObjectID
 	commID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
 		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Convert user ID to ObjectID
 	creatorID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Check if user is a member of the community
 	community, err := a.CDB.FindOne(context.Background(), bson.M{"_id": commID})
 	if err != nil {
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Check if user is a member
 	if _, exists := community.Details.Members[userID]; !exists {
-		config.ErrorStatus("User is not a member of this community", http.StatusForbidden, w, nil)
+		config.ErrorStatus("User is not a member of this community", http.StatusForbidden, w, fmt.Errorf("user is not a member of this community"))
 		return
 	}
-	
+
 	// Create new announcement
 	now := primitive.NewDateTimeFromTime(time.Now())
 	announcement := models.Announcement{
@@ -295,14 +296,14 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	
+
 	// Insert announcement
 	_, err = a.ADB.InsertOne(context.Background(), announcement)
 	if err != nil {
 		config.ErrorStatus("Failed to create announcement", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Get creator user data for response
 	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userID})
 	var creator models.User
@@ -310,7 +311,7 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		config.ErrorStatus("Failed to fetch creator data", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Build response
 	response := models.AnnouncementResponse{
 		ID:        announcement.ID,
@@ -334,7 +335,7 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		CreatedAt: announcement.CreatedAt,
 		UpdatedAt: announcement.UpdatedAt,
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -347,38 +348,38 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 // UpdateAnnouncementHandler updates an existing announcement
 func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
-	
+
 	// Parse request body
 	var req models.UpdateAnnouncementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get user ID from request body
 	userID := req.UserID
-	
+
 	// Convert announcement ID to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get existing announcement
 	announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Announcement not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Check if user is the creator or has admin permissions
 	if announcement.Creator.Hex() != userID {
 		// TODO: Add admin permission check here
-		config.ErrorStatus("Unauthorized to update this announcement", http.StatusForbidden, w, nil)
+		config.ErrorStatus("Unauthorized to update this announcement", http.StatusForbidden, w, fmt.Errorf("unauthorized to update this announcement"))
 		return
 	}
-	
+
 	// Build update document
 	update := bson.M{}
 	if req.Title != nil {
@@ -402,23 +403,23 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 	if req.EndTime != nil {
 		update["endTime"] = *req.EndTime
 	}
-	
+
 	update["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
-	
+
 	// Update announcement
 	err = a.ADB.UpdateOne(context.Background(), bson.M{"_id": annID}, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("Failed to update announcement", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Get updated announcement
 	updatedAnnouncement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Failed to fetch updated announcement", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Get creator user data
 	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": updatedAnnouncement.Creator.Hex()})
 	var creator models.User
@@ -426,7 +427,7 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		config.ErrorStatus("Failed to fetch creator data", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Build response
 	response := models.AnnouncementResponse{
 		ID:        updatedAnnouncement.ID,
@@ -448,10 +449,10 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		CreatedAt: updatedAnnouncement.CreatedAt,
 		UpdatedAt: updatedAnnouncement.UpdatedAt,
 	}
-	
+
 	// Populate reactions and comments (similar to GetAnnouncementHandler)
 	// ... (implementation similar to GetAnnouncementHandler)
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -464,7 +465,7 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 // DeleteAnnouncementHandler deletes an announcement
 func (a Announcement) DeleteAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
-	
+
 	// Parse request body to get user ID
 	var req struct {
 		UserID string `json:"userId"`
@@ -473,37 +474,37 @@ func (a Announcement) DeleteAnnouncementHandler(w http.ResponseWriter, r *http.R
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	userID := req.UserID
-	
+
 	// Convert announcement ID to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get existing announcement
 	announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Announcement not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Check if user is the creator or has admin permissions
 	if announcement.Creator.Hex() != userID {
 		// TODO: Add admin permission check here
-		config.ErrorStatus("Unauthorized to delete this announcement", http.StatusForbidden, w, nil)
+		config.ErrorStatus("Unauthorized to delete this announcement", http.StatusForbidden, w, fmt.Errorf("unauthorized to delete this announcement"))
 		return
 	}
-	
+
 	// Delete announcement
 	err = a.ADB.DeleteOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Failed to delete announcement", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -516,63 +517,63 @@ func (a Announcement) DeleteAnnouncementHandler(w http.ResponseWriter, r *http.R
 // AddReactionHandler adds or updates a user reaction
 func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
-	
+
 	// Parse request body
 	var req models.AddReactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get user ID from request body
 	userID := req.UserID
-	
+
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Remove existing reaction from this user
 	removeFilter := bson.M{"_id": annID}
 	removeUpdate := bson.M{"$pull": bson.M{"reactions": bson.M{"user": userObjID}}}
-	
+
 	err = a.ADB.UpdateOne(context.Background(), removeFilter, removeUpdate)
 	if err != nil {
 		config.ErrorStatus("Failed to update reactions", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Add new reaction
 	newReaction := models.Reaction{
 		User:      userObjID,
 		Emoji:     req.Emoji,
 		Timestamp: primitive.NewDateTimeFromTime(time.Now()),
 	}
-	
+
 	addFilter := bson.M{"_id": annID}
 	addUpdate := bson.M{"$push": bson.M{"reactions": newReaction}}
-	
+
 	err = a.ADB.UpdateOne(context.Background(), addFilter, addUpdate)
 	if err != nil {
 		config.ErrorStatus("Failed to add reaction", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Get updated announcement with reactions
 	announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Failed to fetch updated announcement", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Build reactions response
 	var reactions []models.ReactionResponse
 	for _, reaction := range announcement.Reactions {
@@ -581,7 +582,7 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 		if err := userResult.Decode(&user); err != nil {
 			continue
 		}
-		
+
 		reactions = append(reactions, models.ReactionResponse{
 			User: models.UserSummary{
 				ID:             reaction.User,
@@ -592,7 +593,7 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 			Timestamp: reaction.Timestamp,
 		})
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -608,7 +609,7 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 // RemoveReactionHandler removes a user reaction
 func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
-	
+
 	// Parse request body to get user ID
 	var req struct {
 		UserID string `json:"userId"`
@@ -617,32 +618,32 @@ func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Reque
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	userID := req.UserID
-	
+
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Remove reaction
 	filter := bson.M{"_id": annID}
 	update := bson.M{"$pull": bson.M{"reactions": bson.M{"user": userObjID}}}
-	
+
 	err = a.ADB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("Failed to remove reaction", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -655,30 +656,30 @@ func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Reque
 // AddCommentHandler adds a new comment
 func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
-	
+
 	// Parse request body
 	var req models.AddCommentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get user ID from request body
 	userID := req.UserID
-	
+
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Create new comment
 	newComment := models.Comment{
 		ID:        primitive.NewObjectID(),
@@ -688,17 +689,17 @@ func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) 
 		Edited:    false,
 		EditedAt:  nil,
 	}
-	
+
 	// Add comment to announcement
 	filter := bson.M{"_id": annID}
 	update := bson.M{"$push": bson.M{"comments": newComment}}
-	
+
 	err = a.ADB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("Failed to add comment", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Get user data for response
 	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userID})
 	var user models.User
@@ -706,7 +707,7 @@ func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) 
 		config.ErrorStatus("Failed to fetch user data", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Build comment response
 	commentResponse := models.CommentResponse{
 		ID: newComment.ID,
@@ -720,7 +721,7 @@ func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) 
 		Edited:    newComment.Edited,
 		EditedAt:  newComment.EditedAt,
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -734,37 +735,37 @@ func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) 
 func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 	commentID := mux.Vars(r)["commentId"]
-	
+
 	// Parse request body
 	var req models.UpdateCommentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get user ID from request body
 	userID := req.UserID
-	
+
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	commentObjID, err := primitive.ObjectIDFromHex(commentID)
 	if err != nil {
 		config.ErrorStatus("Invalid comment ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get announcement to check comment ownership
 	announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Announcement not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Find the comment and check ownership
 	var targetComment *models.Comment
 	for _, comment := range announcement.Comments {
@@ -773,37 +774,37 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 			break
 		}
 	}
-	
+
 	if targetComment == nil {
-		config.ErrorStatus("Comment not found", http.StatusNotFound, w, nil)
+		config.ErrorStatus("Comment not found", http.StatusNotFound, w, fmt.Errorf("comment not found"))
 		return
 	}
-	
+
 	if targetComment.User.Hex() != userID {
-		config.ErrorStatus("Unauthorized to edit this comment", http.StatusForbidden, w, nil)
+		config.ErrorStatus("Unauthorized to edit this comment", http.StatusForbidden, w, fmt.Errorf("unauthorized to edit this comment"))
 		return
 	}
-	
+
 	// Update comment
 	now := primitive.NewDateTimeFromTime(time.Now())
 	filter := bson.M{
-		"_id":           annID,
-		"comments._id":  commentObjID,
+		"_id":          annID,
+		"comments._id": commentObjID,
 	}
 	update := bson.M{
 		"$set": bson.M{
-			"comments.$.content":   req.Content,
-			"comments.$.edited":    true,
-			"comments.$.editedAt":  now,
+			"comments.$.content":  req.Content,
+			"comments.$.edited":   true,
+			"comments.$.editedAt": now,
 		},
 	}
-	
+
 	err = a.ADB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("Failed to update comment", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Get user data for response
 	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userID})
 	var user models.User
@@ -811,7 +812,7 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 		config.ErrorStatus("Failed to fetch user data", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Build comment response
 	commentResponse := models.CommentResponse{
 		ID: commentObjID,
@@ -825,7 +826,7 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 		Edited:    true,
 		EditedAt:  &now,
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -839,7 +840,7 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 func (a Announcement) DeleteCommentHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 	commentID := mux.Vars(r)["commentId"]
-	
+
 	// Parse request body to get user ID
 	var req struct {
 		UserID string `json:"userId"`
@@ -848,29 +849,29 @@ func (a Announcement) DeleteCommentHandler(w http.ResponseWriter, r *http.Reques
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	userID := req.UserID
-	
+
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	commentObjID, err := primitive.ObjectIDFromHex(commentID)
 	if err != nil {
 		config.ErrorStatus("Invalid comment ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Get announcement to check comment ownership
 	announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Announcement not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Find the comment and check ownership
 	var targetComment *models.Comment
 	for _, comment := range announcement.Comments {
@@ -879,27 +880,27 @@ func (a Announcement) DeleteCommentHandler(w http.ResponseWriter, r *http.Reques
 			break
 		}
 	}
-	
+
 	if targetComment == nil {
-		config.ErrorStatus("Comment not found", http.StatusNotFound, w, nil)
+		config.ErrorStatus("Comment not found", http.StatusNotFound, w, fmt.Errorf("comment not found"))
 		return
 	}
-	
+
 	if targetComment.User.Hex() != userID {
-		config.ErrorStatus("Unauthorized to delete this comment", http.StatusForbidden, w, nil)
+		config.ErrorStatus("Unauthorized to delete this comment", http.StatusForbidden, w, fmt.Errorf("unauthorized to delete this comment"))
 		return
 	}
-	
+
 	// Remove comment
 	filter := bson.M{"_id": annID}
 	update := bson.M{"$pull": bson.M{"comments": bson.M{"_id": commentObjID}}}
-	
+
 	err = a.ADB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("Failed to delete comment", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -907,4 +908,4 @@ func (a Announcement) DeleteCommentHandler(w http.ResponseWriter, r *http.Reques
 		"success": true,
 		"message": "Comment deleted successfully",
 	})
-} 
+}
