@@ -11,7 +11,6 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/config"
@@ -26,6 +25,15 @@ type Announcement struct {
 	CDB databases.CommunityDatabase
 }
 
+// UserDoc is a minimal struct for decoding user info from the DB
+type UserDoc struct {
+	ID   primitive.ObjectID `bson:"_id"`
+	User struct {
+		Username       string  `bson:"username"`
+		ProfilePicture *string `bson:"profilePicture"`
+	} `bson:"user"`
+}
+
 // GetAnnouncementsHandler returns paginated announcements for a community
 func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
@@ -35,12 +43,10 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 	if page < 1 {
 		page = 1
 	}
-
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 || limit > 100 {
 		limit = 10
 	}
-
 	announcementType := r.URL.Query().Get("type")
 
 	// Convert community ID to ObjectID
@@ -51,85 +57,154 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// Build filter
-	filter := bson.M{
-		"community": commID,
-		"isActive":  true,
-	}
-
+	filter := bson.M{"community": commID}
 	if announcementType != "" {
 		filter["type"] = announcementType
 	}
 
-	// Calculate skip value for pagination
+	// Pagination
 	skip := (page - 1) * limit
 
-	// Get announcements with populated user data
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: filter}},
-		{{Key: "$lookup", Value: bson.M{
-			"from":         "users",
-			"localField":   "creator",
-			"foreignField": "_id",
-			"as":           "creatorData",
-		}}},
-		{{Key: "$unwind", Value: "$creatorData"}},
-		{{Key: "$addFields", Value: bson.M{
-			"creator": bson.M{
-				"_id":            "$creatorData._id",
-				"username":       "$creatorData.user.username",
-				"profilePicture": "$creatorData.user.profilePicture",
-			},
-		}}},
-		{{Key: "$skip", Value: int64(skip)}},
-		{{Key: "$limit", Value: int64(limit)}},
-	}
-
-	// Execute aggregation
-	cursor, err := a.ADB.Aggregate(context.Background(), pipeline)
-	if err != nil {
-		config.ErrorStatus("Failed to fetch announcements", http.StatusInternalServerError, w, err)
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	// Decode results
-	var announcements []models.AnnouncementResponse
-	if err := cursor.All(context.Background(), &announcements); err != nil {
-		config.ErrorStatus("Failed to decode announcements", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Get total count for pagination
+	// Count for pagination
 	totalCount, err := a.ADB.CountDocuments(context.Background(), filter)
 	if err != nil {
 		config.ErrorStatus("Failed to count announcements", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Calculate pagination info
-	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
-	hasNextPage := page < totalPages
-	hasPrevPage := page > 1
+	// Find announcements
+	findOptions := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "createdAt", Value: -1}})
 
-	response := models.PaginatedAnnouncementsResponse{
-		Success:       true,
-		Announcements: announcements,
-		Pagination: models.PaginationInfo{
-			CurrentPage:        page,
-			TotalPages:         totalPages,
-			TotalAnnouncements: int(totalCount),
-			HasNextPage:        hasNextPage,
-			HasPrevPage:        hasPrevPage,
-		},
+	cursor, err := a.ADB.Find(context.Background(), filter, findOptions)
+	if err != nil {
+		config.ErrorStatus("Failed to fetch announcements", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var announcements []models.Announcement
+	if err := cursor.All(context.Background(), &announcements); err != nil {
+		config.ErrorStatus("Failed to decode announcements", http.StatusInternalServerError, w, err)
+		return
 	}
 
-	// Send response
+	// Build responses (populate users, etc. as before)
+	var responses []models.AnnouncementResponse
+	for _, announcement := range announcements {
+		// Get creator user data
+		creatorDoc := UserDoc{}
+		creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": announcement.Creator})
+		if err := creatorResult.Decode(&creatorDoc); err != nil {
+			creatorDoc.User.Username = "Unknown"
+			creatorDoc.User.ProfilePicture = nil
+		}
+
+		resp := models.AnnouncementResponse{
+			ID:        announcement.ID,
+			Community: announcement.Community,
+			Creator: models.UserSummary{
+				ID:             announcement.Creator,
+				Username:       creatorDoc.User.Username,
+				ProfilePicture: creatorDoc.User.ProfilePicture,
+			},
+			Type:      announcement.Type,
+			Title:     announcement.Title,
+			Content:   announcement.Content,
+			Priority:  announcement.Priority,
+			IsActive:  announcement.IsActive,
+			IsPinned:  announcement.IsPinned,
+			StartTime: announcement.StartTime,
+			EndTime:   announcement.EndTime,
+			ViewCount: announcement.ViewCount,
+			CreatedAt: announcement.CreatedAt,
+			UpdatedAt: announcement.UpdatedAt,
+		}
+
+		// Populate reactions
+		for _, reaction := range announcement.Reactions {
+			userDoc := UserDoc{}
+			userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
+			if err := userResult.Decode(&userDoc); err != nil {
+				resp.Reactions = append(resp.Reactions, models.ReactionResponse{
+					User: models.UserSummary{
+						ID:             reaction.User,
+						Username:       "Unknown",
+						ProfilePicture: nil,
+					},
+					Emoji:     reaction.Emoji,
+					Timestamp: reaction.Timestamp,
+				})
+			} else {
+				resp.Reactions = append(resp.Reactions, models.ReactionResponse{
+					User: models.UserSummary{
+						ID:             reaction.User,
+						Username:       userDoc.User.Username,
+						ProfilePicture: userDoc.User.ProfilePicture,
+					},
+					Emoji:     reaction.Emoji,
+					Timestamp: reaction.Timestamp,
+				})
+			}
+		}
+
+		// Populate comments
+		for _, comment := range announcement.Comments {
+			userDoc := UserDoc{}
+			userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
+			if err := userResult.Decode(&userDoc); err != nil {
+				resp.Comments = append(resp.Comments, models.CommentResponse{
+					ID: comment.ID,
+					User: models.UserSummary{
+						ID:             comment.User,
+						Username:       "Unknown",
+						ProfilePicture: nil,
+					},
+					Content:   comment.Content,
+					Timestamp: comment.Timestamp,
+					Edited:    comment.Edited,
+					EditedAt:  comment.EditedAt,
+				})
+			} else {
+				resp.Comments = append(resp.Comments, models.CommentResponse{
+					ID: comment.ID,
+					User: models.UserSummary{
+						ID:             comment.User,
+						Username:       userDoc.User.Username,
+						ProfilePicture: userDoc.User.ProfilePicture,
+					},
+					Content:   comment.Content,
+					Timestamp: comment.Timestamp,
+					Edited:    comment.Edited,
+					EditedAt:  comment.EditedAt,
+				})
+			}
+		}
+
+		responses = append(responses, resp)
+	}
+
+	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
+	pagination := models.PaginationInfo{
+		CurrentPage:        page,
+		TotalPages:         totalPages,
+		TotalAnnouncements: int(totalCount),
+		HasNextPage:        page < totalPages,
+		HasPrevPage:        page > 1,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(models.PaginatedAnnouncementsResponse{
+		Success:       true,
+		Announcements: responses,
+		Pagination:    pagination,
+	})
 }
 
-// GetAnnouncementHandler returns a single announcement and increments view count
+// GetAnnouncementHandler returns a single announcement with populated user data
 func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 
@@ -156,17 +231,11 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Get creator user data
-	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": announcement.Creator.Hex()})
-	var creator models.User
-	if err := creatorResult.Decode(&creator); err != nil {
-		// For now, create a minimal creator response since we know the user exists
-		// TODO: Fix user database query issue
-		creator = models.User{
-			Details: models.UserDetails{
-				Username:       "LPSWebsite", // From the user response we saw earlier
-				ProfilePicture: "",
-			},
-		}
+	creatorDoc := UserDoc{}
+	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": announcement.Creator})
+	if err := creatorResult.Decode(&creatorDoc); err != nil {
+		creatorDoc.User.Username = "Unknown"
+		creatorDoc.User.ProfilePicture = nil
 	}
 
 	// Build response with populated user data
@@ -175,8 +244,8 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		Community: announcement.Community,
 		Creator: models.UserSummary{
 			ID:             announcement.Creator,
-			Username:       creator.Details.Username,
-			ProfilePicture: &creator.Details.ProfilePicture,
+			Username:       creatorDoc.User.Username,
+			ProfilePicture: creatorDoc.User.ProfilePicture,
 		},
 		Type:      announcement.Type,
 		Title:     announcement.Title,
@@ -193,17 +262,16 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 
 	// Populate reactions
 	for _, reaction := range announcement.Reactions {
-		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User.Hex()})
-		var user models.User
-		if err := userResult.Decode(&user); err != nil {
+		userDoc := UserDoc{}
+		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
+		if err := userResult.Decode(&userDoc); err != nil {
 			continue // Skip if user not found
 		}
-
 		response.Reactions = append(response.Reactions, models.ReactionResponse{
 			User: models.UserSummary{
 				ID:             reaction.User,
-				Username:       user.Details.Username,
-				ProfilePicture: &user.Details.ProfilePicture,
+				Username:       userDoc.User.Username,
+				ProfilePicture: userDoc.User.ProfilePicture,
 			},
 			Emoji:     reaction.Emoji,
 			Timestamp: reaction.Timestamp,
@@ -212,18 +280,17 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 
 	// Populate comments
 	for _, comment := range announcement.Comments {
-		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User.Hex()})
-		var user models.User
-		if err := userResult.Decode(&user); err != nil {
+		userDoc := UserDoc{}
+		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
+		if err := userResult.Decode(&userDoc); err != nil {
 			continue // Skip if user not found
 		}
-
 		response.Comments = append(response.Comments, models.CommentResponse{
 			ID: comment.ID,
 			User: models.UserSummary{
 				ID:             comment.User,
-				Username:       user.Details.Username,
-				ProfilePicture: &user.Details.ProfilePicture,
+				Username:       userDoc.User.Username,
+				ProfilePicture: userDoc.User.ProfilePicture,
 			},
 			Content:   comment.Content,
 			Timestamp: comment.Timestamp,
@@ -232,11 +299,10 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
+		"success": true,
 		"announcement": response,
 	})
 }
@@ -273,14 +339,11 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 	// TODO: Fix user database query issue
 	
 	// Get community to check permissions
-	fmt.Printf("DEBUG: Looking up community with ID: %s\n", commID.Hex())
 	community, err := a.CDB.FindOne(context.Background(), bson.M{"_id": commID})
 	if err != nil {
-		fmt.Printf("DEBUG: Community lookup failed: %v\n", err)
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
-	fmt.Printf("DEBUG: Community found, owner ID: %s\n", community.Details.OwnerID)
 	
 	// Check if user has permission to create announcements
 	hasPermission := false
@@ -349,13 +412,12 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// For now, create a minimal creator response since we know the user exists
-	// TODO: Fix user database query issue
-	creator := models.User{
-		Details: models.UserDetails{
-			Username:       "LPSWebsite", // From the user response we saw earlier
-			ProfilePicture: "",
-		},
+	// Fetch creator user
+	creatorDoc := UserDoc{}
+	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": announcement.Creator})
+	if err := creatorResult.Decode(&creatorDoc); err != nil {
+		creatorDoc.User.Username = "Unknown"
+		creatorDoc.User.ProfilePicture = nil
 	}
 
 	// Build response
@@ -364,8 +426,8 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		Community: announcement.Community,
 		Creator: models.UserSummary{
 			ID:             announcement.Creator,
-			Username:       creator.Details.Username,
-			ProfilePicture: &creator.Details.ProfilePicture,
+			Username:       creatorDoc.User.Username,
+			ProfilePicture: creatorDoc.User.ProfilePicture,
 		},
 		Type:      announcement.Type,
 		Title:     announcement.Title,
@@ -467,11 +529,11 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Get creator user data
-	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": updatedAnnouncement.Creator.Hex()})
-	var creator models.User
-	if err := creatorResult.Decode(&creator); err != nil {
-		config.ErrorStatus("Failed to fetch creator data", http.StatusInternalServerError, w, err)
-		return
+	creatorDoc := UserDoc{}
+	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": updatedAnnouncement.Creator})
+	if err := creatorResult.Decode(&creatorDoc); err != nil {
+		creatorDoc.User.Username = "Unknown"
+		creatorDoc.User.ProfilePicture = nil
 	}
 
 	// Build response
@@ -480,8 +542,8 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		Community: updatedAnnouncement.Community,
 		Creator: models.UserSummary{
 			ID:             updatedAnnouncement.Creator,
-			Username:       creator.Details.Username,
-			ProfilePicture: &creator.Details.ProfilePicture,
+			Username:       creatorDoc.User.Username,
+			ProfilePicture: creatorDoc.User.ProfilePicture,
 		},
 		Type:      updatedAnnouncement.Type,
 		Title:     updatedAnnouncement.Title,
@@ -496,8 +558,65 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 		UpdatedAt: updatedAnnouncement.UpdatedAt,
 	}
 
-	// Populate reactions and comments (similar to GetAnnouncementHandler)
-	// ... (implementation similar to GetAnnouncementHandler)
+	// Populate reactions
+	for _, reaction := range updatedAnnouncement.Reactions {
+		userDoc := UserDoc{}
+		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
+		if err := userResult.Decode(&userDoc); err != nil {
+			response.Reactions = append(response.Reactions, models.ReactionResponse{
+				User: models.UserSummary{
+					ID:             reaction.User,
+					Username:       "Unknown",
+					ProfilePicture: nil,
+				},
+				Emoji:     reaction.Emoji,
+				Timestamp: reaction.Timestamp,
+			})
+		} else {
+			response.Reactions = append(response.Reactions, models.ReactionResponse{
+				User: models.UserSummary{
+					ID:             reaction.User,
+					Username:       userDoc.User.Username,
+					ProfilePicture: userDoc.User.ProfilePicture,
+				},
+				Emoji:     reaction.Emoji,
+				Timestamp: reaction.Timestamp,
+			})
+		}
+	}
+
+	// Populate comments
+	for _, comment := range updatedAnnouncement.Comments {
+		userDoc := UserDoc{}
+		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
+		if err := userResult.Decode(&userDoc); err != nil {
+			response.Comments = append(response.Comments, models.CommentResponse{
+				ID: comment.ID,
+				User: models.UserSummary{
+					ID:             comment.User,
+					Username:       "Unknown",
+					ProfilePicture: nil,
+				},
+				Content:   comment.Content,
+				Timestamp: comment.Timestamp,
+				Edited:    comment.Edited,
+				EditedAt:  comment.EditedAt,
+			})
+		} else {
+			response.Comments = append(response.Comments, models.CommentResponse{
+				ID: comment.ID,
+				User: models.UserSummary{
+					ID:             comment.User,
+					Username:       userDoc.User.Username,
+					ProfilePicture: userDoc.User.ProfilePicture,
+				},
+				Content:   comment.Content,
+				Timestamp: comment.Timestamp,
+				Edited:    comment.Edited,
+				EditedAt:  comment.EditedAt,
+			})
+		}
+	}
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
@@ -571,10 +690,8 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get user ID from request body
 	userID := req.UserID
 
-	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
@@ -587,15 +704,15 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// First, ensure the reactions field exists
+	initFilter := bson.M{"_id": annID}
+	initUpdate := bson.M{"$setOnInsert": bson.M{"reactions": []models.Reaction{}}}
+	_ = a.ADB.UpdateOne(context.Background(), initFilter, initUpdate)
+
 	// Remove existing reaction from this user
 	removeFilter := bson.M{"_id": annID}
 	removeUpdate := bson.M{"$pull": bson.M{"reactions": bson.M{"user": userObjID}}}
-
-	err = a.ADB.UpdateOne(context.Background(), removeFilter, removeUpdate)
-	if err != nil {
-		config.ErrorStatus("Failed to update reactions", http.StatusInternalServerError, w, err)
-		return
-	}
+	_ = a.ADB.UpdateOne(context.Background(), removeFilter, removeUpdate)
 
 	// Add new reaction
 	newReaction := models.Reaction{
@@ -603,52 +720,91 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 		Emoji:     req.Emoji,
 		Timestamp: primitive.NewDateTimeFromTime(time.Now()),
 	}
-
 	addFilter := bson.M{"_id": annID}
 	addUpdate := bson.M{"$push": bson.M{"reactions": newReaction}}
-
-	err = a.ADB.UpdateOne(context.Background(), addFilter, addUpdate)
-	if err != nil {
+	if err := a.ADB.UpdateOne(context.Background(), addFilter, addUpdate); err != nil {
 		config.ErrorStatus("Failed to add reaction", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Get updated announcement with reactions
+	// Get updated announcement
 	announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
 		config.ErrorStatus("Failed to fetch updated announcement", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Build reactions response
-	var reactions []models.ReactionResponse
+	// Get creator user data
+	creatorDoc := UserDoc{}
+	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": announcement.Creator})
+	if err := creatorResult.Decode(&creatorDoc); err != nil {
+		creatorDoc.User.Username = "Unknown"
+		creatorDoc.User.ProfilePicture = nil
+	}
+
+	response := models.AnnouncementResponse{
+		ID:        announcement.ID,
+		Community: announcement.Community,
+		Creator: models.UserSummary{
+			ID:             announcement.Creator,
+			Username:       creatorDoc.User.Username,
+			ProfilePicture: creatorDoc.User.ProfilePicture,
+		},
+		Type:      announcement.Type,
+		Title:     announcement.Title,
+		Content:   announcement.Content,
+		Priority:  announcement.Priority,
+		IsActive:  announcement.IsActive,
+		IsPinned:  announcement.IsPinned,
+		StartTime: announcement.StartTime,
+		EndTime:   announcement.EndTime,
+		ViewCount: announcement.ViewCount,
+		CreatedAt: announcement.CreatedAt,
+		UpdatedAt: announcement.UpdatedAt,
+	}
+
 	for _, reaction := range announcement.Reactions {
-		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User.Hex()})
-		var user models.User
-		if err := userResult.Decode(&user); err != nil {
+		userDoc := UserDoc{}
+		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
+		if err := userResult.Decode(&userDoc); err != nil {
 			continue
 		}
-
-		reactions = append(reactions, models.ReactionResponse{
+		response.Reactions = append(response.Reactions, models.ReactionResponse{
 			User: models.UserSummary{
 				ID:             reaction.User,
-				Username:       user.Details.Username,
-				ProfilePicture: &user.Details.ProfilePicture,
+				Username:       userDoc.User.Username,
+				ProfilePicture: userDoc.User.ProfilePicture,
 			},
 			Emoji:     reaction.Emoji,
 			Timestamp: reaction.Timestamp,
 		})
 	}
 
-	// Send response
+	for _, comment := range announcement.Comments {
+		userDoc := UserDoc{}
+		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
+		if err := userResult.Decode(&userDoc); err != nil {
+			continue
+		}
+		response.Comments = append(response.Comments, models.CommentResponse{
+			ID: comment.ID,
+			User: models.UserSummary{
+				ID:             comment.User,
+				Username:       userDoc.User.Username,
+				ProfilePicture: userDoc.User.ProfilePicture,
+			},
+			Content:   comment.Content,
+			Timestamp: comment.Timestamp,
+			Edited:    comment.Edited,
+			EditedAt:  comment.EditedAt,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"announcement": map[string]interface{}{
-			"_id":       announcement.ID,
-			"reactions": reactions,
-		},
+		"announcement": response,
 	})
 }
 
@@ -747,9 +903,9 @@ func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get user data for response
-	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userID})
-	var user models.User
-	if err := userResult.Decode(&user); err != nil {
+	userDoc := UserDoc{}
+	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userObjID})
+	if err := userResult.Decode(&userDoc); err != nil {
 		config.ErrorStatus("Failed to fetch user data", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -759,8 +915,8 @@ func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) 
 		ID: newComment.ID,
 		User: models.UserSummary{
 			ID:             newComment.User,
-			Username:       user.Details.Username,
-			ProfilePicture: &user.Details.ProfilePicture,
+			Username:       userDoc.User.Username,
+			ProfilePicture: userDoc.User.ProfilePicture,
 		},
 		Content:   newComment.Content,
 		Timestamp: newComment.Timestamp,
@@ -796,6 +952,12 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
 		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
 		return
 	}
 
@@ -852,10 +1014,30 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Get user data for response
-	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userID})
-	var user models.User
-	if err := userResult.Decode(&user); err != nil {
-		config.ErrorStatus("Failed to fetch user data", http.StatusInternalServerError, w, err)
+	userDoc := UserDoc{}
+	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userObjID})
+	if err := userResult.Decode(&userDoc); err != nil {
+		// Use fallback user data if lookup fails
+		commentResponse := models.CommentResponse{
+			ID: commentObjID,
+			User: models.UserSummary{
+				ID:             targetComment.User,
+				Username:       "Unknown",
+				ProfilePicture: nil,
+			},
+			Content:   req.Content,
+			Timestamp: targetComment.Timestamp,
+			Edited:    true,
+			EditedAt:  &now,
+		}
+
+		// Send response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"comment": commentResponse,
+		})
 		return
 	}
 
@@ -864,8 +1046,8 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 		ID: commentObjID,
 		User: models.UserSummary{
 			ID:             targetComment.User,
-			Username:       user.Details.Username,
-			ProfilePicture: &user.Details.ProfilePicture,
+			Username:       userDoc.User.Username,
+			ProfilePicture: userDoc.User.ProfilePicture,
 		},
 		Content:   req.Content,
 		Timestamp: targetComment.Timestamp,

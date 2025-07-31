@@ -37,7 +37,7 @@ func NewAnnouncementDatabase(db DatabaseHelper) AnnouncementDatabase {
 
 func (a *announcementDatabase) FindOne(ctx context.Context, filter interface{}) (*models.Announcement, error) {
 	announcement := &models.Announcement{}
-	err := a.db.Collection(announcementCollectionName).FindOne(ctx, filter).Decode(&announcement)
+	err := a.db.Collection(announcementCollectionName).FindOne(ctx, filter).Decode(announcement)
 	if err != nil {
 		return nil, err
 	}
