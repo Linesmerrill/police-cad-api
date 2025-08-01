@@ -79,63 +79,23 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Get announcement IDs with pagination
-	findOptions := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)).SetProjection(bson.M{"_id": 1})
+	// Find announcements with pagination
+	findOptions := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "createdAt", Value: -1}})
+
 	cursor, err := a.ADB.Find(context.Background(), filter, findOptions)
 	if err != nil {
-		config.ErrorStatus("Failed to fetch announcement IDs", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("Failed to fetch announcements", http.StatusInternalServerError, w, err)
 		return
 	}
 	defer cursor.Close(context.Background())
 
-	// Get IDs
-	var announcementIDs []primitive.ObjectID
-	for cursor.Next(context.Background()) {
-		var doc struct {
-			ID primitive.ObjectID `bson:"_id"`
-		}
-		if err := cursor.Decode(&doc); err != nil {
-			fmt.Printf("DEBUG: Failed to decode ID: %v\n", err)
-			continue
-		}
-		announcementIDs = append(announcementIDs, doc.ID)
-	}
-	
-	if err := cursor.Err(); err != nil {
-		fmt.Printf("DEBUG: Cursor error: %v\n", err)
-		config.ErrorStatus("Failed to iterate announcement IDs", http.StatusInternalServerError, w, err)
-		return
-	}
-	
-	fmt.Printf("DEBUG: Found %d announcement IDs\n", len(announcementIDs))
-	
-	// Now fetch each announcement individually using FindOne with a basic struct
-	type BasicAnnouncement struct {
-		ID          primitive.ObjectID `bson:"_id"`
-		Community   primitive.ObjectID `bson:"community"`
-		Creator     primitive.ObjectID `bson:"creator"`
-		Type        string             `bson:"type"`
-		Title       string             `bson:"title"`
-		Content     string             `bson:"content"`
-		Priority    string             `bson:"priority"`
-		IsActive    bool               `bson:"isActive"`
-		IsPinned    bool               `bson:"isPinned"`
-		StartTime   *primitive.DateTime `bson:"startTime,omitempty"`
-		EndTime     *primitive.DateTime `bson:"endTime,omitempty"`
-		ViewCount   int                `bson:"viewCount"`
-		CreatedAt   primitive.DateTime `bson:"createdAt"`
-		UpdatedAt   primitive.DateTime `bson:"updatedAt"`
-	}
-	
 	var announcements []models.Announcement
-	for _, id := range announcementIDs {
-		// Use the database layer's FindOne method
-		announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": id})
-		if err != nil {
-			fmt.Printf("DEBUG: Failed to fetch announcement %s: %v\n", id.Hex(), err)
-			continue
-		}
-		announcements = append(announcements, *announcement)
+	if err := cursor.All(context.Background(), &announcements); err != nil {
+		config.ErrorStatus("Failed to decode announcements", http.StatusInternalServerError, w, err)
+		return
 	}
 
 
@@ -176,60 +136,60 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 			UpdatedAt: ann.UpdatedAt,
 		}
 		
-		// Ensure slices are not nil
-		if response.Reactions == nil {
-			response.Reactions = []models.ReactionResponse{}
-		}
-		if response.Comments == nil {
-			response.Comments = []models.CommentResponse{}
-		}
+		// Always return empty arrays instead of null
+		response.Reactions = []models.ReactionResponse{}
+		response.Comments = []models.CommentResponse{}
 		
 		announcementResponses = append(announcementResponses, response)
 	}
 
 	// Manually populate reactions and comments for each announcement
 	for i, ann := range announcements {
-		// Populate reactions
-		for _, reaction := range ann.Reactions {
-			userDoc := UserDoc{}
-			userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
-			if err := userResult.Decode(&userDoc); err != nil {
-				userDoc.User.Username = "Unknown"
-				userDoc.User.ProfilePicture = nil
+		// Populate reactions (handle null values from database)
+		if ann.Reactions != nil {
+			for _, reaction := range ann.Reactions {
+				userDoc := UserDoc{}
+				userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
+				if err := userResult.Decode(&userDoc); err != nil {
+					userDoc.User.Username = "Unknown"
+					userDoc.User.ProfilePicture = nil
+				}
+				reactionResponse := models.ReactionResponse{
+					User: models.UserSummary{
+						ID:             reaction.User,
+						Username:       userDoc.User.Username,
+						ProfilePicture: userDoc.User.ProfilePicture,
+					},
+					Emoji:     reaction.Emoji,
+					Timestamp: reaction.Timestamp,
+				}
+				announcementResponses[i].Reactions = append(announcementResponses[i].Reactions, reactionResponse)
 			}
-			reactionResponse := models.ReactionResponse{
-				User: models.UserSummary{
-					ID:             reaction.User,
-					Username:       userDoc.User.Username,
-					ProfilePicture: userDoc.User.ProfilePicture,
-				},
-				Emoji:     reaction.Emoji,
-				Timestamp: reaction.Timestamp,
-			}
-			announcementResponses[i].Reactions = append(announcementResponses[i].Reactions, reactionResponse)
 		}
 
-		// Populate comments
-		for _, comment := range ann.Comments {
-			userDoc := UserDoc{}
-			userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
-			if err := userResult.Decode(&userDoc); err != nil {
-				userDoc.User.Username = "Unknown"
-				userDoc.User.ProfilePicture = nil
+		// Populate comments (handle null values from database)
+		if ann.Comments != nil {
+			for _, comment := range ann.Comments {
+				userDoc := UserDoc{}
+				userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
+				if err := userResult.Decode(&userDoc); err != nil {
+					userDoc.User.Username = "Unknown"
+					userDoc.User.ProfilePicture = nil
+				}
+				commentResponse := models.CommentResponse{
+					ID: comment.ID,
+					User: models.UserSummary{
+						ID:             comment.User,
+						Username:       userDoc.User.Username,
+						ProfilePicture: userDoc.User.ProfilePicture,
+					},
+					Content:   comment.Content,
+					Timestamp: comment.Timestamp,
+					Edited:    comment.Edited,
+					EditedAt:  comment.EditedAt,
+				}
+				announcementResponses[i].Comments = append(announcementResponses[i].Comments, commentResponse)
 			}
-			commentResponse := models.CommentResponse{
-				ID: comment.ID,
-				User: models.UserSummary{
-					ID:             comment.User,
-					Username:       userDoc.User.Username,
-					ProfilePicture: userDoc.User.ProfilePicture,
-				},
-				Content:   comment.Content,
-				Timestamp: comment.Timestamp,
-				Edited:    comment.Edited,
-				EditedAt:  comment.EditedAt,
-			}
-			announcementResponses[i].Comments = append(announcementResponses[i].Comments, commentResponse)
 		}
 	}
 
@@ -316,7 +276,10 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		UpdatedAt: announcement.UpdatedAt,
 	}
 
-	// Populate reactions
+	// Populate reactions (ensure we always have an array, even if null in DB)
+	if announcement.Reactions == nil {
+		announcement.Reactions = []models.Reaction{}
+	}
 	for _, reaction := range announcement.Reactions {
 		userDoc := UserDoc{}
 		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
@@ -335,7 +298,10 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	// Populate comments
+	// Populate comments (ensure we always have an array, even if null in DB)
+	if announcement.Comments == nil {
+		announcement.Comments = []models.Comment{}
+	}
 	for _, comment := range announcement.Comments {
 		userDoc := UserDoc{}
 		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
@@ -398,14 +364,11 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 	// TODO: Fix user database query issue
 	
 	// Get community to check permissions
-	fmt.Printf("DEBUG: Looking up community with ID: %s\n", commID.Hex())
 	community, err := a.CDB.FindOne(context.Background(), bson.M{"_id": commID})
 	if err != nil {
-		fmt.Printf("DEBUG: Community lookup failed: %v\n", err)
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
-	fmt.Printf("DEBUG: Community found, owner ID: %s\n", community.Details.OwnerID)
 	
 	// Check if user has permission to create announcements
 	hasPermission := false
@@ -472,6 +435,20 @@ func (a Announcement) CreateAnnouncementHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		config.ErrorStatus("Failed to create announcement", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Ensure reactions and comments are stored as empty arrays (not null)
+	err = a.ADB.UpdateOne(
+		context.Background(),
+		bson.M{"_id": announcement.ID},
+		bson.M{"$set": bson.M{
+			"reactions": []models.Reaction{},
+			"comments":  []models.Comment{},
+		}},
+	)
+	if err != nil {
+		// Log the error but don't fail the request since the announcement was created
+		fmt.Printf("Warning: Failed to initialize empty arrays: %v\n", err)
 	}
 
 	// Fetch creator user
