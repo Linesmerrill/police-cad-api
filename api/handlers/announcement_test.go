@@ -295,4 +295,17 @@ func TestAnnouncementResponse_Structure(t *testing.T) {
 	assert.True(t, response.IsActive)
 	assert.False(t, response.IsPinned)
 	assert.Equal(t, 0, response.ViewCount)
+}
+
+func TestAddReactionRequest_Structure(t *testing.T) {
+	// Test that the AddReactionRequest model can be created correctly
+	request := models.AddReactionRequest{
+		UserID: "507f1f77bcf86cd799439011",
+		Emoji:  "👍",
+	}
+
+	assert.NotEmpty(t, request.UserID)
+	assert.NotEmpty(t, request.Emoji)
+	assert.Equal(t, "507f1f77bcf86cd799439011", request.UserID)
+	assert.Equal(t, "👍", request.Emoji)
 } 

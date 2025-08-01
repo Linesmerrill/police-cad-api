@@ -718,17 +718,21 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// For now, just return success without fetching reactions
-	// TODO: Fix reactions fetching when we resolve the bson tag issues
+	// Fetch the updated announcement with reactions
+	updatedAnnouncement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
+	if err != nil {
+		config.ErrorStatus("Failed to fetch updated announcement", http.StatusInternalServerError, w, err)
+		return
+	}
 
-	// Send response
+	// Send response with updated reactions
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"announcement": map[string]interface{}{
 			"_id":       annID.Hex(),
-			"reactions": []interface{}{},
+			"reactions": updatedAnnouncement.Reactions,
 		},
 	})
 }
@@ -771,12 +775,22 @@ func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Send response
+	// Fetch the updated announcement with reactions
+	updatedAnnouncement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
+	if err != nil {
+		config.ErrorStatus("Failed to fetch updated announcement", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Send response with updated reactions
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": "Reaction removed successfully",
+		"announcement": map[string]interface{}{
+			"_id":       annID.Hex(),
+			"reactions": updatedAnnouncement.Reactions,
+		},
 	})
 }
 
