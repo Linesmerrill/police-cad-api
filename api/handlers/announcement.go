@@ -883,6 +883,12 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
 	// Get announcement to check comment ownership
 	announcement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
@@ -931,10 +937,11 @@ func (a Announcement) UpdateCommentHandler(w http.ResponseWriter, r *http.Reques
 
 	// Get user data for response
 	userDoc := UserDoc{}
-	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userID})
+	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userObjID})
 	if err := userResult.Decode(&userDoc); err != nil {
-		config.ErrorStatus("Failed to fetch user data", http.StatusInternalServerError, w, err)
-		return
+		// Fallback to unknown user if lookup fails
+		userDoc.User.Username = "Unknown"
+		userDoc.User.ProfilePicture = nil
 	}
 
 	// Build comment response
