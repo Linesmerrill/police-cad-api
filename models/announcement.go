@@ -56,6 +56,7 @@ type CreateAnnouncementRequest struct {
 // UpdateAnnouncementRequest holds the structure for updating an announcement
 type UpdateAnnouncementRequest struct {
 	UserID    string              `json:"userId" validate:"required"`
+	Type      *string             `json:"type,omitempty" validate:"omitempty,oneof=main session training"`
 	Title     *string             `json:"title,omitempty" validate:"omitempty,min=1,max=200"`
 	Content   *string             `json:"content,omitempty" validate:"omitempty,min=1"`
 	Priority  *string             `json:"priority,omitempty" validate:"omitempty,oneof=low medium high urgent"`

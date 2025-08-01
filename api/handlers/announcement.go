@@ -529,6 +529,9 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 
 	// Build update document
 	update := bson.M{}
+	if req.Type != nil {
+		update["type"] = *req.Type
+	}
 	if req.Title != nil {
 		update["title"] = *req.Title
 	}
