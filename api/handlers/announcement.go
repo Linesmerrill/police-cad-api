@@ -569,10 +569,11 @@ func (a Announcement) UpdateAnnouncementHandler(w http.ResponseWriter, r *http.R
 
 	// Get creator user data
 	creatorDoc := UserDoc{}
-	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": updatedAnnouncement.Creator.Hex()})
+	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": updatedAnnouncement.Creator})
 	if err := creatorResult.Decode(&creatorDoc); err != nil {
-		config.ErrorStatus("Failed to fetch creator data", http.StatusInternalServerError, w, err)
-		return
+		// Fallback to unknown user if lookup fails
+		creatorDoc.User.Username = "Unknown"
+		creatorDoc.User.ProfilePicture = nil
 	}
 
 	// Build response
