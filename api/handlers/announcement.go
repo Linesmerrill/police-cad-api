@@ -692,30 +692,48 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Remove existing reaction from this user
-	removeFilter := bson.M{"_id": annID}
-	removeUpdate := bson.M{"$pull": bson.M{"reactions": bson.M{"user": userObjID}}}
-
-	err = a.ADB.UpdateOne(context.Background(), removeFilter, removeUpdate)
+	// Check if user already has this specific emoji reaction
+	existingAnnouncement, err := a.ADB.FindOne(context.Background(), bson.M{"_id": annID})
 	if err != nil {
-		config.ErrorStatus("Failed to update reactions", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("Failed to fetch announcement", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Add new reaction
-	newReaction := models.Reaction{
-		User:      userObjID,
-		Emoji:     req.Emoji,
-		Timestamp: primitive.NewDateTimeFromTime(time.Now()),
+	// Check if user already has this specific emoji reaction
+	userHasReaction := false
+	for _, reaction := range existingAnnouncement.Reactions {
+		if reaction.User == userObjID && reaction.Emoji == req.Emoji {
+			userHasReaction = true
+			break
+		}
 	}
 
-	addFilter := bson.M{"_id": annID}
-	addUpdate := bson.M{"$push": bson.M{"reactions": newReaction}}
+	if userHasReaction {
+		// User already has this reaction, remove it (toggle behavior)
+		removeFilter := bson.M{"_id": annID}
+		removeUpdate := bson.M{"$pull": bson.M{"reactions": bson.M{"user": userObjID, "emoji": req.Emoji}}}
 
-	err = a.ADB.UpdateOne(context.Background(), addFilter, addUpdate)
-	if err != nil {
-		config.ErrorStatus("Failed to add reaction", http.StatusInternalServerError, w, err)
-		return
+		err = a.ADB.UpdateOne(context.Background(), removeFilter, removeUpdate)
+		if err != nil {
+			config.ErrorStatus("Failed to remove existing reaction", http.StatusInternalServerError, w, err)
+			return
+		}
+	} else {
+		// User doesn't have this reaction, add it
+		newReaction := models.Reaction{
+			User:      userObjID,
+			Emoji:     req.Emoji,
+			Timestamp: primitive.NewDateTimeFromTime(time.Now()),
+		}
+
+		addFilter := bson.M{"_id": annID}
+		addUpdate := bson.M{"$push": bson.M{"reactions": newReaction}}
+
+		err = a.ADB.UpdateOne(context.Background(), addFilter, addUpdate)
+		if err != nil {
+			config.ErrorStatus("Failed to add reaction", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	// Fetch the updated announcement with reactions
@@ -741,16 +759,15 @@ func (a Announcement) AddReactionHandler(w http.ResponseWriter, r *http.Request)
 func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 
-	// Parse request body to get user ID
-	var req struct {
-		UserID string `json:"userId"`
-	}
+	// Parse request body to get user ID and emoji
+	var req models.RemoveReactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
 
 	userID := req.UserID
+	emoji := req.Emoji
 
 	// Convert IDs to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
@@ -765,9 +782,9 @@ func (a Announcement) RemoveReactionHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Remove reaction
+	// Remove specific reaction (user + emoji combination)
 	filter := bson.M{"_id": annID}
-	update := bson.M{"$pull": bson.M{"reactions": bson.M{"user": userObjID}}}
+	update := bson.M{"$pull": bson.M{"reactions": bson.M{"user": userObjID, "emoji": emoji}}}
 
 	err = a.ADB.UpdateOne(context.Background(), filter, update)
 	if err != nil {

@@ -308,4 +308,17 @@ func TestAddReactionRequest_Structure(t *testing.T) {
 	assert.NotEmpty(t, request.Emoji)
 	assert.Equal(t, "507f1f77bcf86cd799439011", request.UserID)
 	assert.Equal(t, "👍", request.Emoji)
+}
+
+func TestRemoveReactionRequest_Structure(t *testing.T) {
+	// Test that the RemoveReactionRequest model can be created correctly
+	request := models.RemoveReactionRequest{
+		UserID: "507f1f77bcf86cd799439011",
+		Emoji:  "👍",
+	}
+
+	assert.NotEmpty(t, request.UserID)
+	assert.NotEmpty(t, request.Emoji)
+	assert.Equal(t, "507f1f77bcf86cd799439011", request.UserID)
+	assert.Equal(t, "👍", request.Emoji)
 } 

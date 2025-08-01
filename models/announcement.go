@@ -72,6 +72,12 @@ type AddReactionRequest struct {
 	Emoji  string `json:"emoji" validate:"required"`
 }
 
+// RemoveReactionRequest holds the structure for removing a reaction
+type RemoveReactionRequest struct {
+	UserID string `json:"userId" validate:"required"`
+	Emoji  string `json:"emoji" validate:"required"`
+}
+
 // AddCommentRequest holds the structure for adding a comment
 type AddCommentRequest struct {
 	UserID  string `json:"userId" validate:"required"`
