@@ -825,10 +825,11 @@ func (a Announcement) AddCommentHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Get user data for response
 	userDoc := UserDoc{}
-	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userID})
+	userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": userObjID})
 	if err := userResult.Decode(&userDoc); err != nil {
-		config.ErrorStatus("Failed to fetch user data", http.StatusInternalServerError, w, err)
-		return
+		// Fallback to unknown user if lookup fails
+		userDoc.User.Username = "Unknown"
+		userDoc.User.ProfilePicture = nil
 	}
 
 	// Build comment response
