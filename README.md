@@ -31,10 +31,22 @@ brew services start mongodb-community@5.0
 
 ## Run
 
-1. Duplicate `.env.example` and rename the new file to `.env`. Edit to your configurations.
+
+### Full Setup (All Features)
+1. Copy the comprehensive environment file:
+```bash
+cp env.example .env
 ```
+
+2. Configure all services (Stripe, SendGrid, Cloudinary) in `.env`
+
+3. Run the application:
+```bash
 make run
 ```
+
+### Environment Variables
+- **Original**: Use `.env.example` for the original basic configuration
 
 ## Generate Mocks before committing code
 

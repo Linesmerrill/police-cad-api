@@ -26,10 +26,10 @@ import (
 
 // Community struct mostly used for mocking tests
 type Community struct {
-	DB  databases.CommunityDatabase
-	UDB databases.UserDatabase
-	ADB databases.ArchivedCommunityDatabase
-	IDB databases.InviteCodeDatabase
+	DB   databases.CommunityDatabase
+	UDB  databases.UserDatabase
+	ADB  databases.ArchivedCommunityDatabase
+	IDB  databases.InviteCodeDatabase
 	UPDB databases.UserPreferencesDatabase
 }
 
@@ -1331,7 +1331,16 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Respond with success
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "joined"})
+	response := map[string]interface{}{
+		"status":      "joined",
+		"communityId": invite.CommunityID,
+		"community": map[string]interface{}{
+			"_id":       community.ID.Hex(),
+			"name":      community.Details.Name,
+			"imageLink": community.Details.ImageLink,
+		},
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 // Helper function to check if a slice contains a string
