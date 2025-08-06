@@ -1298,9 +1298,20 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 				"communityId": invite.CommunityID,
 				"status":      "approved",
 			}
-			update = bson.M{
-				"$push": bson.M{"user.communities": newCommunityEntry},
+
+			// Check if user.communities is null and handle accordingly
+			if user.Details.Communities == nil {
+				// If communities is null, set it to an array with the new entry
+				update = bson.M{
+					"$set": bson.M{"user.communities": bson.A{newCommunityEntry}},
+				}
+			} else {
+				// If communities already exists as an array, push to it
+				update = bson.M{
+					"$push": bson.M{"user.communities": newCommunityEntry},
+				}
 			}
+
 			_, err = c.UDB.UpdateOne(
 				context.Background(),
 				bson.M{"_id": userObjID},
