@@ -79,7 +79,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/forgot-password", http.HandlerFunc(adminHandler.AdminForgotPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reset-password", http.HandlerFunc(adminHandler.AdminResetPasswordHandler)).Methods("POST")
 	
-	// Admin console routes
+	// Admin console routes (moved to appear before general user routes)
 	apiCreate.Handle("/admin/search/users", http.HandlerFunc(adminHandler.AdminUserSearchHandler)).Methods("POST")
 	apiCreate.Handle("/admin/search/communities", http.HandlerFunc(adminHandler.AdminCommunitySearchHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
