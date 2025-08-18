@@ -233,7 +233,7 @@ func sendResetEmail(toEmail, resetLink string) error {
 	subject := "LPC-APP Admin Password Reset"
 	to := mail.NewEmail("", toEmail)
 	plain := "Reset your admin password using this link: " + resetLink
-	html := templates.RenderCode("Reset your admin password") + "<p><a href='" + resetLink + "'>Reset Password</a></p>"
+	html := templates.RenderAdminPasswordReset(resetLink)
 	msg := mail.NewSingleEmail(from, subject, to, plain, html)
 	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
 	_, err := client.Send(msg)
