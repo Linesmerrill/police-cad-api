@@ -59,6 +59,7 @@ func (a *App) New() *mux.Router {
 		UDB: databases.NewUserDatabase(a.dbHelper),
 		CDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
+	adminHandler := Admin{ADB: databases.NewAdminDatabase(a.dbHelper)}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -69,6 +70,7 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
 	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
+	apiCreate.Handle("/admin/login", http.HandlerFunc(adminHandler.AdminLoginHandler)).Methods("POST")
 
 	apiCreate.Handle("/verify/send-verification-code", http.HandlerFunc(pv.CreatePendingVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/verify/verify-code", http.HandlerFunc(pv.VerifyCodeHandler)).Methods("POST")
@@ -315,6 +317,11 @@ func (a *App) Initialize() error {
 		return fmt.Errorf("stripe secret key is not set")
 	}
 	stripe.Key = stripeKey
+
+	// seed head admin (optional)
+	if err := databases.EnsureHeadAdmin(a.dbHelper); err != nil {
+		zap.S().With(err).Error("failed to ensure head admin")
+	}
 
 	// initialize api router
 	a.initializeRoutes()
