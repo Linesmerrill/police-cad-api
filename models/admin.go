@@ -14,6 +14,40 @@ type AdminUser struct {
 	Permissions  map[string]bool    `bson:"permissions,omitempty" json:"permissions,omitempty"`
 	CreatedAt    interface{}        `bson:"createdAt" json:"createdAt"`
 	UpdatedAt    interface{}        `bson:"updatedAt" json:"updatedAt"`
+	CreatedBy    string             `bson:"createdBy,omitempty" json:"createdBy,omitempty"`
+}
+
+// CreateAdminUserRequest represents the request to create a new admin user
+type CreateAdminUserRequest struct {
+	Email string `json:"email" validate:"required,email"`
+	Role  string `json:"role" validate:"required,oneof=admin owner"`
+}
+
+// CreateAdminUserResponse represents the response when creating a new admin user
+type CreateAdminUserResponse struct {
+	Success   bool       `json:"success"`
+	Message   string     `json:"message"`
+	AdminUser AdminUser  `json:"adminUser"`
+	ResetLink string     `json:"resetLink"`
+}
+
+// SendAdminResetEmailRequest represents the request to send a password reset email
+type SendAdminResetEmailRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+// SendAdminResetEmailResponse represents the response when sending a password reset email
+type SendAdminResetEmailResponse struct {
+	Success   bool   `json:"success"`
+	Message   string `json:"message"`
+	EmailSent bool   `json:"emailSent"`
+}
+
+// ErrorResponse represents a standardized error response
+type ErrorResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error"`
+	Code    string `json:"code"`
 }
 
 // AdminPasswordReset stores password reset tokens for admin accounts

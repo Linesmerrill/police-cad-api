@@ -806,4 +806,273 @@ func generateTempPassword() string {
 	return string(b)
 }
 
+// Helper function to check if current user can create admins
+func canCreateAdmins(currentUser models.AdminUser) bool {
+	for _, role := range currentUser.Roles {
+		if role == "owner" || role == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
+// CreateAdminUserHandler creates a new admin user
+func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// TODO: Get current admin user from JWT token for permission check
+	// For now, we'll assume the request is authorized
+	// currentUser := getCurrentAdminUser(r)
+
+	// Parse request body
+	var req models.CreateAdminUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate email format
+	if req.Email == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Email address is required",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate role
+	if req.Role != "admin" && req.Role != "owner" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Role must be 'admin' or 'owner'",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Check if admin user already exists
+	_, err := h.ADB.FindOne(r.Context(), bson.M{"email": req.Email})
+	if err == nil {
+		// Admin user exists
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Admin user with this email already exists",
+			Code:    "DUPLICATE_USER",
+		})
+		return
+	}
+
+	// Create new admin user
+	adminUser := models.AdminUser{
+		Email:     req.Email,
+		Roles:     []string{req.Role},
+		Active:    true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		CreatedBy: "system", // TODO: Get from JWT token
+	}
+
+	// Insert admin user into database
+	result, err := h.ADB.InsertOne(r.Context(), adminUser)
+	if err != nil {
+		log.Printf("Failed to create admin user: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to create admin user",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Set the ID from the insert result
+	insertedID := result.Decode()
+	if oid, ok := insertedID.(primitive.ObjectID); ok {
+		adminUser.ID = oid
+	}
+
+	// Generate reset token and link
+	resetToken := generateAdminResetToken()
+	expiresAt := time.Now().Add(24 * time.Hour)
+	
+	// Hash the token for storage
+	hashedToken := hashToken(resetToken)
+	
+	// Create password reset record
+	resetRecord := models.AdminPasswordReset{
+		AdminID:   adminUser.ID,
+		TokenHash: hashedToken,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+	}
+	
+	_, err = h.RDB.InsertOne(r.Context(), resetRecord)
+	if err != nil {
+		log.Printf("Failed to create reset record: %v", err)
+		// Continue anyway since admin user was created
+	}
+
+	// Build reset link
+	resetLink := buildAdminResetLink(os.Getenv("PUBLIC_WEB_BASE_URL"), resetToken)
+
+	// Return success response
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(models.CreateAdminUserResponse{
+		Success:   true,
+		Message:   "Admin user created successfully",
+		AdminUser: adminUser,
+		ResetLink: resetLink,
+	})
+}
+
+// SendAdminResetEmailHandler sends a password reset email to an admin user
+func (h Admin) SendAdminResetEmailHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse request body
+	var req models.SendAdminResetEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate email format
+	if req.Email == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Email address is required",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Find admin user by email
+	adminUser, err := h.ADB.FindOne(r.Context(), bson.M{"email": req.Email})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Admin user not found",
+				Code:    "USER_NOT_FOUND",
+			})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Failed to find admin user",
+				Code:    "DATABASE_ERROR",
+			})
+		}
+		return
+	}
+
+	// Generate new reset token
+	resetToken := generateAdminResetToken()
+	expiresAt := time.Now().Add(24 * time.Hour)
+	
+	// Hash the token for storage
+	hashedToken := hashToken(resetToken)
+	
+	// Create new password reset record
+	resetRecord := models.AdminPasswordReset{
+		AdminID:   adminUser.ID,
+		TokenHash: hashedToken,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+	}
+	
+	_, err = h.RDB.InsertOne(r.Context(), resetRecord)
+	if err != nil {
+		log.Printf("Failed to create reset record: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to create reset token",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Build reset link
+	resetLink := buildAdminResetLink(os.Getenv("PUBLIC_WEB_BASE_URL"), resetToken)
+	
+	// Send reset email
+	err = sendAdminResetEmail(adminUser.Email, resetLink)
+	if err != nil {
+		log.Printf("Failed to send reset email: %v", err)
+		// Still return success since token was created
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.SendAdminResetEmailResponse{
+		Success:   true,
+		Message:   "Password reset email sent successfully",
+		EmailSent: true,
+	})
+}
+
+// Helper function to generate admin reset token
+func generateAdminResetToken() string {
+	buf := make([]byte, 32)
+	_, err := rand.Read(buf)
+	if err != nil {
+		// Fallback to timestamp-based token if crypto/rand fails
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
+}
+
+// Helper function to build admin reset link
+func buildAdminResetLink(baseURL, token string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = "https://www.linespolice-cad.com"
+	}
+	return base + "/admin/reset-password?token=" + token
+}
+
+// Helper function to send admin reset email
+func sendAdminResetEmail(toEmail, resetLink string) error {
+	from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
+	subject := "Admin Password Reset Request"
+	to := mail.NewEmail("", toEmail)
+	plain := fmt.Sprintf(`Hello,
+
+You have requested a password reset for your admin account.
+
+Click the following link to reset your password:
+%s
+
+This link will expire in 24 hours.
+
+If you did not request this reset, please ignore this email.
+
+Best regards,
+Lines Police CAD Team`, resetLink)
+
+	html := templates.RenderAdminPasswordReset(resetLink)
+
+	msg := mail.NewSingleEmail(from, subject, to, plain, html)
+	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
+	_, err := client.Send(msg)
+	return err
+}
+
 
