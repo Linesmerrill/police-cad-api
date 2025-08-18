@@ -207,8 +207,8 @@ body {font-family: 'Inter', sans-serif;}
           <table border="0" cellpadding="0" cellspacing="0" class="button" style="border-collapse:separate; margin: 0 auto;" bgcolor="#6366f1">
             <tbody>
               <tr>
-                <td align="center" bgcolor="#6366f1" style="font-family: 'Inter', sans-serif; font-size: 16px; padding: 16px 32px; border-radius: 8px; border: 1px solid #6366f1; color: #ffffff; text-decoration: none; font-weight: 600; display: inline-block; letter-spacing: 0.5px;">
-                  <a href="{{RESET_LINK}}" style="color: #ffffff; text-decoration: none; font-weight: 600; display: block; width: 100%; height: 100%; padding: 16px 32px; margin: -16px -32px; border-radius: 8px;">Reset Password</a>
+                <td align="center" bgcolor="#6366f1" style="font-family: 'Inter', sans-serif; font-size: 16px; padding: 16px 32px; border-radius: 12px; border: 1px solid #6366f1; color: #ffffff; text-decoration: none; font-weight: 600; display: inline-block; letter-spacing: 0.5px; box-shadow: 0 4px 6px rgba(99, 102, 241, 0.25);">
+                  <a href="{{RESET_LINK}}" style="color: #ffffff; text-decoration: none; font-weight: 600; display: block; width: 100%; height: 100%; padding: 16px 32px; margin: -16px -32px; border-radius: 12px;">Reset Password</a>
                 </td>
               </tr>
             </tbody>
