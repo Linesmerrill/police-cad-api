@@ -1,10 +1,11 @@
 package templates
 
-import "fmt"
+import "strings"
 
 // RenderAdminPasswordReset generates the HTML for the admin password reset email
 func RenderAdminPasswordReset(resetLink string) string {
-	return fmt.Sprintf(adminPasswordResetHTML, resetLink, resetLink, resetLink)
+	html := strings.ReplaceAll(adminPasswordResetHTML, "{{RESET_LINK}}", resetLink)
+	return html
 }
 
 // AdminPasswordResetHTML is the HTML template for admin password reset emails
@@ -207,7 +208,7 @@ body {font-family: 'Inter', sans-serif;}
             <tbody>
               <tr>
                 <td align="center" bgcolor="#6366f1" style="font-family: 'Inter', sans-serif; font-size: 16px; padding: 16px 32px; border-radius: 8px; border: 1px solid #6366f1; color: #ffffff; text-decoration: none; font-weight: 600; display: inline-block; letter-spacing: 0.5px;">
-                  <a href="%s" style="color: #ffffff; text-decoration: none; font-weight: 600; display: block; width: 100%; height: 100%; padding: 16px 32px; margin: -16px -32px; border-radius: 8px;">Reset Password</a>
+                  <a href="{{RESET_LINK}}" style="color: #ffffff; text-decoration: none; font-weight: 600; display: block; width: 100%; height: 100%; padding: 16px 32px; margin: -16px -32px; border-radius: 8px;">Reset Password</a>
                 </td>
               </tr>
             </tbody>
@@ -231,7 +232,7 @@ body {font-family: 'Inter', sans-serif;}
   </table><table class="module" role="module" data-type="text" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="35720396-e43f-49a1-9cee-bc75005e2ccd.1" data-mc-module-version="2019-10-22">
     <tbody>
       <tr>
-        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:center;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 14px; color: #1188E6; word-break: break-all;">%s</span></div><div></div></div></td>
+        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:center;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 14px; color: #1188E6; word-break: break-all;">{{RESET_LINK}}</span></div><div></div></div></td>
       </tr>
     </tbody>
   </table><table class="module" role="module" data-type="spacer" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="7770fdab-634a-4f62-a277-1c66b2646d8d.2">
