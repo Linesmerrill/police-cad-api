@@ -447,8 +447,53 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// TODO: Get user communities and implement member counting
+	// Get user communities with role information
 	var userCommunities []models.AdminUserCommunity
+	
+	// Find communities where this user is a member
+	cursor, err := h.CDB.Find(r.Context(), bson.M{
+		"$or": []bson.M{
+			{"details.ownerID": user.ID},                    // User is owner
+			{"details.members": bson.M{"$in": []string{user.ID}}}, // User is member
+		},
+	}, nil)
+	if err == nil {
+		defer cursor.Close(r.Context())
+		
+		var communities []models.Community
+		if err = cursor.All(r.Context(), &communities); err == nil {
+			for _, community := range communities {
+				role := "Member"
+				if community.Details.OwnerID == user.ID {
+					role = "Owner"
+				}
+				
+				// Get department info if available
+				department := ""
+				if len(community.Details.Departments) > 0 {
+					department = community.Details.Departments[0].Name
+				}
+				
+				userCommunities = append(userCommunities, models.AdminUserCommunity{
+					ID:         community.ID.Hex(),
+					Name:       community.Details.Name,
+					Role:       role,
+					Department: department,
+					JoinedAt:   community.Details.CreatedAt, // Use community creation as joined date for now
+				})
+			}
+		}
+	}
+
+	// Get password reset status
+	var resetPasswordToken string
+	var resetPasswordExpires interface{}
+	
+	// Try to get password reset fields from user document
+	if user.Details.ResetPasswordToken != "" {
+		resetPasswordToken = user.Details.ResetPasswordToken
+		resetPasswordExpires = user.Details.ResetPasswordExpires
+	}
 
 	details := models.AdminUserDetails{
 		ID:          user.ID,
@@ -457,6 +502,9 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		Active:      !user.Details.IsDeactivated,
 		CreatedAt:   user.Details.CreatedAt,
 		Communities: userCommunities,
+		// Add password reset fields for frontend
+		ResetPasswordToken:   resetPasswordToken,
+		ResetPasswordExpires: resetPasswordExpires,
 	}
 
 	w.WriteHeader(http.StatusOK)

@@ -51,19 +51,23 @@ type OwnerInfo struct {
 }
 
 type AdminUserDetails struct {
-	ID          string               `json:"id"`
-	Email       string               `json:"email"`
-	Username    string               `json:"username,omitempty"`
-	Active      bool                 `json:"active"`
-	CreatedAt   interface{}          `json:"createdAt"`
-	LastLoginAt interface{}          `json:"lastLoginAt,omitempty"`
-	Communities []AdminUserCommunity `json:"communities,omitempty"`
+	ID                   string               `json:"id"`
+	Email                string               `json:"email"`
+	Username             string               `json:"username,omitempty"`
+	Active               bool                 `json:"active"`
+	CreatedAt            interface{}          `json:"createdAt"`
+	LastLoginAt          interface{}          `json:"lastLoginAt,omitempty"`
+	Communities          []AdminUserCommunity `json:"communities,omitempty"`
+	ResetPasswordToken   string               `json:"resetPasswordToken,omitempty"`
+	ResetPasswordExpires interface{}          `json:"resetPasswordExpires,omitempty"`
 }
 
 type AdminUserCommunity struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Role       string      `json:"role"`
+	Department string      `json:"department,omitempty"`
+	JoinedAt   interface{} `json:"joinedAt,omitempty"`
 }
 
 type AdminCommunityDetails struct {
