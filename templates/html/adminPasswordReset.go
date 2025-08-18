@@ -183,13 +183,13 @@ body {font-family: 'Inter', sans-serif;}
   </table><table class="module" role="module" data-type="text" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="948e3f3f-5214-4721-a90e-625a47b1c957" data-mc-module-version="2019-10-22">
     <tbody>
       <tr>
-        <td style="padding:50px 30px 18px 30px; line-height:36px; text-align:inherit; background-color:#ffffff;" height="100%" valign="top" bgcolor="#ffffff" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 43px; font-weight: 600; color: #1f2937;">Admin Password Reset</span></div><div></div></div></td>
+        <td style="padding:50px 30px 18px 30px; line-height:36px; text-align:center; background-color:#ffffff;" height="100%" valign="top" bgcolor="#ffffff" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 43px; font-weight: 600; color: #1f2937;">Admin Password Reset</span></div><div></div></div></td>
       </tr>
     </tbody>
   </table><table class="module" role="module" data-type="text" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="a10dcb57-ad22-4f4d-b765-1d427dfddb4e" data-mc-module-version="2019-10-22">
     <tbody>
       <tr>
-        <td style="padding:18px 30px 18px 30px; line-height:22px; text-align:inherit; background-color:#ffffff;" height="100%" valign="top" bgcolor="#ffffff" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 18px; color: #6b7280;">You requested to reset your admin password for Lines Police CAD. Click the button below to proceed:</span></div><div></div></div></td>
+        <td style="padding:18px 30px 18px 30px; line-height:22px; text-align:center; background-color:#ffffff;" height="100%" valign="top" bgcolor="#ffffff" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 18px; color: #6b7280;">You requested to reset your admin password for Lines Police CAD. Click the button below to proceed:</span></div><div></div></div></td>
       </tr>
     </tbody>
   </table><table class="module" role="module" data-type="spacer" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="7770fdab-634a-4f62-a277-1c66b2646d8d">
@@ -203,11 +203,11 @@ body {font-family: 'Inter', sans-serif;}
     <tbody>
       <tr>
         <td style="padding:0px 0px 0px 0px; text-align:center;" bgcolor="#ffffff" role="module-content">
-          <table border="0" cellpadding="0" cellspacing="0" class="button" style="border-collapse:separate;" bgcolor="#6366f1">
+          <table border="0" cellpadding="0" cellspacing="0" class="button" style="border-collapse:separate; margin: 0 auto;" bgcolor="#6366f1">
             <tbody>
               <tr>
                 <td align="center" bgcolor="#6366f1" style="font-family: 'Inter', sans-serif; font-size: 16px; padding: 16px 32px; border-radius: 8px; border: 1px solid #6366f1; color: #ffffff; text-decoration: none; font-weight: 600; display: inline-block; letter-spacing: 0.5px;">
-                  <a href="%s" style="color: #ffffff; text-decoration: none; font-weight: 600;">Reset Password</a>
+                  <a href="%s" style="color: #ffffff; text-decoration: none; font-weight: 600; display: block; width: 100%; height: 100%; padding: 16px 32px; margin: -16px -32px; border-radius: 8px;">Reset Password</a>
                 </td>
               </tr>
             </tbody>
@@ -225,13 +225,13 @@ body {font-family: 'Inter', sans-serif;}
   </table><table class="module" role="module" data-type="text" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="35720396-e43f-49a1-9cee-bc75005e2ccd" data-mc-module-version="2019-10-22">
     <tbody>
       <tr>
-        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:inherit;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 16px; color: #6b7280;">If the button doesn't work, copy and paste this link into your browser:</span></div><div></div></div></td>
+        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:center;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 16px; color: #6b7280;">If the button doesn't work, copy and paste this link into your browser:</span></div><div></div></div></td>
       </tr>
     </tbody>
   </table><table class="module" role="module" data-type="text" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="35720396-e43f-49a1-9cee-bc75005e2ccd.1" data-mc-module-version="2019-10-22">
     <tbody>
       <tr>
-        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:inherit;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 14px; color: #1188E6; word-break: break-all;">%s</span></div><div></div></div></td>
+        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:center;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 14px; color: #1188E6; word-break: break-all;">%s</span></div><div></div></div></td>
       </tr>
     </tbody>
   </table><table class="module" role="module" data-type="spacer" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="7770fdab-634a-4f62-a277-1c66b2646d8d.2">
@@ -244,7 +244,7 @@ body {font-family: 'Inter', sans-serif;}
   </table><table class="module" role="module" data-type="text" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="35720396-e43f-49a1-9cee-bc75005e2ccd.2" data-mc-module-version="2019-10-22">
     <tbody>
       <tr>
-        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:inherit;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 14px; color: #9ca3af;">This link expires in 1 hour for security reasons.</span></div><div></div></div></td>
+        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:center;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 14px; color: #9ca3af;">This link expires in 1 hour for security reasons.</span></div><div></div></div></td>
       </tr>
     </tbody>
   </table><table class="module" role="module" data-type="spacer" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="7770fdab-634a-4f62-a277-1c66b2646d8d.3">
@@ -257,7 +257,7 @@ body {font-family: 'Inter', sans-serif;}
   </table><table class="module" role="module" data-type="text" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;" data-muid="35720396-e43f-49a1-9cee-bc75005e2ccd.3" data-mc-module-version="2019-10-22">
     <tbody>
       <tr>
-        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:inherit;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: inherit; text-align: center;"><span style="font-size: 14px; color: #6b7280;">If you need assistance, please visit the <a href="https://www.linespolice-cad.com/contact-us" style="color: #1188E6;">Lines Police CAD Help Center</a></span></div><div></div></div></td>
+        <td style="padding:18px 0px 18px 0px; line-height:22px; text-align:center;" height="100%" valign="top" bgcolor="" role="module-content"><div><div style="font-family: inherit; text-align: center"><span style="font-size: 14px; color: #6b7280;">If you need assistance, please visit the <a href="https://www.linespolice-cad.com/contact-us" style="color: #1188E6;">Lines Police CAD Help Center</a></span></div><div></div></div></td>
       </tr>
     </tbody>
   </table></td>
