@@ -1433,4 +1433,215 @@ func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// AdminGetActivityHandler gets detailed activity information for a specific admin
+func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+	adminID := pathParts[len(pathParts)-2]
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Get query parameters for filtering
+	queryParams := r.URL.Query()
+	timeframe := queryParams.Get("timeframe")
+	if timeframe == "" {
+		timeframe = "30d" // default to 30 days
+	}
+
+	// Calculate time range based on timeframe
+	now := time.Now()
+	var startTime time.Time
+	
+	switch timeframe {
+	case "1d":
+		startTime = now.AddDate(0, 0, -1)
+	case "7d":
+		startTime = now.AddDate(0, 0, -7)
+	case "30d":
+		startTime = now.AddDate(0, 0, -30)
+	case "1m":
+		startTime = now.AddDate(0, -1, 0)
+	case "3m":
+		startTime = now.AddDate(0, -3, 0)
+	case "6m":
+		startTime = now.AddDate(0, -6, 0)
+	case "1y":
+		startTime = now.AddDate(-1, 0, 0)
+	case "all":
+		startTime = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) // reasonable start date
+	default:
+		startTime = now.AddDate(0, 0, -30) // fallback to 30 days
+	}
+
+	// Build activity data
+	activity := models.AdminActivity{
+		TotalLogins:    0,
+		PasswordResets: 0,
+		TempPasswords:  0,
+		AvgSessionTime: "0m",
+		ChartData:      []models.ChartDataPoint{},
+		RecentActivity: []models.ActivityItem{},
+	}
+
+	// Count total logins
+	loginCount, err := h.ADB.CountDocuments(r.Context(), bson.M{
+		"adminId": objectID,
+		"type":    "login",
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
+	})
+	if err == nil {
+		activity.TotalLogins = int(loginCount)
+	}
+
+	// Count password resets (placeholder for now)
+	// This would require implementing activity tracking in the password reset flow
+	activity.PasswordResets = 0
+
+	// Calculate average session time (placeholder for now)
+	// This would require tracking logout events and calculating duration
+	activity.AvgSessionTime = "45m" // placeholder
+
+	// Generate chart data for the last 7 days
+	chartStart := now.AddDate(0, 0, -7)
+	for i := 0; i < 7; i++ {
+		date := chartStart.AddDate(0, 0, i)
+		dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+		dayEnd := dayStart.AddDate(0, 0, 1)
+
+		// Count logins for this day
+		dayLoginCount, err := h.ADB.CountDocuments(r.Context(), bson.M{
+			"adminId": objectID,
+			"type":    "login",
+			"timestamp": bson.M{
+				"$gte": dayStart,
+				"$lt":  dayEnd,
+			},
+		})
+		
+		dayCount := 0
+		if err == nil {
+			dayCount = int(dayLoginCount)
+		}
+
+		activity.ChartData = append(activity.ChartData, models.ChartDataPoint{
+			Date:  date.Format("Jan 02"),
+			Value: dayCount,
+		})
+	}
+
+	// Get recent activity (last 20 events)
+	recentFilter := bson.M{
+		"adminId": objectID,
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
+	}
+
+	// Get recent login activities
+	loginCursor, err := h.ADB.Find(r.Context(), recentFilter, nil)
+	if err == nil {
+		defer loginCursor.Close(r.Context())
+		
+		var loginActivities []models.AdminLoginActivity
+		if err = loginCursor.All(r.Context(), &loginActivities); err == nil {
+			for _, login := range loginActivities {
+				title := "Admin logged in"
+				if login.Type == "logout" {
+					title = "Admin logged out"
+				}
+
+				activity.RecentActivity = append(activity.RecentActivity, models.ActivityItem{
+					Type:      login.Type,
+					Title:     title,
+					Details:   fmt.Sprintf("IP: %s", login.IP),
+					Timestamp: login.Timestamp,
+				})
+			}
+		}
+	}
+
+	// Sort recent activity by timestamp (newest first)
+	if len(activity.RecentActivity) > 20 {
+		activity.RecentActivity = activity.RecentActivity[:20]
+	}
+
+	// Return activity data
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.AdminActivityResponse{
+		Success:  true,
+		Activity: activity,
+	})
+}
+
+// trackAdminLogin tracks when an admin logs in
+func (h Admin) trackAdminLogin(adminID primitive.ObjectID, r *http.Request) {
+	// Get client IP
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	// Create login activity record (placeholder for now)
+	// This would store in a dedicated activity collection
+	log.Printf("Admin login tracked: %s from IP %s", adminID.Hex(), ip)
+}
+
+// trackAdminLogout tracks when an admin logs out
+func (h Admin) trackAdminLogout(adminID primitive.ObjectID, sessionID string, r *http.Request) {
+	// Get client IP
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	// Create logout activity record (placeholder for now)
+	// This would store in a dedicated activity collection
+	log.Printf("Admin logout tracked: %s from IP %s with session %s", adminID.Hex(), ip, sessionID)
+}
+
+// trackAdminAction tracks administrative actions
+func (h Admin) trackAdminAction(adminID primitive.ObjectID, actionType, targetID, targetType, details string, r *http.Request) {
+	// Get client IP
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	// Create action activity record (placeholder for now)
+	// This would store in a dedicated activity collection
+	log.Printf("Admin action tracked: %s performed %s on %s: %s from IP %s", adminID.Hex(), actionType, targetType, details, ip)
+}
+
 

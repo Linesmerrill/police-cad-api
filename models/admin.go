@@ -2,6 +2,7 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"time"
 )
 
 // AdminUser represents an administrative user for platform management
@@ -84,6 +85,60 @@ type ChangeRoleResponse struct {
 type DeleteAdminResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+}
+
+// AdminActivity represents admin activity tracking data
+type AdminActivity struct {
+	TotalLogins    int            `json:"totalLogins"`
+	PasswordResets int            `json:"passwordResets"`
+	TempPasswords  int            `json:"tempPasswords"`
+	AvgSessionTime string         `json:"avgSessionTime"` // e.g., "45m"
+	ChartData      []ChartDataPoint `json:"chartData"`
+	RecentActivity []ActivityItem   `json:"recentActivity"`
+}
+
+// ChartDataPoint represents a single data point for activity charts
+type ChartDataPoint struct {
+	Date  string `json:"date"`  // e.g., "Jan 19", "2025-01-19"
+	Value int    `json:"value"` // number of logins
+}
+
+// ActivityItem represents a single admin activity event
+type ActivityItem struct {
+	Type      string    `json:"type"`      // login, logout, password_reset, etc.
+	Title     string    `json:"title"`     // "Admin logged in"
+	Details   string    `json:"details"`   // "IP: 192.168.1.1"
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// AdminActivityResponse represents the response when getting admin activity
+type AdminActivityResponse struct {
+	Success  bool          `json:"success"`
+	Activity AdminActivity `json:"activity"`
+}
+
+// AdminLoginActivity represents a login/logout event
+type AdminLoginActivity struct {
+	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	AdminID      primitive.ObjectID `bson:"adminId" json:"adminId"`
+	Type         string             `bson:"type" json:"type"` // login, logout
+	IP           string             `bson:"ip" json:"ip"`
+	UserAgent    string             `bson:"userAgent" json:"userAgent"`
+	Timestamp    time.Time          `bson:"timestamp" json:"timestamp"`
+	SessionID    string             `bson:"sessionId,omitempty" json:"sessionId,omitempty"`
+	Duration     *time.Duration     `bson:"duration,omitempty" json:"duration,omitempty"` // for logout events
+}
+
+// AdminActionActivity represents administrative actions
+type AdminActionActivity struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	AdminID     primitive.ObjectID `bson:"adminId" json:"adminId"`
+	ActionType  string             `bson:"actionType" json:"actionType"` // password_reset, temp_password, role_change, etc.
+	TargetID    string             `bson:"targetId,omitempty" json:"targetId,omitempty"` // ID of affected user/community
+	TargetType  string             `bson:"targetType,omitempty" json:"targetType,omitempty"` // user, community, admin
+	Details     string             `bson:"details" json:"details"`
+	Timestamp   time.Time          `bson:"timestamp" json:"timestamp"`
+	IP          string             `bson:"ip" json:"ip"`
 }
 
 // AdminPasswordReset stores password reset tokens for admin accounts
