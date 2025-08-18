@@ -87,10 +87,6 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/temp-password", http.HandlerFunc(adminHandler.AdminUserTempPasswordHandler)).Methods("POST")
 	
-	// Admin debug routes
-	apiCreate.Handle("/admin/debug/users", http.HandlerFunc(adminHandler.AdminDebugUsersHandler)).Methods("GET")
-	apiCreate.Handle("/admin/debug/communities", http.HandlerFunc(adminHandler.AdminDebugCommunitiesHandler)).Methods("GET")
-
 	apiCreate.Handle("/verify/send-verification-code", http.HandlerFunc(pv.CreatePendingVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/verify/verify-code", http.HandlerFunc(pv.VerifyCodeHandler)).Methods("POST")
 	apiCreate.Handle("/verify/resend-verification-code", http.HandlerFunc(pv.ResendVerificationCodeHandler)).Methods("POST")
