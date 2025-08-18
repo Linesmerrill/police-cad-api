@@ -21,6 +21,9 @@ type AdminDatabase interface {
 	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.AdminUser, error)
 	InsertOne(ctx context.Context, admin models.AdminUser, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
+	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
+	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 }
 
 type adminDatabase struct {
@@ -47,6 +50,18 @@ func (a *adminDatabase) InsertOne(ctx context.Context, admin models.AdminUser, o
 
 func (a *adminDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	return a.db.Collection(adminCollectionName).UpdateOne(ctx, filter, update, opts...)
+}
+
+func (a *adminDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error) {
+	return a.db.Collection(adminCollectionName).Find(ctx, filter, opts...)
+}
+
+func (a *adminDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	return a.db.Collection(adminCollectionName).CountDocuments(ctx, filter, opts...)
+}
+
+func (a *adminDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	return a.db.Collection(adminCollectionName).DeleteOne(ctx, filter, opts...)
 }
 
 // EnsureHeadAdmin bootstraps a head admin from env vars if not already present

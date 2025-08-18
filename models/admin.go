@@ -50,6 +50,42 @@ type ErrorResponse struct {
 	Code    string `json:"code"`
 }
 
+// AdminSearchRequest represents the request to search for admins
+type AdminSearchRequest struct {
+	Query string `json:"query" validate:"required"`
+}
+
+// AdminSearchResponse represents the response when searching for admins
+type AdminSearchResponse struct {
+	Success bool           `json:"success"`
+	Admins  []AdminUser   `json:"admins"`
+	Total   int           `json:"total"`
+}
+
+// AdminDetailsResponse represents the response when getting admin details
+type AdminDetailsResponse struct {
+	Success bool      `json:"success"`
+	Admin   AdminUser `json:"admin"`
+}
+
+// ChangeRoleRequest represents the request to change an admin's role
+type ChangeRoleRequest struct {
+	Role string `json:"role" validate:"required,oneof=admin owner"`
+}
+
+// ChangeRoleResponse represents the response when changing an admin's role
+type ChangeRoleResponse struct {
+	Success bool      `json:"success"`
+	Message string    `json:"message"`
+	Admin   AdminUser `json:"admin"`
+}
+
+// DeleteAdminResponse represents the response when deleting an admin
+type DeleteAdminResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
 // AdminPasswordReset stores password reset tokens for admin accounts
 type AdminPasswordReset struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`

@@ -1075,4 +1075,323 @@ Lines Police CAD Team`, resetLink)
 	return err
 }
 
+// AdminSearchAdminsHandler searches for admin users
+func (h Admin) AdminSearchAdminsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse request body
+	var req models.AdminSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate query
+	if req.Query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Search query is required",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Build search filter
+	filter := bson.M{
+		"$or": []bson.M{
+			{"email": bson.M{"$regex": req.Query, "$options": "i"}},
+			{"roles": bson.M{"$regex": req.Query, "$options": "i"}},
+		},
+	}
+
+	// Find admin users
+	cursor, err := h.ADB.Find(r.Context(), filter, nil)
+	if err != nil {
+		log.Printf("Admin search error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to search admins",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+	defer cursor.Close(r.Context())
+
+	var admins []models.AdminUser
+	if err = cursor.All(r.Context(), &admins); err != nil {
+		log.Printf("Admin search decode error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to decode admin results",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Return search results
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.AdminSearchResponse{
+		Success: true,
+		Admins:  admins,
+		Total:   len(admins),
+	})
+}
+
+// AdminGetAdminDetailsHandler gets detailed information about a specific admin
+func (h Admin) AdminGetAdminDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+	adminID := pathParts[len(pathParts)-1]
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Find admin user
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Admin user not found",
+				Code:    "USER_NOT_FOUND",
+			})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Failed to fetch admin user",
+				Code:    "DATABASE_ERROR",
+			})
+		}
+		return
+	}
+
+	// Return admin details
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.AdminDetailsResponse{
+		Success: true,
+		Admin:   *admin,
+	})
+}
+
+// AdminChangeRoleHandler changes an admin's role
+func (h Admin) AdminChangeRoleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+	adminID := pathParts[len(pathParts)-2]
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Parse request body
+	var req models.ChangeRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate role
+	if req.Role != "admin" && req.Role != "owner" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Role must be 'admin' or 'owner'",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Find admin user first
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Admin user not found",
+				Code:    "USER_NOT_FOUND",
+			})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Failed to fetch admin user",
+				Code:    "DATABASE_ERROR",
+			})
+		}
+		return
+	}
+
+	// Update admin role
+	newRoles := []string{req.Role}
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"roles":     newRoles,
+			"updatedAt": time.Now(),
+		},
+	})
+	if err != nil {
+		log.Printf("Failed to update admin role: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to update admin role",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Update the admin object for response
+	admin.Roles = newRoles
+	admin.UpdatedAt = time.Now()
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.ChangeRoleResponse{
+		Success: true,
+		Message: fmt.Sprintf("Admin role changed to %s successfully", req.Role),
+		Admin:   *admin,
+	})
+}
+
+// AdminDeleteAdminHandler deletes an admin user
+func (h Admin) AdminDeleteAdminHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+	adminID := pathParts[len(pathParts)-1]
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Find admin user first to get email for logging
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Admin user not found",
+				Code:    "USER_NOT_FOUND",
+			})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Failed to fetch admin user",
+				Code:    "DATABASE_ERROR",
+			})
+		}
+		return
+	}
+
+	// Check if trying to delete the last owner
+	if len(admin.Roles) > 0 && admin.Roles[0] == "owner" {
+		// Count total owners
+		ownerCount, err := h.ADB.CountDocuments(r.Context(), bson.M{"roles": "owner"})
+		if err == nil && ownerCount <= 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Cannot delete the last owner",
+				Code:    "PERMISSION_DENIED",
+			})
+			return
+		}
+	}
+
+	// Delete admin user
+	err = h.ADB.DeleteOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		log.Printf("Failed to delete admin user: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to delete admin user",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.DeleteAdminResponse{
+		Success: true,
+		Message: fmt.Sprintf("Admin user %s deleted successfully", admin.Email),
+	})
+}
+
 
