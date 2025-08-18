@@ -1394,4 +1394,43 @@ func (h Admin) AdminDeleteAdminHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AdminGetAllAdminsHandler gets all admin users
+func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Find all admin users
+	cursor, err := h.ADB.Find(r.Context(), bson.M{}, nil)
+	if err != nil {
+		log.Printf("Admin get all error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to fetch admin users",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+	defer cursor.Close(r.Context())
+
+	var admins []models.AdminUser
+	if err = cursor.All(r.Context(), &admins); err != nil {
+		log.Printf("Admin get all decode error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to decode admin results",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Return all admin users
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.AdminSearchResponse{
+		Success: true,
+		Admins:  admins,
+		Total:   len(admins),
+	})
+}
+
 
