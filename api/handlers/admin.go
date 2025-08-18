@@ -1161,6 +1161,15 @@ func (h Admin) AdminSearchAdminsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Ensure all admin objects have consistent role field population for backward compatibility
+	for i := range admins {
+		if admins[i].Role == "" && len(admins[i].Roles) > 0 {
+			admins[i].Role = admins[i].Roles[0]
+		} else if admins[i].Role != "" && len(admins[i].Roles) == 0 {
+			admins[i].Roles = []string{admins[i].Role}
+		}
+	}
+
 	// Return search results
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(models.AdminSearchResponse{
@@ -1218,6 +1227,14 @@ func (h Admin) AdminGetAdminDetailsHandler(w http.ResponseWriter, r *http.Reques
 			})
 		}
 		return
+	}
+
+	// Ensure role field is populated from roles array for backward compatibility
+	if admin.Role == "" && len(admin.Roles) > 0 {
+		admin.Role = admin.Roles[0]
+	} else if admin.Role != "" && len(admin.Roles) == 0 {
+		// If we have legacy role but no roles array, populate it
+		admin.Roles = []string{admin.Role}
 	}
 
 	// Return admin details
@@ -1571,6 +1588,15 @@ func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) 
 			Code:    "DATABASE_ERROR",
 		})
 		return
+	}
+
+	// Ensure all admin objects have consistent role field population for backward compatibility
+	for i := range admins {
+		if admins[i].Role == "" && len(admins[i].Roles) > 0 {
+			admins[i].Role = admins[i].Roles[0]
+		} else if admins[i].Role != "" && len(admins[i].Roles) == 0 {
+			admins[i].Roles = []string{admins[i].Role}
+		}
 	}
 
 	// Return all admin users
