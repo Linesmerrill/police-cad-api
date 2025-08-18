@@ -16,4 +16,14 @@ type AdminUser struct {
 	UpdatedAt    interface{}        `bson:"updatedAt" json:"updatedAt"`
 }
 
+// AdminPasswordReset stores password reset tokens for admin accounts
+type AdminPasswordReset struct {
+    ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+    AdminID   primitive.ObjectID `bson:"adminId" json:"adminId"`
+    TokenHash string             `bson:"tokenHash" json:"-"`
+    ExpiresAt interface{}        `bson:"expiresAt" json:"expiresAt"`
+    UsedAt    interface{}        `bson:"usedAt,omitempty" json:"usedAt,omitempty"`
+    CreatedAt interface{}        `bson:"createdAt" json:"createdAt"`
+}
+
 

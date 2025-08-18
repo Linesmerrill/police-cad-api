@@ -86,4 +86,39 @@ func EnsureHeadAdmin(db DatabaseHelper) error {
 	return err
 }
 
+// AdminResetDatabase provides access to the admin password resets collection
+type AdminResetDatabase interface {
+    InsertOne(ctx context.Context, reset models.AdminPasswordReset, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+    FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.AdminPasswordReset, error)
+    UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+}
+
+const adminResetCollectionName = "admin_password_resets"
+
+type adminResetDatabase struct {
+    db DatabaseHelper
+}
+
+// NewAdminResetDatabase initializes the admin reset database helper
+func NewAdminResetDatabase(db DatabaseHelper) AdminResetDatabase {
+    return &adminResetDatabase{db: db}
+}
+
+func (r *adminResetDatabase) InsertOne(ctx context.Context, reset models.AdminPasswordReset, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+    return r.db.Collection(adminResetCollectionName).InsertOne(ctx, reset, opts...)
+}
+
+func (r *adminResetDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.AdminPasswordReset, error) {
+    out := &models.AdminPasswordReset{}
+    err := r.db.Collection(adminResetCollectionName).FindOne(ctx, filter, opts...).Decode(&out)
+    if err != nil {
+        return nil, err
+    }
+    return out, nil
+}
+
+func (r *adminResetDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+    return r.db.Collection(adminResetCollectionName).UpdateOne(ctx, filter, update, opts...)
+}
+
 
