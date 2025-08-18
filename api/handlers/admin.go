@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -273,24 +274,39 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Search by email (case-insensitive)
-	filter := bson.M{"user.email": bson.M{"$regex": query, "$options": "i"}}
+	// Search by email, name, or username (case-insensitive)
+	filter := bson.M{
+		"$or": []bson.M{
+			{"user.email": bson.M{"$regex": query, "$options": "i"}},
+			{"user.name": bson.M{"$regex": query, "$options": "i"}},
+			{"user.username": bson.M{"$regex": query, "$options": "i"}},
+		},
+	}
+	
+	log.Printf("Admin user search filter: %+v", filter)
 	
 	// Use existing user database to search
 	cursor, err := h.UDB.Find(r.Context(), filter, nil)
 	if err != nil {
+		log.Printf("Admin user search error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
 		return
 	}
+	defer cursor.Close(r.Context())
+
+	var users []models.User
+	if err = cursor.All(r.Context(), &users); err != nil {
+		log.Printf("Admin user search decode error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode users"})
+		return
+	}
+
+	log.Printf("Admin user search found %d users", len(users))
 
 	var results []models.AdminUserResult
-	for cursor.Next(r.Context()) {
-		var user models.User
-		if err := cursor.Decode(&user); err != nil {
-			continue
-		}
-		
+	for _, user := range users {
 		result := models.AdminUserResult{
 			ID:        user.ID,
 			Email:     user.Details.Email,
@@ -298,6 +314,7 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 			Active:    !user.Details.IsDeactivated,
 			CreatedAt: user.Details.CreatedAt,
 		}
+		log.Printf("User result: %+v", result)
 		results = append(results, result)
 	}
 
@@ -334,20 +351,29 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	// Search by community name (case-insensitive)
 	filter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
 	
+	log.Printf("Admin community search filter: %+v", filter)
+	
 	cursor, err := h.CDB.Find(r.Context(), filter, nil)
 	if err != nil {
+		log.Printf("Admin community search error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
 		return
 	}
+	defer cursor.Close(r.Context())
+
+	var communities []models.Community
+	if err = cursor.All(r.Context(), &communities); err != nil {
+		log.Printf("Admin community search decode error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode communities"})
+		return
+	}
+
+	log.Printf("Admin community search found %d communities", len(communities))
 
 	var results []models.AdminCommunityResult
-	for cursor.Next(r.Context()) {
-		var community models.Community
-		if err := cursor.Decode(&community); err != nil {
-			continue
-		}
-		
+	for _, community := range communities {
 		// Get owner info
 		var ownerInfo *models.OwnerInfo
 		if community.Details.OwnerID != "" {
@@ -369,6 +395,7 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 			Owner:       ownerInfo,
 			MemberCount: community.Details.MembersCount,
 		}
+		log.Printf("Community result: %+v", result)
 		results = append(results, result)
 	}
 
@@ -608,6 +635,94 @@ func generateTempPassword() string {
 		b[i] = charset[int(randBytes[0])%len(charset)]
 	}
 	return string(b)
+}
+
+// AdminDebugUsersHandler lists all users for debugging
+func (h Admin) AdminDebugUsersHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get all users
+	cursor, err := h.UDB.Find(r.Context(), bson.M{}, nil)
+	if err != nil {
+		log.Printf("Admin debug users error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch users"})
+		return
+	}
+	defer cursor.Close(r.Context())
+
+	var users []models.User
+	if err = cursor.All(r.Context(), &users); err != nil {
+		log.Printf("Admin debug users decode error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode users"})
+		return
+	}
+
+	log.Printf("Admin debug found %d total users", len(users))
+
+	// Return first few users for debugging
+	var debugUsers []map[string]interface{}
+	for i, user := range users {
+		if i >= 5 { // Limit to first 5 users
+			break
+		}
+		debugUsers = append(debugUsers, map[string]interface{}{
+			"id":       user.ID,
+			"email":    user.Details.Email,
+			"username": user.Details.Username,
+			"name":     user.Details.Name,
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"totalUsers": len(users),
+		"sampleUsers": debugUsers,
+	})
+}
+
+// AdminDebugCommunitiesHandler lists all communities for debugging
+func (h Admin) AdminDebugCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get all communities
+	cursor, err := h.CDB.Find(r.Context(), bson.M{}, nil)
+	if err != nil {
+		log.Printf("Admin debug communities error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch communities"})
+		return
+	}
+	defer cursor.Close(r.Context())
+
+	var communities []models.Community
+	if err = cursor.All(r.Context(), &communities); err != nil {
+		log.Printf("Admin debug communities decode error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode communities"})
+		return
+	}
+
+	log.Printf("Admin debug found %d total communities", len(communities))
+
+	// Return first few communities for debugging
+	var debugCommunities []map[string]interface{}
+	for i, community := range communities {
+		if i >= 5 { // Limit to first 5 communities
+			break
+		}
+		debugCommunities = append(debugCommunities, map[string]interface{}{
+			"id":   community.ID.Hex(),
+			"name": community.Details.Name,
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"totalCommunities": len(communities),
+		"sampleCommunities": debugCommunities,
+	})
 }
 
 
