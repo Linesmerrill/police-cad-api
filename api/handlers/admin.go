@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -14,11 +15,13 @@ import (
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 	templates "github.com/linesmerrill/police-cad-api/templates/html"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type adminLoginRequest struct {
@@ -39,6 +42,8 @@ type adminLoginResponse struct {
 type Admin struct {
 	ADB databases.AdminDatabase
 	RDB databases.AdminResetDatabase
+	UDB databases.UserDatabase
+	CDB databases.CommunityDatabase
 }
 
 // AdminLoginHandler handles admin login via email/password and returns a JWT
@@ -238,6 +243,371 @@ func sendResetEmail(toEmail, resetLink string) error {
 	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
 	_, err := client.Send(msg)
 	return err
+}
+
+// Admin console handlers
+
+type userSearchRequest struct {
+	Query string `json:"query"`
+}
+
+type userSearchResponse struct {
+	Users []models.AdminUserResult `json:"users"`
+}
+
+// AdminUserSearchHandler searches for users by email or username
+func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req userSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
+		return
+	}
+
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "query required"})
+		return
+	}
+
+	// Search by email (case-insensitive)
+	filter := bson.M{"user.email": bson.M{"$regex": query, "$options": "i"}}
+	
+	// Use existing user database to search
+	cursor, err := h.UDB.Find(r.Context(), filter, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
+		return
+	}
+
+	var results []models.AdminUserResult
+	for cursor.Next(r.Context()) {
+		var user models.User
+		if err := cursor.Decode(&user); err != nil {
+			continue
+		}
+		
+		result := models.AdminUserResult{
+			ID:        user.ID,
+			Email:     user.Details.Email,
+			Username:  user.Details.Username,
+			Active:    !user.Details.IsDeactivated,
+			CreatedAt: user.Details.CreatedAt,
+		}
+		results = append(results, result)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(userSearchResponse{Users: results})
+}
+
+type communitySearchRequest struct {
+	Query string `json:"query"`
+}
+
+type communitySearchResponse struct {
+	Communities []models.AdminCommunityResult `json:"communities"`
+}
+
+// AdminCommunitySearchHandler searches for communities by name
+func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req communitySearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
+		return
+	}
+
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "query required"})
+		return
+	}
+
+	// Search by community name (case-insensitive)
+	filter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
+	
+	cursor, err := h.CDB.Find(r.Context(), filter, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
+		return
+	}
+
+	var results []models.AdminCommunityResult
+	for cursor.Next(r.Context()) {
+		var community models.Community
+		if err := cursor.Decode(&community); err != nil {
+			continue
+		}
+		
+		// Get owner info
+		var ownerInfo *models.OwnerInfo
+		if community.Details.OwnerID != "" {
+			ownerResult := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID})
+			var ownerUser models.User
+			if err := ownerResult.Decode(&ownerUser); err == nil {
+				ownerInfo = &models.OwnerInfo{
+					ID:    ownerUser.ID,
+					Email: ownerUser.Details.Email,
+				}
+			}
+		}
+
+		result := models.AdminCommunityResult{
+			ID:          community.ID.Hex(),
+			Name:        community.Details.Name,
+			Active:      true, // TODO: Add active field to community model
+			CreatedAt:   community.Details.CreatedAt,
+			Owner:       ownerInfo,
+			MemberCount: community.Details.MembersCount,
+		}
+		results = append(results, result)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(communitySearchResponse{Communities: results})
+}
+
+type userDetailsResponse struct {
+	User models.AdminUserDetails `json:"user"`
+}
+
+// AdminUserDetailsHandler gets detailed user information
+func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract user ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid user ID"})
+		return
+	}
+	userID := pathParts[len(pathParts)-1]
+
+	// Check if user exists
+	userResult := h.UDB.FindOne(r.Context(), bson.M{"_id": userID})
+	
+	var user models.User
+	if err := userResult.Decode(&user); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch user"})
+		}
+		return
+	}
+
+	// TODO: Get user communities and implement member counting
+	var userCommunities []models.AdminUserCommunity
+
+	details := models.AdminUserDetails{
+		ID:          user.ID,
+		Email:       user.Details.Email,
+		Username:    user.Details.Username,
+		Active:      !user.Details.IsDeactivated,
+		CreatedAt:   user.Details.CreatedAt,
+		Communities: userCommunities,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(userDetailsResponse{User: details})
+}
+
+type communityDetailsResponse struct {
+	Community models.AdminCommunityDetails `json:"community"`
+}
+
+// AdminCommunityDetailsHandler gets detailed community information
+func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract community ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		return
+	}
+	communityID := pathParts[len(pathParts)-1]
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID format"})
+		return
+	}
+
+	community, err := h.CDB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "community not found"})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch community"})
+		}
+		return
+	}
+
+	// Get owner info
+	var ownerInfo *models.OwnerInfo
+	if community.Details.OwnerID != "" {
+		ownerResult := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID})
+		var ownerUser models.User
+		if err := ownerResult.Decode(&ownerUser); err == nil {
+			ownerInfo = &models.OwnerInfo{
+				ID:    ownerUser.ID,
+				Email: ownerUser.Details.Email,
+			}
+		}
+	}
+
+	// TODO: Get departments and implement member counting
+	var depts []models.CommunityDept
+
+	details := models.AdminCommunityDetails{
+		ID:          community.ID.Hex(),
+		Name:        community.Details.Name,
+		Active:      true, // TODO: Add active field to community model
+		CreatedAt:   community.Details.CreatedAt,
+		Owner:       ownerInfo,
+		MemberCount: community.Details.MembersCount,
+		Departments: depts,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(communityDetailsResponse{Community: details})
+}
+
+// AdminUserResetPasswordHandler sends a password reset email for a user
+func (h Admin) AdminUserResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract user ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid user ID"})
+		return
+	}
+	userID := pathParts[len(pathParts)-2]
+
+	// Check if user exists
+	userResult := h.UDB.FindOne(r.Context(), bson.M{"_id": userID})
+	var user models.User
+	if err := userResult.Decode(&user); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		return
+	}
+
+	// Create reset token
+	plain, hashHex, genErr := generateResetToken()
+	if genErr == nil {
+		_, _ = h.RDB.InsertOne(r.Context(), models.AdminPasswordReset{
+			AdminID:   primitive.NewObjectID(), // Generate new ID for reset
+			TokenHash: hashHex,
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+		})
+		_ = sendUserResetEmail(user.Details.Email, buildUserResetLink(os.Getenv("PUBLIC_WEB_BASE_URL"), plain))
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "reset email sent"})
+}
+
+type tempPasswordResponse struct {
+	TempPassword string `json:"tempPassword"`
+}
+
+// AdminUserTempPasswordHandler generates a temporary password for a user
+func (h Admin) AdminUserTempPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract user ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid user ID"})
+		return
+	}
+	userID := pathParts[len(pathParts)-2]
+
+	// Check if user exists
+	userResult := h.UDB.FindOne(r.Context(), bson.M{"_id": userID})
+	var user models.User
+	if err := userResult.Decode(&user); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		return
+	}
+
+	// Generate temp password
+	tempPassword := generateTempPassword()
+	hash, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
+		return
+	}
+
+	// Update user password
+	_, err = h.UDB.UpdateOne(r.Context(), bson.M{"_id": userID}, bson.M{"$set": bson.M{"user.password": string(hash), "updatedAt": time.Now()}})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update password"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(tempPasswordResponse{TempPassword: tempPassword})
+}
+
+// Helper functions
+func buildUserResetLink(baseURL, token string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = "https://www.linespolice-cad.com"
+	}
+	return base + "/reset-password?token=" + token
+}
+
+func sendUserResetEmail(toEmail, resetLink string) error {
+	from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
+	subject := "LPC-APP Password Reset"
+	to := mail.NewEmail("", toEmail)
+	plain := "Reset your password using this link: " + resetLink
+	html := templates.RenderAdminPasswordReset(resetLink)
+	msg := mail.NewSingleEmail(from, subject, to, plain, html)
+	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
+	_, err := client.Send(msg)
+	return err
+}
+
+func generateTempPassword() string {
+	// Generate a readable temp password
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 8)
+	for i := range b {
+		// Use crypto/rand to get a random byte and map it to charset
+		randBytes := make([]byte, 1)
+		rand.Read(randBytes)
+		b[i] = charset[int(randBytes[0])%len(charset)]
+	}
+	return string(b)
 }
 
 

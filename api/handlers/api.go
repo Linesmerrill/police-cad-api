@@ -59,7 +59,12 @@ func (a *App) New() *mux.Router {
 		UDB: databases.NewUserDatabase(a.dbHelper),
 		CDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
-	adminHandler := Admin{ADB: databases.NewAdminDatabase(a.dbHelper), RDB: databases.NewAdminResetDatabase(a.dbHelper)}
+	adminHandler := Admin{
+		ADB: databases.NewAdminDatabase(a.dbHelper), 
+		RDB: databases.NewAdminResetDatabase(a.dbHelper),
+		UDB: databases.NewUserDatabase(a.dbHelper),
+		CDB: databases.NewCommunityDatabase(a.dbHelper),
+	}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -73,6 +78,14 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/login", http.HandlerFunc(adminHandler.AdminLoginHandler)).Methods("POST")
 	apiCreate.Handle("/admin/forgot-password", http.HandlerFunc(adminHandler.AdminForgotPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reset-password", http.HandlerFunc(adminHandler.AdminResetPasswordHandler)).Methods("POST")
+	
+	// Admin console routes
+	apiCreate.Handle("/admin/search/users", http.HandlerFunc(adminHandler.AdminUserSearchHandler)).Methods("POST")
+	apiCreate.Handle("/admin/search/communities", http.HandlerFunc(adminHandler.AdminCommunitySearchHandler)).Methods("POST")
+	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
+	apiCreate.Handle("/admin/users/{id}/temp-password", http.HandlerFunc(adminHandler.AdminUserTempPasswordHandler)).Methods("POST")
 
 	apiCreate.Handle("/verify/send-verification-code", http.HandlerFunc(pv.CreatePendingVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/verify/verify-code", http.HandlerFunc(pv.VerifyCodeHandler)).Methods("POST")
