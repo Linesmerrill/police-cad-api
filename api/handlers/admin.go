@@ -24,6 +24,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 	templates "github.com/linesmerrill/police-cad-api/templates/html"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/gorilla/mux"
 )
 
 type adminLoginRequest struct {
@@ -73,9 +74,14 @@ func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password)); err != nil {
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(req.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid credentials"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid credentials",
+			Code:    "INVALID_CREDENTIALS",
+		})
 		return
 	}
 
@@ -806,14 +812,29 @@ func generateTempPassword() string {
 	return string(b)
 }
 
-// Helper function to check if current user can create admins
-func canCreateAdmins(currentUser models.AdminUser) bool {
-	for _, role := range currentUser.Roles {
-		if role == "owner" || role == "admin" {
-			return true
+// canCreateAdmins checks if the current user has permission to create admin users
+func canCreateAdmins(currentUser *models.AdminUser) bool {
+	if currentUser == nil {
+		return false
+	}
+	// Check if user has owner role (either in legacy field or roles array)
+	if currentUser.Role == "owner" {
+		return true
+	}
+	if currentUser.Roles != nil {
+		for _, role := range currentUser.Roles {
+			if role == "owner" {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// isValidEmail checks if an email address is valid
+func isValidEmail(email string) bool {
+	// Simple email validation - you might want to use a more robust library
+	return strings.Contains(email, "@") && strings.Contains(email, ".")
 }
 
 // CreateAdminUserHandler creates a new admin user
@@ -823,6 +844,17 @@ func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
 	// TODO: Get current admin user from JWT token for permission check
 	// For now, we'll assume the request is authorized
 	// currentUser := getCurrentAdminUser(r)
+
+	// Check if current user can create admins
+	if !canCreateAdmins(nil) { // Pass nil for currentUser as it's not available here
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Insufficient permissions to create admin users",
+			Code:    "PERMISSION_DENIED",
+		})
+		return
+	}
 
 	// Parse request body
 	var req models.CreateAdminUserRequest
@@ -837,35 +869,23 @@ func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate email format
-	if req.Email == "" {
+	if !isValidEmail(req.Email) {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 			Success: false,
-			Error:   "Email address is required",
-			Code:    "VALIDATION_ERROR",
-		})
-		return
-	}
-
-	// Validate role
-	if req.Role != "admin" && req.Role != "owner" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-			Success: false,
-			Error:   "Role must be 'admin' or 'owner'",
+			Error:   "Invalid email format",
 			Code:    "VALIDATION_ERROR",
 		})
 		return
 	}
 
 	// Check if admin user already exists
-	_, err := h.ADB.FindOne(r.Context(), bson.M{"email": req.Email})
-	if err == nil {
-		// Admin user exists
+	existingAdmin, err := h.ADB.FindOne(r.Context(), bson.M{"email": req.Email})
+	if err == nil && existingAdmin != nil {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 			Success: false,
-			Error:   "Admin user with this email already exists",
+			Error:   "User with this email already exists",
 			Code:    "DUPLICATE_USER",
 		})
 		return
@@ -874,17 +894,17 @@ func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
 	// Create new admin user
 	adminUser := models.AdminUser{
 		Email:     req.Email,
-		Roles:     []string{req.Role},
+		Role:      req.Role,
+		Roles:     []string{req.Role}, // Initialize roles array with the single role
 		Active:    true,
 		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		CreatedBy: "system", // TODO: Get from JWT token
+		CreatedBy: "System", // Assuming system created for now
 	}
 
 	// Insert admin user into database
 	result, err := h.ADB.InsertOne(r.Context(), adminUser)
 	if err != nil {
-		log.Printf("Failed to create admin user: %v", err)
+		log.Printf("Admin user creation error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 			Success: false,
@@ -894,13 +914,11 @@ func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set the ID from the insert result
+	// Get the inserted ID
 	insertedID := result.Decode()
-	if oid, ok := insertedID.(primitive.ObjectID); ok {
-		adminUser.ID = oid
-	}
+	adminUser.ID = insertedID.(primitive.ObjectID)
 
-	// Generate reset token and link
+	// Generate password reset token
 	resetToken := generateAdminResetToken()
 	expiresAt := time.Now().Add(24 * time.Hour)
 	
@@ -924,7 +942,14 @@ func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
 	// Build reset link
 	resetLink := buildAdminResetLink(os.Getenv("PUBLIC_WEB_BASE_URL"), resetToken)
 
-	// Return success response
+	// Send password reset email
+	err = sendAdminResetEmail(req.Email, resetLink)
+	if err != nil {
+		log.Printf("Admin reset email error: %v", err)
+		// Don't fail the request, just log the error
+		// The admin user was created successfully
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(models.CreateAdminUserResponse{
 		Success:   true,
@@ -1208,19 +1233,10 @@ func (h Admin) AdminChangeRoleHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Extract admin ID from URL path
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 6 {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-			Success: false,
-			Error:   "Invalid admin ID",
-			Code:    "VALIDATION_ERROR",
-		})
-		return
-	}
-	adminID := pathParts[len(pathParts)-2]
+	vars := mux.Vars(r)
+	adminID := vars["id"]
 
-	// Validate ObjectID
+	// Validate admin ID format
 	objectID, err := primitive.ObjectIDFromHex(adminID)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1255,37 +1271,38 @@ func (h Admin) AdminChangeRoleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find admin user first
-	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	// Get current admin user
+	adminUser, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
+		if err == mongo.ErrNoDocuments {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 				Success: false,
 				Error:   "Admin user not found",
-				Code:    "USER_NOT_FOUND",
+				Code:    "NOT_FOUND",
 			})
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-				Success: false,
-				Error:   "Failed to fetch admin user",
-				Code:    "DATABASE_ERROR",
-			})
+			return
 		}
+		log.Printf("Admin change role error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to fetch admin user",
+			Code:    "DATABASE_ERROR",
+		})
 		return
 	}
 
-	// Update admin role
-	newRoles := []string{req.Role}
-	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{
+	// Update admin with new role
+	update := bson.M{
 		"$set": bson.M{
-			"roles":     newRoles,
-			"updatedAt": time.Now(),
+			"role": req.Role,
 		},
-	})
+	}
+
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": objectID}, update)
 	if err != nil {
-		log.Printf("Failed to update admin role: %v", err)
+		log.Printf("Admin change role update error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 			Success: false,
@@ -1295,18 +1312,150 @@ func (h Admin) AdminChangeRoleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update the admin object for response
-	admin.Roles = newRoles
-	admin.UpdatedAt = time.Now()
+	// Update the local admin user object
+	adminUser.Role = req.Role
 
-	// Return success response
+	// Track the action
+	h.trackAdminAction(objectID, "role_change", adminID, "admin", fmt.Sprintf("Role changed to: %s", req.Role), r)
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(models.ChangeRoleResponse{
 		Success: true,
-		Message: fmt.Sprintf("Admin role changed to %s successfully", req.Role),
-		Admin:   *admin,
+		Message: "Admin role updated successfully",
+		Admin:   *adminUser,
 	})
 }
+
+// AdminChangeRolesHandler changes an admin's roles (array-based)
+func (h Admin) AdminChangeRolesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from URL path
+	vars := mux.Vars(r)
+	adminID := vars["id"]
+
+	// Validate admin ID format
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Parse request body
+	var req models.ChangeRolesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate roles array
+	if len(req.Roles) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Admin must have at least one role",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate each role
+	for _, role := range req.Roles {
+		if role != "admin" && role != "owner" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   fmt.Sprintf("Invalid role: %s. Role must be 'admin' or 'owner'", role),
+				Code:    "VALIDATION_ERROR",
+			})
+			return
+		}
+	}
+
+	// Get current admin user
+	adminUser, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Admin user not found",
+				Code:    "NOT_FOUND",
+			})
+			return
+		}
+		log.Printf("Admin change roles error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to fetch admin user",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Check if we're removing the last owner role
+	if adminUser.Role == "owner" && !contains(req.Roles, "owner") {
+		// Count how many owners exist
+		ownerCount, err := h.ADB.CountDocuments(r.Context(), bson.M{"role": "owner"})
+		if err == nil && ownerCount <= 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Cannot remove the last owner role. At least one owner must remain.",
+				Code:    "PERMISSION_DENIED",
+			})
+			return
+		}
+	}
+
+	// Update admin with new roles
+	update := bson.M{
+		"$set": bson.M{
+			"roles": req.Roles,
+			"role":  req.Roles[0], // Keep legacy field for backward compatibility
+		},
+	}
+
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": objectID}, update)
+	if err != nil {
+		log.Printf("Admin change roles update error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to update admin roles",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Update the local admin user object
+	adminUser.Roles = req.Roles
+	adminUser.Role = req.Roles[0] // Legacy field
+
+	// Track the action
+	rolesStr := strings.Join(req.Roles, ", ")
+	h.trackAdminAction(objectID, "roles_change", adminID, "admin", fmt.Sprintf("Roles changed to: %s", rolesStr), r)
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.ChangeRoleResponse{
+		Success: true,
+		Message: "Admin roles updated successfully",
+		Admin:   *adminUser,
+	})
+}
+
+
 
 // AdminDeleteAdminHandler deletes an admin user
 func (h Admin) AdminDeleteAdminHandler(w http.ResponseWriter, r *http.Request) {

@@ -5,17 +5,17 @@ import (
 	"time"
 )
 
-// AdminUser represents an administrative user for platform management
+// AdminUser represents an admin user in the system
 type AdminUser struct {
-	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Email        string             `bson:"email" json:"email"`
-	PasswordHash string             `bson:"passwordHash" json:"-"`
-	Active       bool               `bson:"active" json:"active"`
-	Roles        []string           `bson:"roles" json:"roles"`
-	Permissions  map[string]bool    `bson:"permissions,omitempty" json:"permissions,omitempty"`
-	CreatedAt    interface{}        `bson:"createdAt" json:"createdAt"`
-	UpdatedAt    interface{}        `bson:"updatedAt" json:"updatedAt"`
-	CreatedBy    string             `bson:"createdBy,omitempty" json:"createdBy,omitempty"`
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Email     string             `bson:"email" json:"email"`
+	Password  string             `bson:"password" json:"-"`
+	Role      string             `bson:"role" json:"role"` // Legacy field for backward compatibility
+	Roles     []string           `bson:"roles" json:"roles"` // New array-based roles
+	Active    bool               `bson:"active" json:"active"`
+	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
+	CreatedBy string             `bson:"createdBy" json:"createdBy"`
+	LastLoginAt *time.Time       `bson:"lastLoginAt,omitempty" json:"lastLoginAt,omitempty"`
 }
 
 // CreateAdminUserRequest represents the request to create a new admin user
@@ -69,15 +69,20 @@ type AdminDetailsResponse struct {
 	Admin   AdminUser `json:"admin"`
 }
 
-// ChangeRoleRequest represents the request to change an admin's role
+// ChangeRoleRequest represents a request to change an admin's role
 type ChangeRoleRequest struct {
 	Role string `json:"role" validate:"required,oneof=admin owner"`
 }
 
+// ChangeRolesRequest represents a request to change an admin's roles
+type ChangeRolesRequest struct {
+	Roles []string `json:"roles" validate:"required,min=1,dive,oneof=admin owner"`
+}
+
 // ChangeRoleResponse represents the response when changing an admin's role
 type ChangeRoleResponse struct {
-	Success bool      `json:"success"`
-	Message string    `json:"message"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 	Admin   AdminUser `json:"admin"`
 }
 

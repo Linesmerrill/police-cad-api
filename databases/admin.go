@@ -89,13 +89,13 @@ func EnsureHeadAdmin(db DatabaseHelper) error {
 		return err
 	}
 	admin := models.AdminUser{
-		Email:        headEmail,
-		PasswordHash: string(hash),
-		Active:       true,
-		Roles:        []string{"owner", "admin"},
-		Permissions:  map[string]bool{"*": true},
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		Email:     headEmail,
+		Password:  string(hash),
+		Role:      "owner",
+		Roles:     []string{"owner", "admin"},
+		Active:    true,
+		CreatedAt: time.Now(),
+		CreatedBy: "system",
 	}
 	_, err = db.Collection(adminCollectionName).InsertOne(ctx, admin)
 	return err
