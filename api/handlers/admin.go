@@ -420,19 +420,30 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := pathParts[len(pathParts)-1]
 
-	// Check if user exists
-	userResult := h.UDB.FindOne(r.Context(), bson.M{"_id": userID})
-	
+	// Try string ID first
 	var user models.User
-	if err := userResult.Decode(&user); err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
+	err := h.UDB.FindOne(r.Context(), bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		// If that fails, try ObjectID form
+		if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+			var userObj struct {
+				ID      primitive.ObjectID `bson:"_id"`
+				Details models.UserDetails `bson:"user"`
+				Version int32             `bson:"__v"`
+			}
+			if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
+				user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
+				// proceed
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+				return
+			}
+		} else {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch user"})
+			return
 		}
-		return
 	}
 
 	// TODO: Get user communities and implement member counting
@@ -531,20 +542,35 @@ func (h Admin) AdminUserResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 	}
 	userID := pathParts[len(pathParts)-2]
 
-	// Check if user exists
-	userResult := h.UDB.FindOne(r.Context(), bson.M{"_id": userID})
+	// Check if user exists (string ID first, then ObjectID)
 	var user models.User
-	if err := userResult.Decode(&user); err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
-		return
+	err := h.UDB.FindOne(r.Context(), bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+			var userObj struct {
+				ID      primitive.ObjectID `bson:"_id"`
+				Details models.UserDetails `bson:"user"`
+				Version int32             `bson:"__v"`
+			}
+			if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
+				user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+			return
+		}
 	}
 
 	// Create reset token
 	plain, hashHex, genErr := generateResetToken()
 	if genErr == nil {
 		_, _ = h.RDB.InsertOne(r.Context(), models.AdminPasswordReset{
-			AdminID:   primitive.NewObjectID(), // Generate new ID for reset
+			AdminID:   primitive.NewObjectID(), // placeholder association
 			TokenHash: hashHex,
 			ExpiresAt: time.Now().Add(1 * time.Hour),
 			CreatedAt: time.Now(),
@@ -573,13 +599,28 @@ func (h Admin) AdminUserTempPasswordHandler(w http.ResponseWriter, r *http.Reque
 	}
 	userID := pathParts[len(pathParts)-2]
 
-	// Check if user exists
-	userResult := h.UDB.FindOne(r.Context(), bson.M{"_id": userID})
+	// Check if user exists (string ID first, then ObjectID)
 	var user models.User
-	if err := userResult.Decode(&user); err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
-		return
+	err := h.UDB.FindOne(r.Context(), bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+			var userObj struct {
+				ID      primitive.ObjectID `bson:"_id"`
+				Details models.UserDetails `bson:"user"`
+				Version int32             `bson:"__v"`
+			}
+			if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
+				user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+			return
+		}
 	}
 
 	// Generate temp password
@@ -591,8 +632,13 @@ func (h Admin) AdminUserTempPasswordHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Update user password
-	_, err = h.UDB.UpdateOne(r.Context(), bson.M{"_id": userID}, bson.M{"$set": bson.M{"user.password": string(hash), "updatedAt": time.Now()}})
+	// Update user password: support both string and ObjectID filters
+	filter := bson.M{"_id": userID}
+	if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+		filter = bson.M{"$or": []bson.M{{"_id": userID}, {"_id": oid}}}
+	}
+
+	_, err = h.UDB.UpdateOne(r.Context(), filter, bson.M{"$set": bson.M{"user.password": string(hash), "updatedAt": time.Now()}})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update password"})
