@@ -20,11 +20,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 	templates "github.com/linesmerrill/police-cad-api/templates/html"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"github.com/gorilla/mux"
 )
 
 type adminLoginRequest struct {
