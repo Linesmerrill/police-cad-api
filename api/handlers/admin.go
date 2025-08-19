@@ -41,12 +41,13 @@ type adminLoginResponse struct {
 	} `json:"admin"`
 }
 
-// Admin holds dependencies for admin endpoints
+// Admin represents the admin handler
 type Admin struct {
 	ADB databases.AdminDatabase
 	RDB databases.AdminResetDatabase
 	UDB databases.UserDatabase
 	CDB databases.CommunityDatabase
+	AADB databases.AdminActivityDatabase
 }
 
 // AdminLoginHandler handles admin login via email/password and returns a JWT
@@ -1670,7 +1671,7 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build activity data
-	activity := models.AdminActivity{
+	activity := models.AdminActivityData{
 		TotalLogins:    0,
 		PasswordResets: 0,
 		TempPasswords:  0,
@@ -1782,9 +1783,25 @@ func (h Admin) trackAdminLogin(adminID primitive.ObjectID, r *http.Request) {
 		ip = r.RemoteAddr
 	}
 
-	// Create login activity record (placeholder for now)
-	// This would store in a dedicated activity collection
-	log.Printf("Admin login tracked: %s from IP %s", adminID.Hex(), ip)
+	// Create login activity record
+	loginActivity := models.AdminActivityStorage{
+		AdminID:   adminID.Hex(),
+		Type:      "login",
+		Title:     "Admin logged in",
+		Details:   fmt.Sprintf("IP: %s", ip),
+		Timestamp: time.Now(),
+		IP:        ip,
+		CreatedAt: time.Now(),
+	}
+
+	// Store in database
+	var err error
+	_, err = h.AADB.InsertOne(r.Context(), loginActivity)
+	if err != nil {
+		log.Printf("Failed to log admin login activity: %v", err)
+	} else {
+		log.Printf("Admin login tracked: %s from IP %s", adminID.Hex(), ip)
+	}
 }
 
 // trackAdminLogout tracks when an admin logs out
@@ -1817,6 +1834,65 @@ func (h Admin) trackAdminAction(adminID primitive.ObjectID, actionType, targetID
 	// Create action activity record (placeholder for now)
 	// This would store in a dedicated activity collection
 	log.Printf("Admin action tracked: %s performed %s on %s: %s from IP %s", adminID.Hex(), actionType, targetType, details, ip)
+}
+
+// AdminActivityLogHandler logs admin activity events
+func (h Admin) AdminActivityLogHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse request body
+	var req models.AdminActivityLogRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.AdminID == "" || req.Type == "" || req.Title == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Missing required fields",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Create activity record
+	activity := models.AdminActivityStorage{
+		AdminID:   req.AdminID,
+		Type:      req.Type,
+		Title:     req.Title,
+		Details:   req.Details,
+		Timestamp: req.Timestamp,
+		IP:        req.IP,
+		CreatedAt: time.Now(),
+	}
+
+	// Insert into database
+	_, err := h.AADB.InsertOne(r.Context(), activity)
+	if err != nil {
+		log.Printf("Error logging admin activity: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to log activity",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Return success
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Activity logged successfully",
+	})
 }
 
 

@@ -108,15 +108,33 @@ type AdminResetDatabase interface {
     UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 }
 
+// AdminActivityDatabase provides access to the admin activity collection
+type AdminActivityDatabase interface {
+	InsertOne(ctx context.Context, activity models.AdminActivityStorage, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
+	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
+	Aggregate(ctx context.Context, pipeline interface{}, opts ...*options.AggregateOptions) (*MongoCursor, error)
+}
+
 const adminResetCollectionName = "admin_password_resets"
+const adminActivityCollectionName = "admin_activity"
 
 type adminResetDatabase struct {
     db DatabaseHelper
 }
 
+type adminActivityDatabase struct {
+	db DatabaseHelper
+}
+
 // NewAdminResetDatabase initializes the admin reset database helper
 func NewAdminResetDatabase(db DatabaseHelper) AdminResetDatabase {
     return &adminResetDatabase{db: db}
+}
+
+// NewAdminActivityDatabase initializes the admin activity database helper
+func NewAdminActivityDatabase(db DatabaseHelper) AdminActivityDatabase {
+	return &adminActivityDatabase{db: db}
 }
 
 func (r *adminResetDatabase) InsertOne(ctx context.Context, reset models.AdminPasswordReset, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
@@ -134,6 +152,22 @@ func (r *adminResetDatabase) FindOne(ctx context.Context, filter interface{}, op
 
 func (r *adminResetDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
     return r.db.Collection(adminResetCollectionName).UpdateOne(ctx, filter, update, opts...)
+}
+
+func (a *adminActivityDatabase) InsertOne(ctx context.Context, activity models.AdminActivityStorage, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	return a.db.Collection(adminActivityCollectionName).InsertOne(ctx, activity, opts...)
+}
+
+func (a *adminActivityDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error) {
+	return a.db.Collection(adminActivityCollectionName).Find(ctx, filter, opts...)
+}
+
+func (a *adminActivityDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	return a.db.Collection(adminActivityCollectionName).CountDocuments(ctx, filter, opts...)
+}
+
+func (a *adminActivityDatabase) Aggregate(ctx context.Context, pipeline interface{}, opts ...*options.AggregateOptions) (*MongoCursor, error) {
+	return a.db.Collection(adminActivityCollectionName).Aggregate(ctx, pipeline, opts...)
 }
 
 
