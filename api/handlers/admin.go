@@ -623,7 +623,7 @@ func (h Admin) AdminUserResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Generate reset token and expiration
-	resetToken := generateSecureToken()
+	resetToken := generateUserResetToken()
 	expiresAt := time.Now().Add(24 * time.Hour)
 	
 	// Hash the token for storage
@@ -766,116 +766,10 @@ func (h Admin) AdminUserTempPasswordHandler(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// AdminInitiateUserResetHandler securely initiates a password reset for a user
-func (h Admin) AdminInitiateUserResetHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+// Note: AdminInitiateUserResetHandler removed - frontend will use existing /forgot-password route directly
+// This simplifies the system by leveraging existing password reset logic instead of duplicating it
 
-	// Extract user ID from URL path
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 6 {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-			Success: false,
-			Error:   "Invalid user ID",
-			Code:    "VALIDATION_ERROR",
-		})
-		return
-	}
-	userID := pathParts[len(pathParts)-1]
-
-	// Validate ObjectID
-	objectID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-			Success: false,
-			Error:   "Invalid user ID format",
-			Code:    "VALIDATION_ERROR",
-		})
-		return
-	}
-
-	// Get user from database
-	var user models.User
-	err = h.UDB.FindOne(r.Context(), bson.M{"_id": objectID}).Decode(&user)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-				Success: false,
-				Error:   "User not found",
-				Code:    "NOT_FOUND",
-			})
-			return
-		}
-		log.Printf("Admin initiate user reset error: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-			Success: false,
-			Error:   "Failed to fetch user",
-			Code:    "DATABASE_ERROR",
-		})
-		return
-	}
-
-	// Generate secure reset token
-	resetToken := generateSecureToken()
-	hashedToken := hashToken(resetToken)
-
-	// Set expiration (24 hours from now)
-	expiresAt := time.Now().Add(24 * time.Hour)
-
-	// Update user with reset token
-	_, err = h.UDB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{
-		"$set": bson.M{
-			"user.resetPasswordToken": hashedToken,
-			"user.resetPasswordExpires": expiresAt,
-		},
-	})
-	if err != nil {
-		log.Printf("Admin initiate user reset update error: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-			Success: false,
-			Error:   "Failed to initiate password reset",
-			Code:    "DATABASE_ERROR",
-		})
-		return
-	}
-
-	// Build reset link
-	resetLink := buildUserResetLink(resetToken)
-
-	// Send email to user
-	emailErr := sendUserResetEmail(user.Details.Email, resetLink)
-	if emailErr != nil {
-		log.Printf("Error sending reset email: %v", emailErr)
-		// Don't fail the request, just log the error
-	}
-
-	// Track the action
-	h.trackAdminAction(objectID, "user_reset_initiated", userID, "user", fmt.Sprintf("Initiated password reset for user: %s", user.Details.Email), r)
-
-	// Return success (NO password or token shown)
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Password reset initiated successfully",
-		"emailSent": emailErr == nil,
-		"userEmail": user.Details.Email,
-	})
-}
-
-// Helper functions for secure password reset and temporary password generation
-
-// generateSecureToken generates a cryptographically secure random token
-func generateSecureToken() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
-
+// Helper functions for temporary password generation (kept for backward compatibility)
 
 // generateTempPassword generates a readable temporary password
 func generateTempPassword() string {
@@ -888,6 +782,18 @@ func generateTempPassword() string {
 		b[i] = charset[int(randBytes[0])%len(charset)]
 	}
 	return string(b)
+}
+
+// generateUserResetToken generates a secure random token for user password reset
+func generateUserResetToken() string {
+	// Generate a secure random token for user password reset
+	buf := make([]byte, 32)
+	_, err := rand.Read(buf)
+	if err != nil {
+		// Fallback to timestamp-based token if crypto/rand fails
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 // buildUserResetLink creates the password reset link for users

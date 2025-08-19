@@ -86,7 +86,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
-	apiCreate.Handle("/admin/users/{id}/initiate-reset", http.HandlerFunc(adminHandler.AdminInitiateUserResetHandler)).Methods("POST")
+	// Note: initiate-reset route removed - frontend will use existing /forgot-password route directly
 	
 	// Admin user management routes
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")
