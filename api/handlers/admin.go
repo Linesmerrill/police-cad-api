@@ -622,8 +622,8 @@ func (h Admin) AdminUserResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Generate reset token for regular user (24 hour expiration)
-	resetToken := generateUserResetToken()
+	// Generate reset token and expiration
+	resetToken := generateSecureToken()
 	expiresAt := time.Now().Add(24 * time.Hour)
 	
 	// Hash the token for storage
@@ -650,7 +650,7 @@ func (h Admin) AdminUserResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 	}
 	
 	// Build reset link for regular user (not admin)
-	resetLink := buildUserResetLink(os.Getenv("PUBLIC_WEB_BASE_URL"), resetToken)
+	resetLink := buildUserResetLink(resetToken)
 	
 	// Send email to user using regular user template
 	err = sendUserResetEmail(user.Details.Email, resetLink)
@@ -676,70 +676,231 @@ func (h Admin) AdminUserTempPasswordHandler(w http.ResponseWriter, r *http.Reque
 	pathParts := strings.Split(r.URL.Path, "/")
 	if len(pathParts) < 6 {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid user ID"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid user ID",
+			Code:    "VALIDATION_ERROR",
+		})
 		return
 	}
-	userID := pathParts[len(pathParts)-2]
+	userID := pathParts[len(pathParts)-1]
 
-	// Check if user exists (string ID first, then ObjectID)
-	var user models.User
-	err := h.UDB.FindOne(r.Context(), bson.M{"_id": userID}).Decode(&user)
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
-		if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
-			var userObj struct {
-				ID      primitive.ObjectID `bson:"_id"`
-				Details models.UserDetails `bson:"user"`
-				Version int32             `bson:"__v"`
-			}
-			if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
-				user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
-			} else {
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
-				return
-			}
-		} else {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid user ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Get user from database
+	var user models.User
+	err = h.UDB.FindOne(r.Context(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
 			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "User not found",
+				Code:    "NOT_FOUND",
+			})
 			return
 		}
+		log.Printf("Admin user temp password error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to fetch user",
+			Code:    "DATABASE_ERROR",
+		})
+		return
 	}
 
-	// Generate temp password
+	// Generate temporary password
 	tempPassword := generateTempPassword()
-	hash, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
+
+	// Hash the temporary password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
 	if err != nil {
+		log.Printf("Admin user temp password hash error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to generate password hash",
+			Code:    "DATABASE_ERROR",
+		})
 		return
 	}
 
-	// Update user password: support both string and ObjectID filters
-	filter := bson.M{"_id": userID}
-	if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
-		filter = bson.M{"$or": []bson.M{{"_id": userID}, {"_id": oid}}}
-	}
-
-	_, err = h.UDB.UpdateOne(r.Context(), filter, bson.M{"$set": bson.M{"user.password": string(hash), "updatedAt": time.Now()}})
+	// Update user with temporary password
+	_, err = h.UDB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"user.password": string(hashedPassword),
+		},
+	})
 	if err != nil {
+		log.Printf("Admin user temp password update error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update password"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to update user password",
+			Code:    "DATABASE_ERROR",
+		})
 		return
 	}
 
+	// Track the action
+	h.trackAdminAction(objectID, "temp_password_created", userID, "user", fmt.Sprintf("Temporary password created for user: %s", user.Details.Email), r)
+
+	// Return temporary password
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(tempPasswordResponse{TempPassword: tempPassword})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Temporary password created successfully",
+		"tempPassword": tempPassword,
+		"userEmail": user.Details.Email,
+	})
 }
 
-// Helper functions
-func buildUserResetLink(baseURL, token string) string {
-	base := strings.TrimRight(baseURL, "/")
-	if base == "" {
-		base = "https://www.linespolice-cad.com"
+// AdminInitiateUserResetHandler securely initiates a password reset for a user
+func (h Admin) AdminInitiateUserResetHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract user ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid user ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
 	}
+	userID := pathParts[len(pathParts)-1]
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid user ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Get user from database
+	var user models.User
+	err = h.UDB.FindOne(r.Context(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "User not found",
+				Code:    "NOT_FOUND",
+			})
+			return
+		}
+		log.Printf("Admin initiate user reset error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to fetch user",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Generate secure reset token
+	resetToken := generateSecureToken()
+	hashedToken := hashToken(resetToken)
+
+	// Set expiration (24 hours from now)
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	// Update user with reset token
+	_, err = h.UDB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"user.resetPasswordToken": hashedToken,
+			"user.resetPasswordExpires": expiresAt,
+		},
+	})
+	if err != nil {
+		log.Printf("Admin initiate user reset update error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to initiate password reset",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Build reset link
+	resetLink := buildUserResetLink(resetToken)
+
+	// Send email to user
+	emailErr := sendUserResetEmail(user.Details.Email, resetLink)
+	if emailErr != nil {
+		log.Printf("Error sending reset email: %v", emailErr)
+		// Don't fail the request, just log the error
+	}
+
+	// Track the action
+	h.trackAdminAction(objectID, "user_reset_initiated", userID, "user", fmt.Sprintf("Initiated password reset for user: %s", user.Details.Email), r)
+
+	// Return success (NO password or token shown)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Password reset initiated successfully",
+		"emailSent": emailErr == nil,
+		"userEmail": user.Details.Email,
+	})
+}
+
+// Helper functions for secure password reset and temporary password generation
+
+// generateSecureToken generates a cryptographically secure random token
+func generateSecureToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+
+
+// generateTempPassword generates a readable temporary password
+func generateTempPassword() string {
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 8)
+	for i := range b {
+		// Use crypto/rand to get a random byte and map it to charset
+		randBytes := make([]byte, 1)
+		rand.Read(randBytes)
+		b[i] = charset[int(randBytes[0])%len(charset)]
+	}
+	return string(b)
+}
+
+// buildUserResetLink creates the password reset link for users
+func buildUserResetLink(token string) string {
+	baseURL := os.Getenv("PUBLIC_WEB_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://www.linespolice-cad.com"
+	}
+	base := strings.TrimRight(baseURL, "/")
 	return base + "/reset-password?token=" + token
 }
 
+// sendUserResetEmail sends a password reset email to the user
 func sendUserResetEmail(toEmail, resetLink string) error {
 	from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
 	subject := "Password Reset Request"
@@ -787,30 +948,6 @@ Lines Police CAD Team`, resetLink)
 	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
 	_, err := client.Send(msg)
 	return err
-}
-
-func generateUserResetToken() string {
-	// Generate a secure random token for user password reset
-	buf := make([]byte, 32)
-	_, err := rand.Read(buf)
-	if err != nil {
-		// Fallback to timestamp-based token if crypto/rand fails
-		return fmt.Sprintf("%x", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buf)
-}
-
-func generateTempPassword() string {
-	// Generate a readable temp password
-	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, 8)
-	for i := range b {
-		// Use crypto/rand to get a random byte and map it to charset
-		randBytes := make([]byte, 1)
-		rand.Read(randBytes)
-		b[i] = charset[int(randBytes[0])%len(charset)]
-	}
-	return string(b)
 }
 
 // canCreateAdmins checks if the current user has permission to create admin users
@@ -1674,7 +1811,7 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	activity := models.AdminActivityData{
 		TotalLogins:    0,
 		PasswordResets: 0,
-		TempPasswords:  0,
+		TempPasswords:  0, // Keep for backward compatibility but will be 0
 		AvgSessionTime: "0m",
 		ChartData:      []models.ChartDataPoint{},
 		RecentActivity: []models.ActivityItem{},
@@ -1831,9 +1968,48 @@ func (h Admin) trackAdminAction(adminID primitive.ObjectID, actionType, targetID
 		ip = r.RemoteAddr
 	}
 
-	// Create action activity record (placeholder for now)
-	// This would store in a dedicated activity collection
-	log.Printf("Admin action tracked: %s performed %s on %s: %s from IP %s", adminID.Hex(), actionType, targetType, details, ip)
+	// Create action activity record
+	actionActivity := models.AdminActivityStorage{
+		AdminID:   adminID.Hex(),
+		Type:      actionType,
+		Title:     getActionTitle(actionType),
+		Details:   details,
+		Timestamp: time.Now(),
+		IP:        ip,
+		CreatedAt: time.Now(),
+	}
+
+	// Store in database
+	_, err := h.AADB.InsertOne(r.Context(), actionActivity)
+	if err != nil {
+		log.Printf("Failed to log admin action: %v", err)
+	} else {
+		log.Printf("Admin action tracked: %s performed %s on %s: %s from IP %s", adminID.Hex(), actionType, targetType, details, ip)
+	}
+}
+
+// getActionTitle returns a human-readable title for action types
+func getActionTitle(actionType string) string {
+	switch actionType {
+	case "login":
+		return "Admin logged in"
+	case "logout":
+		return "Admin logged out"
+	case "password_reset":
+		return "Password reset requested"
+	case "user_reset_initiated":
+		return "User password reset initiated"
+	case "temp_password_created":
+		return "Temporary password created"
+	case "role_change":
+		return "Admin role changed"
+	case "roles_change":
+		return "Admin roles changed"
+	case "user_reset_password":
+		return "User password reset sent"
+	default:
+		return "Administrative action performed"
+	}
 }
 
 // AdminActivityLogHandler logs admin activity events
