@@ -820,6 +820,22 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 		visibility = "public" // Default to public if not specified
 	}
 
+	// Get subscription information
+	var subscription *models.CommunitySubscription
+	if community.Details.Subscription.Active {
+		subscription = &models.CommunitySubscription{
+			Active:           community.Details.Subscription.Active,
+			CreatedAt:        community.Details.Subscription.CreatedAt,
+			DurationMonths:   community.Details.Subscription.DurationMonths,
+			ExpirationDate:   community.Details.Subscription.ExpirationDate,
+			ID:               community.Details.Subscription.ID,
+			IsAnnual:         community.Details.Subscription.IsAnnual,
+			Plan:             community.Details.Subscription.Plan,
+			PurchaseDate:     community.Details.Subscription.PurchaseDate,
+			UpdatedAt:        community.Details.Subscription.UpdatedAt,
+		}
+	}
+
 	details := models.AdminCommunityDetails{
 		ID:             community.ID.Hex(),
 		Name:           community.Details.Name,
@@ -829,6 +845,7 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 		MemberCount:    community.Details.MembersCount,
 		Departments:    depts,
 		DepartmentCount: len(community.Details.Departments),
+		Subscription:   subscription,
 	}
 
 	w.WriteHeader(http.StatusOK)

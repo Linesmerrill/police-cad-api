@@ -236,12 +236,25 @@ type AdminCommunityDetails struct {
 	MemberCount    int               `json:"memberCount"`
 	Departments    []CommunityDept   `json:"departments,omitempty"`
 	DepartmentCount int               `json:"departmentCount"`
+	Subscription   *CommunitySubscription `json:"subscription,omitempty"`
 }
 
 type CommunityDept struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	MemberCount int    `json:"memberCount"`
+}
+
+type CommunitySubscription struct {
+	Active           bool        `json:"active"`
+	CreatedAt        interface{} `json:"createdAt"`
+	DurationMonths   int         `json:"durationMonths"`
+	ExpirationDate   interface{} `json:"expirationDate"`
+	ID               string      `json:"id"`
+	IsAnnual         bool        `json:"isAnnual"`
+	Plan             string      `json:"plan"`
+	PurchaseDate     interface{} `json:"purchaseDate"`
+	UpdatedAt        interface{} `json:"updatedAt"`
 }
 
 
