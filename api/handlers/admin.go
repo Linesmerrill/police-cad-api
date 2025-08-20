@@ -791,21 +791,46 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Get owner info
+	// Get owner info with username
 	var ownerInfo *models.OwnerInfo
 	if community.Details.OwnerID != "" {
-		ownerResult := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID})
+		// Try to find owner by string ID first
 		var ownerUser models.User
-		if err := ownerResult.Decode(&ownerUser); err == nil {
+		err := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID}).Decode(&ownerUser)
+		
+		// If that fails, try ObjectID format
+		if err != nil {
+			if oid, oidErr := primitive.ObjectIDFromHex(community.Details.OwnerID); oidErr == nil {
+				err = h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&ownerUser)
+			}
+		}
+		
+		if err == nil {
 			ownerInfo = &models.OwnerInfo{
-				ID:    ownerUser.ID,
-				Email: ownerUser.Details.Email,
+				ID:       ownerUser.ID,
+				Email:    ownerUser.Details.Email,
+				Username: ownerUser.Details.Username,
 			}
 		}
 	}
 
-	// TODO: Get departments and implement member counting
+	// Get departments information
 	var depts []models.CommunityDept
+	if len(community.Details.Departments) > 0 {
+		for _, dept := range community.Details.Departments {
+			// Count members in this department
+			memberCount := 0
+			if dept.Members != nil {
+				memberCount = len(dept.Members)
+			}
+			
+			depts = append(depts, models.CommunityDept{
+				ID:          dept.ID.Hex(),
+				Name:        dept.Name,
+				MemberCount: memberCount,
+			})
+		}
+	}
 
 	details := models.AdminCommunityDetails{
 		ID:          community.ID.Hex(),
