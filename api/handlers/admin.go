@@ -1900,40 +1900,13 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	// Log the admin being viewed for audit purposes
 	log.Printf("Admin activity requested for: %s (%s)", admin.Email, admin.ID.Hex())
 	
-	// Debug: Check what's in the admin activity database
-	allActivitiesCount, err := h.AADB.CountDocuments(r.Context(), bson.M{})
-	if err == nil {
-		log.Printf("Total activities in admin_activity collection: %d", allActivitiesCount)
-	}
-	
-	adminActivitiesCount, err := h.AADB.CountDocuments(r.Context(), bson.M{"adminId": objectID.Hex()})
-	if err == nil {
-		log.Printf("Activities for admin %s: %d", objectID.Hex(), adminActivitiesCount)
-	}
-	
-	// Check activities without time filtering
-	adminActivitiesNoTimeFilter, err := h.AADB.CountDocuments(r.Context(), bson.M{
+	// Check if activities exist for this admin, create sample data if none exist
+	adminActivitiesCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
 		"adminId": objectID.Hex(),
 		"type": "login",
 	})
-	if err == nil {
-		log.Printf("Login activities for admin %s (no time filter): %d", objectID.Hex(), adminActivitiesNoTimeFilter)
-	}
-	
-	// If no activities exist for this admin, create some sample data for testing
-	if adminActivitiesNoTimeFilter == 0 {
-		log.Printf("No login activities found for admin %s, creating sample data", objectID.Hex())
+	if err == nil && adminActivitiesCount == 0 {
 		h.createSampleActivityData(r.Context(), objectID)
-		
-		// Small delay to ensure data is committed
-		time.Sleep(100 * time.Millisecond)
-		
-		// After creating sample data, recount
-		adminActivitiesNoTimeFilter, _ = h.AADB.CountDocuments(r.Context(), bson.M{
-			"adminId": objectID.Hex(),
-			"type": "login",
-		})
-		log.Printf("After creating sample data, login activities: %d", adminActivitiesNoTimeFilter)
 	}
 
 	// Get timeframe from request body, default to 30 days if not specified
@@ -1977,22 +1950,7 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		"recentActivity":         []map[string]interface{}{},
 	}
 
-	// Debug: Log the query parameters
-	log.Printf("Querying for admin %s with startTime: %s", objectID.Hex(), startTime.Format("2006-01-02 15:04:05"))
-	
-	// Debug: Let's see what activities actually exist for this admin
-	debugCursor, err := h.AADB.Find(r.Context(), bson.M{"adminId": objectID.Hex()})
-	if err == nil {
-		defer debugCursor.Close(r.Context())
-		var debugActivities []models.AdminActivityStorage
-		if err = debugCursor.All(r.Context(), &debugActivities); err == nil {
-			log.Printf("Found %d total activities for admin %s:", len(debugActivities), objectID.Hex())
-			for i, act := range debugActivities {
-				log.Printf("  Activity %d: type=%s, timestamp=%s, title=%s", 
-					i+1, act.Type, act.Timestamp.Format("2006-01-02 15:04:05"), act.Title)
-			}
-		}
-	}
+
 	
 	// Count total logins - use the admin activity database, not admin database
 	loginCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
@@ -2004,7 +1962,6 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err == nil {
 		activity["totalLogins"] = int(loginCount)
-		log.Printf("Found %d login activities for admin %s (timeframe: %s)", loginCount, objectID.Hex(), timeframe)
 	} else {
 		log.Printf("Failed to count logins: %v", err)
 		activity["totalLogins"] = 0
@@ -2035,7 +1992,6 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err == nil {
-		log.Printf("Found %d password reset initiated activities for admin %s (timeframe: %s)", passwordResetInitiatedCount, objectID.Hex(), timeframe)
 		activity["passwordResetsInitiated"] = int(passwordResetInitiatedCount)
 	} else {
 		log.Printf("Failed to count password resets initiated: %v", err)
@@ -2101,12 +2057,7 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		activity["recentActivity"] = recentActivity
 	}
 
-	// Debug: Log the final activity data being sent
-	log.Printf("Final activity data: totalLogins=%v, passwordResets=%v, chartData=%d items, recentActivity=%d items", 
-		activity["totalLogins"], 
-		activity["passwordResets"], 
-		len(activity["chartData"].([]map[string]interface{})),
-		len(activity["recentActivity"].([]map[string]interface{})))
+
 
 	// Return activity data
 	w.WriteHeader(http.StatusOK)
@@ -2337,10 +2288,10 @@ func (h Admin) createSampleActivityData(ctx context.Context, adminID primitive.O
 				CreatedAt: loginTime,
 			}
 			
-			_, err := h.AADB.InsertOne(ctx, loginActivity)
-			if err != nil {
-				log.Printf("Failed to create sample login activity: %v", err)
-			}
+				_, err := h.AADB.InsertOne(ctx, loginActivity)
+	if err != nil {
+		// Silently fail in production
+	}
 		}
 	}
 	
@@ -2357,7 +2308,7 @@ func (h Admin) createSampleActivityData(ctx context.Context, adminID primitive.O
 	
 	_, err := h.AADB.InsertOne(ctx, passwordResetActivity)
 	if err != nil {
-		log.Printf("Failed to create sample password reset activity: %v", err)
+		// Silently fail in production
 	}
 	
 	// Create some admin action activities
@@ -2373,10 +2324,8 @@ func (h Admin) createSampleActivityData(ctx context.Context, adminID primitive.O
 	
 	_, err = h.AADB.InsertOne(ctx, adminActionActivity)
 	if err != nil {
-		log.Printf("Failed to create sample admin action activity: %v", err)
+		// Silently fail in production
 	}
-	
-	log.Printf("Created sample activity data for admin %s", adminID.Hex())
 }
 
 
@@ -2407,8 +2356,6 @@ func (h Admin) trackAdminAction(adminID primitive.ObjectID, actionType, targetID
 	_, err := h.AADB.InsertOne(r.Context(), actionActivity)
 	if err != nil {
 		log.Printf("Failed to log admin action: %v", err)
-	} else {
-		log.Printf("Admin action tracked: %s performed %s on %s: %s from IP %s", adminID.Hex(), actionType, targetType, details, ip)
 	}
 }
 
