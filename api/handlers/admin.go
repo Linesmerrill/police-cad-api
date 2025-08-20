@@ -566,38 +566,24 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	var userCommunities []models.AdminUserCommunity
 	var approvedCommunitiesCount int
 	
-	log.Printf("Searching for communities for user ID: %s", user.ID)
-	
 	// Get the user's communities from the user document
 	if len(user.Details.Communities) > 0 {
-		log.Printf("User has %d communities in their profile", len(user.Details.Communities))
-		
 		for _, userComm := range user.Details.Communities {
-			log.Printf("Processing community: ID=%s, CommunityID=%s, Status=%s", 
-				userComm.ID, userComm.CommunityID, userComm.Status)
-			
 			// Convert community ID string to ObjectID
 			communityObjectID, err := primitive.ObjectIDFromHex(userComm.CommunityID)
 			if err != nil {
-				log.Printf("Invalid community ID format: %s", userComm.CommunityID)
 				continue
 			}
 			
 			// Query the community collection for this community
 			community, err := h.CDB.FindOne(r.Context(), bson.M{"_id": communityObjectID})
 			if err != nil {
-				log.Printf("Failed to find community %s: %v", userComm.CommunityID, err)
 				continue
 			}
 			
-			log.Printf("Found community: %s (Owner: %s)", community.Details.Name, community.Details.OwnerID)
-			
 			// Get owner details (we'll use this later if needed)
 			var ownerUser models.User
-			ownerErr := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID}).Decode(&ownerUser)
-			if ownerErr != nil {
-				log.Printf("Could not find owner user: %v", ownerErr)
-			}
+			h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID}).Decode(&ownerUser)
 			
 			// Determine role (owner or member)
 			role := "Member"
@@ -624,12 +610,7 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 				Department: department,
 				JoinedAt:   community.Details.CreatedAt,
 			})
-			
-			log.Printf("Added community: %s, Status: %s, Role: %s", 
-				community.Details.Name, userComm.Status, role)
 		}
-	} else {
-		log.Printf("User has no communities in their profile")
 	}
 
 	// Get password reset status
@@ -655,9 +636,7 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		ResetPasswordExpires: resetPasswordExpires,
 	}
 
-	// Debug: Log what we're sending
-	log.Printf("Sending user details: ID=%s, Email=%s, CommunitiesCount=%d, Communities=%d", 
-		details.ID, details.Email, details.CommunitiesCount, len(details.Communities))
+
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(userDetailsResponse{User: details})
