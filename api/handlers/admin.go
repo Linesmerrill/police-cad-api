@@ -19,6 +19,7 @@ import (
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gorilla/mux"
@@ -1978,6 +1979,8 @@ func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) 
 type AdminGetActivityRequest struct {
 	CurrentUser map[string]interface{} `json:"currentUser"`
 	Timeframe   string                 `json:"timeframe"`
+	Page        int                    `json:"page"`        // Page number (1-based)
+	Limit       int                    `json:"limit"`       // Records per page
 }
 
 // AdminGetActivityHandler gets detailed activity information for a specific admin
@@ -2066,6 +2069,21 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		timeframe = "30d" // default to 30 days
 	}
 
+	// Set pagination defaults
+	page := req.Page
+	if page <= 0 {
+		page = 1 // Default to first page
+	}
+	
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10 // Default to 10 records per page
+	}
+	
+	// Calculate skip value for MongoDB
+	skip := int64((page - 1) * limit)
+	limit64 := int64(limit)
+
 	// Calculate time range based on timeframe
 	now := time.Now()
 	var startTime time.Time
@@ -2104,15 +2122,19 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 
 	
 	// Count total logins - use the admin activity database, not admin database
-	loginCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
+	loginFilter := bson.M{
 		"adminId": objectID.Hex(),
 		"type":    "login",
 		"timestamp": bson.M{
 			"$gte": startTime,
 		},
-	})
+	}
+	log.Printf("Login count filter: %+v", loginFilter)
+	
+	loginCount, err := h.AADB.CountDocuments(r.Context(), loginFilter)
 	if err == nil {
 		activity["totalLogins"] = int(loginCount)
+		log.Printf("Found %d login activities for admin %s", loginCount, objectID.Hex())
 	} else {
 		log.Printf("Failed to count logins: %v", err)
 		activity["totalLogins"] = 0
@@ -2263,7 +2285,7 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	// Store chart data in activity map
 	activity["chartData"] = chartData
 
-	// Get recent activity (last 20 events)
+	// Get recent activity with pagination
 	recentFilter := bson.M{
 		"adminId": objectID.Hex(),
 		"timestamp": bson.M{
@@ -2271,8 +2293,15 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Get recent activities from admin activity database
-	recentCursor, err := h.AADB.Find(r.Context(), recentFilter, nil)
+	// Get total count for pagination metadata
+	totalCount, _ := h.AADB.CountDocuments(r.Context(), recentFilter)
+
+	// Get recent activities from admin activity database with pagination
+	recentCursor, err := h.AADB.Find(r.Context(), recentFilter, &options.FindOptions{
+		Sort:  bson.M{"timestamp": -1}, // Sort by timestamp descending (newest first)
+		Skip:  &skip,
+		Limit: &limit64,
+	})
 	if err == nil {
 		defer recentCursor.Close(r.Context())
 		
@@ -2288,18 +2317,17 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 				})
 				activity["recentActivity"] = recentActivity
 			}
-		} else {
-			log.Printf("Failed to decode recent activities: %v", err)
 		}
-	} else {
-		log.Printf("Failed to fetch recent activities: %v", err)
 	}
 
-	// Sort recent activity by timestamp (newest first)
-	recentActivity := activity["recentActivity"].([]map[string]interface{})
-	if len(recentActivity) > 20 {
-		recentActivity = recentActivity[:20]
-		activity["recentActivity"] = recentActivity
+	// Add pagination metadata to the response
+	activity["pagination"] = map[string]interface{}{
+		"currentPage": page,
+		"limit":       limit,
+		"totalRecords": totalCount,
+		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasPrevPage": page > 1,
 	}
 
 
