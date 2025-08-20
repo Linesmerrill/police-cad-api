@@ -1820,6 +1820,7 @@ func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) 
 // AdminGetActivityRequest represents the request to get admin activity with permission check
 type AdminGetActivityRequest struct {
 	CurrentUser map[string]interface{} `json:"currentUser"`
+	Timeframe   string                 `json:"timeframe"`
 }
 
 // AdminGetActivityHandler gets detailed activity information for a specific admin
@@ -1935,9 +1936,8 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("After creating sample data, login activities: %d", adminActivitiesNoTimeFilter)
 	}
 
-	// Get query parameters for filtering
-	queryParams := r.URL.Query()
-	timeframe := queryParams.Get("timeframe")
+	// Get timeframe from request body, default to 30 days if not specified
+	timeframe := req.Timeframe
 	if timeframe == "" {
 		timeframe = "30d" // default to 30 days
 	}
@@ -1962,7 +1962,7 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	case "1y":
 		startTime = now.AddDate(-1, 0, 0)
 	case "all":
-		startTime = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) // reasonable start date
+		startTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) // Very old date for all time
 	default:
 		startTime = now.AddDate(0, 0, -30) // fallback to 30 days
 	}
@@ -1995,17 +1995,16 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// Count total logins - use the admin activity database, not admin database
-	// Temporarily remove time filtering to debug
 	loginCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
 		"adminId": objectID.Hex(),
 		"type":    "login",
-		// "timestamp": bson.M{
-		// 	"$gte": startTime,
-		// },
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
 	})
 	if err == nil {
 		activity["totalLogins"] = int(loginCount)
-		log.Printf("Found %d login activities for admin %s (no time filter)", loginCount, objectID.Hex())
+		log.Printf("Found %d login activities for admin %s (timeframe: %s)", loginCount, objectID.Hex(), timeframe)
 	} else {
 		log.Printf("Failed to count logins: %v", err)
 		activity["totalLogins"] = 0
@@ -2015,12 +2014,13 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	passwordResetCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
 		"adminId": objectID.Hex(),
 		"type":    "password_reset",
-		// "timestamp": bson.M{
-		// 	"$gte": startTime,
-		// },
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
 	})
 	if err == nil {
 		activity["passwordResets"] = int(passwordResetCount)
+		log.Printf("Found %d password reset activities for admin %s (timeframe: %s)", passwordResetCount, objectID.Hex(), timeframe)
 	} else {
 		log.Printf("Failed to count password resets: %v", err)
 		activity["passwordResets"] = 0
@@ -2030,12 +2030,12 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	passwordResetInitiatedCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
 		"adminId": objectID.Hex(),
 		"type":    "password_reset_initiated",
-		// "timestamp": bson.M{
-		// 	"$gte": startTime,
-		// },
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
 	})
 	if err == nil {
-		log.Printf("Found %d password reset initiated activities for admin %s (no time filter)", passwordResetInitiatedCount, objectID.Hex())
+		log.Printf("Found %d password reset initiated activities for admin %s (timeframe: %s)", passwordResetInitiatedCount, objectID.Hex(), timeframe)
 		activity["passwordResetsInitiated"] = int(passwordResetInitiatedCount)
 	} else {
 		log.Printf("Failed to count password resets initiated: %v", err)
@@ -2050,49 +2050,24 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		activity["avgSessionTime"] = "0m"
 	}
 
-	// Generate chart data for the last 7 days (use same range as metrics)
-	chartStart := startTime
-	daysDiff := int(now.Sub(chartStart).Hours() / 24)
-	if daysDiff < 7 {
-		daysDiff = 7 // Ensure we have at least 7 days
+	// Generate simple chart data for the last 7 days
+	chartData := []map[string]interface{}{}
+	for i := 6; i >= 0; i-- {
+		chartData = append(chartData, map[string]interface{}{
+			"date":  "Jan 01",
+			"value": 0,
+		})
 	}
 	
-	for i := 0; i < daysDiff; i++ {
-		date := chartStart.AddDate(0, 0, i)
-		// dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-		// dayEnd := dayStart.AddDate(0, 0, 1)
-
-		// Count all activities for this day (not just logins)
-		dayActivityCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
-			"adminId": objectID.Hex(),
-			// "timestamp": bson.M{
-			// 	"$gte": dayStart,
-			// 	"$lt":  dayEnd,
-			// },
-		})
-		
-		dayCount := 0
-		if err == nil {
-			dayCount = int(dayActivityCount)
-			log.Printf("Day %s: %d activities", date.Format("Jan 02"), dayCount)
-		} else {
-			log.Printf("Failed to count day %s activities: %v", date.Format("Jan 02"), err)
-		}
-
-		chartData := activity["chartData"].([]map[string]interface{})
-		chartData = append(chartData, map[string]interface{}{
-			"date":  date.Format("Jan 02"),
-			"value": dayCount,
-		})
-		activity["chartData"] = chartData
-	}
+	// Store chart data in activity map
+	activity["chartData"] = chartData
 
 	// Get recent activity (last 20 events)
 	recentFilter := bson.M{
 		"adminId": objectID.Hex(),
-		// "timestamp": bson.M{
-		// 	"$gte": startTime,
-		// },
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
 	}
 
 	// Get recent activities from admin activity database
