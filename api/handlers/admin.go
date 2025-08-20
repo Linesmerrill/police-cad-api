@@ -172,50 +172,98 @@ func (h Admin) AdminResetPasswordHandler(w http.ResponseWriter, r *http.Request)
 
 	var req resetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "invalid request",
+		})
 		return
 	}
 
+	log.Printf("Received reset request - Token length: %d, Password length: %d", len(req.Token), len(req.Password))
+	
 	token := strings.TrimSpace(req.Token)
 	password := req.Password
 	if token == "" || password == "" {
+		log.Printf("Missing token or password - Token: '%s', Password: '%s'", token, password)
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "token and password required"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "token and password required",
+		})
 		return
 	}
 
 	hashHex := hashToken(token)
+	log.Printf("Looking for reset token with hash: %s", hashHex)
+	log.Printf("Token validation query: %+v", bson.M{
+		"tokenHash": hashHex,
+		"usedAt":    bson.M{"$exists": false},
+		"expiresAt": bson.M{"$gt": time.Now()},
+	})
+	
 	reset, err := h.RDB.FindOne(r.Context(), bson.M{
 		"tokenHash": hashHex,
 		"usedAt":    bson.M{"$exists": false},
 		"expiresAt": bson.M{"$gt": time.Now()},
 	})
 	if err != nil {
+		log.Printf("Token validation failed: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid or expired token"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "invalid or expired token",
+		})
 		return
 	}
+	log.Printf("Token validation successful, reset record: %+v", reset)
 
+	log.Printf("Generating password hash for password length: %d", len(password))
 	newHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
+		log.Printf("Failed to generate password hash: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "could not update password"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "could not update password",
+		})
 		return
 	}
+	log.Printf("Password hash generated successfully, length: %d", len(newHash))
 
 	// Update admin password
-	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": reset.AdminID}, bson.M{"$set": bson.M{"passwordHash": string(newHash), "updatedAt": time.Now()}})
+	log.Printf("Updating admin password for admin ID: %v", reset.AdminID)
+	log.Printf("Using collection: %s", "admin_users")
+	log.Printf("Update filter: %+v", bson.M{"_id": reset.AdminID})
+	log.Printf("Update operation: %+v", bson.M{"$set": bson.M{"password": string(newHash)}})
+	
+	result, err := h.ADB.UpdateOne(r.Context(), bson.M{"_id": reset.AdminID}, bson.M{"$set": bson.M{"password": string(newHash)}})
 	if err != nil {
+		log.Printf("Failed to update admin password: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "could not update password"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "could not update password",
+		})
 		return
 	}
+	log.Printf("Password update successful: %+v", result)
 	// Mark token used
-	_, _ = h.RDB.UpdateOne(r.Context(), bson.M{"_id": reset.ID}, bson.M{"$set": bson.M{"usedAt": time.Now()}})
+	log.Printf("Marking token as used for reset ID: %v", reset.ID)
+	markResult, markErr := h.RDB.UpdateOne(r.Context(), bson.M{"_id": reset.ID}, bson.M{"$set": bson.M{"usedAt": time.Now()}})
+	if markErr != nil {
+		log.Printf("Warning: Failed to mark token as used: %v", markErr)
+	} else {
+		log.Printf("Token marked as used successfully: %+v", markResult)
+	}
 
+	log.Printf("Password reset completed successfully for admin ID: %v", reset.AdminID)
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"message": "password updated"})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Password updated successfully",
+	})
 }
 
 // helpers
