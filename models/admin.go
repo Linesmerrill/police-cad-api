@@ -196,11 +196,14 @@ type AdminCommunityResult struct {
 	CreatedAt   interface{} `json:"createdAt"`
 	Owner       *OwnerInfo  `json:"owner,omitempty"`
 	MemberCount int         `json:"memberCount"`
+	Departments []CommunityDept `json:"departments,omitempty"`
+	DepartmentCount int      `json:"departmentCount"`
 }
 
 type OwnerInfo struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
+	ID       string `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username,omitempty"`
 }
 
 type AdminUserDetails struct {

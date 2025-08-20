@@ -552,26 +552,64 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 
 	var results []models.AdminCommunityResult
 	for _, community := range communities {
-		// Get owner info
+		// Get owner info with username
 		var ownerInfo *models.OwnerInfo
 		if community.Details.OwnerID != "" {
-			ownerResult := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID})
+			// Try to find owner by string ID first
 			var ownerUser models.User
-			if err := ownerResult.Decode(&ownerUser); err == nil {
+			err := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID}).Decode(&ownerUser)
+			
+			// If that fails, try ObjectID format
+			if err != nil {
+				if oid, oidErr := primitive.ObjectIDFromHex(community.Details.OwnerID); oidErr == nil {
+					err = h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&ownerUser)
+				}
+			}
+			
+			if err == nil {
 				ownerInfo = &models.OwnerInfo{
-					ID:    ownerUser.ID,
-					Email: ownerUser.Details.Email,
+					ID:       ownerUser.ID,
+					Email:    ownerUser.Details.Email,
+					Username: ownerUser.Details.Username,
 				}
 			}
 		}
 
+		// Get departments info
+		var departments []models.CommunityDept
+		departmentCount := len(community.Details.Departments)
+		if departmentCount > 0 {
+			// Limit to first 5 departments for search results (can be expanded in details view)
+			maxDepts := 5
+			if departmentCount > maxDepts {
+				departmentCount = maxDepts
+			}
+			
+			for i := 0; i < departmentCount; i++ {
+				dept := community.Details.Departments[i]
+				// Count members in this department
+				memberCount := 0
+				if dept.Members != nil {
+					memberCount = len(dept.Members)
+				}
+				
+				departments = append(departments, models.CommunityDept{
+					ID:          dept.ID.Hex(),
+					Name:        dept.Name,
+					MemberCount: memberCount,
+				})
+			}
+		}
+
 		result := models.AdminCommunityResult{
-			ID:          community.ID.Hex(),
-			Name:        community.Details.Name,
-			Active:      true, // TODO: Add active field to community model
-			CreatedAt:   community.Details.CreatedAt,
-			Owner:       ownerInfo,
-			MemberCount: community.Details.MembersCount,
+			ID:             community.ID.Hex(),
+			Name:           community.Details.Name,
+			Active:         true, // TODO: Add active field to community model
+			CreatedAt:      community.Details.CreatedAt,
+			Owner:          ownerInfo,
+			MemberCount:    community.Details.MembersCount,
+			Departments:    departments,
+			DepartmentCount: len(community.Details.Departments),
 		}
 		results = append(results, result)
 	}
