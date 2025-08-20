@@ -567,10 +567,13 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	var approvedCommunitiesCount int
 	
 	// Find communities where this user is a member
+	log.Printf("Searching for communities for user ID: %s", user.ID)
+	
+	// Query for communities where user is owner or member of any department
 	cursor, err := h.CDB.Find(r.Context(), bson.M{
 		"$or": []bson.M{
-			{"details.ownerID": user.ID},                    // User is owner
-			{"details.members": bson.M{"$in": []string{user.ID}}}, // User is member
+			{"details.ownerID": user.ID}, // User is owner
+			{"details.departments.members.userID": user.ID}, // User is member of any department
 		},
 	}, nil)
 	if err == nil {
@@ -578,6 +581,7 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		
 		var communities []models.Community
 		if err = cursor.All(r.Context(), &communities); err == nil {
+			log.Printf("Found %d communities for user %s", len(communities), user.ID)
 			for _, community := range communities {
 				role := "Member"
 				status := "pending" // Default status
@@ -646,6 +650,10 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		ResetPasswordToken:   resetPasswordToken,
 		ResetPasswordExpires: resetPasswordExpires,
 	}
+
+	// Debug: Log what we're sending
+	log.Printf("Sending user details: ID=%s, Email=%s, CommunitiesCount=%d, Communities=%d", 
+		details.ID, details.Email, details.CommunitiesCount, len(details.Communities))
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(userDetailsResponse{User: details})
