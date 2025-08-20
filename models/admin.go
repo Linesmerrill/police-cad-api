@@ -192,7 +192,7 @@ type AdminUserResult struct {
 type AdminCommunityResult struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
-	Active      bool        `json:"active"`
+	Visibility  string      `json:"visibility"`  // "public" or "private"
 	CreatedAt   interface{} `json:"createdAt"`
 	Owner       *OwnerInfo  `json:"owner,omitempty"`
 	MemberCount int         `json:"memberCount"`
@@ -231,7 +231,7 @@ type AdminUserCommunity struct {
 type AdminCommunityDetails struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
-	Active      bool              `json:"active"`
+	Visibility  string            `json:"visibility"`  // "public" or "private"
 	CreatedAt   interface{}       `json:"createdAt"`
 	Owner       *OwnerInfo        `json:"owner,omitempty"`
 	MemberCount int               `json:"memberCount"`

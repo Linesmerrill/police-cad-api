@@ -601,10 +601,16 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
+		// Set default visibility if empty
+		visibility := community.Details.Visibility
+		if visibility == "" {
+			visibility = "public" // Default to public if not specified
+		}
+
 		result := models.AdminCommunityResult{
 			ID:             community.ID.Hex(),
 			Name:           community.Details.Name,
-			Active:         true, // TODO: Add active field to community model
+			Visibility:     visibility,
 			CreatedAt:      community.Details.CreatedAt,
 			Owner:          ownerInfo,
 			MemberCount:    community.Details.MembersCount,
@@ -832,10 +838,16 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// Set default visibility if empty
+	visibility := community.Details.Visibility
+	if visibility == "" {
+		visibility = "public" // Default to public if not specified
+	}
+
 	details := models.AdminCommunityDetails{
 		ID:          community.ID.Hex(),
 		Name:        community.Details.Name,
-		Active:      true, // TODO: Add active field to community model
+		Visibility:  visibility,
 		CreatedAt:   community.Details.CreatedAt,
 		Owner:       ownerInfo,
 		MemberCount: community.Details.MembersCount,
