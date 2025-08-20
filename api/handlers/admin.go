@@ -367,10 +367,13 @@ func sendResetEmail(toEmail, resetLink string) error {
 
 type userSearchRequest struct {
 	Query string `json:"query"`
+	Page  int    `json:"page"`  // Page number (0-based)
+	Limit int    `json:"limit"` // Records per page
 }
 
 type userSearchResponse struct {
-	Users []models.AdminUserResult `json:"users"`
+	Users      []models.AdminUserResult `json:"users"`
+	Pagination map[string]interface{}  `json:"pagination"`
 }
 
 // AdminUserSearchHandler searches for users by email or username
@@ -391,6 +394,21 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set pagination defaults
+	page := req.Page
+	if page < 0 {
+		page = 0 // Default to first page (0-based)
+	}
+	
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10 // Default to 10 records per page
+	}
+	
+	// Calculate skip value for MongoDB
+	skip := int64(page * limit)
+	limit64 := int64(limit)
+
 	// Search by email, name, or username (case-insensitive)
 	filter := bson.M{
 		"$or": []bson.M{
@@ -400,12 +418,21 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	
-	log.Printf("Admin user search filter: %+v", filter)
-	
-	// Use existing user database to search
-	cursor, err := h.UDB.Find(r.Context(), filter, nil)
+	// Get total count for pagination metadata
+	totalCount, err := h.UDB.CountDocuments(r.Context(), filter)
 	if err != nil {
-		log.Printf("Admin user search error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+		return
+	}
+	
+	// Use existing user database to search with pagination
+	cursor, err := h.UDB.Find(r.Context(), filter, &options.FindOptions{
+		Skip:  &skip,
+		Limit: &limit64,
+		Sort:  bson.M{"user.email": 1}, // Sort by email for consistent results
+	})
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
 		return
@@ -414,13 +441,10 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	var users []models.User
 	if err = cursor.All(r.Context(), &users); err != nil {
-		log.Printf("Admin user search decode error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode users"})
 		return
 	}
-
-	log.Printf("Admin user search found %d users", len(users))
 
 	var results []models.AdminUserResult
 	for _, user := range users {
@@ -431,20 +455,35 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 			IsDeactivated: user.Details.IsDeactivated,
 			CreatedAt:     user.Details.CreatedAt,
 		}
-		log.Printf("User result: %+v", result)
 		results = append(results, result)
 	}
 
+	// Create pagination metadata
+	pagination := map[string]interface{}{
+		"currentPage": page,
+		"limit":       limit,
+		"totalRecords": totalCount,
+		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)) - 1,
+		"hasPrevPage": page > 0,
+	}
+
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(userSearchResponse{Users: results})
+	_ = json.NewEncoder(w).Encode(userSearchResponse{
+		Users:      results,
+		Pagination: pagination,
+	})
 }
 
 type communitySearchRequest struct {
 	Query string `json:"query"`
+	Page  int    `json:"page"`  // Page number (0-based)
+	Limit int    `json:"limit"` // Records per page
 }
 
 type communitySearchResponse struct {
 	Communities []models.AdminCommunityResult `json:"communities"`
+	Pagination map[string]interface{}        `json:"pagination"`
 }
 
 // AdminCommunitySearchHandler searches for communities by name
@@ -465,14 +504,39 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Set pagination defaults
+	page := req.Page
+	if page < 0 {
+		page = 0 // Default to first page (0-based)
+	}
+	
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10 // Default to 10 records per page
+	}
+	
+	// Calculate skip value for MongoDB
+	skip := int64(page * limit)
+	limit64 := int64(limit)
+
 	// Search by community name (case-insensitive)
 	filter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
 	
-	log.Printf("Admin community search filter: %+v", filter)
-	
-	cursor, err := h.CDB.Find(r.Context(), filter, nil)
+	// Get total count for pagination metadata
+	totalCount, err := h.CDB.CountDocuments(r.Context(), filter)
 	if err != nil {
-		log.Printf("Admin community search error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+		return
+	}
+	
+	// Use community database to search with pagination
+	cursor, err := h.CDB.Find(r.Context(), filter, &options.FindOptions{
+		Skip:  &skip,
+		Limit: &limit64,
+		Sort:  bson.M{"community.name": 1}, // Sort by name for consistent results
+	})
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
 		return
@@ -481,13 +545,10 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 
 	var communities []models.Community
 	if err = cursor.All(r.Context(), &communities); err != nil {
-		log.Printf("Admin community search decode error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode communities"})
 		return
 	}
-
-	log.Printf("Admin community search found %d communities", len(communities))
 
 	var results []models.AdminCommunityResult
 	for _, community := range communities {
@@ -512,12 +573,24 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 			Owner:       ownerInfo,
 			MemberCount: community.Details.MembersCount,
 		}
-		log.Printf("Community result: %+v", result)
 		results = append(results, result)
 	}
 
+	// Create pagination metadata
+	pagination := map[string]interface{}{
+		"currentPage": page,
+		"limit":       limit,
+		"totalRecords": totalCount,
+		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)) - 1,
+		"hasPrevPage": page > 0,
+	}
+
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(communitySearchResponse{Communities: results})
+	_ = json.NewEncoder(w).Encode(communitySearchResponse{
+		Communities: results,
+		Pagination:  pagination,
+	})
 }
 
 type userDetailsResponse struct {
