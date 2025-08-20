@@ -570,6 +570,38 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Searching for communities for user ID: %s", user.ID)
 	
 	// Query for communities where user is owner or member of any department
+	log.Printf("User ID being searched: %s", user.ID)
+	
+	// First, let's see what communities exist in the database
+	allCommunitiesCursor, err := h.CDB.Find(r.Context(), bson.M{})
+	if err == nil {
+		defer allCommunitiesCursor.Close(r.Context())
+		var allCommunities []models.Community
+		if err = allCommunitiesCursor.All(r.Context(), &allCommunities); err == nil {
+			log.Printf("Total communities in database: %d", len(allCommunities))
+			// Log first few communities to see their structure
+			for i, comm := range allCommunities {
+				if i < 3 { // Only log first 3
+					log.Printf("Community %d: ID=%s, Name=%s, OwnerID=%s", 
+						i+1, comm.ID.Hex(), comm.Details.Name, comm.Details.OwnerID)
+					log.Printf("  Departments: %d", len(comm.Details.Departments))
+					for j, dept := range comm.Details.Departments {
+						if j < 2 { // Only log first 2 departments
+							log.Printf("    Dept %d: Name=%s, Members=%d", 
+								j+1, dept.Name, len(dept.Members))
+							for k, member := range dept.Members {
+								if k < 3 { // Only log first 3 members
+									log.Printf("      Member %d: UserID=%s, Status=%s", 
+										k+1, member.UserID, member.Status)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
 	cursor, err := h.CDB.Find(r.Context(), bson.M{
 		"$or": []bson.M{
 			{"details.ownerID": user.ID}, // User is owner
@@ -582,6 +614,9 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		var communities []models.Community
 		if err = cursor.All(r.Context(), &communities); err == nil {
 			log.Printf("Found %d communities for user %s", len(communities), user.ID)
+			if len(communities) == 0 {
+				log.Printf("No communities found - this might indicate a query issue")
+			}
 			for _, community := range communities {
 				role := "Member"
 				status := "pending" // Default status
