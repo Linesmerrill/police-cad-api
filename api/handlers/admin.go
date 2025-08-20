@@ -424,11 +424,11 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	var results []models.AdminUserResult
 	for _, user := range users {
 		result := models.AdminUserResult{
-			ID:        user.ID,
-			Email:     user.Details.Email,
-			Username:  user.Details.Username,
-			Active:    !user.Details.IsDeactivated,
-			CreatedAt: user.Details.CreatedAt,
+			ID:            user.ID,
+			Email:         user.Details.Email,
+			Username:      user.Details.Username,
+			IsDeactivated: user.Details.IsDeactivated,
+			CreatedAt:     user.Details.CreatedAt,
 		}
 		log.Printf("User result: %+v", result)
 		results = append(results, result)
@@ -624,13 +624,13 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	details := models.AdminUserDetails{
-		ID:              user.ID,
-		Email:           user.Details.Email,
-		Username:        user.Details.Username,
-		Active:          !user.Details.IsDeactivated,
-		CreatedAt:       user.Details.CreatedAt,
-		Communities:     userCommunities,
-		CommunitiesCount: approvedCommunitiesCount,
+		ID:                   user.ID,
+		Email:                user.Details.Email,
+		Username:             user.Details.Username,
+		IsDeactivated:        user.Details.IsDeactivated,
+		CreatedAt:            user.Details.CreatedAt,
+		Communities:          userCommunities,
+		CommunitiesCount:     approvedCommunitiesCount,
 		// Add password reset fields for frontend
 		ResetPasswordToken:   resetPasswordToken,
 		ResetPasswordExpires: resetPasswordExpires,

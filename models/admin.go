@@ -181,12 +181,12 @@ type AdminPasswordReset struct {
 
 // Admin response models
 type AdminUserResult struct {
-	ID          string      `json:"id"`
-	Email       string      `json:"email"`
-	Username    string      `json:"username,omitempty"`
-	Active      bool        `json:"active"`
-	CreatedAt   interface{} `json:"createdAt"`
-	LastLoginAt interface{} `json:"lastLoginAt,omitempty"`
+	ID            string      `json:"id"`
+	Email         string      `json:"email"`
+	Username      string      `json:"username,omitempty"`
+	IsDeactivated bool        `json:"isDeactivated"`
+	CreatedAt     interface{} `json:"createdAt"`
+	LastLoginAt   interface{} `json:"lastLoginAt,omitempty"`
 }
 
 type AdminCommunityResult struct {
@@ -207,7 +207,7 @@ type AdminUserDetails struct {
 	ID                   string               `json:"id"`
 	Email                string               `json:"email"`
 	Username             string               `json:"username,omitempty"`
-	Active               bool                 `json:"active"`
+	IsDeactivated        bool                 `json:"isDeactivated"`
 	CreatedAt            interface{}          `json:"createdAt"`
 	LastLoginAt          interface{}          `json:"lastLoginAt,omitempty"`
 	Communities          []AdminUserCommunity `json:"communities,omitempty"`
