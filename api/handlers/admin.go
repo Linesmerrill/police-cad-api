@@ -2057,14 +2057,8 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	// Log the admin being viewed for audit purposes
 	log.Printf("Admin activity requested for: %s (%s)", admin.Email, admin.ID.Hex())
 	
-	// Check if activities exist for this admin, create sample data if none exist
-	adminActivitiesCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
-		"adminId": objectID.Hex(),
-		"type": "login",
-	})
-	if err == nil && adminActivitiesCount == 0 {
-		h.createSampleActivityData(r.Context(), objectID)
-	}
+	// Log admin activity request for audit purposes
+	log.Printf("Admin activity requested for: %s (%s)", admin.Email, admin.ID.Hex())
 
 	// Get timeframe from request body, default to 30 days if not specified
 	timeframe := req.Timeframe
@@ -2163,13 +2157,107 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		activity["avgSessionTime"] = "0m"
 	}
 
-	// Generate simple chart data for the last 7 days
+	// Generate chart data based on timeframe
 	chartData := []map[string]interface{}{}
-	for i := 6; i >= 0; i-- {
-		chartData = append(chartData, map[string]interface{}{
-			"date":  "Jan 01",
-			"value": 0,
-		})
+	
+	switch timeframe {
+	case "1d":
+		// Hourly data for 1 day
+		for i := 23; i >= 0; i-- {
+			hour := now.Add(-time.Duration(i) * time.Hour)
+			dateStr := hour.Format("2006-01-02")
+			label := hour.Format("3:04 PM")
+			
+			// Count activities for this hour
+			hourStart := hour.Truncate(time.Hour)
+			hourEnd := hourStart.Add(time.Hour)
+			
+			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
+				"adminId": objectID.Hex(),
+				"timestamp": bson.M{
+					"$gte": hourStart,
+					"$lt":  hourEnd,
+				},
+			})
+			
+			chartData = append(chartData, map[string]interface{}{
+				"date":  dateStr,
+				"value": int(count),
+				"label": label,
+			})
+		}
+	case "7d":
+		// Daily data for 7 days
+		for i := 6; i >= 0; i-- {
+			date := now.AddDate(0, 0, -i)
+			dateStr := date.Format("2006-01-02")
+			label := date.Format("Jan 02")
+			
+			// Count activities for this day
+			dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+			dayEnd := dayStart.AddDate(0, 0, 1)
+			
+			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
+				"adminId": objectID.Hex(),
+				"timestamp": bson.M{
+					"$gte": dayStart,
+					"$lt":  dayEnd,
+				},
+			})
+			
+			chartData = append(chartData, map[string]interface{}{
+				"date":  dateStr,
+				"value": int(count),
+				"label": label,
+			})
+		}
+	case "30d":
+		// Daily data for 30 days
+		for i := 29; i >= 0; i-- {
+			date := now.AddDate(0, 0, -i)
+			dateStr := date.Format("2006-01-02")
+			label := date.Format("Jan 02")
+			
+			// Count activities for this day
+			dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+			dayEnd := dayStart.AddDate(0, 0, 1)
+			
+			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
+				"adminId": objectID.Hex(),
+				"timestamp": bson.M{
+					"$gte": dayStart,
+					"$lt":  dayEnd,
+				},
+			})
+			
+			chartData = append(chartData, map[string]interface{}{
+				"date":  dateStr,
+				"value": int(count),
+				"label": label,
+			})
+		}
+	default:
+		// For other timeframes, show weekly data
+		for i := 3; i >= 0; i-- {
+			weekStart := now.AddDate(0, 0, -7*i)
+			weekEnd := weekStart.AddDate(0, 0, 7)
+			dateStr := weekStart.Format("2006-01-02")
+			label := fmt.Sprintf("Week of %s", weekStart.Format("Jan 02"))
+			
+			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
+				"adminId": objectID.Hex(),
+				"timestamp": bson.M{
+					"$gte": weekStart,
+					"$lt":  weekEnd,
+				},
+			})
+			
+			chartData = append(chartData, map[string]interface{}{
+				"date":  dateStr,
+				"value": int(count),
+				"label": label,
+			})
+		}
 	}
 	
 	// Store chart data in activity map
@@ -2423,67 +2511,7 @@ func (h Admin) calculateAverageSessionTime(ctx context.Context, adminID primitiv
 	return fmt.Sprintf("%dh%dm", avgHours, remainingMinutes), nil
 }
 
-// createSampleActivityData creates sample activity data for testing purposes
-func (h Admin) createSampleActivityData(ctx context.Context, adminID primitive.ObjectID) {
-	// Create sample login activities for the last 7 days
-	now := time.Now()
-	for i := 6; i >= 0; i-- {
-		date := now.AddDate(0, 0, -i)
-		
-		// Create 1-3 login activities per day
-		activityCount := 1 + (i % 3)
-		for j := 0; j < activityCount; j++ {
-			loginTime := date.Add(time.Duration(9+j*4) * time.Hour) // 9 AM, 1 PM, 5 PM
-			
-			loginActivity := models.AdminActivityStorage{
-				AdminID:   adminID.Hex(),
-				Type:      "login",
-				Title:     "Admin logged in",
-				Details:   fmt.Sprintf("Login from admin console at %s", loginTime.Format("3:04 PM")),
-				Timestamp: loginTime,
-				IP:        "192.168.1.100",
-				CreatedAt: loginTime,
-			}
-			
-				_, err := h.AADB.InsertOne(ctx, loginActivity)
-	if err != nil {
-		// Silently fail in production
-	}
-		}
-	}
-	
-	// Create some password reset activities
-	passwordResetActivity := models.AdminActivityStorage{
-		AdminID:   adminID.Hex(),
-		Type:      "password_reset",
-		Title:     "Password reset completed",
-		Details:   "Password successfully updated via reset link",
-		Timestamp: now.AddDate(0, 0, -2),
-		IP:        "192.168.1.100",
-		CreatedAt: now.AddDate(0, 0, -2),
-	}
-	
-	_, err := h.AADB.InsertOne(ctx, passwordResetActivity)
-	if err != nil {
-		// Silently fail in production
-	}
-	
-	// Create some admin action activities
-	adminActionActivity := models.AdminActivityStorage{
-		AdminID:   adminID.Hex(),
-		Type:      "admin_action",
-		Title:     "Admin action performed",
-		Details:   "Created new admin user: test@example.com",
-		Timestamp: now.AddDate(0, 0, -1),
-		IP:        "192.168.1.100",
-		CreatedAt: now.AddDate(0, 0, -1),
-	}
-	
-	_, err = h.AADB.InsertOne(ctx, adminActionActivity)
-	if err != nil {
-		// Silently fail in production
-	}
-}
+
 
 
 
