@@ -1763,9 +1763,38 @@ func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// AdminGetActivityRequest represents the request to get admin activity with permission check
+type AdminGetActivityRequest struct {
+	CurrentUser map[string]interface{} `json:"currentUser"`
+}
+
 // AdminGetActivityHandler gets detailed activity information for a specific admin
 func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	var req AdminGetActivityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body",
+			"code":    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Check permissions - only owners can view admin activity
+	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+		response := map[string]interface{}{
+			"success": false,
+			"error":   "Insufficient permissions to view admin activity",
+			"code":    "INSUFFICIENT_PERMISSIONS",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
 
 	// Extract admin ID from URL path
 	pathParts := strings.Split(r.URL.Path, "/")
@@ -1791,6 +1820,30 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Check if admin exists
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "Admin user not found",
+				"code":    "ADMIN_NOT_FOUND",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to fetch admin user",
+			"code":    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Log the admin being viewed for audit purposes
+	log.Printf("Admin activity requested for: %s (%s)", admin.Email, admin.ID.Hex())
 
 	// Get query parameters for filtering
 	queryParams := r.URL.Query()
@@ -1825,13 +1878,13 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build activity data
-	activity := models.AdminActivityData{
-		TotalLogins:    0,
-		PasswordResets: 0,
-		TempPasswords:  0, // Keep for backward compatibility but will be 0
-		AvgSessionTime: "0m",
-		ChartData:      []models.ChartDataPoint{},
-		RecentActivity: []models.ActivityItem{},
+	activity := map[string]interface{}{
+		"totalLogins":            0,
+		"passwordResets":         0,
+		"passwordResetsInitiated": 0,
+		"avgSessionTime":         "0m",
+		"chartData":              []map[string]interface{}{},
+		"recentActivity":         []map[string]interface{}{},
 	}
 
 	// Count total logins
@@ -1843,16 +1896,16 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err == nil {
-		activity.TotalLogins = int(loginCount)
+		activity["totalLogins"] = int(loginCount)
 	}
 
 	// Count password resets (placeholder for now)
 	// This would require implementing activity tracking in the password reset flow
-	activity.PasswordResets = 0
+	activity["passwordResets"] = 0
 
 	// Calculate average session time (placeholder for now)
 	// This would require tracking logout events and calculating duration
-	activity.AvgSessionTime = "45m" // placeholder
+	activity["avgSessionTime"] = "45m" // placeholder
 
 	// Generate chart data for the last 7 days
 	chartStart := now.AddDate(0, 0, -7)
@@ -1876,10 +1929,12 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 			dayCount = int(dayLoginCount)
 		}
 
-		activity.ChartData = append(activity.ChartData, models.ChartDataPoint{
-			Date:  date.Format("Jan 02"),
-			Value: dayCount,
+		chartData := activity["chartData"].([]map[string]interface{})
+		chartData = append(chartData, map[string]interface{}{
+			"date":  date.Format("Jan 02"),
+			"value": dayCount,
 		})
+		activity["chartData"] = chartData
 	}
 
 	// Get recent activity (last 20 events)
@@ -1903,26 +1958,30 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 					title = "Admin logged out"
 				}
 
-				activity.RecentActivity = append(activity.RecentActivity, models.ActivityItem{
-					Type:      login.Type,
-					Title:     title,
-					Details:   fmt.Sprintf("IP: %s", login.IP),
-					Timestamp: login.Timestamp,
+				recentActivity := activity["recentActivity"].([]map[string]interface{})
+				recentActivity = append(recentActivity, map[string]interface{}{
+					"type":      login.Type,
+					"title":     title,
+					"details":   fmt.Sprintf("IP: %s", login.IP),
+					"timestamp": login.Timestamp,
 				})
+				activity["recentActivity"] = recentActivity
 			}
 		}
 	}
 
 	// Sort recent activity by timestamp (newest first)
-	if len(activity.RecentActivity) > 20 {
-		activity.RecentActivity = activity.RecentActivity[:20]
+	recentActivity := activity["recentActivity"].([]map[string]interface{})
+	if len(recentActivity) > 20 {
+		recentActivity = recentActivity[:20]
+		activity["recentActivity"] = recentActivity
 	}
 
 	// Return activity data
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(models.AdminActivityResponse{
-		Success:  true,
-		Activity: activity,
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"activity": activity,
 	})
 }
 
