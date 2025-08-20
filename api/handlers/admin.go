@@ -575,31 +575,8 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		// Get departments info
-		var departments []models.CommunityDept
+		// Get departments info - just count for search results
 		departmentCount := len(community.Details.Departments)
-		if departmentCount > 0 {
-			// Limit to first 5 departments for search results (can be expanded in details view)
-			maxDepts := 5
-			if departmentCount > maxDepts {
-				departmentCount = maxDepts
-			}
-			
-			for i := 0; i < departmentCount; i++ {
-				dept := community.Details.Departments[i]
-				// Count members in this department
-				memberCount := 0
-				if dept.Members != nil {
-					memberCount = len(dept.Members)
-				}
-				
-				departments = append(departments, models.CommunityDept{
-					ID:          dept.ID.Hex(),
-					Name:        dept.Name,
-					MemberCount: memberCount,
-				})
-			}
-		}
 
 		// Set default visibility if empty
 		visibility := community.Details.Visibility
@@ -614,8 +591,7 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 			CreatedAt:      community.Details.CreatedAt,
 			Owner:          ownerInfo,
 			MemberCount:    community.Details.MembersCount,
-			Departments:    departments,
-			DepartmentCount: len(community.Details.Departments),
+			DepartmentCount: departmentCount,
 		}
 		results = append(results, result)
 	}
@@ -845,13 +821,14 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	details := models.AdminCommunityDetails{
-		ID:          community.ID.Hex(),
-		Name:        community.Details.Name,
-		Visibility:  visibility,
-		CreatedAt:   community.Details.CreatedAt,
-		Owner:       ownerInfo,
-		MemberCount: community.Details.MembersCount,
-		Departments: depts,
+		ID:             community.ID.Hex(),
+		Name:           community.Details.Name,
+		Visibility:     visibility,
+		CreatedAt:      community.Details.CreatedAt,
+		Owner:          ownerInfo,
+		MemberCount:    community.Details.MembersCount,
+		Departments:    depts,
+		DepartmentCount: len(community.Details.Departments),
 	}
 
 	w.WriteHeader(http.StatusOK)

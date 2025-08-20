@@ -196,7 +196,6 @@ type AdminCommunityResult struct {
 	CreatedAt   interface{} `json:"createdAt"`
 	Owner       *OwnerInfo  `json:"owner,omitempty"`
 	MemberCount int         `json:"memberCount"`
-	Departments []CommunityDept `json:"departments,omitempty"`
 	DepartmentCount int      `json:"departmentCount"`
 }
 
@@ -229,13 +228,14 @@ type AdminUserCommunity struct {
 }
 
 type AdminCommunityDetails struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Visibility  string            `json:"visibility"`  // "public" or "private"
-	CreatedAt   interface{}       `json:"createdAt"`
-	Owner       *OwnerInfo        `json:"owner,omitempty"`
-	MemberCount int               `json:"memberCount"`
-	Departments []CommunityDept   `json:"departments,omitempty"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Visibility     string            `json:"visibility"`  // "public" or "private"
+	CreatedAt      interface{}       `json:"createdAt"`
+	Owner          *OwnerInfo        `json:"owner,omitempty"`
+	MemberCount    int               `json:"memberCount"`
+	Departments    []CommunityDept   `json:"departments,omitempty"`
+	DepartmentCount int               `json:"departmentCount"`
 }
 
 type CommunityDept struct {
