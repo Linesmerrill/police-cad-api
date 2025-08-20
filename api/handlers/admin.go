@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -89,6 +90,47 @@ func checkAdminPermissions(currentUser map[string]interface{}) error {
 	return nil
 }
 
+// AdminLogoutHandler handles admin logout and tracks the activity
+func (h Admin) AdminLogoutHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from JWT token or request body
+	var req struct {
+		AdminID string `json:"adminId"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body",
+			"code":    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate admin ID format
+	objectID, err := primitive.ObjectIDFromHex(req.AdminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid admin ID format",
+			"code":    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Track admin logout activity
+	h.trackAdminLogout(objectID, r)
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Admin logout tracked successfully",
+	})
+}
+
 // AdminLoginHandler handles admin login via email/password and returns a JWT
 func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -155,6 +197,9 @@ func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	resp.Admin.Email = admin.Email
 	resp.Admin.Roles = admin.Roles
 
+	// Track admin login activity
+	h.trackAdminLogin(admin.ID, r)
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -193,6 +238,9 @@ func (h Admin) AdminForgotPasswordHandler(w http.ResponseWriter, r *http.Request
 				CreatedAt: time.Now(),
 			})
 			_ = sendResetEmail(email, buildResetLink(os.Getenv("PUBLIC_WEB_BASE_URL"), plain))
+			
+			// Track password reset initiated
+			h.trackPasswordResetInitiated(admin.ID, r)
 		}
 	}
 
@@ -267,6 +315,9 @@ func (h Admin) AdminResetPasswordHandler(w http.ResponseWriter, r *http.Request)
 	}
 	// Mark token used
 	_, _ = h.RDB.UpdateOne(r.Context(), bson.M{"_id": reset.ID}, bson.M{"$set": bson.M{"usedAt": time.Now()}})
+
+	// Track password reset completed
+	h.trackPasswordResetCompleted(reset.AdminID, r)
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1022,6 +1073,9 @@ func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the inserted ID
 	insertedID := result.Decode()
 	adminUser.ID = insertedID.(primitive.ObjectID)
+
+	// Track admin user creation
+	h.trackAdminAction(adminUser.ID, "admin_created", adminUser.ID.Hex(), "admin", fmt.Sprintf("Created admin user: %s", adminUser.Email), r)
 
 	// Generate password reset token
 	resetToken := generateAdminResetToken()
@@ -1844,6 +1898,17 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Log the admin being viewed for audit purposes
 	log.Printf("Admin activity requested for: %s (%s)", admin.Email, admin.ID.Hex())
+	
+	// Debug: Check what's in the admin activity database
+	allActivitiesCount, err := h.AADB.CountDocuments(r.Context(), bson.M{})
+	if err == nil {
+		log.Printf("Total activities in admin_activity collection: %d", allActivitiesCount)
+	}
+	
+	adminActivitiesCount, err := h.AADB.CountDocuments(r.Context(), bson.M{"adminId": objectID.Hex()})
+	if err == nil {
+		log.Printf("Activities for admin %s: %d", objectID.Hex(), adminActivitiesCount)
+	}
 
 	// Get query parameters for filtering
 	queryParams := r.URL.Query()
@@ -1887,9 +1952,9 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		"recentActivity":         []map[string]interface{}{},
 	}
 
-	// Count total logins
-	loginCount, err := h.ADB.CountDocuments(r.Context(), bson.M{
-		"adminId": objectID,
+	// Count total logins - use the admin activity database, not admin database
+	loginCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
+		"adminId": objectID.Hex(),
 		"type":    "login",
 		"timestamp": bson.M{
 			"$gte": startTime,
@@ -1897,15 +1962,48 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err == nil {
 		activity["totalLogins"] = int(loginCount)
+	} else {
+		log.Printf("Failed to count logins: %v", err)
+		activity["totalLogins"] = 0
 	}
 
-	// Count password resets (placeholder for now)
-	// This would require implementing activity tracking in the password reset flow
-	activity["passwordResets"] = 0
+	// Count password resets
+	passwordResetCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
+		"adminId": objectID.Hex(),
+		"type":    "password_reset",
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
+	})
+	if err == nil {
+		activity["passwordResets"] = int(passwordResetCount)
+	} else {
+		log.Printf("Failed to count password resets: %v", err)
+		activity["passwordResets"] = 0
+	}
 
-	// Calculate average session time (placeholder for now)
-	// This would require tracking logout events and calculating duration
-	activity["avgSessionTime"] = "45m" // placeholder
+	// Count password resets initiated
+	passwordResetInitiatedCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
+		"adminId": objectID.Hex(),
+		"type":    "password_reset_initiated",
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
+	})
+	if err == nil {
+		activity["passwordResetsInitiated"] = int(passwordResetInitiatedCount)
+	} else {
+		log.Printf("Failed to count password resets initiated: %v", err)
+		activity["passwordResetsInitiated"] = 0
+	}
+
+	// Calculate average session time from login/logout pairs
+	avgSessionTime, err := h.calculateAverageSessionTime(r.Context(), objectID, startTime)
+	if err == nil {
+		activity["avgSessionTime"] = avgSessionTime
+	} else {
+		activity["avgSessionTime"] = "0m"
+	}
 
 	// Generate chart data for the last 7 days
 	chartStart := now.AddDate(0, 0, -7)
@@ -1914,10 +2012,9 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 		dayEnd := dayStart.AddDate(0, 0, 1)
 
-		// Count logins for this day
-		dayLoginCount, err := h.ADB.CountDocuments(r.Context(), bson.M{
-			"adminId": objectID,
-			"type":    "login",
+		// Count all activities for this day (not just logins)
+		dayActivityCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
+			"adminId": objectID.Hex(),
 			"timestamp": bson.M{
 				"$gte": dayStart,
 				"$lt":  dayEnd,
@@ -1926,7 +2023,9 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		
 		dayCount := 0
 		if err == nil {
-			dayCount = int(dayLoginCount)
+			dayCount = int(dayActivityCount)
+		} else {
+			log.Printf("Failed to count day %s activities: %v", date.Format("Jan 02"), err)
 		}
 
 		chartData := activity["chartData"].([]map[string]interface{})
@@ -1939,35 +2038,34 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get recent activity (last 20 events)
 	recentFilter := bson.M{
-		"adminId": objectID,
+		"adminId": objectID.Hex(),
 		"timestamp": bson.M{
 			"$gte": startTime,
 		},
 	}
 
-	// Get recent login activities
-	loginCursor, err := h.ADB.Find(r.Context(), recentFilter, nil)
+	// Get recent activities from admin activity database
+	recentCursor, err := h.AADB.Find(r.Context(), recentFilter, nil)
 	if err == nil {
-		defer loginCursor.Close(r.Context())
+		defer recentCursor.Close(r.Context())
 		
-		var loginActivities []models.AdminLoginActivity
-		if err = loginCursor.All(r.Context(), &loginActivities); err == nil {
-			for _, login := range loginActivities {
-				title := "Admin logged in"
-				if login.Type == "logout" {
-					title = "Admin logged out"
-				}
-
+		var recentActivities []models.AdminActivityStorage
+		if err = recentCursor.All(r.Context(), &recentActivities); err == nil {
+			for _, activityItem := range recentActivities {
 				recentActivity := activity["recentActivity"].([]map[string]interface{})
 				recentActivity = append(recentActivity, map[string]interface{}{
-					"type":      login.Type,
-					"title":     title,
-					"details":   fmt.Sprintf("IP: %s", login.IP),
-					"timestamp": login.Timestamp,
+					"type":      activityItem.Type,
+					"title":     activityItem.Title,
+					"details":   activityItem.Details,
+					"timestamp": activityItem.Timestamp,
 				})
 				activity["recentActivity"] = recentActivity
 			}
+		} else {
+			log.Printf("Failed to decode recent activities: %v", err)
 		}
+	} else {
+		log.Printf("Failed to fetch recent activities: %v", err)
 	}
 
 	// Sort recent activity by timestamp (newest first)
@@ -2007,18 +2105,15 @@ func (h Admin) trackAdminLogin(adminID primitive.ObjectID, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 
-	// Store in database
-	var err error
-	_, err = h.AADB.InsertOne(r.Context(), loginActivity)
+	// Insert the activity record
+	_, err := h.AADB.InsertOne(r.Context(), loginActivity)
 	if err != nil {
-		log.Printf("Failed to log admin login activity: %v", err)
-	} else {
-		log.Printf("Admin login tracked: %s from IP %s", adminID.Hex(), ip)
+		log.Printf("Failed to track admin login: %v", err)
 	}
 }
 
 // trackAdminLogout tracks when an admin logs out
-func (h Admin) trackAdminLogout(adminID primitive.ObjectID, sessionID string, r *http.Request) {
+func (h Admin) trackAdminLogout(adminID primitive.ObjectID, r *http.Request) {
 	// Get client IP
 	ip := r.Header.Get("X-Forwarded-For")
 	if ip == "" {
@@ -2028,10 +2123,230 @@ func (h Admin) trackAdminLogout(adminID primitive.ObjectID, sessionID string, r 
 		ip = r.RemoteAddr
 	}
 
-	// Create logout activity record (placeholder for now)
-	// This would store in a dedicated activity collection
-	log.Printf("Admin logout tracked: %s from IP %s with session %s", adminID.Hex(), ip, sessionID)
+	// Create logout activity record
+	logoutActivity := models.AdminActivityStorage{
+		AdminID:   adminID.Hex(),
+		Type:      "logout",
+		Title:     "Admin logged out",
+		Details:   fmt.Sprintf("IP: %s", ip),
+		Timestamp: time.Now(),
+		IP:        ip,
+		CreatedAt: time.Now(),
+	}
+
+	// Insert the activity record
+	_, err := h.AADB.InsertOne(r.Context(), logoutActivity)
+	if err != nil {
+		log.Printf("Failed to track admin logout: %v", err)
+	}
 }
+
+// trackPasswordResetInitiated tracks when a password reset is initiated
+func (h Admin) trackPasswordResetInitiated(adminID primitive.ObjectID, r *http.Request) {
+	// Get client IP
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	// Create password reset initiated activity record
+	resetInitiatedActivity := models.AdminActivityStorage{
+		AdminID:   adminID.Hex(),
+		Type:      "password_reset_initiated",
+		Title:     "Password reset initiated",
+		Details:   fmt.Sprintf("Password reset email sent to %s", adminID.Hex()),
+		Timestamp: time.Now(),
+		IP:        ip,
+		CreatedAt: time.Now(),
+	}
+
+	// Insert the activity record
+	_, err := h.AADB.InsertOne(r.Context(), resetInitiatedActivity)
+	if err != nil {
+		log.Printf("Failed to track password reset initiated: %v", err)
+	}
+}
+
+// trackPasswordResetCompleted tracks when a password reset is completed
+func (h Admin) trackPasswordResetCompleted(adminID primitive.ObjectID, r *http.Request) {
+	// Get client IP
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	// Create password reset completed activity record
+	resetCompletedActivity := models.AdminActivityStorage{
+		AdminID:   adminID.Hex(),
+		Type:      "password_reset",
+		Title:     "Password reset completed",
+		Details:   "Password successfully updated",
+		Timestamp: time.Now(),
+		IP:        ip,
+		CreatedAt: time.Now(),
+	}
+
+	// Insert the activity record
+	_, err := h.AADB.InsertOne(r.Context(), resetCompletedActivity)
+	if err != nil {
+		log.Printf("Failed to track password reset completed: %v", err)
+	}
+}
+
+// calculateAverageSessionTime calculates the average session time for an admin
+func (h Admin) calculateAverageSessionTime(ctx context.Context, adminID primitive.ObjectID, startTime time.Time) (string, error) {
+	// Find all login events for the admin in the time range
+	loginFilter := bson.M{
+		"adminId": adminID.Hex(),
+		"type":    "login",
+		"timestamp": bson.M{
+			"$gte": startTime,
+		},
+	}
+
+	loginCursor, err := h.AADB.Find(ctx, loginFilter, nil)
+	if err != nil {
+		return "0m", err
+	}
+	defer loginCursor.Close(ctx)
+
+	var loginEvents []models.AdminActivityStorage
+	if err = loginCursor.All(ctx, &loginEvents); err != nil {
+		return "0m", err
+	}
+
+	if len(loginEvents) == 0 {
+		return "0m", nil
+	}
+
+	var totalDuration time.Duration
+	var sessionCount int
+
+	// For each login, find the corresponding logout
+	for _, login := range loginEvents {
+		// Find logout event that comes after this login
+		logoutFilter := bson.M{
+			"adminId": adminID.Hex(),
+			"type":    "logout",
+			"timestamp": bson.M{
+				"$gt": login.Timestamp,
+			},
+		}
+
+		logoutCursor, err := h.AADB.Find(ctx, logoutFilter, nil)
+		if err != nil {
+			continue
+		}
+
+		var logoutEvents []models.AdminActivityStorage
+		if err = logoutCursor.All(ctx, &logoutEvents); err != nil {
+			logoutCursor.Close(ctx)
+			continue
+		}
+		logoutCursor.Close(ctx)
+
+		// Find the closest logout after this login
+		var closestLogout *models.AdminActivityStorage
+		for _, logout := range logoutEvents {
+			if closestLogout == nil || logout.Timestamp.Sub(login.Timestamp) < closestLogout.Timestamp.Sub(login.Timestamp) {
+				closestLogout = &logout
+			}
+		}
+
+		if closestLogout != nil {
+			duration := closestLogout.Timestamp.Sub(login.Timestamp)
+			totalDuration += duration
+			sessionCount++
+		}
+	}
+
+	if sessionCount == 0 {
+		return "0m", nil
+	}
+
+	avgDuration := totalDuration / time.Duration(sessionCount)
+	avgMinutes := int(avgDuration.Minutes())
+
+	if avgMinutes < 60 {
+		return fmt.Sprintf("%dm", avgMinutes), nil
+	}
+
+	avgHours := avgMinutes / 60
+	remainingMinutes := avgMinutes % 60
+	return fmt.Sprintf("%dh%dm", avgHours, remainingMinutes), nil
+}
+
+// createSampleActivityData creates sample activity data for testing purposes
+func (h Admin) createSampleActivityData(ctx context.Context, adminID primitive.ObjectID) {
+	// Create sample login activities for the last 7 days
+	now := time.Now()
+	for i := 6; i >= 0; i-- {
+		date := now.AddDate(0, 0, -i)
+		
+		// Create 1-3 login activities per day
+		activityCount := 1 + (i % 3)
+		for j := 0; j < activityCount; j++ {
+			loginTime := date.Add(time.Duration(9+j*4) * time.Hour) // 9 AM, 1 PM, 5 PM
+			
+			loginActivity := models.AdminActivityStorage{
+				AdminID:   adminID.Hex(),
+				Type:      "login",
+				Title:     "Admin logged in",
+				Details:   fmt.Sprintf("Login from admin console at %s", loginTime.Format("3:04 PM")),
+				Timestamp: loginTime,
+				IP:        "192.168.1.100",
+				CreatedAt: loginTime,
+			}
+			
+			_, err := h.AADB.InsertOne(ctx, loginActivity)
+			if err != nil {
+				log.Printf("Failed to create sample login activity: %v", err)
+			}
+		}
+	}
+	
+	// Create some password reset activities
+	passwordResetActivity := models.AdminActivityStorage{
+		AdminID:   adminID.Hex(),
+		Type:      "password_reset",
+		Title:     "Password reset completed",
+		Details:   "Password successfully updated via reset link",
+		Timestamp: now.AddDate(0, 0, -2),
+		IP:        "192.168.1.100",
+		CreatedAt: now.AddDate(0, 0, -2),
+	}
+	
+	_, err := h.AADB.InsertOne(ctx, passwordResetActivity)
+	if err != nil {
+		log.Printf("Failed to create sample password reset activity: %v", err)
+	}
+	
+	// Create some admin action activities
+	adminActionActivity := models.AdminActivityStorage{
+		AdminID:   adminID.Hex(),
+		Type:      "admin_action",
+		Title:     "Admin action performed",
+		Details:   "Created new admin user: test@example.com",
+		Timestamp: now.AddDate(0, 0, -1),
+		IP:        "192.168.1.100",
+		CreatedAt: now.AddDate(0, 0, -1),
+	}
+	
+	_, err = h.AADB.InsertOne(ctx, adminActionActivity)
+	if err != nil {
+		log.Printf("Failed to create sample admin action activity: %v", err)
+	}
+	
+	log.Printf("Created sample activity data for admin %s", adminID.Hex())
+}
+
+
 
 // trackAdminAction tracks administrative actions
 func (h Admin) trackAdminAction(adminID primitive.ObjectID, actionType, targetID, targetType, details string, r *http.Request) {
