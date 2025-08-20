@@ -788,6 +788,147 @@ func (h Admin) AdminUserResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Password reset email sent successfully"})
 }
 
+// AdminUserReactivateHandler handles reactivating a deactivated user account
+func (h Admin) AdminUserReactivateHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract user ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid user ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+	userID := pathParts[len(pathParts)-2]
+
+	// Parse request body
+	var req struct {
+		CurrentUser struct {
+			Email string   `json:"email"`
+			Roles []string `json:"roles"`
+		} `json:"currentUser"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate current user permissions
+	hasPermission := false
+	for _, role := range req.CurrentUser.Roles {
+		if role == "admin" || role == "owner" {
+			hasPermission = true
+			break
+		}
+	}
+
+	if !hasPermission {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Insufficient permissions to reactivate user accounts",
+			Code:    "PERMISSION_DENIED",
+		})
+		return
+	}
+
+	// Try string ID first, then ObjectID
+	var user models.User
+	err := h.UDB.FindOne(r.Context(), bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+			var userObj struct {
+				ID      primitive.ObjectID `bson:"_id"`
+				Details models.UserDetails `bson:"user"`
+				Version int32             `bson:"__v"`
+			}
+			if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
+				user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+					Success: false,
+					Error:   "User not found",
+					Code:    "NOT_FOUND",
+				})
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "User not found",
+				Code:    "NOT_FOUND",
+			})
+			return
+		}
+	}
+
+	// Check if user is actually deactivated
+	if !user.Details.IsDeactivated {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "User account is already active",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Reactivate the user
+	filter := bson.M{"_id": userID}
+	if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+		filter = bson.M{"$or": []bson.M{{"_id": userID}, {"_id": oid}}}
+	}
+
+	_, err = h.UDB.UpdateOne(r.Context(), filter, bson.M{
+		"$set": bson.M{
+			"user.isDeactivated": false,
+			"updatedAt":          time.Now(),
+		},
+	})
+
+	if err != nil {
+		log.Printf("Failed to reactivate user: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to reactivate user",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Track the action
+	if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+		h.trackAdminAction(oid, "user_reactivated", userID, "user", fmt.Sprintf("User account reactivated: %s", user.Details.Email), r)
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "User account reactivated successfully",
+		"user": map[string]interface{}{
+			"id":            user.ID,
+			"email":         user.Details.Email,
+			"username":      user.Details.Username,
+			"isDeactivated": false,
+			"updatedAt":     time.Now(),
+		},
+	})
+}
+
 type tempPasswordResponse struct {
 	TempPassword string `json:"tempPassword"`
 }

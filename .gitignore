@@ -2,3 +2,4 @@ vendor*
 coverage.out
 .env
 police-cad-api
+server.log
