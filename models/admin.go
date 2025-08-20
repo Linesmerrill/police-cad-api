@@ -1,8 +1,9 @@
 package models
 
 import (
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // AdminUser represents an admin user in the system
@@ -210,6 +211,7 @@ type AdminUserDetails struct {
 	CreatedAt            interface{}          `json:"createdAt"`
 	LastLoginAt          interface{}          `json:"lastLoginAt,omitempty"`
 	Communities          []AdminUserCommunity `json:"communities,omitempty"`
+	CommunitiesCount     int                  `json:"communitiesCount"`
 	ResetPasswordToken   string               `json:"resetPasswordToken,omitempty"`
 	ResetPasswordExpires interface{}          `json:"resetPasswordExpires,omitempty"`
 }
@@ -217,6 +219,7 @@ type AdminUserDetails struct {
 type AdminUserCommunity struct {
 	ID         string      `json:"id"`
 	Name       string      `json:"name"`
+	Status     string      `json:"status"`
 	Role       string      `json:"role"`
 	Department string      `json:"department,omitempty"`
 	JoinedAt   interface{} `json:"joinedAt,omitempty"`

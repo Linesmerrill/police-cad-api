@@ -562,8 +562,9 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get user communities with role information
+	// Get user communities with role and status information
 	var userCommunities []models.AdminUserCommunity
+	var approvedCommunitiesCount int
 	
 	// Find communities where this user is a member
 	cursor, err := h.CDB.Find(r.Context(), bson.M{
@@ -579,8 +580,25 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		if err = cursor.All(r.Context(), &communities); err == nil {
 			for _, community := range communities {
 				role := "Member"
+				status := "pending" // Default status
+				
+				// Check if user is owner
 				if community.Details.OwnerID == user.ID {
 					role = "Owner"
+					status = "approved" // Owners are always approved
+				} else {
+					// Check member status in departments
+					for _, dept := range community.Details.Departments {
+						for _, member := range dept.Members {
+							if member.UserID == user.ID {
+								status = member.Status
+								break
+							}
+						}
+						if status != "pending" {
+							break
+						}
+					}
 				}
 				
 				// Get department info if available
@@ -589,9 +607,15 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 					department = community.Details.Departments[0].Name
 				}
 				
+				// Only count approved communities
+				if status == "approved" {
+					approvedCommunitiesCount++
+				}
+				
 				userCommunities = append(userCommunities, models.AdminUserCommunity{
 					ID:         community.ID.Hex(),
 					Name:       community.Details.Name,
+					Status:     status,
 					Role:       role,
 					Department: department,
 					JoinedAt:   community.Details.CreatedAt, // Use community creation as joined date for now
@@ -611,12 +635,13 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	details := models.AdminUserDetails{
-		ID:          user.ID,
-		Email:       user.Details.Email,
-		Username:    user.Details.Username,
-		Active:      !user.Details.IsDeactivated,
-		CreatedAt:   user.Details.CreatedAt,
-		Communities: userCommunities,
+		ID:              user.ID,
+		Email:           user.Details.Email,
+		Username:        user.Details.Username,
+		Active:          !user.Details.IsDeactivated,
+		CreatedAt:       user.Details.CreatedAt,
+		Communities:     userCommunities,
+		CommunitiesCount: approvedCommunitiesCount,
 		// Add password reset fields for frontend
 		ResetPasswordToken:   resetPasswordToken,
 		ResetPasswordExpires: resetPasswordExpires,
