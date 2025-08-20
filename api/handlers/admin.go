@@ -566,101 +566,70 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	var userCommunities []models.AdminUserCommunity
 	var approvedCommunitiesCount int
 	
-	// Find communities where this user is a member
 	log.Printf("Searching for communities for user ID: %s", user.ID)
 	
-	// Query for communities where user is owner or member of any department
-	log.Printf("User ID being searched: %s", user.ID)
-	
-	// First, let's see what communities exist in the database
-	allCommunitiesCursor, err := h.CDB.Find(r.Context(), bson.M{})
-	if err == nil {
-		defer allCommunitiesCursor.Close(r.Context())
-		var allCommunities []models.Community
-		if err = allCommunitiesCursor.All(r.Context(), &allCommunities); err == nil {
-			log.Printf("Total communities in database: %d", len(allCommunities))
-			// Log first few communities to see their structure
-			for i, comm := range allCommunities {
-				if i < 3 { // Only log first 3
-					log.Printf("Community %d: ID=%s, Name=%s, OwnerID=%s", 
-						i+1, comm.ID.Hex(), comm.Details.Name, comm.Details.OwnerID)
-					log.Printf("  Departments: %d", len(comm.Details.Departments))
-					for j, dept := range comm.Details.Departments {
-						if j < 2 { // Only log first 2 departments
-							log.Printf("    Dept %d: Name=%s, Members=%d", 
-								j+1, dept.Name, len(dept.Members))
-							for k, member := range dept.Members {
-								if k < 3 { // Only log first 3 members
-									log.Printf("      Member %d: UserID=%s, Status=%s", 
-										k+1, member.UserID, member.Status)
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	
-	cursor, err := h.CDB.Find(r.Context(), bson.M{
-		"$or": []bson.M{
-			{"details.ownerID": user.ID}, // User is owner
-			{"details.departments.members.userID": user.ID}, // User is member of any department
-		},
-	}, nil)
-	if err == nil {
-		defer cursor.Close(r.Context())
+	// Get the user's communities from the user document
+	if len(user.Details.Communities) > 0 {
+		log.Printf("User has %d communities in their profile", len(user.Details.Communities))
 		
-		var communities []models.Community
-		if err = cursor.All(r.Context(), &communities); err == nil {
-			log.Printf("Found %d communities for user %s", len(communities), user.ID)
-			if len(communities) == 0 {
-				log.Printf("No communities found - this might indicate a query issue")
+		for _, userComm := range user.Details.Communities {
+			log.Printf("Processing community: ID=%s, CommunityID=%s, Status=%s", 
+				userComm.ID, userComm.CommunityID, userComm.Status)
+			
+			// Convert community ID string to ObjectID
+			communityObjectID, err := primitive.ObjectIDFromHex(userComm.CommunityID)
+			if err != nil {
+				log.Printf("Invalid community ID format: %s", userComm.CommunityID)
+				continue
 			}
-			for _, community := range communities {
-				role := "Member"
-				status := "pending" // Default status
-				
-				// Check if user is owner
-				if community.Details.OwnerID == user.ID {
-					role = "Owner"
-					status = "approved" // Owners are always approved
-				} else {
-					// Check member status in departments
-					for _, dept := range community.Details.Departments {
-						for _, member := range dept.Members {
-							if member.UserID == user.ID {
-								status = member.Status
-								break
-							}
-						}
-						if status != "pending" {
-							break
-						}
-					}
-				}
-				
-				// Get department info if available
-				department := ""
-				if len(community.Details.Departments) > 0 {
-					department = community.Details.Departments[0].Name
-				}
-				
-				// Only count approved communities
-				if status == "approved" {
-					approvedCommunitiesCount++
-				}
-				
-				userCommunities = append(userCommunities, models.AdminUserCommunity{
-					ID:         community.ID.Hex(),
-					Name:       community.Details.Name,
-					Status:     status,
-					Role:       role,
-					Department: department,
-					JoinedAt:   community.Details.CreatedAt, // Use community creation as joined date for now
-				})
+			
+			// Query the community collection for this community
+			community, err := h.CDB.FindOne(r.Context(), bson.M{"_id": communityObjectID})
+			if err != nil {
+				log.Printf("Failed to find community %s: %v", userComm.CommunityID, err)
+				continue
 			}
+			
+			log.Printf("Found community: %s (Owner: %s)", community.Details.Name, community.Details.OwnerID)
+			
+			// Get owner details (we'll use this later if needed)
+			var ownerUser models.User
+			ownerErr := h.UDB.FindOne(r.Context(), bson.M{"_id": community.Details.OwnerID}).Decode(&ownerUser)
+			if ownerErr != nil {
+				log.Printf("Could not find owner user: %v", ownerErr)
+			}
+			
+			// Determine role (owner or member)
+			role := "Member"
+			if community.Details.OwnerID == user.ID {
+				role = "Owner"
+			}
+			
+			// Get department info if available
+			department := ""
+			if len(community.Details.Departments) > 0 {
+				department = community.Details.Departments[0].Name
+			}
+			
+			// Only count approved communities
+			if userComm.Status == "approved" {
+				approvedCommunitiesCount++
+			}
+			
+			userCommunities = append(userCommunities, models.AdminUserCommunity{
+				ID:         community.ID.Hex(),
+				Name:       community.Details.Name,
+				Status:     userComm.Status,
+				Role:       role,
+				Department: department,
+				JoinedAt:   community.Details.CreatedAt,
+			})
+			
+			log.Printf("Added community: %s, Status: %s, Role: %s", 
+				community.Details.Name, userComm.Status, role)
 		}
+	} else {
+		log.Printf("User has no communities in their profile")
 	}
 
 	// Get password reset status
