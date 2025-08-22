@@ -68,6 +68,7 @@ func (a *App) New() *mux.Router {
 	}
 	
 	medicalReportHandler := MedicalReport{DB: databases.NewMedicalReportDatabase(a.dbHelper)}
+	medicationHandler := Medication{DB: databases.NewMedicationDatabase(a.dbHelper)}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -308,6 +309,13 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/medical-reports/{id}", api.Middleware(http.HandlerFunc(medicalReportHandler.GetMedicalReportByIDHandler))).Methods("GET")
 	apiCreate.Handle("/medical-reports/{id}", api.Middleware(http.HandlerFunc(medicalReportHandler.UpdateMedicalReportHandler))).Methods("PUT")
 	apiCreate.Handle("/medical-reports/{id}", api.Middleware(http.HandlerFunc(medicalReportHandler.DeleteMedicalReportHandler))).Methods("DELETE")
+
+	// Medication routes
+	apiCreate.Handle("/medications", api.Middleware(http.HandlerFunc(medicationHandler.GetMedicationsHandler))).Methods("GET")
+	apiCreate.Handle("/medications", api.Middleware(http.HandlerFunc(medicationHandler.CreateMedicationHandler))).Methods("POST")
+	apiCreate.Handle("/medications/{id}", api.Middleware(http.HandlerFunc(medicationHandler.GetMedicationByIDHandler))).Methods("GET")
+	apiCreate.Handle("/medications/{id}", api.Middleware(http.HandlerFunc(medicationHandler.UpdateMedicationHandler))).Methods("PUT")
+	apiCreate.Handle("/medications/{id}", api.Middleware(http.HandlerFunc(medicationHandler.DeleteMedicationHandler))).Methods("DELETE")
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
