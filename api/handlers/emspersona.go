@@ -165,7 +165,7 @@ func (h EMSPersona) CreateEMSPersonaHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate station number
-	if persona.Persona.Station > 99999 {
+	if persona.Persona.Station != "" && len(persona.Persona.Station) > 5 {
 		http.Error(w, "station cannot exceed 5 digits", http.StatusBadRequest)
 		return
 	}
@@ -261,7 +261,7 @@ func (h EMSPersona) UpdateEMSPersonaHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate station number
-	if persona.Persona.Station > 99999 {
+	if persona.Persona.Station != "" && len(persona.Persona.Station) > 5 {
 		http.Error(w, "station cannot exceed 5 digits", http.StatusBadRequest)
 		return
 	}

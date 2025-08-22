@@ -17,7 +17,7 @@ type PersonaDetails struct {
 	LastName           string             `json:"lastName" bson:"lastName"`
 	Department         string             `json:"department" bson:"department"`
 	AssignmentArea     string             `json:"assignmentArea" bson:"assignmentArea"`
-	Station            int                `json:"station" bson:"station"`
+	Station            string             `json:"station" bson:"station"`
 	CallSign           string             `json:"callSign" bson:"callSign"`
 	ActiveCommunityID  string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	UserID             string             `json:"userID" bson:"userID"`
@@ -38,7 +38,7 @@ type EMSPersonaWithDetails struct {
 	LastName          string             `json:"lastName" bson:"lastName"`
 	Department        string             `json:"department" bson:"department"`
 	AssignmentArea    string             `json:"assignmentArea" bson:"assignmentArea"`
-	Station           int                `json:"station" bson:"station"`
+	Station           string             `json:"station" bson:"station"`
 	CallSign          string             `json:"callSign" bson:"callSign"`
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	UserID            string             `json:"userID" bson:"userID"`
