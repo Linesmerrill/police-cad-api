@@ -89,9 +89,9 @@ func testEMSPersonasIntegration(t *testing.T) {
 		}
 
 		// Set up mock expectation
-		mockDB.On("GetEMSPersonasByCommunityID", mock.Anything, "test-community-123", int64(20), int64(0)).Return(expectedResponse, nil).Once()
+		mockDB.On("GetEMSPersonasByCommunityID", mock.Anything, "test-community-123", "test-user-123", int64(20), int64(0)).Return(expectedResponse, nil).Once()
 
-		req := httptest.NewRequest("GET", "/ems-personas?active_community_id=test-community-123&limit=20&page=0", nil)
+		req := httptest.NewRequest("GET", "/ems-personas?active_community_id=test-community-123&user_id=test-user-123&limit=20&page=0", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -337,9 +337,9 @@ func testEMSVehiclesIntegration(t *testing.T) {
 		}
 
 		// Set up mock expectation
-		mockDB.On("GetEMSVehiclesByCommunityID", mock.Anything, "test-community-123", int64(20), int64(0)).Return(expectedResponse, nil).Once()
+		mockDB.On("GetEMSVehiclesByCommunityID", mock.Anything, "test-community-123", "test-user-123", int64(20), int64(0)).Return(expectedResponse, nil).Once()
 
-		req := httptest.NewRequest("GET", "/ems-vehicles?active_community_id=test-community-123&limit=20&page=0", nil)
+		req := httptest.NewRequest("GET", "/ems-vehicles?active_community_id=test-community-123&user_id=test-user-123&limit=20&page=0", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 

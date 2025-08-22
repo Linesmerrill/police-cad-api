@@ -12,7 +12,7 @@ import (
 
 // EMSPersonaDatabase defines the interface for EMS persona database operations
 type EMSPersonaDatabase interface {
-	GetEMSPersonasByCommunityID(ctx context.Context, activeCommunityID string, limit, page int64) (*models.EMSPersonaResponse, error)
+	GetEMSPersonasByCommunityID(ctx context.Context, activeCommunityID, userID string, limit, page int64) (*models.EMSPersonaResponse, error)
 	GetEMSPersonaByID(ctx context.Context, id string) (*models.EMSPersona, error)
 	CreateEMSPersona(ctx context.Context, persona *models.EMSPersona) error
 	UpdateEMSPersona(ctx context.Context, id string, persona *models.EMSPersona) error
@@ -31,11 +31,12 @@ func NewEMSPersonaDatabase(dbHelper DatabaseHelper) EMSPersonaDatabase {
 	}
 }
 
-// GetEMSPersonasByCommunityID retrieves EMS personas for a specific community with pagination
-func (e *emsPersonaDatabase) GetEMSPersonasByCommunityID(ctx context.Context, activeCommunityID string, limit, page int64) (*models.EMSPersonaResponse, error) {
+// GetEMSPersonasByCommunityID retrieves EMS personas for a specific community and user with pagination
+func (e *emsPersonaDatabase) GetEMSPersonasByCommunityID(ctx context.Context, activeCommunityID, userID string, limit, page int64) (*models.EMSPersonaResponse, error) {
 	// Build filter
 	filter := bson.M{
 		"persona.activeCommunityID": activeCommunityID,
+		"persona.userID":            userID,
 	}
 
 	// Calculate skip value for pagination

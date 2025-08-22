@@ -25,12 +25,18 @@ func (h EMSPersona) GetEMSPersonasHandler(w http.ResponseWriter, r *http.Request
 
 	// Get query parameters
 	activeCommunityID := r.URL.Query().Get("active_community_id")
+	userID := r.URL.Query().Get("user_id")
 	limitStr := r.URL.Query().Get("limit")
 	pageStr := r.URL.Query().Get("page")
 
 	// Validate required parameters
 	if activeCommunityID == "" {
 		http.Error(w, "active_community_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if userID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -54,7 +60,7 @@ func (h EMSPersona) GetEMSPersonasHandler(w http.ResponseWriter, r *http.Request
 
 	// Get EMS personas from database
 	ctx := context.Background()
-	response, err := h.DB.GetEMSPersonasByCommunityID(ctx, activeCommunityID, limit, page)
+	response, err := h.DB.GetEMSPersonasByCommunityID(ctx, activeCommunityID, userID, limit, page)
 	if err != nil {
 		zap.S().With(err).Error("failed to get EMS personas")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

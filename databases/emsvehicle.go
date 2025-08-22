@@ -12,7 +12,7 @@ import (
 
 // EMSVehicleDatabase defines the interface for EMS vehicle database operations
 type EMSVehicleDatabase interface {
-	GetEMSVehiclesByCommunityID(ctx context.Context, activeCommunityID string, limit, page int64) (*models.EMSVehicleResponse, error)
+	GetEMSVehiclesByCommunityID(ctx context.Context, activeCommunityID, userID string, limit, page int64) (*models.EMSVehicleResponse, error)
 	GetEMSVehicleByID(ctx context.Context, id string) (*models.EMSVehicle, error)
 	CreateEMSVehicle(ctx context.Context, vehicle *models.EMSVehicle) error
 	UpdateEMSVehicle(ctx context.Context, id string, vehicle *models.EMSVehicle) error
@@ -31,11 +31,12 @@ func NewEMSVehicleDatabase(dbHelper DatabaseHelper) EMSVehicleDatabase {
 	}
 }
 
-// GetEMSVehiclesByCommunityID retrieves EMS vehicles for a specific community with pagination
-func (e *emsVehicleDatabase) GetEMSVehiclesByCommunityID(ctx context.Context, activeCommunityID string, limit, page int64) (*models.EMSVehicleResponse, error) {
+// GetEMSVehiclesByCommunityID retrieves EMS vehicles for a specific community and user with pagination
+func (e *emsVehicleDatabase) GetEMSVehiclesByCommunityID(ctx context.Context, activeCommunityID, userID string, limit, page int64) (*models.EMSVehicleResponse, error) {
 	// Build filter
 	filter := bson.M{
 		"vehicle.activeCommunityID": activeCommunityID,
+		"vehicle.userID":            userID,
 	}
 
 	// Calculate skip value for pagination

@@ -81,9 +81,9 @@ func (_m *EMSVehicleDatabase) GetEMSVehicleByID(ctx context.Context, id string) 
 	return r0, r1
 }
 
-// GetEMSVehiclesByCommunityID provides a mock function with given fields: ctx, activeCommunityID, limit, page
-func (_m *EMSVehicleDatabase) GetEMSVehiclesByCommunityID(ctx context.Context, activeCommunityID string, limit int64, page int64) (*models.EMSVehicleResponse, error) {
-	ret := _m.Called(ctx, activeCommunityID, limit, page)
+// GetEMSVehiclesByCommunityID provides a mock function with given fields: ctx, activeCommunityID, userID, limit, page
+func (_m *EMSVehicleDatabase) GetEMSVehiclesByCommunityID(ctx context.Context, activeCommunityID string, userID string, limit int64, page int64) (*models.EMSVehicleResponse, error) {
+	ret := _m.Called(ctx, activeCommunityID, userID, limit, page)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetEMSVehiclesByCommunityID")
@@ -91,19 +91,19 @@ func (_m *EMSVehicleDatabase) GetEMSVehiclesByCommunityID(ctx context.Context, a
 
 	var r0 *models.EMSVehicleResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64) (*models.EMSVehicleResponse, error)); ok {
-		return rf(ctx, activeCommunityID, limit, page)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, int64) (*models.EMSVehicleResponse, error)); ok {
+		return rf(ctx, activeCommunityID, userID, limit, page)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64) *models.EMSVehicleResponse); ok {
-		r0 = rf(ctx, activeCommunityID, limit, page)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, int64) *models.EMSVehicleResponse); ok {
+		r0 = rf(ctx, activeCommunityID, userID, limit, page)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.EMSVehicleResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, int64, int64) error); ok {
-		r1 = rf(ctx, activeCommunityID, limit, page)
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int64, int64) error); ok {
+		r1 = rf(ctx, activeCommunityID, userID, limit, page)
 	} else {
 		r1 = ret.Error(1)
 	}
