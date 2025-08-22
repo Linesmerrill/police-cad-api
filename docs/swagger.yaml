@@ -534,7 +534,7 @@ definitions:
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   EmsVehicle:
-    description: EmsVehicle holds the structure for the emsVehicle collection in mongo
+    description: Legacy types for backward compatibility
     properties:
       __v:
         format: int32
@@ -548,9 +548,6 @@ definitions:
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   EmsVehicleDetails:
-    description: |-
-      EmsVehicleDetails holds the structure for the inner user structure as
-      defined in the emsVehicle collection in mongo
     properties:
       activeCommunityID:
         type: string

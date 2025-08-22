@@ -43,7 +43,7 @@ func (a *App) New() *mux.Router {
 	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper)}
 	l := License{DB: databases.NewLicenseDatabase(a.dbHelper)}
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
-	ev := EmsVehicle{DB: databases.NewEmsVehicleDatabase(a.dbHelper)}
+
 	pv := PendingVerification{PVDB: databases.NewPendingVerificationDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper)}
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
@@ -69,6 +69,8 @@ func (a *App) New() *mux.Router {
 	
 	medicalReportHandler := MedicalReport{DB: databases.NewMedicalReportDatabase(a.dbHelper)}
 	medicationHandler := Medication{DB: databases.NewMedicationDatabase(a.dbHelper)}
+	emsPersonaHandler := EMSPersona{DB: databases.NewEMSPersonaDatabase(a.dbHelper)}
+	emsVehicleHandler := EMSVehicle{DB: databases.NewEMSVehicleDatabase(a.dbHelper)}
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -277,9 +279,10 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/ems/{ems_id}", api.Middleware(http.HandlerFunc(e.EmsByIDHandler))).Methods("GET")
 	apiCreate.Handle("/ems", api.Middleware(http.HandlerFunc(e.EmsHandler))).Methods("GET")
 	apiCreate.Handle("/ems/user/{user_id}", api.Middleware(http.HandlerFunc(e.EmsByUserIDHandler))).Methods("GET")
-	apiCreate.Handle("/emsVehicle/{ems_vehicle_id}", api.Middleware(http.HandlerFunc(ev.EmsVehicleByIDHandler))).Methods("GET")
-	apiCreate.Handle("/emsVehicles", api.Middleware(http.HandlerFunc(ev.EmsVehicleHandler))).Methods("GET")
-	apiCreate.Handle("/emsVehicles/user/{user_id}", api.Middleware(http.HandlerFunc(ev.EmsVehiclesByUserIDHandler))).Methods("GET")
+	// Old EMS vehicle routes (keeping for backward compatibility)
+	// apiCreate.Handle("/emsVehicle/{ems_vehicle_id}", api.Middleware(http.HandlerFunc(ev.EmsVehicleByIDHandler))).Methods("GET")
+	// apiCreate.Handle("/emsVehicles", api.Middleware(http.HandlerFunc(ev.EmsVehicleHandler))).Methods("GET")
+	// apiCreate.Handle("/emsVehicles/user/{user_id}", api.Middleware(http.HandlerFunc(ev.EmsVehiclesByUserIDHandler))).Methods("GET")
 
 	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.CallByIDHandler))).Methods("GET")
 	apiCreate.Handle("/call/{call_id}", api.Middleware(http.HandlerFunc(call.UpdateCallByIDHandler))).Methods("PUT")
@@ -316,6 +319,20 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/medications/{id}", api.Middleware(http.HandlerFunc(medicationHandler.GetMedicationByIDHandler))).Methods("GET")
 	apiCreate.Handle("/medications/{id}", api.Middleware(http.HandlerFunc(medicationHandler.UpdateMedicationHandler))).Methods("PUT")
 	apiCreate.Handle("/medications/{id}", api.Middleware(http.HandlerFunc(medicationHandler.DeleteMedicationHandler))).Methods("DELETE")
+
+	// EMS Persona routes
+	apiCreate.Handle("/ems-personas", api.Middleware(http.HandlerFunc(emsPersonaHandler.GetEMSPersonasHandler))).Methods("GET")
+	apiCreate.Handle("/ems-personas", api.Middleware(http.HandlerFunc(emsPersonaHandler.CreateEMSPersonaHandler))).Methods("POST")
+	apiCreate.Handle("/ems-personas/{id}", api.Middleware(http.HandlerFunc(emsPersonaHandler.GetEMSPersonaByIDHandler))).Methods("GET")
+	apiCreate.Handle("/ems-personas/{id}", api.Middleware(http.HandlerFunc(emsPersonaHandler.UpdateEMSPersonaHandler))).Methods("PUT")
+	apiCreate.Handle("/ems-personas/{id}", api.Middleware(http.HandlerFunc(emsPersonaHandler.DeleteEMSPersonaHandler))).Methods("DELETE")
+
+	// EMS Vehicle routes
+	apiCreate.Handle("/ems-vehicles", api.Middleware(http.HandlerFunc(emsVehicleHandler.GetEMSVehiclesHandler))).Methods("GET")
+	apiCreate.Handle("/ems-vehicles", api.Middleware(http.HandlerFunc(emsVehicleHandler.CreateEMSVehicleHandler))).Methods("POST")
+	apiCreate.Handle("/ems-vehicles/{id}", api.Middleware(http.HandlerFunc(emsVehicleHandler.GetEMSVehicleByIDHandler))).Methods("GET")
+	apiCreate.Handle("/ems-vehicles/{id}", api.Middleware(http.HandlerFunc(emsVehicleHandler.UpdateEMSVehicleHandler))).Methods("PUT")
+	apiCreate.Handle("/ems-vehicles/{id}", api.Middleware(http.HandlerFunc(emsVehicleHandler.DeleteEMSVehicleHandler))).Methods("DELETE")
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")

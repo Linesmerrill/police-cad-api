@@ -3,131 +3,319 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
-	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
-// EmsVehicle exported for testing purposes
-type EmsVehicle struct {
-	DB databases.EmsVehicleDatabase
+// EMSVehicle represents the EMS vehicle handler
+type EMSVehicle struct {
+	DB databases.EMSVehicleDatabase
 }
 
-// EmsVehicleHandler returns all emsVehicles
-func (v EmsVehicle) EmsVehicleHandler(w http.ResponseWriter, r *http.Request) {
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
-	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-	if err != nil {
-		config.ErrorStatus("failed to get emsVehicles", http.StatusNotFound, w, err)
-		return
-	}
-	// Because the frontend requires that the data elements inside models.EmsVehicles exist, if
-	// len == 0 then we will just return an empty data object
-	if len(dbResp) == 0 {
-		dbResp = []models.EmsVehicle{}
-	}
-	b, err := json.Marshal(dbResp)
-	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(b)
-}
+// GetEMSVehiclesHandler handles GET requests for EMS vehicles
+func (h EMSVehicle) GetEMSVehiclesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 
-// EmsVehicleByIDHandler returns a emsVehicle by ID
-func (v EmsVehicle) EmsVehicleByIDHandler(w http.ResponseWriter, r *http.Request) {
-	emsVehicleID := mux.Vars(r)["ems_vehicle_id"]
-
-	zap.S().Debugf("ems_vehicle_id: %v", emsVehicleID)
-
-	evID, err := primitive.ObjectIDFromHex(emsVehicleID)
-	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-		return
-	}
-
-	dbResp, err := v.DB.FindOne(context.Background(), bson.M{"_id": evID})
-	if err != nil {
-		config.ErrorStatus("failed to get emsVehicle by ID", http.StatusNotFound, w, err)
-		return
-	}
-
-	b, err := json.Marshal(dbResp)
-	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(b)
-}
-
-// EmsVehiclesByUserIDHandler returns all emsVehicles that contain the given userID
-func (v EmsVehicle) EmsVehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request) {
-	userID := mux.Vars(r)["user_id"]
+	// Get query parameters
 	activeCommunityID := r.URL.Query().Get("active_community_id")
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
 
-	zap.S().Debugf("user_id: '%v'", userID)
-	zap.S().Debugf("active_community: '%v'", activeCommunityID)
-
-	var dbResp []models.EmsVehicle
-
-	// If the user is in a community then we want to search for emsVehicles that
-	// are in that same community. This way each user can have different emsVehicles
-	// across different communities.
-	//
-	// Likewise, if the user is not in a community, then we will display only the emsVehicles
-	// that are not in a community
-	var err error
-	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"emsVehicle.userID":            userID,
-			"emsVehicle.activeCommunityID": activeCommunityID,
-		})
-		if err != nil {
-			config.ErrorStatus("failed to get emsVehicles with active community id", http.StatusNotFound, w, err)
-			return
-		}
-	} else {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
-			"emsVehicle.userID": userID,
-			"$or": []bson.M{
-				{"emsVehicle.activeCommunityID": nil},
-				{"emsVehicle.activeCommunityID": ""},
-			},
-		})
-		if err != nil {
-			config.ErrorStatus("failed to get emsVehicles with empty active community id", http.StatusNotFound, w, err)
-			return
-		}
-	}
-
-	// Because the frontend requires that the data elements inside models.EmsVehicles exist, if
-	// len == 0 then we will just return an empty data object
-	if len(dbResp) == 0 {
-		dbResp = []models.EmsVehicle{}
-	}
-	b, err := json.Marshal(dbResp)
-	if err != nil {
-		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+	// Validate required parameters
+	if activeCommunityID == "" {
+		http.Error(w, "active_community_id is required", http.StatusBadRequest)
 		return
 	}
+
+	// Set default values for optional parameters
+	limit := int64(20)
+	page := int64(0)
+
+	// Parse limit parameter
+	if limitStr != "" {
+		if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	// Parse page parameter
+	if pageStr != "" {
+		if parsedPage, err := strconv.ParseInt(pageStr, 10, 64); err == nil && parsedPage >= 0 {
+			page = parsedPage
+		}
+	}
+
+	// Get EMS vehicles from database
+	ctx := context.Background()
+	response, err := h.DB.GetEMSVehiclesByCommunityID(ctx, activeCommunityID, limit, page)
+	if err != nil {
+		zap.S().With(err).Error("failed to get EMS vehicles")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return response
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		zap.S().With(err).Error("failed to encode EMS vehicles response")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
+
+// GetEMSVehicleByIDHandler handles GET requests for a single EMS vehicle
+func (h EMSVehicle) GetEMSVehicleByIDHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get ID from URL parameters
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if id == "" {
+		http.Error(w, "EMS vehicle ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get EMS vehicle from database
+	ctx := context.Background()
+	vehicle, err := h.DB.GetEMSVehicleByID(ctx, id)
+	if err != nil {
+		zap.S().With(err).Error("failed to get EMS vehicle by ID")
+		http.Error(w, "EMS vehicle not found", http.StatusNotFound)
+		return
+	}
+
+	// Return response
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(vehicle); err != nil {
+		zap.S().With(err).Error("failed to encode EMS vehicle response")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// CreateEMSVehicleHandler handles POST requests to create a new EMS vehicle
+func (h EMSVehicle) CreateEMSVehicleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Read request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Parse request body
+	var vehicle models.EMSVehicle
+	if err := json.Unmarshal(body, &vehicle); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if vehicle.Vehicle.Plate == "" {
+		http.Error(w, "plate is required", http.StatusBadRequest)
+		return
+	}
+
+	if vehicle.Vehicle.Model == "" {
+		http.Error(w, "model is required", http.StatusBadRequest)
+		return
+	}
+
+	if vehicle.Vehicle.EngineNumber == "" {
+		http.Error(w, "engineNumber is required", http.StatusBadRequest)
+		return
+	}
+
+	if vehicle.Vehicle.ActiveCommunityID == "" {
+		http.Error(w, "activeCommunityID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate plate length
+	if len(vehicle.Vehicle.Plate) > 8 {
+		http.Error(w, "plate cannot exceed 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Validate model value
+	isValidModel := false
+	for _, validModel := range models.ValidVehicleModels {
+		if vehicle.Vehicle.Model == validModel {
+			isValidModel = true
+			break
+		}
+	}
+	if !isValidModel {
+		http.Error(w, "model must be one of the valid options: "+strings.Join(models.ValidVehicleModels, ", "), http.StatusBadRequest)
+		return
+	}
+
+	// Validate engine number length
+	if len(vehicle.Vehicle.EngineNumber) > 10 {
+		http.Error(w, "engineNumber cannot exceed 10 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Set default registered owner if not provided
+	if vehicle.Vehicle.RegisteredOwner == "" {
+		vehicle.Vehicle.RegisteredOwner = "N/A"
+	}
+
+	// Create EMS vehicle in database
+	ctx := context.Background()
+	err = h.DB.CreateEMSVehicle(ctx, &vehicle)
+	if err != nil {
+		zap.S().With(err).Error("failed to create EMS vehicle")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return created EMS vehicle
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(vehicle); err != nil {
+		zap.S().With(err).Error("failed to encode created EMS vehicle response")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// UpdateEMSVehicleHandler handles PUT requests to update an existing EMS vehicle
+func (h EMSVehicle) UpdateEMSVehicleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get ID from URL parameters
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if id == "" {
+		http.Error(w, "EMS vehicle ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Read request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Parse request body
+	var vehicle models.EMSVehicle
+	if err := json.Unmarshal(body, &vehicle); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if vehicle.Vehicle.Plate == "" {
+		http.Error(w, "plate is required", http.StatusBadRequest)
+		return
+	}
+
+	if vehicle.Vehicle.Model == "" {
+		http.Error(w, "model is required", http.StatusBadRequest)
+		return
+	}
+
+	if vehicle.Vehicle.EngineNumber == "" {
+		http.Error(w, "engineNumber is required", http.StatusBadRequest)
+		return
+	}
+
+	if vehicle.Vehicle.ActiveCommunityID == "" {
+		http.Error(w, "activeCommunityID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate plate length
+	if len(vehicle.Vehicle.Plate) > 8 {
+		http.Error(w, "plate cannot exceed 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Validate model value
+	isValidModel := false
+	for _, validModel := range models.ValidVehicleModels {
+		if vehicle.Vehicle.Model == validModel {
+			isValidModel = true
+			break
+		}
+	}
+	if !isValidModel {
+		http.Error(w, "model must be one of the valid options: "+strings.Join(models.ValidVehicleModels, ", "), http.StatusBadRequest)
+		return
+	}
+
+	// Validate engine number length
+	if len(vehicle.Vehicle.EngineNumber) > 10 {
+		http.Error(w, "engineNumber cannot exceed 10 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Set default registered owner if not provided
+	if vehicle.Vehicle.RegisteredOwner == "" {
+		vehicle.Vehicle.RegisteredOwner = "N/A"
+	}
+
+	// Update EMS vehicle in database
+	ctx := context.Background()
+	err = h.DB.UpdateEMSVehicle(ctx, id, &vehicle)
+	if err != nil {
+		zap.S().With(err).Error("failed to update EMS vehicle")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	response := map[string]string{"message": "EMS vehicle updated successfully"}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		zap.S().With(err).Error("failed to encode update response")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// DeleteEMSVehicleHandler handles DELETE requests to delete an EMS vehicle
+func (h EMSVehicle) DeleteEMSVehicleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get ID from URL parameters
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if id == "" {
+		http.Error(w, "EMS vehicle ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Delete EMS vehicle from database
+	ctx := context.Background()
+	err := h.DB.DeleteEMSVehicle(ctx, id)
+	if err != nil {
+		zap.S().With(err).Error("failed to delete EMS vehicle")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	response := map[string]string{"message": "EMS vehicle deleted successfully"}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		zap.S().With(err).Error("failed to encode delete response")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+} 
