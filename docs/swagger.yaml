@@ -179,6 +179,9 @@ definitions:
           $ref: '#/definitions/CriminalHistory'
         type: array
         x-go-name: CriminalHistory
+      deceased:
+        type: boolean
+        x-go-name: Deceased
       email:
         type: string
         x-go-name: Email
@@ -1064,9 +1067,6 @@ definitions:
       deactivatedAt:
         type: object
         x-go-name: DeactivatedAt
-      deceased:
-        type: boolean
-        x-go-name: Deceased
       dispatchStatus:
         type: string
         x-go-name: DispatchStatus

@@ -40,6 +40,7 @@ type CivilianDetails struct {
 	Occupation           string             `json:"occupation" bson:"occupation"`
 	FirearmLicense       string             `json:"firearmLicense" bson:"firearmLicense"`
 	ActiveCommunityID    string             `json:"activeCommunityID" bson:"activeCommunityID"`
+	Deceased              bool              `json:"deceased" bson:"deceased"`
 	UserID               string             `json:"userID" bson:"userID"`
 	CreatedAt            primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
