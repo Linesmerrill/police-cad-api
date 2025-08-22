@@ -137,6 +137,11 @@ func (h MedicalReport) CreateMedicalReportHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	if medicalReport.Report.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
 	// Create medical report in database
 	ctx := context.Background()
 	err = h.DB.CreateMedicalReport(ctx, &medicalReport)
@@ -191,6 +196,11 @@ func (h MedicalReport) UpdateMedicalReportHandler(w http.ResponseWriter, r *http
 
 	if medicalReport.Report.ActiveCommunityID == "" {
 		http.Error(w, "activeCommunityID is required", http.StatusBadRequest)
+		return
+	}
+
+	if medicalReport.Report.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
 

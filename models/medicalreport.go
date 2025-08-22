@@ -21,8 +21,7 @@ type MedicalReportDetails struct {
 	Deceased           bool               `json:"deceased" bson:"deceased"`
 	ActiveCommunityID  string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	UserID             string             `json:"userID" bson:"userID"`
-	FirstName          string             `json:"firstName" bson:"firstName"`
-	LastName           string             `json:"lastName" bson:"lastName"`
+	Name                string             `json:"name" bson:"name"`
 	DateOfBirth        string             `json:"dateOfBirth" bson:"dateOfBirth"`
 	CreatedAt          primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt          primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
@@ -52,8 +51,7 @@ type MedicalReportWithEms struct {
 
 // EmsInfo contains basic EMS information for the response
 type EmsInfo struct {
-	FirstName string `json:"firstName" bson:"firstName"`
-	LastName  string `json:"lastName" bson:"lastName"`
+	Name       string `json:"name" bson:"name"`
 	Department string `json:"department" bson:"department"`
 }
 

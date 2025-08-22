@@ -68,8 +68,7 @@ func (m *medicalReportDatabase) GetMedicalReportsByCivilianID(ctx context.Contex
 			"createdAt":          "$report.createdAt",
 			"updatedAt":          "$report.updatedAt",
 			"reportingEms": bson.M{
-				"firstName":  "$reportingEms.ems.firstName",
-				"lastName":   "$reportingEms.ems.lastName",
+				"name":       bson.M{"$concat": []string{"$reportingEms.ems.firstName", " ", "$reportingEms.ems.lastName"}},
 				"department": "$reportingEms.ems.department",
 			},
 		}},
