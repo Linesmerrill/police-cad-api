@@ -16,14 +16,14 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func TestGetEMSVehiclesHandler(t *testing.T) {
+func TestGetEMSPersonasHandler(t *testing.T) {
 	tests := []struct {
 		name               string
 		activeCommunityID string
 		limit             string
 		page              string
 		expectedStatus    int
-		expectedResponse  *models.EMSVehicleResponse
+		expectedResponse  *models.EMSPersonaResponse
 		mockError         error
 	}{
 		{
@@ -32,15 +32,16 @@ func TestGetEMSVehiclesHandler(t *testing.T) {
 			limit:             "",
 			page:              "",
 			expectedStatus:    http.StatusOK,
-			expectedResponse: &models.EMSVehicleResponse{
-				Vehicles: []models.EMSVehicleWithDetails{
+			expectedResponse: &models.EMSPersonaResponse{
+				Personas: []models.EMSPersonaWithDetails{
 					{
 						ID:                primitive.NewObjectID(),
-						Plate:             "AMB123",
-						Model:             "Ambulance",
-						EngineNumber:      "ENG-001",
-						Color:             "White",
-						RegisteredOwner:   "City Hospital",
+						FirstName:         "John",
+						LastName:          "Doe",
+						Department:        "EMS",
+						AssignmentArea:    "Downtown District",
+						Station:           5,
+						CallSign:          "Medic-5",
 						ActiveCommunityID: "test-community-id",
 						UserID:            "test-user-id",
 						CreatedAt:         primitive.DateTime(0),
@@ -69,8 +70,8 @@ func TestGetEMSVehiclesHandler(t *testing.T) {
 			limit:             "10",
 			page:              "1",
 			expectedStatus:    http.StatusOK,
-			expectedResponse: &models.EMSVehicleResponse{
-				Vehicles: []models.EMSVehicleWithDetails{},
+			expectedResponse: &models.EMSPersonaResponse{
+				Personas: []models.EMSPersonaWithDetails{},
 				Pagination: models.Pagination{
 					CurrentPage:  1,
 					TotalPages:   0,
@@ -85,7 +86,7 @@ func TestGetEMSVehiclesHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock database
-			mockDB := mocks.NewEMSVehicleDatabase(t)
+			mockDB := mocks.NewEMSPersonaDatabase(t)
 			
 			// Set up mock expectations
 			if tt.expectedStatus == http.StatusOK {
@@ -105,14 +106,14 @@ func TestGetEMSVehiclesHandler(t *testing.T) {
 					}
 				}
 				
-				mockDB.On("GetEMSVehiclesByCommunityID", context.Background(), tt.activeCommunityID, expectedLimit, expectedPage).Return(tt.expectedResponse, tt.mockError)
+				mockDB.On("GetEMSPersonasByCommunityID", context.Background(), tt.activeCommunityID, expectedLimit, expectedPage).Return(tt.expectedResponse, tt.mockError)
 			}
 
 			// Create handler
-			handler := EMSVehicle{DB: mockDB}
+			handler := EMSPersona{DB: mockDB}
 
 			// Create request
-			req := httptest.NewRequest("GET", "/ems-vehicles", nil)
+			req := httptest.NewRequest("GET", "/ems-personas", nil)
 			
 			// Add query parameters
 			q := req.URL.Query()
@@ -131,43 +132,44 @@ func TestGetEMSVehiclesHandler(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			// Call handler
-			handler.GetEMSVehiclesHandler(w, req)
+			handler.GetEMSPersonasHandler(w, req)
 
 			// Assert status code
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			// If successful, check response body
 			if tt.expectedStatus == http.StatusOK && tt.expectedResponse != nil {
-				var response models.EMSVehicleResponse
+				var response models.EMSPersonaResponse
 				err := json.NewDecoder(w.Body).Decode(&response)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedResponse.Pagination, response.Pagination)
-				assert.Len(t, response.Vehicles, len(tt.expectedResponse.Vehicles))
+				assert.Len(t, response.Personas, len(tt.expectedResponse.Personas))
 			}
 		})
 	}
 }
 
-func TestGetEMSVehicleByIDHandler(t *testing.T) {
+func TestGetEMSPersonaByIDHandler(t *testing.T) {
 	tests := []struct {
 		name            string
 		id              string
 		expectedStatus  int
-		expectedVehicle *models.EMSVehicle
+		expectedPersona *models.EMSPersona
 		mockError       error
 	}{
 		{
 			name:   "successful request",
 			id:     "507f1f77bcf86cd799439011",
 			expectedStatus: http.StatusOK,
-			expectedVehicle: &models.EMSVehicle{
+			expectedPersona: &models.EMSPersona{
 				ID: primitive.NewObjectID(),
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB123",
-					Model:             "Ambulance",
-					EngineNumber:      "ENG-001",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					LastName:          "Doe",
+					Department:        "EMS",
+					AssignmentArea:    "Downtown District",
+					Station:           5,
+					CallSign:          "Medic-5",
 					ActiveCommunityID: "test-community-id",
 					UserID:            "test-user-id",
 					CreatedAt:         primitive.DateTime(0),
@@ -181,14 +183,14 @@ func TestGetEMSVehicleByIDHandler(t *testing.T) {
 			name:           "missing id",
 			id:             "",
 			expectedStatus: http.StatusBadRequest,
-			expectedVehicle: nil,
+			expectedPersona: nil,
 			mockError:      nil,
 		},
 		{
 			name:           "not found",
 			id:             "507f1f77bcf86cd799439011",
 			expectedStatus: http.StatusNotFound,
-			expectedVehicle: nil,
+			expectedPersona: nil,
 			mockError:      assert.AnError,
 		},
 	}
@@ -196,20 +198,20 @@ func TestGetEMSVehicleByIDHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock database
-			mockDB := mocks.NewEMSVehicleDatabase(t)
+			mockDB := mocks.NewEMSPersonaDatabase(t)
 			
 			// Set up mock expectations
 			if tt.expectedStatus == http.StatusOK {
-				mockDB.On("GetEMSVehicleByID", context.Background(), tt.id).Return(tt.expectedVehicle, tt.mockError)
+				mockDB.On("GetEMSPersonaByID", context.Background(), tt.id).Return(tt.expectedPersona, tt.mockError)
 			} else if tt.expectedStatus == http.StatusNotFound {
-				mockDB.On("GetEMSVehicleByID", context.Background(), tt.id).Return(nil, tt.mockError)
+				mockDB.On("GetEMSPersonaByID", context.Background(), tt.id).Return(nil, tt.mockError)
 			}
 
 			// Create handler
-			handler := EMSVehicle{DB: mockDB}
+			handler := EMSPersona{DB: mockDB}
 
 			// Create request
-			req := httptest.NewRequest("GET", "/ems-vehicles/"+tt.id, nil)
+			req := httptest.NewRequest("GET", "/ems-personas/"+tt.id, nil)
 			
 			// Set URL parameters
 			if tt.id != "" {
@@ -220,39 +222,40 @@ func TestGetEMSVehicleByIDHandler(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			// Call handler
-			handler.GetEMSVehicleByIDHandler(w, req)
+			handler.GetEMSPersonaByIDHandler(w, req)
 
 			// Assert status code
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			// If successful, check response body
-			if tt.expectedStatus == http.StatusOK && tt.expectedVehicle != nil {
-				var response models.EMSVehicle
+			if tt.expectedStatus == http.StatusOK && tt.expectedPersona != nil {
+				var response models.EMSPersona
 				err := json.NewDecoder(w.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedVehicle.ID, response.ID)
-				assert.Equal(t, tt.expectedVehicle.Vehicle.Plate, response.Vehicle.Plate)
+				assert.Equal(t, tt.expectedPersona.ID, response.ID)
+				assert.Equal(t, tt.expectedPersona.Persona.FirstName, response.Persona.FirstName)
 			}
 		})
 	}
 }
 
-func TestCreateEMSVehicleHandler(t *testing.T) {
+func TestCreateEMSPersonaHandler(t *testing.T) {
 	tests := []struct {
 		name           string
-		requestBody    *models.EMSVehicle
+		requestBody    *models.EMSPersona
 		expectedStatus int
 		mockError      error
 	}{
 		{
 			name: "successful creation",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB123",
-					Model:             "Ambulance",
-					EngineNumber:      "ENG-001",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					LastName:          "Doe",
+					Department:        "EMS",
+					AssignmentArea:    "Downtown District",
+					Station:           5,
+					CallSign:          "Medic-5",
 					ActiveCommunityID: "test-community-id",
 					UserID:            "test-user-id",
 				},
@@ -261,13 +264,12 @@ func TestCreateEMSVehicleHandler(t *testing.T) {
 			mockError:      nil,
 		},
 		{
-			name: "missing plate",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Model:             "Ambulance",
-					EngineNumber:      "ENG-001",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
+			name: "missing firstName",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					LastName:          "Doe",
+					Department:        "EMS",
+					AssignmentArea:    "Downtown District",
 					ActiveCommunityID: "test-community-id",
 					UserID:            "test-user-id",
 				},
@@ -276,13 +278,12 @@ func TestCreateEMSVehicleHandler(t *testing.T) {
 			mockError:      nil,
 		},
 		{
-			name: "missing model",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB123",
-					EngineNumber:      "ENG-001",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
+			name: "missing lastName",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					Department:        "EMS",
+					AssignmentArea:    "Downtown District",
 					ActiveCommunityID: "test-community-id",
 					UserID:            "test-user-id",
 				},
@@ -291,13 +292,41 @@ func TestCreateEMSVehicleHandler(t *testing.T) {
 			mockError:      nil,
 		},
 		{
-			name: "missing engineNumber",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB123",
-					Model:             "Ambulance",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
+			name: "missing department",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					LastName:          "Doe",
+					AssignmentArea:    "Downtown District",
+					ActiveCommunityID: "test-community-id",
+					UserID:            "test-user-id",
+				},
+			},
+			expectedStatus: http.StatusBadRequest,
+			mockError:      nil,
+		},
+		{
+			name: "invalid department",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					LastName:          "Doe",
+					Department:        "Invalid",
+					AssignmentArea:    "Downtown District",
+					ActiveCommunityID: "test-community-id",
+					UserID:            "test-user-id",
+				},
+			},
+			expectedStatus: http.StatusBadRequest,
+			mockError:      nil,
+		},
+		{
+			name: "missing assignmentArea",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					LastName:          "Doe",
+					Department:        "EMS",
 					ActiveCommunityID: "test-community-id",
 					UserID:            "test-user-id",
 				},
@@ -307,62 +336,13 @@ func TestCreateEMSVehicleHandler(t *testing.T) {
 		},
 		{
 			name: "missing activeCommunityID",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:         "AMB123",
-					Model:         "Ambulance",
-					EngineNumber:  "ENG-001",
-					Color:         "White",
-					RegisteredOwner: "City Hospital",
-					UserID:        "test-user-id",
-				},
-			},
-			expectedStatus: http.StatusBadRequest,
-			mockError:      nil,
-		},
-		{
-			name: "invalid model",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB123",
-					Model:             "InvalidModel",
-					EngineNumber:      "ENG-001",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
-					ActiveCommunityID: "test-community-id",
-					UserID:            "test-user-id",
-				},
-			},
-			expectedStatus: http.StatusBadRequest,
-			mockError:      nil,
-		},
-		{
-			name: "plate too long",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB123456789",
-					Model:             "Ambulance",
-					EngineNumber:      "ENG-001",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
-					ActiveCommunityID: "test-community-id",
-					UserID:            "test-user-id",
-				},
-			},
-			expectedStatus: http.StatusBadRequest,
-			mockError:      nil,
-		},
-		{
-			name: "engineNumber too long",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB123",
-					Model:             "Ambulance",
-					EngineNumber:      "ENG-00123456789",
-					Color:             "White",
-					RegisteredOwner:   "City Hospital",
-					ActiveCommunityID: "test-community-id",
-					UserID:            "test-user-id",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:      "John",
+					LastName:       "Doe",
+					Department:     "EMS",
+					AssignmentArea: "Downtown District",
+					UserID:         "test-user-id",
 				},
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -373,59 +353,60 @@ func TestCreateEMSVehicleHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock database
-			mockDB := mocks.NewEMSVehicleDatabase(t)
+			mockDB := mocks.NewEMSPersonaDatabase(t)
 			
 			// Set up mock expectations
 			if tt.expectedStatus == http.StatusCreated {
-				mockDB.On("CreateEMSVehicle", context.Background(), tt.requestBody).Return(tt.mockError)
+				mockDB.On("CreateEMSPersona", context.Background(), tt.requestBody).Return(tt.mockError)
 			}
 
 			// Create handler
-			handler := EMSVehicle{DB: mockDB}
+			handler := EMSPersona{DB: mockDB}
 
 			// Create request body
 			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("POST", "/ems-vehicles", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/ems-personas", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			// Create response recorder
 			w := httptest.NewRecorder()
 
 			// Call handler
-			handler.CreateEMSVehicleHandler(w, req)
+			handler.CreateEMSPersonaHandler(w, req)
 
 			// Assert status code
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			// If successful, check response body
 			if tt.expectedStatus == http.StatusCreated {
-				var response models.EMSVehicle
+				var response models.EMSPersona
 				err := json.NewDecoder(w.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, tt.requestBody.Vehicle.Plate, response.Vehicle.Plate)
+				assert.Equal(t, tt.requestBody.Persona.FirstName, response.Persona.FirstName)
 			}
 		})
 	}
 }
 
-func TestUpdateEMSVehicleHandler(t *testing.T) {
+func TestUpdateEMSPersonaHandler(t *testing.T) {
 	tests := []struct {
 		name           string
 		id             string
-		requestBody    *models.EMSVehicle
+		requestBody    *models.EMSPersona
 		expectedStatus int
 		mockError      error
 	}{
 		{
 			name: "successful update",
 			id:   "507f1f77bcf86cd799439011",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB456",
-					Model:             "Medical Dept. Vehicle",
-					EngineNumber:      "ENG-002",
-					Color:             "Red",
-					RegisteredOwner:   "Fire Department",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					LastName:          "Smith",
+					Department:        "Fire",
+					AssignmentArea:    "Uptown District",
+					Station:           10,
+					CallSign:          "Fire-10",
 					ActiveCommunityID: "test-community-id",
 					UserID:            "test-user-id",
 				},
@@ -436,13 +417,12 @@ func TestUpdateEMSVehicleHandler(t *testing.T) {
 		{
 			name: "missing id",
 			id:   "",
-			requestBody: &models.EMSVehicle{
-				Vehicle: models.EMSVehicleDetails{
-					Plate:             "AMB456",
-					Model:             "Medical Dept. Vehicle",
-					EngineNumber:      "ENG-002",
-					Color:             "Red",
-					RegisteredOwner:   "Fire Department",
+			requestBody: &models.EMSPersona{
+				Persona: models.PersonaDetails{
+					FirstName:         "John",
+					LastName:          "Smith",
+					Department:        "Fire",
+					AssignmentArea:    "Uptown District",
 					ActiveCommunityID: "test-community-id",
 					UserID:            "test-user-id",
 				},
@@ -455,19 +435,19 @@ func TestUpdateEMSVehicleHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock database
-			mockDB := mocks.NewEMSVehicleDatabase(t)
+			mockDB := mocks.NewEMSPersonaDatabase(t)
 			
 			// Set up mock expectations
 			if tt.expectedStatus == http.StatusOK {
-				mockDB.On("UpdateEMSVehicle", context.Background(), tt.id, tt.requestBody).Return(tt.mockError)
+				mockDB.On("UpdateEMSPersona", context.Background(), tt.id, tt.requestBody).Return(tt.mockError)
 			}
 
 			// Create handler
-			handler := EMSVehicle{DB: mockDB}
+			handler := EMSPersona{DB: mockDB}
 
 			// Create request body
 			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("PUT", "/ems-vehicles/"+tt.id, bytes.NewBuffer(body))
+			req := httptest.NewRequest("PUT", "/ems-personas/"+tt.id, bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			
 			// Set URL parameters
@@ -479,7 +459,7 @@ func TestUpdateEMSVehicleHandler(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			// Call handler
-			handler.UpdateEMSVehicleHandler(w, req)
+			handler.UpdateEMSPersonaHandler(w, req)
 
 			// Assert status code
 			assert.Equal(t, tt.expectedStatus, w.Code)
@@ -489,13 +469,13 @@ func TestUpdateEMSVehicleHandler(t *testing.T) {
 				var response map[string]string
 				err := json.NewDecoder(w.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, "EMS vehicle updated successfully", response["message"])
+				assert.Equal(t, "EMS persona updated successfully", response["message"])
 			}
 		})
 	}
 }
 
-func TestDeleteEMSVehicleHandler(t *testing.T) {
+func TestDeleteEMSPersonaHandler(t *testing.T) {
 	tests := []struct {
 		name           string
 		id             string
@@ -525,18 +505,18 @@ func TestDeleteEMSVehicleHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock database
-			mockDB := mocks.NewEMSVehicleDatabase(t)
+			mockDB := mocks.NewEMSPersonaDatabase(t)
 			
 			// Set up mock expectations
 			if tt.id != "" {
-				mockDB.On("DeleteEMSVehicle", context.Background(), tt.id).Return(tt.mockError)
+				mockDB.On("DeleteEMSPersona", context.Background(), tt.id).Return(tt.mockError)
 			}
 
 			// Create handler
-			handler := EMSVehicle{DB: mockDB}
+			handler := EMSPersona{DB: mockDB}
 
 			// Create request
-			req := httptest.NewRequest("DELETE", "/ems-vehicles/"+tt.id, nil)
+			req := httptest.NewRequest("DELETE", "/ems-personas/"+tt.id, nil)
 			
 			// Set URL parameters
 			if tt.id != "" {
@@ -547,7 +527,7 @@ func TestDeleteEMSVehicleHandler(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			// Call handler
-			handler.DeleteEMSVehicleHandler(w, req)
+			handler.DeleteEMSPersonaHandler(w, req)
 
 			// Assert status code
 			assert.Equal(t, tt.expectedStatus, w.Code)
@@ -557,7 +537,7 @@ func TestDeleteEMSVehicleHandler(t *testing.T) {
 				var response map[string]string
 				err := json.NewDecoder(w.Body).Decode(&response)
 				assert.NoError(t, err)
-				assert.Equal(t, "EMS vehicle deleted successfully", response["message"])
+				assert.Equal(t, "EMS persona deleted successfully", response["message"])
 			}
 		})
 	}
