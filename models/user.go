@@ -28,6 +28,7 @@ type UserDetails struct {
 	Notifications         []Notification        `json:"notifications" bson:"notifications"`
 	Communities           []UserCommunity       `json:"communities" bson:"communities"`
 	IsOnline              bool                  `json:"isOnline" bson:"isOnline"`
+	Deceased              bool                  `json:"deceased" bson:"deceased"`
 	Subscription          Subscription          `json:"subscription" bson:"subscription"`
 	IsDeactivated         bool                  `json:"isDeactivated" bson:"isDeactivated"`
 	DeactivatedAt         interface{}           `json:"deactivatedAt" bson:"deactivatedAt"`
