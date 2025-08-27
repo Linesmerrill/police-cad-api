@@ -1886,8 +1886,30 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Update the user's communities array to remove the specified community
+	// Check if the community exists in the user's communities array
 	userFilter := bson.M{"_id": uID}
+	var user models.User
+	err = u.DB.FindOne(context.Background(), userFilter).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Check if the community actually exists in the user's communities array
+	communityExists := false
+	for _, comm := range user.Details.Communities {
+		if comm.CommunityID == requestBody.CommunityID {
+			communityExists = true
+			break
+		}
+	}
+
+	if !communityExists {
+		config.ErrorStatus("community not found in user's communities", http.StatusBadRequest, w, fmt.Errorf("community %s is not associated with user %s", requestBody.CommunityID, userID))
+		return
+	}
+
+	// Update the user's communities array to remove the specified community
 	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
 	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
 	if err != nil {
