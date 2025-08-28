@@ -3381,3 +3381,158 @@ func (c Community) GetPaginatedAllDepartmentsHandler(w http.ResponseWriter, r *h
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+// FetchBannedUsersHandlerV2 returns paginated banned users of a community with populated user details
+func (c Community) FetchBannedUsersHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100 // Cap at 100 to prevent abuse
+	}
+
+	// Convert the community ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Get the list of banned user IDs
+	banList := community.Details.BanList
+
+	// Calculate pagination
+	totalBannedUsers := len(banList)
+	offset := (page - 1) * limit
+	end := offset + limit
+	if end > totalBannedUsers {
+		end = totalBannedUsers
+	}
+	if offset >= totalBannedUsers {
+		// Return empty result for pages beyond available data
+		response := map[string]interface{}{
+			"bannedUsers": []interface{}{},
+			"pagination": map[string]interface{}{
+				"currentPage": page,
+				"totalPages":  (totalBannedUsers + limit - 1) / limit,
+				"totalCount":  totalBannedUsers,
+				"hasNextPage": false,
+				"hasPrevPage": page > 1,
+			},
+		}
+		responseBytes, _ := json.Marshal(response)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseBytes)
+		return
+	}
+
+	// Get paginated banned user IDs
+	paginatedBanList := banList[offset:end]
+
+	// Convert paginated banList to a slice of primitive.ObjectID
+	var objectIDs []primitive.ObjectID
+	for _, id := range paginatedBanList {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			// Skip invalid ObjectIDs
+			continue
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+
+	if len(objectIDs) == 0 {
+		// Return empty result if no valid ObjectIDs
+		response := map[string]interface{}{
+			"bannedUsers": []interface{}{},
+			"pagination": map[string]interface{}{
+				"currentPage": page,
+				"totalPages":  (totalBannedUsers + limit - 1) / limit,
+				"totalCount":  totalBannedUsers,
+				"hasNextPage": page < (totalBannedUsers+limit-1)/limit,
+				"hasPrevPage": page > 1,
+			},
+		}
+		responseBytes, _ := json.Marshal(response)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseBytes)
+		return
+	}
+
+	// Find the banned users
+	userFilter := bson.M{"_id": bson.M{"$in": objectIDs}}
+	cursor, err := c.UDB.Find(context.Background(), userFilter)
+	if err != nil {
+		config.ErrorStatus("failed to get banned users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	defer cursor.Close(context.Background())
+
+	var bannedUsers []models.User
+	if err = cursor.All(context.Background(), &bannedUsers); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Populate user details for each banned user
+	var populatedBannedUsers []map[string]interface{}
+	for _, user := range bannedUsers {
+		// Check if user is verified (has active premium or premium+ subscription)
+		isVerified := false
+		if user.Details.Subscription.Active && (user.Details.Subscription.Plan == "premium" || user.Details.Subscription.Plan == "premium_plus") {
+			isVerified = true
+		}
+
+		// Create banned user object with required fields
+		bannedUser := map[string]interface{}{
+			"id":             user.ID,
+			"username":       user.Details.Username,
+			"profilePicture": user.Details.ProfilePicture,
+			"callSign":       user.Details.CallSign,
+			"isVerified":     isVerified,
+		}
+
+		populatedBannedUsers = append(populatedBannedUsers, bannedUser)
+	}
+
+	// Calculate pagination info
+	totalPages := (totalBannedUsers + limit - 1) / limit
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	// Build response
+	response := map[string]interface{}{
+		"bannedUsers": populatedBannedUsers,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalBannedUsers,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBytes)
+}
