@@ -87,7 +87,10 @@ func TestCommunity_FetchCommunityMembersByRoleIDHandlerV2_Success(t *testing.T) 
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *user1
 	}).Return(nil)
-	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userID1}).Return(mockUser1Result)
+	
+	// Convert userID1 to ObjectID for the mock
+	user1ObjectID, _ := primitive.ObjectIDFromHex(userID1)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": user1ObjectID}).Return(mockUser1Result)
 	
 	// Create mock SingleResultHelper for user2
 	mockUser2Result := &mocks.SingleResultHelper{}
@@ -95,7 +98,10 @@ func TestCommunity_FetchCommunityMembersByRoleIDHandlerV2_Success(t *testing.T) 
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *user2
 	}).Return(nil)
-	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userID2}).Return(mockUser2Result)
+	
+	// Convert userID2 to ObjectID for the mock
+	user2ObjectID, _ := primitive.ObjectIDFromHex(userID2)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": user2ObjectID}).Return(mockUser2Result)
 
 	// Create request
 	req, err := http.NewRequest("GET", "/api/v2/community/"+communityID+"/roles/"+roleID+"/members?page=1&limit=10", nil)
@@ -221,7 +227,10 @@ func TestCommunity_FetchCommunityMembersByRoleIDHandlerV2_Pagination(t *testing.
 				},
 			}
 		}).Return(nil)
-		mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": memberIDs[i]}).Return(mockUserResult)
+		
+		// Convert memberID string to ObjectID for the mock
+		memberObjectID, _ := primitive.ObjectIDFromHex(memberIDs[i])
+		mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": memberObjectID}).Return(mockUserResult)
 	}
 
 	// Create request with page 2, limit 10

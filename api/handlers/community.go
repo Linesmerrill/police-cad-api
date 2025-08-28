@@ -1587,10 +1587,17 @@ func (c Community) FetchCommunityMembersByRoleIDHandlerV2(w http.ResponseWriter,
 	// Populate user details for each member
 	var populatedMembers []map[string]interface{}
 	for _, memberID := range paginatedMemberIDs {
+		// Convert memberID string to ObjectID
+		memberObjectID, err := primitive.ObjectIDFromHex(memberID)
+		if err != nil {
+			// Skip invalid ObjectIDs
+			continue
+		}
+		
 		// Find user by ID
-		userFilter := bson.M{"_id": memberID}
+		userFilter := bson.M{"_id": memberObjectID}
 		var user models.User
-		err := c.UDB.FindOne(context.Background(), userFilter).Decode(&user)
+		err = c.UDB.FindOne(context.Background(), userFilter).Decode(&user)
 		if err != nil {
 			// Skip users that can't be found
 			continue
@@ -1598,7 +1605,7 @@ func (c Community) FetchCommunityMembersByRoleIDHandlerV2(w http.ResponseWriter,
 
 		// Check if user is verified (has active premium or premium+ subscription)
 		isVerified := false
-		if user.Details.Subscription.Active && (user.Details.Subscription.Plan == "premium" || user.Details.Subscription.Plan == "premium+") {
+		if user.Details.Subscription.Active && (user.Details.Subscription.Plan == "premium" || user.Details.Subscription.Plan == "premium_plus") {
 			isVerified = true
 		}
 
