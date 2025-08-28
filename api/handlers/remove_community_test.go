@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -48,6 +49,28 @@ func TestUser_RemoveCommunityFromUserHandler_Success(t *testing.T) {
 	// Setup mocks
 	mockUserDB := &mocks.UserDatabase{}
 	mockCommunityDB := &mocks.CommunityDatabase{}
+	
+	// Mock user find for debugging (checking if community exists in user's communities)
+	mockUser := &models.User{
+		ID: userID,
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{
+				{
+					ID:          "community1",
+					CommunityID: communityID,
+					Status:      "approved",
+				},
+			},
+		},
+	}
+	
+	// Create mock SingleResultHelper for user lookup
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = *mockUser
+	}).Return(nil)
+	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update (removing community from user's communities array)
 	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
@@ -98,6 +121,7 @@ func TestUser_RemoveCommunityFromUserHandler_Success(t *testing.T) {
 	// Verify all mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
+	mockUserResult.AssertExpectations(t)
 }
 
 func TestUser_RemoveCommunityFromUserHandler_InvalidUserID(t *testing.T) {
@@ -247,6 +271,28 @@ func TestUser_RemoveCommunityFromUserHandler_UserUpdateFailure(t *testing.T) {
 	mockUserDB := &mocks.UserDatabase{}
 	mockCommunityDB := &mocks.CommunityDatabase{}
 	
+	// Mock user find for debugging (checking if community exists in user's communities)
+	mockUser := &models.User{
+		ID: userID,
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{
+				{
+					ID:          "community1",
+					CommunityID: communityID,
+					Status:      "approved",
+				},
+			},
+		},
+	}
+	
+	// Create mock SingleResultHelper for user lookup
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = *mockUser
+	}).Return(nil)
+	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	
 	// Mock failed user update
 	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(nil, errors.New("database error"))
 	
@@ -269,6 +315,7 @@ func TestUser_RemoveCommunityFromUserHandler_UserUpdateFailure(t *testing.T) {
 	
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
+	mockUserResult.AssertExpectations(t)
 }
 
 func TestUser_RemoveCommunityFromUserHandler_CommunityUpdateFailure(t *testing.T) {
@@ -300,6 +347,28 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityUpdateFailure(t *testing.T
 	userObjectID, _ := primitive.ObjectIDFromHex(userID)
 	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
 	
+	// Mock user find for debugging (checking if community exists in user's communities)
+	mockUser := &models.User{
+		ID: userID,
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{
+				{
+					ID:          "community1",
+					CommunityID: communityID,
+					Status:      "approved",
+				},
+			},
+		},
+	}
+	
+	// Create mock SingleResultHelper for user lookup
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = *mockUser
+	}).Return(nil)
+	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	
 	// Mock successful user update
 	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
@@ -326,6 +395,7 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityUpdateFailure(t *testing.T
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
+	mockUserResult.AssertExpectations(t)
 }
 
 func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) {
@@ -356,6 +426,28 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) 
 	// Convert to ObjectID for mocking
 	userObjectID, _ := primitive.ObjectIDFromHex(userID)
 	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+	
+	// Mock user find for debugging (checking if community exists in user's communities)
+	mockUser := &models.User{
+		ID: userID,
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{
+				{
+					ID:          "community1",
+					CommunityID: communityID,
+					Status:      "approved",
+				},
+			},
+		},
+	}
+	
+	// Create mock SingleResultHelper for user lookup
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = *mockUser
+	}).Return(nil)
+	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
 	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
@@ -393,6 +485,7 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) 
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
+	mockUserResult.AssertExpectations(t)
 }
 
 func TestUser_RemoveCommunityFromUserHandler_RoleUpdateFailure(t *testing.T) {
@@ -423,6 +516,28 @@ func TestUser_RemoveCommunityFromUserHandler_RoleUpdateFailure(t *testing.T) {
 	// Convert to ObjectID for mocking
 	userObjectID, _ := primitive.ObjectIDFromHex(userID)
 	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+	
+	// Mock user find for debugging (checking if community exists in user's communities)
+	mockUser := &models.User{
+		ID: userID,
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{
+				{
+					ID:          "community1",
+					CommunityID: communityID,
+					Status:      "approved",
+				},
+			},
+		},
+	}
+	
+	// Create mock SingleResultHelper for user lookup
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = *mockUser
+	}).Return(nil)
+	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
 	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
@@ -468,6 +583,7 @@ func TestUser_RemoveCommunityFromUserHandler_RoleUpdateFailure(t *testing.T) {
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
+	mockUserResult.AssertExpectations(t)
 }
 
 func TestUser_RemoveCommunityFromUserHandler_NoRoles(t *testing.T) {
@@ -498,6 +614,28 @@ func TestUser_RemoveCommunityFromUserHandler_NoRoles(t *testing.T) {
 	// Convert to ObjectID for mocking
 	userObjectID, _ := primitive.ObjectIDFromHex(userID)
 	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+	
+	// Mock user find for debugging (checking if community exists in user's communities)
+	mockUser := &models.User{
+		ID: userID,
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{
+				{
+					ID:          "community1",
+					CommunityID: communityID,
+					Status:      "approved",
+				},
+			},
+		},
+	}
+	
+	// Create mock SingleResultHelper for user lookup
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = *mockUser
+	}).Return(nil)
+	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
 	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
@@ -536,6 +674,7 @@ func TestUser_RemoveCommunityFromUserHandler_NoRoles(t *testing.T) {
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
+	mockUserResult.AssertExpectations(t)
 }
 
 func TestUser_RemoveCommunityFromUserHandler_UserNotInRoles(t *testing.T) {
@@ -566,6 +705,28 @@ func TestUser_RemoveCommunityFromUserHandler_UserNotInRoles(t *testing.T) {
 	// Convert to ObjectID for mocking
 	userObjectID, _ := primitive.ObjectIDFromHex(userID)
 	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+	
+	// Mock user find for debugging (checking if community exists in user's communities)
+	mockUser := &models.User{
+		ID: userID,
+		Details: models.UserDetails{
+			Communities: []models.UserCommunity{
+				{
+					ID:          "community1",
+					CommunityID: communityID,
+					Status:      "approved",
+				},
+			},
+		},
+	}
+	
+	// Create mock SingleResultHelper for user lookup
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		userPtr := args.Get(0).(*models.User)
+		*userPtr = *mockUser
+	}).Return(nil)
+	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
 	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
@@ -617,4 +778,5 @@ func TestUser_RemoveCommunityFromUserHandler_UserNotInRoles(t *testing.T) {
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
+	mockUserResult.AssertExpectations(t)
 }

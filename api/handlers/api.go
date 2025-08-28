@@ -129,6 +129,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/fines", api.Middleware(http.HandlerFunc(c.SetCommunityFinesHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{community_id}/archive", api.Middleware(http.HandlerFunc(c.ArchiveCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersByRoleIDHandler))).Methods("GET")
+	apiV2.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersByRoleIDHandlerV2))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.UpdateRoleMembersHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/name", api.Middleware(http.HandlerFunc(c.UpdateRoleNameHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/permissions", api.Middleware(http.HandlerFunc(c.UpdateRolePermissionsHandler))).Methods("PUT")
