@@ -3861,11 +3861,15 @@ func (c *Community) FetchCommunityMembersExcludeRoleHandlerV2(w http.ResponseWri
 
 	// Step 2: Get all community members (approved status)
 	communityFilter := bson.M{
-		"communities": bson.M{
-			"$elemMatch": bson.M{
-				"communityId": communityID,
-				"status":      "approved",
-			},
+		"$and": []bson.M{
+			{"user.communities": bson.M{"$exists": true}},
+			{"user.communities": bson.M{"$ne": nil}},
+			{"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      "approved",
+				},
+			}},
 		},
 	}
 
