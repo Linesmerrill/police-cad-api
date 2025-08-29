@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -3792,4 +3793,144 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBytes)
+}
+
+// FetchCommunityMembersExcludeRoleHandlerV2 fetches community members who are NOT in a specific role
+func (c *Community) FetchCommunityMembersExcludeRoleHandlerV2(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+	roleID := vars["roleId"]
+
+	// Parse pagination parameters
+	page := 1
+	limit := 20
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Validate ObjectIDs
+	if !primitive.IsValidObjectID(communityID) {
+		http.Error(w, "Invalid community ID", http.StatusBadRequest)
+		return
+	}
+	if !primitive.IsValidObjectID(roleID) {
+		http.Error(w, "Invalid role ID", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Step 1: Get the role to find current members
+	communityObjID, _ := primitive.ObjectIDFromHex(communityID)
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": communityObjID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			http.Error(w, "Community not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to fetch community", http.StatusInternalServerError)
+		return
+	}
+
+	// Find the specific role
+	var targetRole *models.Role
+	for _, role := range community.Details.Roles {
+		if role.ID.Hex() == roleID {
+			targetRole = &role
+			break
+		}
+	}
+
+	if targetRole == nil {
+		http.Error(w, "Role not found", http.StatusNotFound)
+		return
+	}
+
+	// Step 2: Get all community members (approved status)
+	communityFilter := bson.M{
+		"communities": bson.M{
+			"$elemMatch": bson.M{
+				"communityId": communityID,
+				"status":      "approved",
+			},
+		},
+	}
+
+	// Count total community members
+	totalCount, err := c.UDB.CountDocuments(ctx, communityFilter)
+	if err != nil {
+		http.Error(w, "Failed to count community members", http.StatusInternalServerError)
+		return
+	}
+
+	// Step 3: Get paginated community members
+	skip := int64((page - 1) * limit)
+	findOptions := options.Find().SetSkip(skip).SetLimit(int64(limit))
+
+	cursor, err := c.UDB.Find(ctx, communityFilter, findOptions)
+	if err != nil {
+		http.Error(w, "Failed to fetch community members", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var users []models.User
+	if err = cursor.All(ctx, &users); err != nil {
+		http.Error(w, "Failed to decode users", http.StatusInternalServerError)
+		return
+	}
+
+	// Step 4: Filter out users who are in the target role
+	var filteredUsers []map[string]interface{}
+	for _, user := range users {
+		// Check if user is NOT in the target role
+		isInRole := false
+		for _, memberID := range targetRole.Members {
+			if memberID == user.ID {
+				isInRole = true
+				break
+			}
+		}
+
+		// Only include users NOT in the role
+		if !isInRole {
+			userData := map[string]interface{}{
+				"id":             user.ID,
+				"username":       user.Details.Username,
+				"profilePicture": user.Details.ProfilePicture,
+				"callSign":       user.Details.CallSign,
+				"isVerified":     user.Details.Subscription.Active,
+			}
+			filteredUsers = append(filteredUsers, userData)
+		}
+	}
+
+	// Calculate pagination info
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	response := map[string]interface{}{
+		"members": filteredUsers,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalCount,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
