@@ -19,6 +19,7 @@ type CommunityDetails struct {
 	ActivePanics           map[string]interface{}  `json:"activePanics" bson:"activePanics"`
 	ActiveSignal100        bool                    `json:"activeSignal100" bson:"activeSignal100"`
 	ImageLink              string                  `json:"imageLink" bson:"imageLink"`
+	MapLink                string                  `json:"mapLink" bson:"mapLink"`
 	Visibility             string                  `json:"visibility" bson:"visibility"`
 	PromotionalText        string                  `json:"promotionalText" bson:"promotionalText"`
 	PromotionalDescription string                  `json:"promotionalDescription" bson:"promotionalDescription"`
