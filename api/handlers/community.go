@@ -3688,3 +3688,132 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBytes)
 }
+
+// FetchCommunityMembersHandlerV2 returns paginated members of a community with populated user details
+func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100 // Cap at 100 to prevent abuse
+	}
+
+	// Convert the community ID to primitive.ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community by ID
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Get all member IDs from the community
+	var memberIDs []string
+	for memberID := range community.Details.Members {
+		memberIDs = append(memberIDs, memberID)
+	}
+
+	// Calculate pagination
+	totalMembers := len(memberIDs)
+	offset := (page - 1) * limit
+	end := offset + limit
+	if end > totalMembers {
+		end = totalMembers
+	}
+	if offset >= totalMembers {
+		// Return empty result for pages beyond available data
+		response := map[string]interface{}{
+			"members": []interface{}{},
+			"pagination": map[string]interface{}{
+				"currentPage": page,
+				"totalPages":  (totalMembers + limit - 1) / limit,
+				"totalCount":  totalMembers,
+				"hasNextPage": false,
+				"hasPrevPage": page > 1,
+			},
+		}
+		responseBytes, _ := json.Marshal(response)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseBytes)
+		return
+	}
+
+	// Get paginated member IDs
+	paginatedMemberIDs := memberIDs[offset:end]
+
+	// Populate user details for each member
+	var populatedMembers []map[string]interface{}
+	for _, memberID := range paginatedMemberIDs {
+		// Convert memberID string to ObjectID
+		memberObjectID, err := primitive.ObjectIDFromHex(memberID)
+		if err != nil {
+			// Skip invalid ObjectIDs
+			continue
+		}
+		
+		// Find user by ID
+		userFilter := bson.M{"_id": memberObjectID}
+		var user models.User
+		err = c.UDB.FindOne(context.Background(), userFilter).Decode(&user)
+		if err != nil {
+			// Skip users that can't be found
+			continue
+		}
+
+		// Check if user is verified (has active premium or premium+ subscription)
+		isVerified := false
+		if user.Details.Subscription.Active && (user.Details.Subscription.Plan == "premium" || user.Details.Subscription.Plan == "premium_plus") {
+			isVerified = true
+		}
+
+		// Create member object with required fields
+		member := map[string]interface{}{
+			"id":             user.ID,
+			"username":       user.Details.Username,
+			"profilePicture": user.Details.ProfilePicture,
+			"callSign":       user.Details.CallSign,
+			"isVerified":     isVerified,
+		}
+
+		populatedMembers = append(populatedMembers, member)
+	}
+
+	// Calculate pagination info
+	totalPages := (totalMembers + limit - 1) / limit
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	// Build response
+	response := map[string]interface{}{
+		"members": populatedMembers,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalMembers,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBytes)
+}
