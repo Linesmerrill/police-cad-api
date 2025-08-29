@@ -60,13 +60,13 @@ func (a *App) New() *mux.Router {
 		CDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
 	adminHandler := Admin{
-		ADB: databases.NewAdminDatabase(a.dbHelper),
-		RDB: databases.NewAdminResetDatabase(a.dbHelper),
-		UDB: databases.NewUserDatabase(a.dbHelper),
-		CDB: databases.NewCommunityDatabase(a.dbHelper),
+		ADB:  databases.NewAdminDatabase(a.dbHelper),
+		RDB:  databases.NewAdminResetDatabase(a.dbHelper),
+		UDB:  databases.NewUserDatabase(a.dbHelper),
+		CDB:  databases.NewCommunityDatabase(a.dbHelper),
 		AADB: databases.NewAdminActivityDatabase(a.dbHelper),
 	}
-	
+
 	medicalReportHandler := MedicalReport{DB: databases.NewMedicalReportDatabase(a.dbHelper)}
 	medicationHandler := Medication{DB: databases.NewMedicationDatabase(a.dbHelper)}
 	emsPersonaHandler := EMSPersona{DB: databases.NewEMSPersonaDatabase(a.dbHelper)}
@@ -85,7 +85,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/logout", http.HandlerFunc(adminHandler.AdminLogoutHandler)).Methods("POST")
 	apiCreate.Handle("/admin/forgot-password", http.HandlerFunc(adminHandler.AdminForgotPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reset-password", http.HandlerFunc(adminHandler.AdminResetPasswordHandler)).Methods("POST")
-	
+
 	// Admin console routes (moved to appear before general user routes)
 	apiCreate.Handle("/admin/search/users", http.HandlerFunc(adminHandler.AdminUserSearchHandler)).Methods("POST")
 	apiCreate.Handle("/admin/search/communities", http.HandlerFunc(adminHandler.AdminCommunitySearchHandler)).Methods("POST")
@@ -94,11 +94,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	// Note: initiate-reset route removed - frontend will use existing /forgot-password route directly
-	
+
 	// Admin user management routes
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")
 	apiCreate.Handle("/admin/send-reset-email", http.HandlerFunc(adminHandler.SendAdminResetEmailHandler)).Methods("POST")
-	
+
 	// Admin management routes
 	apiCreate.Handle("/admin/search/admins", http.HandlerFunc(adminHandler.AdminSearchAdminsHandler)).Methods("POST")
 	apiCreate.Handle("/admin/admins", http.HandlerFunc(adminHandler.AdminGetAllAdminsHandler)).Methods("POST")
@@ -109,7 +109,7 @@ func (a *App) New() *mux.Router {
 
 	// Admin activity tracking routes
 	apiCreate.Handle("/admin/activity/log", http.HandlerFunc(adminHandler.AdminActivityLogHandler)).Methods("POST")
-	
+
 	apiCreate.Handle("/verify/send-verification-code", http.HandlerFunc(pv.CreatePendingVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/verify/verify-code", http.HandlerFunc(pv.VerifyCodeHandler)).Methods("POST")
 	apiCreate.Handle("/verify/resend-verification-code", http.HandlerFunc(pv.ResendVerificationCodeHandler)).Methods("POST")
@@ -132,7 +132,6 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersByRoleIDHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersByRoleIDHandlerV2))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/roles/{roleId}/members/exclude", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersExcludeRoleHandlerV2))).Methods("GET")
-	apiV2.Handle("/community/{communityId}/banned-users", api.Middleware(http.HandlerFunc(c.FetchBannedUsersHandlerV2))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/transfer-ownership", api.Middleware(http.HandlerFunc(c.TransferCommunityOwnershipHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members", api.Middleware(http.HandlerFunc(c.UpdateRoleMembersHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/name", api.Middleware(http.HandlerFunc(c.UpdateRoleNameHandler))).Methods("PUT")
@@ -140,6 +139,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}/members/{memberId}", api.Middleware(http.HandlerFunc(c.DeleteRoleMemberHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/roles/{roleId}", api.Middleware(http.HandlerFunc(c.DeleteRoleByIDHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/banned-users", api.Middleware(http.HandlerFunc(c.GetBannedUsersHandler))).Methods("GET")
+	apiV2.Handle("/community/{communityId}/banned-users", api.Middleware(http.HandlerFunc(c.FetchBannedUsersHandlerV2))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/online-users", api.Middleware(http.HandlerFunc(c.GetOnlineUsersHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/add-invite-code", api.Middleware(http.HandlerFunc(c.AddInviteCodeHandler))).Methods("POST")
 	apiV2.Handle("/community/{communityId}/your-departments", api.Middleware(http.HandlerFunc(c.GetPaginatedAllDepartmentsHandler))).Methods("GET")
@@ -166,7 +166,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.GetEventByIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.UpdateEventByIDHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.DeleteEventByIDHandler))).Methods("DELETE")
-	
+
 	// Announcement routes
 	apiCreate.Handle("/community/{communityId}/announcements", http.HandlerFunc(announcement.GetAnnouncementsHandler)).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/announcements", http.HandlerFunc(announcement.CreateAnnouncementHandler)).Methods("POST")
@@ -178,7 +178,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/announcement/{announcementId}/comments", http.HandlerFunc(announcement.AddCommentHandler)).Methods("POST")
 	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", http.HandlerFunc(announcement.UpdateCommentHandler)).Methods("PUT")
 	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", http.HandlerFunc(announcement.DeleteCommentHandler)).Methods("DELETE")
-	
+
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.FetchEliteCommunitiesHandler))).Methods("GET")

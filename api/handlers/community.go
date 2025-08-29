@@ -303,6 +303,7 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 }
 
 // CommunityMembersHandler returns all members of a community
+// Deprecated: Use FetchCommunityMembersHandlerV2 instead
 func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
@@ -956,6 +957,7 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 }
 
 // GetBannedUsersHandler returns all banned users of a community
+// Deprecated: Use FetchBannedUsersHandlerV2 instead
 func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
@@ -1454,6 +1456,7 @@ func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Reques
 }
 
 // FetchCommunityMembersByRoleIDHandler returns all members of a role in a community
+// Deprecated: Use FetchCommunityMembersByRoleIDHandlerV2 for paginated results with user details
 func (c Community) FetchCommunityMembersByRoleIDHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	roleID := mux.Vars(r)["roleId"]
@@ -1565,21 +1568,21 @@ func (c Community) FetchCommunityMembersByRoleIDHandlerV2(w http.ResponseWriter,
 		end = totalMembers
 	}
 	if offset >= totalMembers {
-			// Return empty result for pages beyond available data
-	response := map[string]interface{}{
-		"members": []interface{}{},
-		"pagination": map[string]interface{}{
-			"currentPage": page,
-			"totalPages":  (totalMembers + limit - 1) / limit,
-			"totalCount":  totalMembers,
-			"hasNextPage": false,
-			"hasPrevPage": page > 1,
-		},
-	}
-	responseBytes, _ := json.Marshal(response)
-	w.WriteHeader(http.StatusOK)
-	w.Write(responseBytes)
-	return
+		// Return empty result for pages beyond available data
+		response := map[string]interface{}{
+			"members": []interface{}{},
+			"pagination": map[string]interface{}{
+				"currentPage": page,
+				"totalPages":  (totalMembers + limit - 1) / limit,
+				"totalCount":  totalMembers,
+				"hasNextPage": false,
+				"hasPrevPage": page > 1,
+			},
+		}
+		responseBytes, _ := json.Marshal(response)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseBytes)
+		return
 	}
 
 	// Get paginated member IDs
@@ -1594,7 +1597,7 @@ func (c Community) FetchCommunityMembersByRoleIDHandlerV2(w http.ResponseWriter,
 			// Skip invalid ObjectIDs
 			continue
 		}
-		
+
 		// Find user by ID
 		userFilter := bson.M{"_id": memberObjectID}
 		var user models.User
@@ -3542,44 +3545,44 @@ func (c Community) FetchBannedUsersHandlerV2(w http.ResponseWriter, r *http.Requ
 func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *http.Request) {
 	// Get community ID from URL parameters
 	communityID := mux.Vars(r)["communityId"]
-	
+
 	// Parse request body
 	var transferRequest struct {
 		CurrentUserID string `json:"currentUserId"`
 		NewOwnerID    string `json:"newOwnerId"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&transferRequest); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Validate required fields
 	if transferRequest.CurrentUserID == "" || transferRequest.NewOwnerID == "" {
 		config.ErrorStatus("currentUserId and newOwnerId are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
 		return
 	}
-	
+
 	// Convert community ID to ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
 		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Fetch the community
 	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Check if current user is the owner
 	if community.Details.OwnerID != transferRequest.CurrentUserID {
 		config.ErrorStatus("only the current owner can transfer ownership", http.StatusForbidden, w, fmt.Errorf("user is not the community owner"))
 		return
 	}
-	
+
 	// Check if current user has Head Admin role with administrator permission enabled
 	hasPermission := false
 	for _, role := range community.Details.Roles {
@@ -3592,7 +3595,7 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 					break
 				}
 			}
-			
+
 			if isMember {
 				// Check if administrator permission is enabled
 				for _, permission := range role.Permissions {
@@ -3605,19 +3608,19 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 			break
 		}
 	}
-	
+
 	if !hasPermission {
 		config.ErrorStatus("user does not have permission to transfer ownership", http.StatusForbidden, w, fmt.Errorf("user lacks required permissions"))
 		return
 	}
-	
+
 	// Validate that new owner exists
 	newOwnerID, err := primitive.ObjectIDFromHex(transferRequest.NewOwnerID)
 	if err != nil {
 		config.ErrorStatus("invalid new owner ID", http.StatusBadRequest, w, err)
 		return
 	}
-	
+
 	// Check if new owner exists
 	var newOwner models.User
 	err = c.UDB.FindOne(context.Background(), bson.M{"_id": newOwnerID}).Decode(&newOwner)
@@ -3625,15 +3628,15 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 		config.ErrorStatus("new owner not found", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Update the community with new owner
 	update := bson.M{
 		"$set": bson.M{
-			"community.ownerID": transferRequest.NewOwnerID,
+			"community.ownerID":   transferRequest.NewOwnerID,
 			"community.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
-	
+
 	// Update the Head Admin role members to include the new owner
 	// Find the Head Admin role and update its members
 	for i, role := range community.Details.Roles {
@@ -3658,33 +3661,33 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 				if !hasNewOwner {
 					newMembers = append(newMembers, transferRequest.NewOwnerID)
 				}
-				
+
 				// Update the role members
 				update["$set"].(bson.M)[fmt.Sprintf("community.roles.%d.members", i)] = newMembers
 			}
 			break
 		}
 	}
-	
+
 	// Apply the update
 	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
 	if err != nil {
 		config.ErrorStatus("failed to transfer ownership", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	// Return success response
 	response := map[string]interface{}{
-		"message": "Community ownership transferred successfully",
+		"message":    "Community ownership transferred successfully",
 		"newOwnerId": transferRequest.NewOwnerID,
 	}
-	
+
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBytes)
