@@ -3706,73 +3706,49 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 		limit = 100 // Cap at 100 to prevent abuse
 	}
 
-	// Convert the community ID to primitive.ObjectID
-	cID, err := primitive.ObjectIDFromHex(communityID)
-	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-		return
-	}
-
-	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
-	if err != nil {
-		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
-		return
-	}
-
-	// Get all member IDs from the community
-	var memberIDs []string
-	for memberID := range community.Details.Members {
-		memberIDs = append(memberIDs, memberID)
-	}
-
-	// Calculate pagination
-	totalMembers := len(memberIDs)
+	// Calculate the offset for pagination
 	offset := (page - 1) * limit
-	end := offset + limit
-	if end > totalMembers {
-		end = totalMembers
+
+	// Find all users that belong to the community with pagination
+	filter := bson.M{
+		"$and": []bson.M{
+			{"user.communities": bson.M{"$exists": true}},
+			{"user.communities": bson.M{"$ne": nil}},
+			{"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      "approved",
+				},
+			}},
+		},
 	}
-	if offset >= totalMembers {
-		// Return empty result for pages beyond available data
-		response := map[string]interface{}{
-			"members": []interface{}{},
-			"pagination": map[string]interface{}{
-				"currentPage": page,
-				"totalPages":  (totalMembers + limit - 1) / limit,
-				"totalCount":  totalMembers,
-				"hasNextPage": false,
-				"hasPrevPage": page > 1,
-			},
-		}
-		responseBytes, _ := json.Marshal(response)
-		w.WriteHeader(http.StatusOK)
-		w.Write(responseBytes)
+
+	// Count the total number of users
+	totalUsers, err := c.UDB.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count users", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Get paginated member IDs
-	paginatedMemberIDs := memberIDs[offset:end]
+	// Fetch users with pagination
+	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
+	cursor, err := c.UDB.Find(context.Background(), filter, options)
+	if err != nil {
+		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	defer cursor.Close(context.Background())
+
+	var users []models.User
+	if err = cursor.All(context.Background(), &users); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
+		return
+	}
 
 	// Populate user details for each member
 	var populatedMembers []map[string]interface{}
-	for _, memberID := range paginatedMemberIDs {
-		// Convert memberID string to ObjectID
-		memberObjectID, err := primitive.ObjectIDFromHex(memberID)
-		if err != nil {
-			// Skip invalid ObjectIDs
-			continue
-		}
-		
-		// Find user by ID
-		userFilter := bson.M{"_id": memberObjectID}
-		var user models.User
-		err = c.UDB.FindOne(context.Background(), userFilter).Decode(&user)
-		if err != nil {
-			// Skip users that can't be found
-			continue
-		}
-
+	for _, user := range users {
 		// Check if user is verified (has active premium or premium+ subscription)
 		isVerified := false
 		if user.Details.Subscription.Active && (user.Details.Subscription.Plan == "premium" || user.Details.Subscription.Plan == "premium_plus") {
@@ -3792,8 +3768,8 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 	}
 
 	// Calculate pagination info
-	totalPages := (totalMembers + limit - 1) / limit
-	hasNextPage := page < totalPages
+	totalPages := (totalUsers + int64(limit) - 1) / int64(limit)
+	hasNextPage := page < int(totalPages)
 	hasPrevPage := page > 1
 
 	// Build response
@@ -3802,7 +3778,7 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 		"pagination": map[string]interface{}{
 			"currentPage": page,
 			"totalPages":  totalPages,
-			"totalCount":  totalMembers,
+			"totalCount":  totalUsers,
 			"hasNextPage": hasNextPage,
 			"hasPrevPage": hasPrevPage,
 		},
