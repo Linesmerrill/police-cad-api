@@ -305,6 +305,16 @@ definitions:
           type: string
         type: array
         x-go-name: BanList
+      civilianApprovalSystemEnabled:
+        type: boolean
+        x-go-name: CivilianApprovalSystemEnabled
+      civilianCreationLimit:
+        format: int64
+        type: integer
+        x-go-name: CivilianCreationLimit
+      civilianCreationLimitsEnabled:
+        type: boolean
+        x-go-name: CivilianCreationLimitsEnabled
       code:
         type: string
         x-go-name: Code
@@ -333,6 +343,9 @@ definitions:
           type: string
         type: array
         x-go-name: InviteCodeIds
+      mapLink:
+        type: string
+        x-go-name: MapLink
       members:
         additionalProperties:
           $ref: '#/definitions/MemberDetail'

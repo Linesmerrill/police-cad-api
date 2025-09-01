@@ -39,6 +39,9 @@ type CommunityDetails struct {
 	SubscriptionCreatedBy  string                  `json:"subscriptionCreatedBy" bson:"subscriptionCreatedBy"`
 	Analytics              CommunityAnalytics      `json:"analytics" bson:"analytics"`
 	ActivityLevel          string                  `json:"activityLevel" bson:"activityLevel"`
+	CivilianCreationLimitsEnabled bool             `json:"civilianCreationLimitsEnabled" bson:"civilianCreationLimitsEnabled"`
+	CivilianCreationLimit  int                    `json:"civilianCreationLimit" bson:"civilianCreationLimit"`
+	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
 	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
 }
