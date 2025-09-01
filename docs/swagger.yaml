@@ -169,6 +169,9 @@ definitions:
       address:
         type: string
         x-go-name: Address
+      approvalStatus:
+        type: string
+        x-go-name: ApprovalStatus
       birthday:
         type: string
         x-go-name: Birthday
