@@ -464,3 +464,128 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Criminal history deleted successfully"}`))
 }
+
+// CivilianApprovalHandler handles civilian approval workflow actions
+func (c Civilian) CivilianApprovalHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		CivilianID  string `json:"civilianId"`
+		CommunityID string `json:"communityId"`
+		UserID      string `json:"userId"`
+		Action      string `json:"action"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate required fields
+	if requestBody.CivilianID == "" || requestBody.CommunityID == "" || requestBody.UserID == "" || requestBody.Action == "" {
+		config.ErrorStatus("missing required fields", http.StatusBadRequest, w, fmt.Errorf("civilianId, communityId, userId, and action are required"))
+		return
+	}
+
+	// Convert civilian ID to ObjectID
+	civID, err := primitive.ObjectIDFromHex(requestBody.CivilianID)
+	if err != nil {
+		config.ErrorStatus("invalid civilian ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Handle different actions
+	switch requestBody.Action {
+	case "send_for_approval":
+		// Update civilian status to "requested_review" for admin review
+		filter := bson.M{"_id": civID}
+		update := bson.M{
+			"$set": bson.M{
+				"civilian.approvalStatus": "requested_review",
+				"civilian.updatedAt":      primitive.NewDateTimeFromTime(time.Now()),
+			},
+		}
+
+		err = c.DB.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			config.ErrorStatus("failed to update civilian approval status", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Civilian sent for approval successfully",
+			"status":  "requested_review",
+		})
+
+	default:
+		config.ErrorStatus("invalid action", http.StatusBadRequest, w, fmt.Errorf("action must be 'send_for_approval'"))
+	}
+}
+
+// AdminCivilianApprovalHandler handles admin actions on civilian approvals
+func (c Civilian) AdminCivilianApprovalHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		CivilianID  string `json:"civilianId"`
+		CommunityID string `json:"communityId"`
+		AdminID     string `json:"adminId"`
+		Action      string `json:"action"`
+		Notes       string `json:"notes,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate required fields
+	if requestBody.CivilianID == "" || requestBody.CommunityID == "" || requestBody.AdminID == "" || requestBody.Action == "" {
+		config.ErrorStatus("missing required fields", http.StatusBadRequest, w, fmt.Errorf("civilianId, communityId, adminId, and action are required"))
+		return
+	}
+
+	// Convert civilian ID to ObjectID
+	civID, err := primitive.ObjectIDFromHex(requestBody.CivilianID)
+	if err != nil {
+		config.ErrorStatus("invalid civilian ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate action
+	validActions := map[string]string{
+		"approve": "approved",
+		"deny":    "rejected",
+		"require_edits": "requires_edits",
+	}
+
+	newStatus, isValidAction := validActions[requestBody.Action]
+	if !isValidAction {
+		config.ErrorStatus("invalid action", http.StatusBadRequest, w, fmt.Errorf("action must be one of: approve, deny, require_edits"))
+		return
+	}
+
+	// Update civilian approval status
+	filter := bson.M{"_id": civID}
+	update := bson.M{
+		"$set": bson.M{
+			"civilian.approvalStatus": newStatus,
+			"civilian.updatedAt":      primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	// Add notes if provided
+	if requestBody.Notes != "" {
+		update["$set"].(bson.M)["civilian.approvalNotes"] = requestBody.Notes
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update civilian approval status", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": fmt.Sprintf("Civilian %s successfully", requestBody.Action),
+		"status":  newStatus,
+		"notes":   requestBody.Notes,
+	})
+}

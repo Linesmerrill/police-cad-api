@@ -169,6 +169,9 @@ definitions:
       address:
         type: string
         x-go-name: Address
+      approvalNotes:
+        type: string
+        x-go-name: ApprovalNotes
       approvalStatus:
         type: string
         x-go-name: ApprovalStatus
