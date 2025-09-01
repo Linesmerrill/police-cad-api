@@ -256,6 +256,7 @@ func (a *App) New() *mux.Router {
 	// Civilian approval routes
 	apiCreate.Handle("/civilian/approval", api.Middleware(http.HandlerFunc(civ.CivilianApprovalHandler))).Methods("POST")
 	apiCreate.Handle("/civilian/admin-approval", api.Middleware(http.HandlerFunc(civ.AdminCivilianApprovalHandler))).Methods("POST")
+	apiCreate.Handle("/civilian/pending-approvals", api.Middleware(http.HandlerFunc(civ.PendingApprovalsHandler))).Methods("GET")
 
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.UpdateVehicleHandler))).Methods("PUT")

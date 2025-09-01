@@ -15,6 +15,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"math"
+
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -588,4 +590,88 @@ func (c Civilian) AdminCivilianApprovalHandler(w http.ResponseWriter, r *http.Re
 		"status":  newStatus,
 		"notes":   requestBody.Notes,
 	})
+}
+
+// PendingApprovalsHandler returns all civilians with pending approval status for a community
+func (c Civilian) PendingApprovalsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := r.URL.Query().Get("communityId")
+	if communityID == "" {
+		config.ErrorStatus("communityId query parameter is required", http.StatusBadRequest, w, fmt.Errorf("communityId is required"))
+		return
+	}
+
+	// Get pagination parameters
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 10 // default limit
+	}
+	limit64 := int64(limit)
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 0 {
+		page = 0 // default page
+	}
+	skip64 := int64(page * limit)
+
+	// Build filter for pending approvals
+	filter := bson.M{
+		"civilian.activeCommunityID": communityID,
+		"$or": []bson.M{
+			{"civilian.approvalStatus": "pending"},
+			{"civilian.approvalStatus": "requested_review"},
+		},
+	}
+
+	// Set up pagination options
+	options := &options.FindOptions{
+		Limit: &limit64,
+		Skip:  &skip64,
+		Sort:  bson.D{{Key: "civilian.createdAt", Value: -1}}, // Sort by creation date, newest first
+	}
+
+	// Find civilians with pending approval status
+	dbResp, err := c.DB.Find(context.TODO(), filter, options)
+	if err != nil {
+		config.ErrorStatus("failed to get pending approvals", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Get total count for pagination metadata
+	totalCount, err := c.DB.CountDocuments(context.TODO(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get total count", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Calculate pagination info
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))
+	hasNext := page < totalPages-1
+	hasPrev := page > 0
+
+	// Build response with pagination metadata
+	response := map[string]interface{}{
+		"data": dbResp,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"limit":       limit,
+			"totalCount":  totalCount,
+			"totalPages":  totalPages,
+			"hasNext":     hasNext,
+			"hasPrev":     hasPrev,
+		},
+	}
+
+	// Return empty data array if no results
+	if len(dbResp) == 0 {
+		response["data"] = []models.Civilian{}
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
 }

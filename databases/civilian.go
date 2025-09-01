@@ -20,6 +20,7 @@ type CivilianDatabase interface {
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
 	FindOneAndUpdate(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) *mongo.SingleResult
+	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
 }
 
 type civilianDatabase struct {
@@ -72,4 +73,9 @@ func (c *civilianDatabase) DeleteOne(ctx context.Context, filter interface{}, op
 func (c *civilianDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult {
 	res := c.db.Collection(civilianName).FindOneAndUpdate(ctx, filter, update, opts...)
 	return res
+}
+
+func (c *civilianDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	count, err := c.db.Collection(civilianName).CountDocuments(ctx, filter, opts...)
+	return count, err
 }
