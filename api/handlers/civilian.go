@@ -622,6 +622,8 @@ func (c Civilian) PendingApprovalsHandler(w http.ResponseWriter, r *http.Request
 		},
 	}
 
+	zap.S().Debugf("MongoDB filter: %+v", filter)
+
 	// Set up pagination options
 	options := &options.FindOptions{
 		Limit: &limit64,

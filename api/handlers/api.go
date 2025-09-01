@@ -242,6 +242,12 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.GetDepartmentOrderHandler))).Methods("GET")
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.UpdateDepartmentOrderHandler))).Methods("PUT")
 
+	// Civilian approval routes (must come before parameterized routes)
+	apiCreate.Handle("/civilian/approval", api.Middleware(http.HandlerFunc(civ.CivilianApprovalHandler))).Methods("POST")
+	apiCreate.Handle("/civilian/admin-approval", api.Middleware(http.HandlerFunc(civ.AdminCivilianApprovalHandler))).Methods("POST")
+	apiCreate.Handle("/civilian/pending-approvals", api.Middleware(http.HandlerFunc(civ.PendingApprovalsHandler))).Methods("GET")
+	
+	// Civilian parameterized routes
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.UpdateCivilianHandler))).Methods("PUT")
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.DeleteCivilianHandler))).Methods("DELETE")
@@ -252,11 +258,6 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/civilians", api.Middleware(http.HandlerFunc(civ.CivilianHandler))).Methods("GET")
 	apiCreate.Handle("/civilians/user/{user_id}", api.Middleware(http.HandlerFunc(civ.CiviliansByUserIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilians/search", api.Middleware(http.HandlerFunc(civ.CiviliansByNameSearchHandler))).Methods("GET")
-	
-	// Civilian approval routes
-	apiCreate.Handle("/civilian/approval", api.Middleware(http.HandlerFunc(civ.CivilianApprovalHandler))).Methods("POST")
-	apiCreate.Handle("/civilian/admin-approval", api.Middleware(http.HandlerFunc(civ.AdminCivilianApprovalHandler))).Methods("POST")
-	apiCreate.Handle("/civilian/pending-approvals", api.Middleware(http.HandlerFunc(civ.PendingApprovalsHandler))).Methods("GET")
 
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.UpdateVehicleHandler))).Methods("PUT")

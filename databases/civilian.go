@@ -49,7 +49,7 @@ func (c *civilianDatabase) Find(ctx context.Context, filter interface{}, opts ..
 	if err != nil {
 		return nil, err
 	}
-	err = cur.Decode(&civilians)
+	err = cur.All(ctx, &civilians)
 	if err != nil {
 		return nil, err
 	}
