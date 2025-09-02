@@ -4016,13 +4016,13 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 		components = []models.Component{}
 	}
 
-	// Apply updates to components
+	// Create a map for efficient lookup of existing components
 	componentMap := make(map[string]models.Component)
 	for _, comp := range components {
 		componentMap[comp.ID.Hex()] = comp
 	}
 
-	// Update existing components
+	// Update existing components based on the request
 	for _, newComp := range requestBody.Components {
 		if existingComp, exists := componentMap[newComp.ID.Hex()]; exists {
 			existingComp.Name = newComp.Name
@@ -4031,24 +4031,25 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 		}
 	}
 
-	// Convert back to slice
+	// Convert back to array format for database storage
 	updatedComponents := make([]models.Component, 0, len(componentMap))
 	for _, comp := range componentMap {
 		updatedComponents = append(updatedComponents, comp)
 	}
 
-	// Apply pagination to the updated components
+	// Apply pagination to the updated components for response
 	totalComponents := len(updatedComponents)
 	startIndex := skip
 	endIndex := skip + limit
 
+	var paginatedComponents []models.Component
 	if startIndex >= totalComponents {
-		updatedComponents = []models.Component{}
+		paginatedComponents = []models.Component{}
 	} else {
 		if endIndex > totalComponents {
 			endIndex = totalComponents
 		}
-		updatedComponents = updatedComponents[startIndex:endIndex]
+		paginatedComponents = updatedComponents[startIndex:endIndex]
 	}
 
 	// Calculate pagination metadata
@@ -4056,11 +4057,11 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 	hasNextPage := page < totalPages
 	hasPrevPage := page > 1
 
-	// Update the department in the database
+	// Update the department in the database with the full components array
 	filter := bson.M{"_id": cID, "community.departments._id": dID}
 	update := bson.M{
 		"$set": bson.M{
-			"community.departments.$.template.components": componentMap,
+			"community.departments.$.template.components": updatedComponents,
 			"community.departments.$.updatedAt":           primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
@@ -4073,7 +4074,7 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 
 	// Build response with pagination
 	response := map[string]interface{}{
-		"components": updatedComponents,
+		"components": paginatedComponents,
 		"pagination": map[string]interface{}{
 			"currentPage": page,
 			"limit":       limit,
