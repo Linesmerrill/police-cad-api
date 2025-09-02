@@ -3927,17 +3927,164 @@ func (c *Community) FetchCommunityMembersExcludeRoleHandlerV2(w http.ResponseWri
 	hasNextPage := page < totalPages
 	hasPrevPage := page > 1
 
+	        response := map[string]interface{}{
+                "members": filteredUsers,
+                "pagination": map[string]interface{}{
+                        "currentPage": page,
+                        "totalPages":  totalPages,
+                        "totalCount":  totalCount,
+                        "hasNextPage": hasNextPage,
+                        "hasPrevPage": hasPrevPage,
+                },
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(response)
+}
+
+// UpdateDepartmentComponentsHandler updates the components of a department with pagination
+func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	// Parse pagination parameters
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 10 // Default limit
+	}
+	if limit > 100 {
+		limit = 100 // Max limit
+	}
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default page
+	}
+	skip := (page - 1) * limit
+
+	// Parse request body for component updates
+	var requestBody struct {
+		Components []models.Component `json:"components"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate required fields
+	if len(requestBody.Components) == 0 {
+		config.ErrorStatus("components array is required", http.StatusBadRequest, w, fmt.Errorf("components array cannot be empty"))
+		return
+	}
+
+	// Convert IDs to ObjectIDs
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		config.ErrorStatus("invalid department ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Find the community and department
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to find community", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find the department
+	var targetDepartment *models.Department
+	for i, dept := range community.Details.Departments {
+		if dept.ID == dID {
+			targetDepartment = &community.Details.Departments[i]
+			break
+		}
+	}
+
+	if targetDepartment == nil {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
+		return
+	}
+
+	// Update components with pagination
+	components := targetDepartment.Template.Components
+	if components == nil {
+		components = []models.Component{}
+	}
+
+	// Apply updates to components
+	componentMap := make(map[string]models.Component)
+	for _, comp := range components {
+		componentMap[comp.ID.Hex()] = comp
+	}
+
+	// Update existing components
+	for _, newComp := range requestBody.Components {
+		if existingComp, exists := componentMap[newComp.ID.Hex()]; exists {
+			existingComp.Name = newComp.Name
+			existingComp.Enabled = newComp.Enabled
+			componentMap[newComp.ID.Hex()] = existingComp
+		}
+	}
+
+	// Convert back to slice
+	updatedComponents := make([]models.Component, 0, len(componentMap))
+	for _, comp := range componentMap {
+		updatedComponents = append(updatedComponents, comp)
+	}
+
+	// Apply pagination to the updated components
+	totalComponents := len(updatedComponents)
+	startIndex := skip
+	endIndex := skip + limit
+
+	if startIndex >= totalComponents {
+		updatedComponents = []models.Component{}
+	} else {
+		if endIndex > totalComponents {
+			endIndex = totalComponents
+		}
+		updatedComponents = updatedComponents[startIndex:endIndex]
+	}
+
+	// Calculate pagination metadata
+	totalPages := (totalComponents + limit - 1) / limit
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	// Update the department in the database
+	filter := bson.M{"_id": cID, "community.departments._id": dID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.departments.$.template.components": componentMap,
+			"community.departments.$.updatedAt":           primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update department components", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Build response with pagination
 	response := map[string]interface{}{
-		"members": filteredUsers,
+		"components": updatedComponents,
 		"pagination": map[string]interface{}{
 			"currentPage": page,
+			"limit":       limit,
+			"totalCount":  totalComponents,
 			"totalPages":  totalPages,
-			"totalCount":  totalCount,
 			"hasNextPage": hasNextPage,
 			"hasPrevPage": hasPrevPage,
 		},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }
