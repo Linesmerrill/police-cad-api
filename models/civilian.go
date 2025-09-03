@@ -36,7 +36,7 @@ type CivilianDetails struct {
 	Veteran              bool               `json:"veteran" bson:"veteran"`
 	OnProbation          bool               `json:"onProbation" bson:"onProbation"`
 	OnParole             bool               `json:"onParole" bson:"onParole"`
-	ApprovalStatus       string             `json:"approvalStatus" bson:"approvalStatus"` // "pending", "approved", "rejected", etc.
+	ApprovalStatus       string             `json:"approvalStatus" bson:"approvalStatus"` // "pending", "approved", "denied", "require_edits", etc.
 	ApprovalNotes        string             `json:"approvalNotes" bson:"approvalNotes"`   // Admin notes for approval decisions
 	Image                string             `json:"image" bson:"image"`
 	Occupation           string             `json:"occupation" bson:"occupation"`

@@ -189,6 +189,9 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize email to lowercase
+	user.Email = strings.TrimSpace(strings.ToLower(user.Email))
+
 	// check if the user already exists
 	existingUser := models.User{}
 	_ = u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email}).Decode(&existingUser)
@@ -226,6 +229,9 @@ func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
 		return
 	}
+
+	// Normalize email to lowercase
+	user.Email = strings.TrimSpace(strings.ToLower(user.Email))
 
 	// check if the user already exists
 	existingUser := models.User{}

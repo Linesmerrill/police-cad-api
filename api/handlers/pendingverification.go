@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sendgrid/sendgrid-go"
@@ -18,7 +19,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
-	"github.com/linesmerrill/police-cad-api/templates/html"
+	templates "github.com/linesmerrill/police-cad-api/templates/html"
 )
 
 // PendingVerification handles pendingVerification-related requests
@@ -44,6 +45,9 @@ func (pv PendingVerification) CreatePendingVerificationHandler(w http.ResponseWr
 		http.Error(w, `{"success": false, "message": "Email is required"}`, http.StatusBadRequest)
 		return
 	}
+
+	// Normalize email to lowercase
+	requestBody.Email = strings.TrimSpace(strings.ToLower(requestBody.Email))
 
 	// Check if email already exists in pendingVerifications
 	_, err := pv.PVDB.FindOne(context.Background(), bson.M{"email": requestBody.Email})
@@ -124,6 +128,15 @@ func (pv PendingVerification) VerifyCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Check if email is provided
+	if requestBody.Email == "" {
+		config.ErrorStatus("email is required", http.StatusBadRequest, w, fmt.Errorf("email is required"))
+		return
+	}
+
+	// Normalize email to lowercase
+	requestBody.Email = strings.TrimSpace(strings.ToLower(requestBody.Email))
+
 	// Find the pending verification by email
 	pendingVerification, err := pv.PVDB.FindOne(context.Background(), bson.M{"email": requestBody.Email})
 	if err != nil {
@@ -178,6 +191,9 @@ func (pv PendingVerification) ResendVerificationCodeHandler(w http.ResponseWrite
 		http.Error(w, `{"success": false, "message": "Email is required"}`, http.StatusBadRequest)
 		return
 	}
+
+	// Normalize email to lowercase
+	requestBody.Email = strings.TrimSpace(strings.ToLower(requestBody.Email))
 
 	// Check if the user already exists in the user database
 	existingUser := models.User{}

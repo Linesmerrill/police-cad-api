@@ -467,7 +467,7 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	w.Write([]byte(`{"message": "Criminal history deleted successfully"}`))
 }
 
-// CivilianApprovalHandler handles civilian approval workflow actions
+// CivilianApprovalHandler handles civilian sent-for-approval workflow actions
 func (c Civilian) CivilianApprovalHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		CivilianID  string `json:"civilianId"`

@@ -1324,6 +1324,9 @@ func (h Admin) CreateAdminUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize email to lowercase
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+
 	// Validate email format
 	if !isValidEmail(req.Email) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1438,6 +1441,9 @@ func (h Admin) SendAdminResetEmailHandler(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
+
+	// Normalize email to lowercase
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
 	// Validate email format
 	if req.Email == "" {
