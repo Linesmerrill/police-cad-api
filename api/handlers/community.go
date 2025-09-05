@@ -32,6 +32,7 @@ type Community struct {
 	ADB  databases.ArchivedCommunityDatabase
 	IDB  databases.InviteCodeDatabase
 	UPDB databases.UserPreferencesDatabase
+	CDB  databases.CivilianDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -4225,6 +4226,66 @@ func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Reques
 	response := map[string]interface{}{
 		"success": true,
 		"message": "Invite code deleted successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetCommunityCiviliansHandlerV2 returns paginated civilians for a community
+func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100 // Cap at 100 to prevent abuse
+	}
+
+	// Calculate the offset for pagination
+	offset := (page - 1) * limit
+
+	// Find civilians for this community
+	filter := bson.M{"civilian.activeCommunityID": communityID}
+
+	// Count total civilians
+	totalCivilians, err := c.CDB.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count civilians", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Fetch civilians with pagination
+	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.D{{"civilian.createdAt", -1}})
+	civilians, err := c.CDB.Find(context.Background(), filter, options)
+	if err != nil {
+		config.ErrorStatus("failed to get civilians", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Calculate pagination metadata
+	totalPages := int((totalCivilians + int64(limit) - 1) / int64(limit))
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	// Build response
+	response := map[string]interface{}{
+		"civilians": civilians,
+		"pagination": map[string]interface{}{
+			"currentPage":  page,
+			"totalPages":   totalPages,
+			"totalCount":   totalCivilians,
+			"hasNextPage":  hasNextPage,
+			"hasPrevPage":  hasPrevPage,
+			"limit":        limit,
+		},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
