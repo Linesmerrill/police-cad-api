@@ -4270,6 +4270,37 @@ func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Populate user details for each civilian
+	var populatedCivilians []map[string]interface{}
+	for _, civilian := range civilians {
+		// Get user details for userID
+		var userDetails map[string]interface{}
+		if civilian.Details.UserID != "" {
+			userObjID, err := primitive.ObjectIDFromHex(civilian.Details.UserID)
+			if err == nil {
+				var user models.User
+				err = c.UDB.FindOne(context.Background(), bson.M{"_id": userObjID}).Decode(&user)
+				if err == nil {
+					userDetails = map[string]interface{}{
+						"id":       user.ID,
+						"username": user.Details.Username,
+						"email":    user.Details.Email,
+					}
+				}
+			}
+		}
+
+		// Build the populated civilian
+		populatedCivilian := map[string]interface{}{
+			"_id":      civilian.ID,
+			"civilian": civilian.Details,
+			"user":     userDetails,
+			"__v":      civilian.Version,
+		}
+
+		populatedCivilians = append(populatedCivilians, populatedCivilian)
+	}
+
 	// Calculate pagination metadata
 	totalPages := int((totalCivilians + int64(limit) - 1) / int64(limit))
 	hasNextPage := page < totalPages
@@ -4277,7 +4308,7 @@ func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http
 
 	// Build response
 	response := map[string]interface{}{
-		"civilians": civilians,
+		"civilians": populatedCivilians,
 		"pagination": map[string]interface{}{
 			"currentPage":  page,
 			"totalPages":   totalPages,
