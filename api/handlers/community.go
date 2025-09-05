@@ -4089,3 +4089,144 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }
+
+// GetCommunityInviteCodesHandlerV2 returns paginated invite codes for a community with populated user details
+func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100 // Cap at 100 to prevent abuse
+	}
+
+	// Calculate the offset for pagination
+	offset := (page - 1) * limit
+
+	// Find invite codes for this community
+	filter := bson.M{"communityId": communityID}
+
+	// Count total invite codes
+	totalInviteCodes, err := c.IDB.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count invite codes", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Fetch invite codes with pagination
+	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.D{{"createdAt", -1}})
+	inviteCodes, err := c.IDB.Find(context.Background(), filter, options)
+	if err != nil {
+		config.ErrorStatus("failed to get invite codes", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Populate user details for each invite code
+	var populatedInviteCodes []map[string]interface{}
+	for _, inviteCode := range inviteCodes {
+		// Get user details for createdBy
+		var createdByUser map[string]interface{}
+		if inviteCode.CreatedBy != "" {
+			userObjID, err := primitive.ObjectIDFromHex(inviteCode.CreatedBy)
+			if err == nil {
+				var user models.User
+				err = c.UDB.FindOne(context.Background(), bson.M{"_id": userObjID}).Decode(&user)
+				if err == nil {
+					createdByUser = map[string]interface{}{
+						"id":       user.ID,
+						"username": user.Details.Username,
+						"email":    user.Details.Email,
+					}
+				}
+			}
+		}
+
+		// Build the populated invite code
+		populatedInviteCode := map[string]interface{}{
+			"_id":            inviteCode.ID,
+			"code":           inviteCode.Code,
+			"communityId":    inviteCode.CommunityID,
+			"expiresAt":      inviteCode.ExpiresAt,
+			"maxUses":        inviteCode.MaxUses,
+			"remainingUses":  inviteCode.RemainingUses,
+			"createdBy":      inviteCode.CreatedBy,
+			"createdByUser":  createdByUser,
+			"createdAt":      inviteCode.CreatedAt,
+		}
+
+		populatedInviteCodes = append(populatedInviteCodes, populatedInviteCode)
+	}
+
+	// Calculate pagination metadata
+	totalPages := int((totalInviteCodes + int64(limit) - 1) / int64(limit))
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	// Build response
+	response := map[string]interface{}{
+		"inviteCodes": populatedInviteCodes,
+		"pagination": map[string]interface{}{
+			"currentPage":  page,
+			"totalPages":   totalPages,
+			"totalCount":   totalInviteCodes,
+			"hasNextPage":  hasNextPage,
+			"hasPrevPage":  hasPrevPage,
+			"limit":        limit,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// DeleteInviteCodeHandler deletes an invite code by ID
+func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Request) {
+	inviteCodeID := mux.Vars(r)["inviteCodeId"]
+
+	// Convert string ID to ObjectID
+	objID, err := primitive.ObjectIDFromHex(inviteCodeID)
+	if err != nil {
+		config.ErrorStatus("invalid invite code ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// First, get the invite code to find the community ID
+	inviteCode, err := c.IDB.FindOne(context.Background(), bson.M{"_id": objID})
+	if err != nil {
+		config.ErrorStatus("invite code not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Delete the invite code
+	err = c.IDB.DeleteOne(context.Background(), bson.M{"_id": objID})
+	if err != nil {
+		config.ErrorStatus("failed to delete invite code", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Remove the invite code ID from the community's inviteCodeIds array
+	communityObjID, err := primitive.ObjectIDFromHex(inviteCode.CommunityID)
+	if err == nil {
+		c.DB.UpdateOne(
+			context.Background(),
+			bson.M{"_id": communityObjID},
+			bson.M{"$pull": bson.M{"community.inviteCodeIds": inviteCodeID}},
+		)
+	}
+
+	// Return success response
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Invite code deleted successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
