@@ -301,6 +301,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/warrants", api.Middleware(http.HandlerFunc(w.WarrantHandler))).Methods("GET")
 	apiCreate.Handle("/warrants/user/{user_id}", api.Middleware(http.HandlerFunc(w.WarrantsByUserIDHandler))).Methods("GET")
 
+	// EMS Medical Component routes (focused testing) - MUST come before generic /ems/{ems_id} route
+	apiCreate.Handle("/ems/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSMedicalComponentHandler))).Methods("GET")
+	apiCreate.Handle("/ems/components", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSComponentsWithPaginationHandler))).Methods("GET")
+	apiCreate.Handle("/ems/template-with-medical", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSTemplateWithMedicalComponentHandler))).Methods("GET")
+
 	apiCreate.Handle("/ems/{ems_id}", api.Middleware(http.HandlerFunc(e.EmsByIDHandler))).Methods("GET")
 	apiCreate.Handle("/ems", api.Middleware(http.HandlerFunc(e.EmsHandler))).Methods("GET")
 	apiCreate.Handle("/ems/user/{user_id}", api.Middleware(http.HandlerFunc(e.EmsByUserIDHandler))).Methods("GET")
@@ -388,10 +393,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.UpdateDepartmentTemplateHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.GetDepartmentTemplateHandler))).Methods("GET")
 
-	// EMS Medical Component routes (focused testing)
-	apiCreate.Handle("/ems/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSMedicalComponentHandler))).Methods("GET")
-	apiCreate.Handle("/ems/components", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSComponentsWithPaginationHandler))).Methods("GET")
-	apiCreate.Handle("/ems/template-with-medical", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSTemplateWithMedicalComponentHandler))).Methods("GET")
+	// Department Medical Component routes (focused testing)
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.UpdateEMSMedicalComponentHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetDepartmentMedicalComponentStatusHandler))).Methods("GET")
 
