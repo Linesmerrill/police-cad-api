@@ -80,6 +80,7 @@ func (a *App) New() *mux.Router {
 	templateHandler := NewTemplate(templateDB, componentDB)
 	templateMigrationHandler := NewTemplateMigration(templateDB, databases.NewCommunityDatabase(a.dbHelper))
 	departmentTemplateHandler := NewDepartmentTemplate(databases.NewCommunityDatabase(a.dbHelper), templateDB)
+	emsMedicalHandler := NewEMSMedicalComponent(componentDB, templateDB, databases.NewCommunityDatabase(a.dbHelper))
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
@@ -386,6 +387,12 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments/with-template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.CreateDepartmentWithTemplateHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.UpdateDepartmentTemplateHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.GetDepartmentTemplateHandler))).Methods("GET")
+
+	// EMS Medical Component routes (focused testing)
+	apiCreate.Handle("/ems/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSMedicalComponentHandler))).Methods("GET")
+	apiCreate.Handle("/ems/template-with-medical", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSTemplateWithMedicalComponentHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.UpdateEMSMedicalComponentHandler))).Methods("PUT")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetDepartmentMedicalComponentStatusHandler))).Methods("GET")
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
