@@ -62,7 +62,7 @@ func (c *ComponentDatabase) DeleteOne(ctx context.Context, filter bson.M) error 
 // GetActiveComponents returns all active components
 func (c *ComponentDatabase) GetActiveComponents(ctx context.Context) ([]models.GlobalComponent, error) {
 	filter := bson.M{"isActive": true}
-	return c.FindMany(ctx, filter, options.Find().SetSort(bson.M{"category": 1, "name": 1}))
+	return c.FindMany(ctx, filter, options.Find().SetSort(bson.D{{"category", 1}, {"name", 1}}))
 }
 
 // GetComponentsByCategory returns components filtered by category

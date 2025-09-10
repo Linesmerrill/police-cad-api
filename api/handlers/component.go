@@ -91,7 +91,7 @@ func (c *Component) GetComponentsHandler(w http.ResponseWriter, r *http.Request)
 	skip := (page - 1) * limit
 	opts := []*options.FindOptions{
 		options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)),
-		options.Find().SetSort(bson.M{"category": 1, "name": 1}),
+		options.Find().SetSort(bson.D{{"category", 1}, {"name", 1}}),
 	}
 
 	// Find components
