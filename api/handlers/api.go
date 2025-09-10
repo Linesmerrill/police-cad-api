@@ -390,6 +390,7 @@ func (a *App) New() *mux.Router {
 
 	// EMS Medical Component routes (focused testing)
 	apiCreate.Handle("/ems/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSMedicalComponentHandler))).Methods("GET")
+	apiCreate.Handle("/ems/components", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSComponentsWithPaginationHandler))).Methods("GET")
 	apiCreate.Handle("/ems/template-with-medical", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSTemplateWithMedicalComponentHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.UpdateEMSMedicalComponentHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetDepartmentMedicalComponentStatusHandler))).Methods("GET")

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -43,6 +45,81 @@ func (e *EMSMedicalComponent) GetEMSMedicalComponentHandler(w http.ResponseWrite
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"component": component,
 		"message":   "Medical database component retrieved successfully",
+	})
+}
+
+// GetEMSComponentsWithPaginationHandler returns all components with pagination, highlighting medicalDatabase
+func (e *EMSMedicalComponent) GetEMSComponentsWithPaginationHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse query parameters
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+	category := r.URL.Query().Get("category")
+	includeInactive := r.URL.Query().Get("includeInactive") == "true"
+
+	// Set up pagination
+	page := 1
+	limit := 50
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	// Set up filter
+	filter := bson.M{}
+	if category != "" {
+		filter["category"] = category
+	}
+	if !includeInactive {
+		filter["isActive"] = true
+	}
+
+	skip := (page - 1) * limit
+	opts := []*options.FindOptions{
+		options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)),
+		options.Find().SetSort(bson.D{{"category", 1}, {"name", 1}}),
+	}
+
+	// Find components
+	components, err := e.ComponentDB.FindMany(context.Background(), filter, opts...)
+	if err != nil {
+		config.ErrorStatus("failed to retrieve components", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Get total count for pagination
+	totalCount, err := e.ComponentDB.Collection.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count components", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Mark medicalDatabase component as special
+	for i, comp := range components {
+		if comp.Name == "medicalDatabase" {
+			// Add a special flag for frontend highlighting
+			components[i].Metadata = map[string]interface{}{
+				"isNewComponent": true,
+				"isEMSSpecific":  true,
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"components": components,
+		"pagination": map[string]interface{}{
+			"page":       page,
+			"limit":      limit,
+			"total":      totalCount,
+			"totalPages": (totalCount + int64(limit) - 1) / int64(limit),
+		},
+		"message": "Components retrieved successfully with pagination",
 	})
 }
 
@@ -94,6 +171,17 @@ func (e *EMSMedicalComponent) GetEMSTemplateWithMedicalComponentHandler(w http.R
 		}
 	}
 
+	// Count enabled and disabled components
+	enabledCount := 0
+	disabledCount := 0
+	for _, comp := range resolvedComponents {
+		if comp.Enabled {
+			enabledCount++
+		} else {
+			disabledCount++
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"template": map[string]interface{}{
@@ -107,6 +195,11 @@ func (e *EMSMedicalComponent) GetEMSTemplateWithMedicalComponentHandler(w http.R
 			"createdAt":   template.CreatedAt,
 			"updatedAt":   template.UpdatedAt,
 			"createdBy":   template.CreatedBy,
+		},
+		"componentStats": map[string]interface{}{
+			"total":    len(resolvedComponents),
+			"enabled":  enabledCount,
+			"disabled": disabledCount,
 		},
 		"message": "EMS template with resolved components retrieved successfully",
 	})
