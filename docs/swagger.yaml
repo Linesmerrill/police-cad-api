@@ -431,6 +431,20 @@ definitions:
         x-go-name: Name
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
+  ComponentOverride:
+    description: ComponentOverride represents custom settings for a component within
+      a template reference
+    properties:
+      enabled:
+        type: boolean
+        x-go-name: Enabled
+      settings:
+        additionalProperties:
+          type: object
+        type: object
+        x-go-name: Settings
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   CriminalHistory:
     description: CriminalHistory holds the structure for the criminal history
     properties:
@@ -494,6 +508,8 @@ definitions:
         x-go-name: OnlineMemberCount
       template:
         $ref: '#/definitions/Template'
+      templateRef:
+        $ref: '#/definitions/TemplateReference'
       updatedAt:
         $ref: '#/definitions/DateTime'
     type: object
@@ -1012,6 +1028,22 @@ definitions:
       name:
         type: string
         x-go-name: Name
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
+  TemplateReference:
+    description: TemplateReference represents a reference to a global template with
+      customizations
+    properties:
+      customizations:
+        additionalProperties:
+          $ref: '#/definitions/ComponentOverride'
+        type: object
+        x-go-name: Customizations
+      isActive:
+        type: boolean
+        x-go-name: IsActive
+      templateId:
+        $ref: '#/definitions/ObjectID'
     type: object
     x-go-package: github.com/linesmerrill/police-cad-api/models
   TenCodes:

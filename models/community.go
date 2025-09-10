@@ -85,7 +85,8 @@ type Department struct {
 	Image             string             `json:"image" bson:"image"`
 	ApprovalRequired  bool               `json:"approvalRequired" bson:"approvalRequired"`
 	Members           []MemberStatus     `json:"members" bson:"members"`
-	Template          Template           `json:"template" bson:"template"`
+	Template          Template           `json:"template" bson:"template"` // Legacy embedded template (for backward compatibility)
+	TemplateRef       *TemplateReference `json:"templateRef" bson:"templateRef"` // New template reference system
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt         primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 	OnlineMemberCount int                `json:"onlineMemberCount" bson:"onlineMemberCount"`

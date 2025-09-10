@@ -72,6 +72,15 @@ func (a *App) New() *mux.Router {
 	emsPersonaHandler := EMSPersona{DB: databases.NewEMSPersonaDatabase(a.dbHelper)}
 	emsVehicleHandler := EMSVehicle{DB: databases.NewEMSVehicleDatabase(a.dbHelper)}
 
+	// Component and Template handlers
+	componentDB := databases.NewComponentDatabase(a.dbHelper)
+	templateDB := databases.NewTemplateDatabase(a.dbHelper)
+	
+	componentHandler := NewComponent(componentDB)
+	templateHandler := NewTemplate(templateDB, componentDB)
+	templateMigrationHandler := NewTemplateMigration(templateDB, databases.NewCommunityDatabase(a.dbHelper))
+	departmentTemplateHandler := NewDepartmentTemplate(databases.NewCommunityDatabase(a.dbHelper), templateDB)
+
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
 
@@ -348,6 +357,35 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/ems-vehicles/{id}", api.Middleware(http.HandlerFunc(emsVehicleHandler.GetEMSVehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/ems-vehicles/{id}", api.Middleware(http.HandlerFunc(emsVehicleHandler.UpdateEMSVehicleHandler))).Methods("PUT")
 	apiCreate.Handle("/ems-vehicles/{id}", api.Middleware(http.HandlerFunc(emsVehicleHandler.DeleteEMSVehicleHandler))).Methods("DELETE")
+
+	// Component Management routes
+	apiCreate.Handle("/components", api.Middleware(http.HandlerFunc(componentHandler.CreateComponentHandler))).Methods("POST")
+	apiCreate.Handle("/components", api.Middleware(http.HandlerFunc(componentHandler.GetComponentsHandler))).Methods("GET")
+	apiCreate.Handle("/components/{componentId}", api.Middleware(http.HandlerFunc(componentHandler.GetComponentHandler))).Methods("GET")
+	apiCreate.Handle("/components/{componentId}", api.Middleware(http.HandlerFunc(componentHandler.UpdateComponentHandler))).Methods("PUT")
+	apiCreate.Handle("/components/{componentId}", api.Middleware(http.HandlerFunc(componentHandler.DeleteComponentHandler))).Methods("DELETE")
+	apiCreate.Handle("/components/category/{category}", api.Middleware(http.HandlerFunc(componentHandler.GetComponentsByCategoryHandler))).Methods("GET")
+	apiCreate.Handle("/components/initialize-defaults", api.Middleware(http.HandlerFunc(componentHandler.InitializeDefaultComponentsHandler))).Methods("POST")
+
+	// Template Management routes
+	apiCreate.Handle("/templates", api.Middleware(http.HandlerFunc(templateHandler.CreateTemplateHandler))).Methods("POST")
+	apiCreate.Handle("/templates", api.Middleware(http.HandlerFunc(templateHandler.GetTemplatesHandler))).Methods("GET")
+	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.GetTemplateHandler))).Methods("GET")
+	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.UpdateTemplateHandler))).Methods("PUT")
+	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.DeleteTemplateHandler))).Methods("DELETE")
+	apiCreate.Handle("/templates/defaults", api.Middleware(http.HandlerFunc(templateHandler.GetDefaultTemplatesHandler))).Methods("GET")
+	apiCreate.Handle("/templates/category/{category}", api.Middleware(http.HandlerFunc(templateHandler.GetTemplatesByCategoryHandler))).Methods("GET")
+	apiCreate.Handle("/templates/initialize-defaults", api.Middleware(http.HandlerFunc(templateHandler.InitializeDefaultTemplatesHandler))).Methods("POST")
+
+	// Template Migration routes
+	apiCreate.Handle("/templates/migrate/community/{communityId}", api.Middleware(http.HandlerFunc(templateMigrationHandler.MigrateCommunityTemplatesHandler))).Methods("POST")
+	apiCreate.Handle("/templates/migrate/all", api.Middleware(http.HandlerFunc(templateMigrationHandler.MigrateAllCommunitiesTemplatesHandler))).Methods("POST")
+	apiCreate.Handle("/templates/migrate/status", api.Middleware(http.HandlerFunc(templateMigrationHandler.GetMigrationStatusHandler))).Methods("GET")
+
+	// Department Template routes
+	apiCreate.Handle("/community/{communityId}/departments/with-template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.CreateDepartmentWithTemplateHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.UpdateDepartmentTemplateHandler))).Methods("PUT")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/template", api.Middleware(http.HandlerFunc(departmentTemplateHandler.GetDepartmentTemplateHandler))).Methods("GET")
 
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightHandler))).Methods("GET")
 	apiCreate.Handle("/spotlight", api.Middleware(http.HandlerFunc(s.SpotlightCreateHandler))).Methods("POST")
