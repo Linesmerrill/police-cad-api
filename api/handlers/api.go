@@ -361,21 +361,21 @@ func (a *App) New() *mux.Router {
 	// Component Management routes
 	apiCreate.Handle("/components", api.Middleware(http.HandlerFunc(componentHandler.CreateComponentHandler))).Methods("POST")
 	apiCreate.Handle("/components", api.Middleware(http.HandlerFunc(componentHandler.GetComponentsHandler))).Methods("GET")
+	apiCreate.Handle("/components/category/{category}", api.Middleware(http.HandlerFunc(componentHandler.GetComponentsByCategoryHandler))).Methods("GET")
+	apiCreate.Handle("/components/initialize-defaults", api.Middleware(http.HandlerFunc(componentHandler.InitializeDefaultComponentsHandler))).Methods("POST")
 	apiCreate.Handle("/components/{componentId}", api.Middleware(http.HandlerFunc(componentHandler.GetComponentHandler))).Methods("GET")
 	apiCreate.Handle("/components/{componentId}", api.Middleware(http.HandlerFunc(componentHandler.UpdateComponentHandler))).Methods("PUT")
 	apiCreate.Handle("/components/{componentId}", api.Middleware(http.HandlerFunc(componentHandler.DeleteComponentHandler))).Methods("DELETE")
-	apiCreate.Handle("/components/category/{category}", api.Middleware(http.HandlerFunc(componentHandler.GetComponentsByCategoryHandler))).Methods("GET")
-	apiCreate.Handle("/components/initialize-defaults", api.Middleware(http.HandlerFunc(componentHandler.InitializeDefaultComponentsHandler))).Methods("POST")
 
 	// Template Management routes
 	apiCreate.Handle("/templates", api.Middleware(http.HandlerFunc(templateHandler.CreateTemplateHandler))).Methods("POST")
 	apiCreate.Handle("/templates", api.Middleware(http.HandlerFunc(templateHandler.GetTemplatesHandler))).Methods("GET")
-	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.GetTemplateHandler))).Methods("GET")
-	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.UpdateTemplateHandler))).Methods("PUT")
-	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.DeleteTemplateHandler))).Methods("DELETE")
 	apiCreate.Handle("/templates/defaults", api.Middleware(http.HandlerFunc(templateHandler.GetDefaultTemplatesHandler))).Methods("GET")
 	apiCreate.Handle("/templates/category/{category}", api.Middleware(http.HandlerFunc(templateHandler.GetTemplatesByCategoryHandler))).Methods("GET")
 	apiCreate.Handle("/templates/initialize-defaults", api.Middleware(http.HandlerFunc(templateHandler.InitializeDefaultTemplatesHandler))).Methods("POST")
+	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.GetTemplateHandler))).Methods("GET")
+	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.UpdateTemplateHandler))).Methods("PUT")
+	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.DeleteTemplateHandler))).Methods("DELETE")
 
 	// Template Migration routes
 	apiCreate.Handle("/templates/migrate/community/{communityId}", api.Middleware(http.HandlerFunc(templateMigrationHandler.MigrateCommunityTemplatesHandler))).Methods("POST")
