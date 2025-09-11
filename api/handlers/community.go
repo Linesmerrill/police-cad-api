@@ -3315,6 +3315,97 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetNonMemberDepartmentsHandler returns a paginated list of departments that the user is not a member of
+func (c Community) GetNonMemberDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	userID := r.URL.Query().Get("userId")
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1 // Default to page 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10 // Default limit
+	}
+	offset := (page - 1) * limit
+
+	// Convert communityID to ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Fetch the community
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Filter departments that user is not a member of
+	var filteredDepartments []map[string]interface{}
+	for _, department := range community.Details.Departments {
+		// Only include departments that require approval
+		if !department.ApprovalRequired {
+			continue
+		}
+
+		// Check if user is NOT in the members list or is not "approved"
+		isMember := false
+		for _, member := range department.Members {
+			if member.UserID == userID {
+				if member.Status == "approved" {
+					isMember = true
+				}
+				break
+			}
+		}
+
+		// If user is not a member (or not approved), include this department
+		if !isMember {
+			// Add department with required fields
+			departmentData := map[string]interface{}{
+				"_id":              department.ID,
+				"name":             department.Name,
+				"description":      department.Description,
+				"image":            department.Image,
+				"approvalRequired": department.ApprovalRequired,
+			}
+
+			// Add template name if available (legacy template system)
+			if department.Template.Name != "" {
+				departmentData["templateName"] = department.Template.Name
+			}
+
+			filteredDepartments = append(filteredDepartments, departmentData)
+		}
+	}
+
+	// Apply pagination
+	start := offset
+	end := offset + limit
+	if start > len(filteredDepartments) {
+		start = len(filteredDepartments)
+	}
+	if end > len(filteredDepartments) {
+		end = len(filteredDepartments)
+	}
+	paginatedDepartments := filteredDepartments[start:end]
+
+	// Return the response
+	response := map[string]interface{}{
+		"page":       page,
+		"limit":      limit,
+		"totalCount": len(filteredDepartments),
+		"data":       paginatedDepartments,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // GetPaginatedAllDepartmentsHandler returns a paginated list of all departments by communityId
 func (c Community) GetPaginatedAllDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]

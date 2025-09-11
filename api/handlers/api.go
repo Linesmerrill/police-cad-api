@@ -157,6 +157,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/invite-code/{inviteCodeId}", api.Middleware(http.HandlerFunc(c.DeleteInviteCodeHandler))).Methods("DELETE")
 	apiV2.Handle("/community/{communityId}/your-departments", api.Middleware(http.HandlerFunc(c.GetPaginatedAllDepartmentsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.FetchAllCommunityDepartmentsHandler))).Methods("GET")
+	apiV2.Handle("/community/{communityId}/departments/non-member", api.Middleware(http.HandlerFunc(c.GetNonMemberDepartmentsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.GetPaginatedDepartmentsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/all-departments", api.Middleware(http.HandlerFunc(c.GetPaginatedAllDepartmentsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments", api.Middleware(http.HandlerFunc(c.CreateCommunityDepartmentHandler))).Methods("POST")
