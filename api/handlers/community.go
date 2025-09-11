@@ -3278,11 +3278,18 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 		}
 
 		// Add department with only required fields
-		filteredDepartments = append(filteredDepartments, map[string]interface{}{
+		departmentData := map[string]interface{}{
 			"_id":   department.ID,
 			"name":  department.Name,
 			"image": department.Image,
-		})
+		}
+
+		// Add template name if available (legacy template system)
+		if department.Template.Name != "" {
+			departmentData["templateName"] = department.Template.Name
+		}
+
+		filteredDepartments = append(filteredDepartments, departmentData)
 	}
 
 	// Apply pagination
