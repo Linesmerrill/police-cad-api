@@ -4422,7 +4422,7 @@ func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(response)
 }
 
-// SearchCommunityMembersHandler searches for community members by name or username
+// SearchCommunityMembersHandler searches for community members by callSign or username
 func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	communityID := vars["communityId"]
@@ -4463,7 +4463,7 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	// Build the complex search filter
 	// We need to find users who:
 	// 1. Have the community in their communities array with status "approved"
-	// 2. Match the search query in their name or username
+	// 2. Match the search query in their callSign or username
 	filter := bson.M{
 		"$and": []bson.M{
 			// User must be a member of the community with status "approved"
@@ -4475,10 +4475,10 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 					},
 				},
 			},
-			// User must match the search query in name or username
+			// User must match the search query in callSign or username
 			{
 				"$or": []bson.M{
-					{"user.name": bson.M{"$regex": query, "$options": "i"}},
+					{"user.callSign": bson.M{"$regex": query, "$options": "i"}},
 					{"user.username": bson.M{"$regex": query, "$options": "i"}},
 				},
 			},
@@ -4515,9 +4515,30 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Populate user details for each member (same structure as FetchCommunityMembersHandlerV2)
+	var populatedMembers []map[string]interface{}
+	for _, user := range users {
+		// Check if user is verified (has active premium or premium+ subscription)
+		isVerified := false
+		if user.Details.Subscription.Active && (user.Details.Subscription.Plan == "premium" || user.Details.Subscription.Plan == "premium_plus") {
+			isVerified = true
+		}
+
+		// Create member object with required fields
+		member := map[string]interface{}{
+			"id":             user.ID,
+			"username":       user.Details.Username,
+			"profilePicture": user.Details.ProfilePicture,
+			"callSign":       user.Details.CallSign,
+			"isVerified":     isVerified,
+		}
+
+		populatedMembers = append(populatedMembers, member)
+	}
+
 	// Build response
 	response := map[string]interface{}{
-		"members": users,
+		"members": populatedMembers,
 		"pagination": map[string]interface{}{
 			"currentPage":  page,
 			"totalPages":   totalPages,
