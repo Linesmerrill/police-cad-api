@@ -4421,3 +4421,117 @@ func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+// SearchCommunityMembersHandler searches for community members by name or username
+func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	// Get search query parameter
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		config.ErrorStatus("query param q is required", http.StatusBadRequest, w, fmt.Errorf("q parameter is required"))
+		return
+	}
+
+	// Parse pagination parameters
+	page := 1
+	limit := 10 // Default limit as requested
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	// Cap limit at 100 to prevent abuse
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Validate community ID
+	if !primitive.IsValidObjectID(communityID) {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, fmt.Errorf("invalid community ID format"))
+		return
+	}
+
+	ctx := r.Context()
+
+	// Build the complex search filter
+	// We need to find users who:
+	// 1. Have the community in their communities array with status "approved"
+	// 2. Match the search query in their name or username
+	filter := bson.M{
+		"$and": []bson.M{
+			// User must be a member of the community with status "approved"
+			{
+				"user.communities": bson.M{
+					"$elemMatch": bson.M{
+						"communityId": communityID,
+						"status":      "approved",
+					},
+				},
+			},
+			// User must match the search query in name or username
+			{
+				"$or": []bson.M{
+					{"user.name": bson.M{"$regex": query, "$options": "i"}},
+					{"user.username": bson.M{"$regex": query, "$options": "i"}},
+				},
+			},
+		},
+	}
+
+	// Count total matching users
+	totalCount, err := c.UDB.CountDocuments(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to count community members", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Calculate pagination
+	skip := int64((page - 1) * limit)
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))
+
+	// Fetch paginated results
+	findOptions := options.Find().
+		SetSkip(skip).
+		SetLimit(int64(limit)).
+		SetSort(bson.M{"user.name": 1}) // Sort by name for consistent results
+
+	cursor, err := c.UDB.Find(ctx, filter, findOptions)
+	if err != nil {
+		config.ErrorStatus("failed to search community members", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var users []models.User
+	if err = cursor.All(ctx, &users); err != nil {
+		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Build response
+	response := map[string]interface{}{
+		"members": users,
+		"pagination": map[string]interface{}{
+			"currentPage":  page,
+			"totalPages":   totalPages,
+			"totalCount":   totalCount,
+			"hasNextPage":  page < totalPages,
+			"hasPrevPage":  page > 1,
+			"limit":        limit,
+		},
+		"query": query,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		config.ErrorStatus("failed to encode response", http.StatusInternalServerError, w, err)
+		return
+	}
+}
