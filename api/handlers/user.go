@@ -3168,10 +3168,28 @@ func (u User) AddUserNoteHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: primitive.NewDateTimeFromTime(time.Now()),
 	}
 
+	// First, check if the user exists and get their current notes
+	var user models.User
+	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("user not found", http.StatusNotFound, w, err)
+		return
+	}
+
 	// Update the user's notes in the database
 	filter := bson.M{"_id": uID}
+	
+	// If notes is null or not an array, initialize it as an empty array first
+	if user.Details.Notes == nil {
+		_, err = u.DB.UpdateOne(context.Background(), filter, bson.M{"$set": bson.M{"user.notes": []models.Note{}}})
+		if err != nil {
+			config.ErrorStatus("failed to initialize notes array", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+	
+	// Now push the new note
 	update := bson.M{"$push": bson.M{"user.notes": note}}
-
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add note", http.StatusInternalServerError, w, err)
