@@ -65,6 +65,7 @@ func (a *App) New() *mux.Router {
 		UDB:  databases.NewUserDatabase(a.dbHelper),
 		CDB:  databases.NewCommunityDatabase(a.dbHelper),
 		AADB: databases.NewAdminActivityDatabase(a.dbHelper),
+		PVDB: databases.NewPendingVerificationDatabase(a.dbHelper),
 	}
 
 	medicalReportHandler := MedicalReport{DB: databases.NewMedicalReportDatabase(a.dbHelper)}
@@ -97,25 +98,30 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/reset-password", http.HandlerFunc(adminHandler.AdminResetPasswordHandler)).Methods("POST")
 
 	// Admin console routes (moved to appear before general user routes)
+	// Search routes (most specific first)
 	apiCreate.Handle("/admin/search/users", http.HandlerFunc(adminHandler.AdminUserSearchHandler)).Methods("POST")
 	apiCreate.Handle("/admin/search/communities", http.HandlerFunc(adminHandler.AdminCommunitySearchHandler)).Methods("POST")
-	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
-	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/search/pending-verifications", http.HandlerFunc(adminHandler.AdminPendingVerificationSearchHandler)).Methods("POST")
+	apiCreate.Handle("/admin/search/admins", http.HandlerFunc(adminHandler.AdminSearchAdminsHandler)).Methods("POST")
+	
+	// Admin user management routes (specific before general)
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
-	// Note: initiate-reset route removed - frontend will use existing /forgot-password route directly
-
-	// Admin user management routes
+	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")
-	apiCreate.Handle("/admin/send-reset-email", http.HandlerFunc(adminHandler.SendAdminResetEmailHandler)).Methods("POST")
-
-	// Admin management routes
-	apiCreate.Handle("/admin/search/admins", http.HandlerFunc(adminHandler.AdminSearchAdminsHandler)).Methods("POST")
-	apiCreate.Handle("/admin/admins", http.HandlerFunc(adminHandler.AdminGetAllAdminsHandler)).Methods("POST")
-	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminGetAdminDetailsHandler)).Methods("GET")
+	
+	// Admin community management routes
+	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
+	
+	// Admin management routes (specific before general)
 	apiCreate.Handle("/admin/admins/{id}/activity", http.HandlerFunc(adminHandler.AdminGetActivityHandler)).Methods("POST")
 	apiCreate.Handle("/admin/admins/{id}/roles", http.HandlerFunc(adminHandler.AdminChangeRolesHandler)).Methods("PUT")
+	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminGetAdminDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminDeleteAdminHandler)).Methods("DELETE")
+	apiCreate.Handle("/admin/admins", http.HandlerFunc(adminHandler.AdminGetAllAdminsHandler)).Methods("POST")
+	
+	// Other admin routes
+	apiCreate.Handle("/admin/send-reset-email", http.HandlerFunc(adminHandler.SendAdminResetEmailHandler)).Methods("POST")
 
 	// Admin activity tracking routes
 	apiCreate.Handle("/admin/activity/log", http.HandlerFunc(adminHandler.AdminActivityLogHandler)).Methods("POST")

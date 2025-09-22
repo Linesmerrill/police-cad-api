@@ -18,6 +18,7 @@ type PendingVerificationDatabase interface {
 	InsertOne(ctx context.Context, pendingVerification models.PendingVerification, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
+	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 }
 
 type pendingVerificationDatabase struct {
@@ -60,5 +61,9 @@ func (c *pendingVerificationDatabase) InsertOne(ctx context.Context, pendingVeri
 
 func (c *pendingVerificationDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
 	return c.db.Collection(pendingVerificationName).DeleteOne(ctx, filter, opts...)
+}
 
+func (c *pendingVerificationDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	count, err := c.db.Collection(pendingVerificationName).CountDocuments(ctx, filter, opts...)
+	return count, err
 }

@@ -257,4 +257,12 @@ type CommunitySubscription struct {
 	UpdatedAt        interface{} `json:"updatedAt"`
 }
 
+type AdminPendingVerificationResult struct {
+	ID        primitive.ObjectID `json:"id"`
+	Email     string             `json:"email"`
+	Code      string             `json:"code"`
+	Attempts  int                `json:"attempts"`
+	CreatedAt interface{}        `json:"createdAt"`
+}
+
 

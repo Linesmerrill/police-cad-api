@@ -50,6 +50,7 @@ type Admin struct {
 	UDB databases.UserDatabase
 	CDB databases.CommunityDatabase
 	AADB databases.AdminActivityDatabase
+	PVDB databases.PendingVerificationDatabase
 }
 
 // checkAdminPermissions validates if the current user has sufficient permissions
@@ -610,6 +611,112 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	_ = json.NewEncoder(w).Encode(communitySearchResponse{
 		Communities: results,
 		Pagination:  pagination,
+	})
+}
+
+type pendingVerificationSearchRequest struct {
+	Query string `json:"query"`
+	Page  int    `json:"page"`  // Page number (0-based)
+	Limit int    `json:"limit"` // Records per page
+}
+
+type pendingVerificationSearchResponse struct {
+	PendingVerifications []models.AdminPendingVerificationResult `json:"pendingVerifications"`
+	Pagination           map[string]interface{}                 `json:"pagination"`
+}
+
+// AdminPendingVerificationSearchHandler searches for pending verifications by email
+func (h Admin) AdminPendingVerificationSearchHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req pendingVerificationSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
+		return
+	}
+
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "query required"})
+		return
+	}
+
+	// Set pagination defaults
+	page := req.Page
+	if page < 0 {
+		page = 0 // Default to first page (0-based)
+	}
+	
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10 // Default to 10 records per page
+	}
+	
+	// Calculate skip value for MongoDB
+	skip := int64(page * limit)
+	limit64 := int64(limit)
+
+	// Search by email (case-insensitive)
+	filter := bson.M{
+		"email": bson.M{"$regex": query, "$options": "i"},
+	}
+	
+	// Get total count for pagination metadata
+	totalCount, err := h.PVDB.CountDocuments(r.Context(), filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+		return
+	}
+	
+	// Use pending verification database to search with pagination
+	cursor, err := h.PVDB.Find(r.Context(), filter, &options.FindOptions{
+		Skip:  &skip,
+		Limit: &limit64,
+		Sort:  bson.M{"email": 1}, // Sort by email for consistent results
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
+		return
+	}
+	defer cursor.Close(r.Context())
+
+	var pendingVerifications []models.PendingVerification
+	if err = cursor.All(r.Context(), &pendingVerifications); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode pending verifications"})
+		return
+	}
+
+	var results []models.AdminPendingVerificationResult
+	for _, pv := range pendingVerifications {
+		result := models.AdminPendingVerificationResult{
+			ID:        pv.ID,
+			Email:     pv.Email,
+			Code:      pv.Code,
+			Attempts:  pv.Attempts,
+			CreatedAt: pv.CreatedAt,
+		}
+		results = append(results, result)
+	}
+
+	// Create pagination metadata
+	pagination := map[string]interface{}{
+		"currentPage": page,
+		"limit":       limit,
+		"totalRecords": totalCount,
+		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)) - 1,
+		"hasPrevPage": page > 0,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(pendingVerificationSearchResponse{
+		PendingVerifications: results,
+		Pagination:          pagination,
 	})
 }
 

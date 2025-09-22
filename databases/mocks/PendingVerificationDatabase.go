@@ -18,6 +18,41 @@ type PendingVerificationDatabase struct {
 	mock.Mock
 }
 
+// CountDocuments provides a mock function with given fields: ctx, filter, opts
+func (_m *PendingVerificationDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountDocuments")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.CountOptions) (int64, error)); ok {
+		return rf(ctx, filter, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.CountOptions) int64); ok {
+		r0 = rf(ctx, filter, opts...)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}, ...*options.CountOptions) error); ok {
+		r1 = rf(ctx, filter, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // DeleteOne provides a mock function with given fields: ctx, filter, opts
 func (_m *PendingVerificationDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
 	_va := make([]interface{}, len(opts))
