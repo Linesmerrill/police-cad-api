@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -676,4 +677,111 @@ func (c Civilian) PendingApprovalsHandler(w http.ResponseWriter, r *http.Request
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// CivilianSearchRequest represents the request structure for civilian search
+type CivilianSearchRequest struct {
+	Query       string `json:"query"`
+	CommunityID string `json:"communityId"`
+	Page        int    `json:"page"`  // Page number (0-based)
+	Limit       int    `json:"limit"` // Records per page
+}
+
+// CivilianSearchResponse represents the response structure for civilian search
+type CivilianSearchResponse struct {
+	Civilians  []models.Civilian     `json:"civilians"`
+	Pagination map[string]interface{} `json:"pagination"`
+}
+
+// CiviliansSearchHandlerV2 searches for civilians by name field with pagination and community filtering
+func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req CivilianSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
+		return
+	}
+
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "query required"})
+		return
+	}
+
+	if req.CommunityID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "communityId required"})
+		return
+	}
+
+	// Set pagination defaults
+	page := req.Page
+	if page < 0 {
+		page = 0 // Default to first page (0-based)
+	}
+	
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10 // Default to 10 records per page
+	}
+	
+	// Calculate skip value for MongoDB
+	skip := int64(page * limit)
+	limit64 := int64(limit)
+
+	// Search by name (case-insensitive) within the specified community
+	filter := bson.M{
+		"$and": []bson.M{
+			{
+				"civilian.name": bson.M{"$regex": query, "$options": "i"},
+			},
+			{
+				"civilian.activeCommunityID": req.CommunityID,
+			},
+		},
+	}
+	
+	// Get total count for pagination metadata
+	totalCount, err := c.DB.CountDocuments(r.Context(), filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+		return
+	}
+	
+	// Search civilians with pagination
+	civilians, err := c.DB.Find(r.Context(), filter, &options.FindOptions{
+		Skip:  &skip,
+		Limit: &limit64,
+		Sort:  bson.M{"civilian.name": 1}, // Sort by name for consistent results
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
+		return
+	}
+
+	// Ensure the response is always an array
+	if civilians == nil {
+		civilians = []models.Civilian{}
+	}
+
+	// Create pagination metadata
+	pagination := map[string]interface{}{
+		"currentPage": page,
+		"limit":       limit,
+		"totalRecords": totalCount,
+		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)) - 1,
+		"hasPrevPage": page > 0,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(CivilianSearchResponse{
+		Civilians:  civilians,
+		Pagination: pagination,
+	})
 }
