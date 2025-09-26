@@ -341,6 +341,13 @@ definitions:
         x-go-name: Events
       fines:
         $ref: '#/definitions/CommunityFine'
+      firearmCreationLimit:
+        format: int64
+        type: integer
+        x-go-name: FirearmCreationLimit
+      firearmCreationLimitsEnabled:
+        type: boolean
+        x-go-name: FirearmCreationLimitsEnabled
       imageLink:
         type: string
         x-go-name: ImageLink
@@ -400,6 +407,13 @@ definitions:
         x-go-name: TenCodes
       updatedAt:
         $ref: '#/definitions/DateTime'
+      vehicleCreationLimit:
+        format: int64
+        type: integer
+        x-go-name: VehicleCreationLimit
+      vehicleCreationLimitsEnabled:
+        type: boolean
+        x-go-name: VehicleCreationLimitsEnabled
       visibility:
         type: string
         x-go-name: Visibility

@@ -40,7 +40,11 @@ type CommunityDetails struct {
 	Analytics              CommunityAnalytics      `json:"analytics" bson:"analytics"`
 	ActivityLevel          string                  `json:"activityLevel" bson:"activityLevel"`
 	CivilianCreationLimitsEnabled bool             `json:"civilianCreationLimitsEnabled" bson:"civilianCreationLimitsEnabled"`
-	CivilianCreationLimit  int                    `json:"civilianCreationLimit" bson:"civilianCreationLimit"`
+	CivilianCreationLimit  int                     `json:"civilianCreationLimit" bson:"civilianCreationLimit"`
+	VehicleCreationLimitsEnabled bool              `json:"vehicleCreationLimitsEnabled" bson:"vehicleCreationLimitsEnabled"`
+	VehicleCreationLimit  int                      `json:"vehicleCreationLimit" bson:"vehicleCreationLimit"`
+	FirearmCreationLimitsEnabled bool              `json:"firearmCreationLimitsEnabled" bson:"firearmCreationLimitsEnabled"`
+	FirearmCreationLimit  int                      `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
 	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
 	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
