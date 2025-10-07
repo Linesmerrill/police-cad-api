@@ -87,3 +87,21 @@ func sendNotificationToUser(userId string, notification interface{}) {
 		}
 	}
 }
+
+// Broadcast panic alert event to all connected users
+func broadcastPanicAlertEvent(eventType string, data map[string]interface{}) {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	for userId, conn := range hub.clients {
+		err := conn.WriteJSON(map[string]interface{}{
+			"event": eventType,
+			"data":  data,
+		})
+		if err != nil {
+			log.Printf("Error broadcasting panic alert event to user %s: %v", userId, err)
+			delete(hub.clients, userId)
+			conn.Close()
+		}
+	}
+}

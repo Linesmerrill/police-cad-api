@@ -432,10 +432,6 @@ func (a *App) New() *mux.Router {
 	// Websocket routes
 	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")
 
-	// Socket.IO routes
-	socketIOServer := InitializeSocketIO()
-	r.Handle("/socket.io/", socketIOServer)
-
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))
 	return r
