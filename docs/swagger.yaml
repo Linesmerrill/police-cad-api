@@ -293,6 +293,11 @@ definitions:
     description: CommunityDetails holds the structure for the inner community collection
       in mongo
     properties:
+      activePanicAlerts:
+        items:
+          $ref: '#/definitions/PanicAlert'
+        type: array
+        x-go-name: ActivePanicAlerts
       activePanics:
         additionalProperties:
           type: object
@@ -948,6 +953,39 @@ definitions:
     title: ObjectID is the BSON ObjectID type.
     type: array
     x-go-package: github.com/linesmerrill/police-cad-api/vendor/go.mongodb.org/mongo-driver/bson/primitive
+  PanicAlert:
+    description: PanicAlert holds the structure for a panic alert
+    properties:
+      alertId:
+        type: string
+        x-go-name: AlertID
+      callSign:
+        type: string
+        x-go-name: CallSign
+      clearedAt:
+        $ref: '#/definitions/DateTime'
+      clearedBy:
+        type: string
+        x-go-name: ClearedBy
+      communityId:
+        type: string
+        x-go-name: CommunityID
+      departmentType:
+        type: string
+        x-go-name: DepartmentType
+      status:
+        type: string
+        x-go-name: Status
+      triggeredAt:
+        $ref: '#/definitions/DateTime'
+      userId:
+        type: string
+        x-go-name: UserID
+      username:
+        type: string
+        x-go-name: Username
+    type: object
+    x-go-package: github.com/linesmerrill/police-cad-api/models
   Permission:
     description: Permission holds the structure for a permission
     properties:
