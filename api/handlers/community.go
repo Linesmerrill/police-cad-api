@@ -4622,6 +4622,19 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Emit socket event for panic alert created
+	alertData := map[string]interface{}{
+		"alertId":       alertID,
+		"userId":        request.UserID,
+		"username":      request.Username,
+		"callSign":      request.CallSign,
+		"departmentType": request.DepartmentType,
+		"communityId":   communityID,
+		"triggeredAt":   panicAlert.TriggeredAt,
+		"status":        "active",
+	}
+	EmitPanicAlertCreated(communityID, alertData)
+
 	// Response
 	response := map[string]interface{}{
 		"success": true,
@@ -4719,6 +4732,9 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Emit socket event for panic button cleared
+	EmitPanicButtonCleared(communityID, alertID)
+
 	// Response
 	response := map[string]interface{}{
 		"success": true,
@@ -4788,6 +4804,9 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 		config.ErrorStatus("failed to clear user panic alerts", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Emit socket event for panic button cleared
+	EmitPanicButtonCleared(communityID, userID)
 
 	// Response
 	response := map[string]interface{}{
