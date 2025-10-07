@@ -93,6 +93,8 @@ func broadcastPanicAlertEvent(eventType string, data map[string]interface{}) {
 	hub.mutex.Lock()
 	defer hub.mutex.Unlock()
 
+	log.Printf("Broadcasting panic alert event: %s with data: %+v to %d connected users", eventType, data, len(hub.clients))
+
 	for userId, conn := range hub.clients {
 		err := conn.WriteJSON(map[string]interface{}{
 			"event": eventType,
@@ -102,6 +104,8 @@ func broadcastPanicAlertEvent(eventType string, data map[string]interface{}) {
 			log.Printf("Error broadcasting panic alert event to user %s: %v", userId, err)
 			delete(hub.clients, userId)
 			conn.Close()
+		} else {
+			log.Printf("Successfully sent panic alert event %s to user %s", eventType, userId)
 		}
 	}
 }

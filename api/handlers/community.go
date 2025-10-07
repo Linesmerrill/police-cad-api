@@ -4623,7 +4623,23 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Broadcast panic alert created event to all connected users
-	broadcastPanicAlertEvent("panic_alert_created", map[string]interface{}{
+	panicData := map[string]interface{}{
+		"alertId":     alertID,
+		"userId":      request.UserID,
+		"username":    request.Username,
+		"callSign":    request.CallSign,
+		"departmentType": request.DepartmentType,
+		"communityId": communityID,
+		"triggeredAt": panicAlert.TriggeredAt,
+		"action":      "created",
+	}
+	
+	broadcastPanicAlertEvent("panic_alert_created", panicData)
+	
+	// Also emit a generic alert event in case frontend is listening for that
+	broadcastPanicAlertEvent("alert", map[string]interface{}{
+		"type":        "panic",
+		"action":      "created",
 		"alertId":     alertID,
 		"userId":      request.UserID,
 		"username":    request.Username,
@@ -4713,8 +4729,24 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Update the specific panic alert
+	// Get the userId from the alert before clearing it
+	var alertUserId string
 	filter := bson.M{"_id": cID, "community.activePanicAlerts.alertId": alertID}
+	community, err := c.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to find panic alert", http.StatusNotFound, w, err)
+		return
+	}
+	
+	// Find the alert and get its userId
+	for _, alert := range community.Details.ActivePanicAlerts {
+		if alert.AlertID == alertID {
+			alertUserId = alert.UserID
+			break
+		}
+	}
+
+	// Update the specific panic alert
 	update := bson.M{
 		"$set": bson.M{
 			"community.activePanicAlerts.$.status":    "cleared",
@@ -4731,8 +4763,20 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Broadcast panic alert cleared event to all connected users
-	broadcastPanicAlertEvent("panic_button_cleared", map[string]interface{}{
-		"alertId":     alertID,
+	clearData := map[string]interface{}{
+		"userId":      alertUserId,
+		"communityId": communityID,
+		"clearedBy":   request.ClearedBy,
+		"action":      "cleared",
+	}
+	
+	broadcastPanicAlertEvent("panic_button_cleared", clearData)
+	
+	// Also emit a generic alert event in case frontend is listening for that
+	broadcastPanicAlertEvent("alert", map[string]interface{}{
+		"type":        "panic",
+		"action":      "cleared",
+		"userId":      alertUserId,
 		"communityId": communityID,
 		"clearedBy":   request.ClearedBy,
 	})
@@ -4808,7 +4852,19 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Broadcast panic alerts cleared event to all connected users
-	broadcastPanicAlertEvent("panic_button_cleared", map[string]interface{}{
+	clearData := map[string]interface{}{
+		"userId":      userID,
+		"communityId": communityID,
+		"clearedBy":   request.ClearedBy,
+		"action":      "cleared",
+	}
+	
+	broadcastPanicAlertEvent("panic_button_cleared", clearData)
+	
+	// Also emit a generic alert event in case frontend is listening for that
+	broadcastPanicAlertEvent("alert", map[string]interface{}{
+		"type":        "panic",
+		"action":      "cleared",
 		"userId":      userID,
 		"communityId": communityID,
 		"clearedBy":   request.ClearedBy,
