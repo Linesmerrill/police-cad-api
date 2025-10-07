@@ -46,6 +46,7 @@ type CommunityDetails struct {
 	FirearmCreationLimitsEnabled bool              `json:"firearmCreationLimitsEnabled" bson:"firearmCreationLimitsEnabled"`
 	FirearmCreationLimit  int                      `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
 	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
+	ActivePanicAlerts       []PanicAlert          `json:"activePanicAlerts" bson:"activePanicAlerts"`
 	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
 }
@@ -163,4 +164,18 @@ type Permission struct {
 	Name        string             `json:"name" bson:"name"`
 	Description string             `json:"description" bson:"description"`
 	Enabled     bool               `json:"enabled" bson:"enabled"`
+}
+
+// PanicAlert holds the structure for a panic alert
+type PanicAlert struct {
+	AlertID       string             `json:"alertId" bson:"alertId"`
+	UserID        string             `json:"userId" bson:"userId"`
+	Username      string             `json:"username" bson:"username"`
+	CallSign      string             `json:"callSign" bson:"callSign"`
+	DepartmentType string            `json:"departmentType" bson:"departmentType"`
+	CommunityID   string             `json:"communityId" bson:"communityId"`
+	TriggeredAt   primitive.DateTime `json:"triggeredAt" bson:"triggeredAt"`
+	Status        string             `json:"status" bson:"status"` // "active", "cleared"
+	ClearedBy     *string            `json:"clearedBy" bson:"clearedBy"`
+	ClearedAt     *primitive.DateTime `json:"clearedAt" bson:"clearedAt"`
 }

@@ -201,6 +201,12 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", http.HandlerFunc(announcement.UpdateCommentHandler)).Methods("PUT")
 	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", http.HandlerFunc(announcement.DeleteCommentHandler)).Methods("DELETE")
 
+	// Panic Alert routes (must come before generic {community_id}/{owner_id} route)
+	apiCreate.Handle("/community/{communityId}/panic-alerts", api.Middleware(http.HandlerFunc(c.CreatePanicAlertHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/panic-alerts", api.Middleware(http.HandlerFunc(c.GetPanicAlertsHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/panic-alerts/{alertId}", api.Middleware(http.HandlerFunc(c.ClearPanicAlertHandler))).Methods("DELETE")
+	apiCreate.Handle("/community/{communityId}/panic-alerts/user/{userId}", api.Middleware(http.HandlerFunc(c.ClearUserPanicAlertsHandler))).Methods("DELETE")
+
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.FetchEliteCommunitiesHandler))).Methods("GET")

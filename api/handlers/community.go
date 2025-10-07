@@ -4550,9 +4550,251 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 		"query": query,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		config.ErrorStatus("failed to encode response", http.StatusInternalServerError, w, err)
+        w.Header().Set("Content-Type", "application/json")
+        if err := json.NewEncoder(w).Encode(response); err != nil {
+                config.ErrorStatus("failed to encode response", http.StatusInternalServerError, w, err)                                                         
+                return
+        }
+}
+
+// CreatePanicAlertHandler creates a new panic alert for a user in a community
+func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	// Parse community ID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
+
+	// Parse request body
+	var request struct {
+		UserID        string `json:"userId"`
+		Username      string `json:"username"`
+		CallSign      string `json:"callSign"`
+		DepartmentType string `json:"departmentType"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Validate required fields
+	if request.UserID == "" || request.Username == "" || request.CallSign == "" || request.DepartmentType == "" {
+		config.ErrorStatus("userId, username, callSign, and departmentType are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
+		return
+	}
+
+	// Generate unique alert ID
+	alertID := primitive.NewObjectID().Hex()
+
+	// Create panic alert
+	panicAlert := models.PanicAlert{
+		AlertID:       alertID,
+		UserID:        request.UserID,
+		Username:      request.Username,
+		CallSign:      request.CallSign,
+		DepartmentType: request.DepartmentType,
+		CommunityID:   communityID,
+		TriggeredAt:   primitive.NewDateTimeFromTime(time.Now()),
+		Status:        "active",
+		ClearedBy:     nil,
+		ClearedAt:     nil,
+	}
+
+	// Add panic alert to community
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$push": bson.M{
+			"community.activePanicAlerts": panicAlert,
+		},
+		"$set": bson.M{
+			"community.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to create panic alert", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Response
+	response := map[string]interface{}{
+		"success": true,
+		"alertId": alertID,
+		"message": "Panic alert created successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetPanicAlertsHandler retrieves panic alerts for a community
+func (c Community) GetPanicAlertsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	// Parse community ID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Get status filter from query parameter
+	status := r.URL.Query().Get("status")
+
+	// Get community
+	filter := bson.M{"_id": cID}
+	community, err := c.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get community", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Filter alerts by status if specified
+	var filteredAlerts []models.PanicAlert
+	for _, alert := range community.Details.ActivePanicAlerts {
+		if status == "" || alert.Status == status {
+			filteredAlerts = append(filteredAlerts, alert)
+		}
+	}
+
+	// Response
+	response := map[string]interface{}{
+		"success": true,
+		"alerts":  filteredAlerts,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// ClearPanicAlertHandler clears a specific panic alert
+func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+	alertID := vars["alertId"]
+
+	// Parse community ID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Parse request body
+	var request struct {
+		ClearedBy string `json:"clearedBy"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if request.ClearedBy == "" {
+		config.ErrorStatus("clearedBy is required", http.StatusBadRequest, w, fmt.Errorf("clearedBy is required"))
+		return
+	}
+
+	// Update the specific panic alert
+	filter := bson.M{"_id": cID, "community.activePanicAlerts.alertId": alertID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.activePanicAlerts.$.status":    "cleared",
+			"community.activePanicAlerts.$.clearedBy": request.ClearedBy,
+			"community.activePanicAlerts.$.clearedAt":  primitive.NewDateTimeFromTime(time.Now()),
+			"community.updatedAt":                       primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to clear panic alert", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Response
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Panic alert cleared successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// ClearUserPanicAlertsHandler clears all panic alerts for a specific user
+func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+	userID := vars["userId"]
+
+	// Parse community ID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Parse request body
+	var request struct {
+		ClearedBy string `json:"clearedBy"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if request.ClearedBy == "" {
+		config.ErrorStatus("clearedBy is required", http.StatusBadRequest, w, fmt.Errorf("clearedBy is required"))
+		return
+	}
+
+	// Get community to find user's active alerts
+	filter := bson.M{"_id": cID}
+	community, err := c.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get community", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find and update all active alerts for this user
+	now := primitive.NewDateTimeFromTime(time.Now())
+	for i, alert := range community.Details.ActivePanicAlerts {
+		if alert.UserID == userID && alert.Status == "active" {
+			community.Details.ActivePanicAlerts[i].Status = "cleared"
+			community.Details.ActivePanicAlerts[i].ClearedBy = &request.ClearedBy
+			community.Details.ActivePanicAlerts[i].ClearedAt = &now
+		}
+	}
+
+	// Update community with cleared alerts
+	update := bson.M{
+		"$set": bson.M{
+			"community.activePanicAlerts": community.Details.ActivePanicAlerts,
+			"community.updatedAt":           primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to clear user panic alerts", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Response
+	response := map[string]interface{}{
+		"success": true,
+		"message": "User panic alerts cleared successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
