@@ -4634,6 +4634,7 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		"action":      "created",
 	}
 	
+	zap.S().Infof("PANIC ALERT CREATED - About to broadcast socket events for alertId: %s, userId: %s", alertID, request.UserID)
 	broadcastPanicAlertEvent("panic_alert_created", panicData)
 	
 	// Also emit a generic alert event in case frontend is listening for that
@@ -4648,6 +4649,7 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		"communityId": communityID,
 		"triggeredAt": panicAlert.TriggeredAt,
 	})
+	zap.S().Infof("PANIC ALERT CREATED - Socket events broadcast completed for alertId: %s", alertID)
 
 	// Response
 	response := map[string]interface{}{
@@ -4770,6 +4772,7 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 		"action":      "cleared",
 	}
 	
+	zap.S().Infof("PANIC ALERT CLEARED - About to broadcast socket events for alertId: %s, userId: %s", alertID, alertUserId)
 	broadcastPanicAlertEvent("panic_button_cleared", clearData)
 	
 	// Also emit a generic alert event in case frontend is listening for that
@@ -4780,6 +4783,7 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 		"communityId": communityID,
 		"clearedBy":   request.ClearedBy,
 	})
+	zap.S().Infof("PANIC ALERT CLEARED - Socket events broadcast completed for alertId: %s", alertID)
 
 	// Response
 	response := map[string]interface{}{
@@ -4859,6 +4863,7 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 		"action":      "cleared",
 	}
 	
+	zap.S().Infof("USER PANIC ALERTS CLEARED - About to broadcast socket events for userId: %s", userID)
 	broadcastPanicAlertEvent("panic_button_cleared", clearData)
 	
 	// Also emit a generic alert event in case frontend is listening for that
@@ -4869,11 +4874,63 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 		"communityId": communityID,
 		"clearedBy":   request.ClearedBy,
 	})
+	zap.S().Infof("USER PANIC ALERTS CLEARED - Socket events broadcast completed for userId: %s", userID)
 
 	// Response
 	response := map[string]interface{}{
 		"success": true,
 		"message": "User panic alerts cleared successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// TestPanicSocketHandler tests socket emissions for panic alerts
+func (c Community) TestPanicSocketHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	// Parse community ID
+	_, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Test socket emission
+	testData := map[string]interface{}{
+		"alertId":     "test-alert-123",
+		"userId":      "test-user-456",
+		"username":    "TestUser",
+		"callSign":    "TEST01",
+		"departmentType": "police",
+		"communityId": communityID,
+		"action":      "test",
+	}
+
+	zap.S().Infof("TEST PANIC SOCKET - Broadcasting test socket events for community: %s", communityID)
+	
+	// Emit test events
+	broadcastPanicAlertEvent("panic_alert_created", testData)
+	broadcastPanicAlertEvent("alert", map[string]interface{}{
+		"type":        "panic",
+		"action":      "test",
+		"alertId":     "test-alert-123",
+		"userId":      "test-user-456",
+		"username":    "TestUser",
+		"callSign":    "TEST01",
+		"departmentType": "police",
+		"communityId": communityID,
+	})
+	
+	zap.S().Infof("TEST PANIC SOCKET - Test socket events broadcast completed for community: %s", communityID)
+
+	// Response
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Test panic socket events sent",
+		"data":    testData,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

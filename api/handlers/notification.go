@@ -94,6 +94,11 @@ func broadcastPanicAlertEvent(eventType string, data map[string]interface{}) {
 	defer hub.mutex.Unlock()
 
 	log.Printf("Broadcasting panic alert event: %s with data: %+v to %d connected users", eventType, data, len(hub.clients))
+	
+	if len(hub.clients) == 0 {
+		log.Printf("WARNING: No websocket clients connected! Panic alert event %s will not be delivered", eventType)
+		return
+	}
 
 	for userId, conn := range hub.clients {
 		err := conn.WriteJSON(map[string]interface{}{

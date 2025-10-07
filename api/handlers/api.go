@@ -206,6 +206,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/panic-alerts", api.Middleware(http.HandlerFunc(c.GetPanicAlertsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/panic-alerts/{alertId}", api.Middleware(http.HandlerFunc(c.ClearPanicAlertHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/panic-alerts/user/{userId}", api.Middleware(http.HandlerFunc(c.ClearUserPanicAlertsHandler))).Methods("DELETE")
+	apiCreate.Handle("/community/{communityId}/panic-alerts/test-socket", api.Middleware(http.HandlerFunc(c.TestPanicSocketHandler))).Methods("POST")
 
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
