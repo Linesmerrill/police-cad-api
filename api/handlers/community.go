@@ -5069,9 +5069,25 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 	}
 	defer cursor.Close(ctx)
 
+	// Iterate through cursor and handle decoding errors gracefully
+	// Some communities may have data type mismatches, so we skip those rather than failing
 	var communities []models.Community
-	if err = cursor.All(ctx, &communities); err != nil {
-		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+	for cursor.Next(ctx) {
+		var comm models.Community
+		// Use DecodeCurrent to decode individual documents (cursor.Decode() calls All() which won't work here)
+		cursorPtr := &cursor
+		if err := cursorPtr.DecodeCurrent(&comm); err != nil {
+			// Log the error but continue processing other communities
+			zap.S().With(err).Warnf("Failed to decode community, skipping: %v", err)
+			continue
+		}
+		communities = append(communities, comm)
+	}
+
+	// Check for cursor iteration errors
+	if err := cursor.Err(); err != nil {
+		zap.S().With(err).Error("Error iterating communities cursor")
+		config.ErrorStatus("failed to iterate communities", http.StatusInternalServerError, w, err)
 		return
 	}
 

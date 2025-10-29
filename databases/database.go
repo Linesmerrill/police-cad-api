@@ -226,6 +226,11 @@ func (cr *MongoCursor) Close(ctx context.Context) error { return cr.cr.Close(ctx
 // Err returns the error from the cursor
 func (cr *MongoCursor) Err() error { return cr.cr.Err() }
 
+// DecodeCurrent decodes the current document from the cursor
+func (cr *MongoCursor) DecodeCurrent(v interface{}) error {
+	return cr.cr.Decode(v)
+}
+
 // CursorHelper defines the methods required for cursor operations
 type CursorHelper interface {
 	Next(ctx context.Context) bool
