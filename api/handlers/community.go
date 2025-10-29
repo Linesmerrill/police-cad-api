@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -24,6 +25,18 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
+)
+
+// leaderboardCacheEntry stores cached leaderboard results
+type leaderboardCacheEntry struct {
+	Data       []map[string]interface{}
+	TotalCount int64
+	ExpiresAt  time.Time
+}
+
+var (
+	leaderboardCacheMu sync.RWMutex
+	leaderboardCache   = map[string]leaderboardCacheEntry{}
 )
 
 // Community struct mostly used for mocking tests
@@ -5021,6 +5034,8 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+    // NOTE: optimized members leaderboard moved after pagination/ctx initialization
+
 	// Parse pagination parameters
 	page, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil || page < 0 {
@@ -5057,6 +5072,124 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 		currentStart = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 		previousEnd = currentStart
 		previousStart = currentStart
+	}
+
+	// Fast path for statType=members using indexed aggregation + in-memory cache (top 10 only)
+	if statType == "members" {
+		// Only cache first page (page=0) and limit up to 10
+		if page == 0 && limit <= 10 {
+			cacheKey := fmt.Sprintf("leaderboard:%s:%s:%d", timeframe, statType, limit)
+			leaderboardCacheMu.RLock()
+			entry, ok := leaderboardCache[cacheKey]
+			leaderboardCacheMu.RUnlock()
+			if ok && time.Now().Before(entry.ExpiresAt) {
+				response := map[string]interface{}{
+					"success": true,
+					"data":    entry.Data,
+					"pagination": map[string]interface{}{
+						"page":        page,
+						"limit":       limit,
+						"totalCount":  entry.TotalCount,
+						"totalPages":  int(math.Ceil(float64(entry.TotalCount) / float64(limit))),
+						"hasNextPage": entry.TotalCount > int64(limit),
+						"hasPrevPage": false,
+					},
+				}
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+		}
+
+		// Build aggregation to fetch top communities by membersCount
+		match := bson.M{
+			"community.visibility":   "public",
+			"community.membersCount": bson.M{"$gte": 1},
+		}
+
+		// Use aggregation for sorting and paging by indexed field
+		pipeline := mongo.Pipeline{
+			bson.D{{Key: "$match", Value: match}},
+			bson.D{{Key: "$project", Value: bson.M{
+				"_id":           1,
+				"name":          "$community.name",
+				"imageLink":     "$community.imageLink",
+				"membersCount":  "$community.membersCount",
+				"plan":          "$community.subscription.plan",
+			}}},
+			bson.D{{Key: "$sort", Value: bson.M{"membersCount": -1}}},
+			bson.D{{Key: "$skip", Value: int64(page * limit)}},
+			bson.D{{Key: "$limit", Value: int64(limit)}},
+		}
+
+		cur, err := c.DB.Aggregate(ctx, pipeline)
+		if err != nil {
+			config.ErrorStatus("failed to fetch leaderboard", http.StatusInternalServerError, w, err)
+			return
+		}
+		defer cur.Close(ctx)
+
+		var docs []struct {
+			ID           primitive.ObjectID `bson:"_id"`
+			Name         string             `bson:"name"`
+			ImageLink    string             `bson:"imageLink"`
+			MembersCount int                `bson:"membersCount"`
+			Plan         string             `bson:"plan"`
+		}
+		if err := cur.All(ctx, &docs); err != nil {
+			config.ErrorStatus("failed to decode leaderboard", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		// Count total for pagination
+		totalCount, _ := c.DB.CountDocuments(ctx, match)
+
+		// Build response data with placeholders for non-members stats to avoid heavy computation
+		responseData := make([]map[string]interface{}, 0, len(docs))
+		for _, d := range docs {
+			item := map[string]interface{}{
+				"_id":              d.ID.Hex(),
+				"name":             d.Name,
+				"imageLink":        func() interface{} { if d.ImageLink == "" { return nil }; return d.ImageLink }(),
+				"membersCount":     d.MembersCount,
+				"onlineCount":      0,
+				"activityScore":    0,
+				"growthPercentage": 0.0,
+				"subscription": map[string]interface{}{
+					"plan": func() interface{} { if d.Plan == "" { return nil }; return d.Plan }(),
+				},
+			}
+			responseData = append(responseData, item)
+		}
+
+		// Write-through cache only for first page (top 10) to keep it fresh daily
+		if page == 0 && limit <= 10 {
+			cacheKey := fmt.Sprintf("leaderboard:%s:%s:%d", timeframe, statType, limit)
+			leaderboardCacheMu.Lock()
+			leaderboardCache[cacheKey] = leaderboardCacheEntry{
+				Data:       responseData,
+				TotalCount: totalCount,
+				ExpiresAt:  time.Now().Add(24 * time.Hour),
+			}
+			leaderboardCacheMu.Unlock()
+		}
+
+		response := map[string]interface{}{
+			"success": true,
+			"data":    responseData,
+			"pagination": map[string]interface{}{
+				"page":        page,
+				"limit":       limit,
+				"totalCount":  totalCount,
+				"totalPages":  int(math.Ceil(float64(totalCount) / float64(limit))),
+				"hasNextPage": (int64((page+1)*limit) < totalCount),
+				"hasPrevPage": page > 0,
+			},
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+		return
 	}
 
 	// Fetch all communities (we'll sort and paginate after calculating stats)
