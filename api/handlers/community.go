@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -27,12 +28,13 @@ import (
 
 // Community struct mostly used for mocking tests
 type Community struct {
-	DB   databases.CommunityDatabase
-	UDB  databases.UserDatabase
-	ADB  databases.ArchivedCommunityDatabase
-	IDB  databases.InviteCodeDatabase
-	UPDB databases.UserPreferencesDatabase
-	CDB  databases.CivilianDatabase
+	DB      databases.CommunityDatabase
+	UDB     databases.UserDatabase
+	ADB     databases.ArchivedCommunityDatabase
+	IDB     databases.InviteCodeDatabase
+	UPDB    databases.UserPreferencesDatabase
+	CDB     databases.CivilianDatabase
+	DBHelper databases.DatabaseHelper
 }
 
 // CommunityHandler returns a community given a communityID
@@ -4934,5 +4936,346 @@ func (c Community) TestPanicSocketHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// CommunityLeaderboardHandler returns leaderboard stats for communities with pagination
+// Query parameters:
+//   - timeframe: "weekly", "monthly", or "allTime" (required)
+//   - statType: "members", "activity", or "growth" (required)
+//   - page: page number (default: 0, 0-based)
+//   - limit: results per page (default: 10, max: 50)
+func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse and validate query parameters - trim whitespace to catch empty strings
+	timeframe := strings.TrimSpace(r.URL.Query().Get("timeframe"))
+	statType := strings.TrimSpace(r.URL.Query().Get("statType"))
+
+	// Check for missing required parameters - must be checked first before any processing
+	var missingParams []string
+	if timeframe == "" {
+		missingParams = append(missingParams, "timeframe")
+	}
+	if statType == "" {
+		missingParams = append(missingParams, "statType")
+	}
+
+	if len(missingParams) > 0 {
+		errorMessage := fmt.Sprintf("Missing required query parameters: %s. Required parameters: timeframe (weekly|monthly|allTime), statType (members|activity|growth)", 
+			strings.Join(missingParams, ", "))
+		
+		errorResponse := map[string]interface{}{
+			"success": false,
+			"error": map[string]interface{}{
+				"message":   errorMessage,
+				"code":      "MISSING_REQUIRED_PARAMETERS",
+				"required": map[string]interface{}{
+					"timeframe": "weekly | monthly | allTime",
+					"statType":  "members | activity | growth",
+				},
+				"docs": "/swagger.yaml#/paths/~1api~1v2~1communities~1leaderboard",
+			},
+		}
+
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(errorResponse); err != nil {
+			zap.S().With(err).Error("Failed to encode leaderboard error response")
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		return
+	}
+
+	// Validate timeframe
+	if timeframe != "weekly" && timeframe != "monthly" && timeframe != "allTime" {
+		errorResponse := map[string]interface{}{
+			"success": false,
+			"error": map[string]interface{}{
+				"message": fmt.Sprintf("Invalid timeframe value: '%s'. Must be one of: weekly, monthly, allTime", timeframe),
+				"code":    "INVALID_TIMEFRAME",
+				"allowed": []string{"weekly", "monthly", "allTime"},
+				"docs":    "/swagger.yaml#/paths/~1api~1v2~1communities~1leaderboard",
+			},
+		}
+
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(errorResponse)
+		return
+	}
+
+	// Validate statType
+	if statType != "members" && statType != "activity" && statType != "growth" {
+		errorResponse := map[string]interface{}{
+			"success": false,
+			"error": map[string]interface{}{
+				"message": fmt.Sprintf("Invalid statType value: '%s'. Must be one of: members, activity, growth", statType),
+				"code":    "INVALID_STAT_TYPE",
+				"allowed": []string{"members", "activity", "growth"},
+				"docs":    "/swagger.yaml#/paths/~1api~1v2~1communities~1leaderboard",
+			},
+		}
+
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(errorResponse)
+		return
+	}
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 0 {
+		page = 0
+	}
+
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50 // Cap at 50
+	}
+
+	ctx := context.Background()
+	now := time.Now()
+
+	// Calculate time ranges based on timeframe
+	var currentStart, currentEnd, previousStart, previousEnd time.Time
+
+	switch timeframe {
+	case "weekly":
+		currentEnd = now
+		currentStart = now.AddDate(0, 0, -7)
+		previousEnd = currentStart
+		previousStart = previousEnd.AddDate(0, 0, -7)
+	case "monthly":
+		currentEnd = now
+		currentStart = now.AddDate(0, 0, -30)
+		previousEnd = currentStart
+		previousStart = previousEnd.AddDate(0, 0, -30)
+	case "allTime":
+		currentEnd = now
+		currentStart = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+		previousEnd = currentStart
+		previousStart = currentStart
+	}
+
+	// Fetch all communities (we'll sort and paginate after calculating stats)
+	// For performance, we could limit this but for now we'll fetch all public communities
+	filter := bson.M{"community.visibility": "public"}
+	cursor, err := c.DB.Find(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var communities []models.Community
+	if err = cursor.All(ctx, &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Access collections for stats calculation
+	callsCollection := c.DBHelper.Collection("calls")
+	reportsCollection := c.DBHelper.Collection("reports")
+
+	// Calculate stats for each community
+	type CommunityStats struct {
+		Community      models.Community
+		MembersCount   int
+		OnlineCount    int
+		ActivityScore  float64
+		GrowthPercent  float64
+	}
+
+	var statsList []CommunityStats
+
+	for _, comm := range communities {
+		communityID := comm.ID.Hex()
+		stats := CommunityStats{
+			Community:    comm,
+			MembersCount: comm.Details.MembersCount,
+		}
+
+		// Calculate online count - users with this community who are online
+		onlineFilter := bson.M{
+			"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      "approved",
+				},
+			},
+			"user.isOnline": true,
+		}
+		onlineCount, _ := c.UDB.CountDocuments(ctx, onlineFilter)
+		stats.OnlineCount = int(onlineCount)
+
+		// Calculate activity score (calls + reports in current period)
+		if timeframe != "allTime" {
+			// Count calls in current period
+			callFilter := bson.M{
+				"call.communityID": communityID,
+				"call.createdAt": bson.M{
+					"$gte": currentStart,
+					"$lte": currentEnd,
+				},
+			}
+			callCount, _ := callsCollection.CountDocuments(ctx, callFilter)
+
+			// Count reports in current period
+			reportFilter := bson.M{
+				"report.communityID": communityID,
+				"report.createdAt": bson.M{
+					"$gte": currentStart,
+					"$lte": currentEnd,
+				},
+			}
+			reportCount, _ := reportsCollection.CountDocuments(ctx, reportFilter)
+
+			// Activity score: weighted combination of calls and reports
+			// Calls worth more than reports for activity
+			stats.ActivityScore = float64(callCount)*1.5 + float64(reportCount)*1.0 + float64(stats.OnlineCount)*0.5
+		} else {
+			// For allTime, use all calls/reports
+			callFilter := bson.M{"call.communityID": communityID}
+			callCount, _ := callsCollection.CountDocuments(ctx, callFilter)
+			reportFilter := bson.M{"report.communityID": communityID}
+			reportCount, _ := reportsCollection.CountDocuments(ctx, reportFilter)
+			stats.ActivityScore = float64(callCount)*1.5 + float64(reportCount)*1.0 + float64(stats.OnlineCount)*0.5
+		}
+
+		// Calculate growth percentage
+		if timeframe != "allTime" {
+			// Count members/calls/reports in previous period
+			var previousActivity float64
+
+			prevCallFilter := bson.M{
+				"call.communityID": communityID,
+				"call.createdAt": bson.M{
+					"$gte": previousStart,
+					"$lt":  previousEnd,
+				},
+			}
+			prevCallCount, _ := callsCollection.CountDocuments(ctx, prevCallFilter)
+
+			prevReportFilter := bson.M{
+				"report.communityID": communityID,
+				"report.createdAt": bson.M{
+					"$gte": previousStart,
+					"$lt":  previousEnd,
+				},
+			}
+			prevReportCount, _ := reportsCollection.CountDocuments(ctx, prevReportFilter)
+
+			previousActivity = float64(prevCallCount)*1.5 + float64(prevReportCount)*1.0
+
+			// Calculate growth percentage
+			currentActivity := stats.ActivityScore
+			if previousActivity > 0 {
+				stats.GrowthPercent = ((currentActivity - previousActivity) / previousActivity) * 100
+			} else if currentActivity > 0 {
+				stats.GrowthPercent = 100.0 // 100% growth from 0
+			}
+		} else {
+			// For allTime, growth is based on member count growth over last 30 days vs previous 30 days
+			// This is simplified - in a real implementation, you'd track when users joined
+			// For now, we'll use 0 growth for allTime
+			stats.GrowthPercent = 0.0
+		}
+
+		statsList = append(statsList, stats)
+	}
+
+	// Sort by the requested statType
+	switch statType {
+	case "members":
+		sort.Slice(statsList, func(i, j int) bool {
+			return statsList[i].MembersCount > statsList[j].MembersCount
+		})
+	case "activity":
+		sort.Slice(statsList, func(i, j int) bool {
+			return statsList[i].ActivityScore > statsList[j].ActivityScore
+		})
+	case "growth":
+		sort.Slice(statsList, func(i, j int) bool {
+			return statsList[i].GrowthPercent > statsList[j].GrowthPercent
+		})
+	}
+
+	// Apply pagination
+	totalCount := len(statsList)
+	skip := page * limit
+	end := skip + limit
+
+	if skip >= totalCount {
+		// Return empty result
+		response := map[string]interface{}{
+			"success": true,
+			"data":    []interface{}{},
+			"pagination": map[string]interface{}{
+				"page":        page,
+				"limit":       limit,
+				"totalCount":  totalCount,
+				"totalPages":  int(math.Ceil(float64(totalCount) / float64(limit))),
+				"hasNextPage": false,
+				"hasPrevPage": page > 0,
+			},
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	if end > totalCount {
+		end = totalCount
+	}
+
+	paginatedStats := statsList[skip:end]
+
+	// Build response data
+	var responseData []map[string]interface{}
+	for _, stats := range paginatedStats {
+		comm := stats.Community
+		item := map[string]interface{}{
+			"_id":           comm.ID.Hex(),
+			"name":          comm.Details.Name,
+			"imageLink":     comm.Details.ImageLink,
+			"membersCount":  stats.MembersCount,
+			"onlineCount":   stats.OnlineCount,
+			"activityScore": stats.ActivityScore,
+			"growthPercentage": stats.GrowthPercent,
+			"subscription": map[string]interface{}{
+				"plan": comm.Details.Subscription.Plan,
+			},
+		}
+
+		// Handle null imageLink
+		if item["imageLink"] == "" {
+			item["imageLink"] = nil
+		}
+
+		responseData = append(responseData, item)
+	}
+
+	// Calculate pagination metadata
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	response := map[string]interface{}{
+		"success": true,
+		"data":    responseData,
+		"pagination": map[string]interface{}{
+			"page":        page,
+			"limit":       limit,
+			"totalCount":  totalCount,
+			"totalPages":  totalPages,
+			"hasNextPage": page < (totalPages - 1),
+			"hasPrevPage": page > 0,
+		},
+	}
+
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }

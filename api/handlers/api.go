@@ -36,7 +36,7 @@ func (a *App) New() *mux.Router {
 
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
-	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper)}
+	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), DBHelper: a.dbHelper}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
@@ -76,7 +76,7 @@ func (a *App) New() *mux.Router {
 	// Component and Template handlers
 	componentDB := databases.NewComponentDatabase(a.dbHelper)
 	templateDB := databases.NewTemplateDatabase(a.dbHelper)
-	
+
 	componentHandler := NewComponent(componentDB)
 	templateHandler := NewTemplate(templateDB, componentDB)
 	templateMigrationHandler := NewTemplateMigration(templateDB, databases.NewCommunityDatabase(a.dbHelper))
@@ -103,23 +103,23 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/search/communities", http.HandlerFunc(adminHandler.AdminCommunitySearchHandler)).Methods("POST")
 	apiCreate.Handle("/admin/search/pending-verifications", http.HandlerFunc(adminHandler.AdminPendingVerificationSearchHandler)).Methods("POST")
 	apiCreate.Handle("/admin/search/admins", http.HandlerFunc(adminHandler.AdminSearchAdminsHandler)).Methods("POST")
-	
+
 	// Admin user management routes (specific before general)
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")
-	
+
 	// Admin community management routes
 	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
-	
+
 	// Admin management routes (specific before general)
 	apiCreate.Handle("/admin/admins/{id}/activity", http.HandlerFunc(adminHandler.AdminGetActivityHandler)).Methods("POST")
 	apiCreate.Handle("/admin/admins/{id}/roles", http.HandlerFunc(adminHandler.AdminChangeRolesHandler)).Methods("PUT")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminGetAdminDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminDeleteAdminHandler)).Methods("DELETE")
 	apiCreate.Handle("/admin/admins", http.HandlerFunc(adminHandler.AdminGetAllAdminsHandler)).Methods("POST")
-	
+
 	// Other admin routes
 	apiCreate.Handle("/admin/send-reset-email", http.HandlerFunc(adminHandler.SendAdminResetEmailHandler)).Methods("POST")
 
@@ -209,6 +209,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/panic-alerts/test-socket", api.Middleware(http.HandlerFunc(c.TestPanicSocketHandler))).Methods("POST")
 
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
+	apiCreate.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
+	apiV2.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.FetchEliteCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
@@ -275,7 +277,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/civilian/approval", api.Middleware(http.HandlerFunc(civ.CivilianApprovalHandler))).Methods("POST")
 	apiCreate.Handle("/civilian/admin-approval", api.Middleware(http.HandlerFunc(civ.AdminCivilianApprovalHandler))).Methods("POST")
 	apiCreate.Handle("/civilian/pending-approvals", api.Middleware(http.HandlerFunc(civ.PendingApprovalsHandler))).Methods("GET")
-	
+
 	// Civilian parameterized routes
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.CivilianByIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(civ.UpdateCivilianHandler))).Methods("PUT")
