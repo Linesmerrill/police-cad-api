@@ -40,15 +40,36 @@ func Middleware(next http.Handler) http.Handler {
 		// TODO: rework this to use the proper format
 		// Bypass authentication for all routes except login
 		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/token") {
+			// Check if Basic Auth header is present
+			email, _, hasAuth := r.BasicAuth()
+			if !hasAuth {
+				zap.S().Warnw("auth/token: missing basic auth header",
+					"url", r.URL.Path,
+					"method", r.Method)
+				w.Header().Set("WWW-Authenticate", `Basic realm="restricted"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error": "unauthorized", "message": "Basic authentication required"}`))
+				return
+			}
+
+			zap.S().Debugw("auth/token: attempting authentication",
+				"email", email,
+				"url", r.URL.Path)
+
 			user, err := authenticator.Authenticate(r)
 			if err != nil {
-				zap.S().Errorw("unauthorized",
-					"url", r.URL, "error", err)
+				zap.S().Errorw("auth/token: authentication failed",
+					"url", r.URL.Path,
+					"email", email,
+					"error", err)
+				w.Header().Set("WWW-Authenticate", `Basic realm="restricted"`)
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(fmt.Sprintf(`{"error": "unauthorized", "message": "%s"}`, err.Error())))
 				return
 			}
-			zap.S().Debugf("User %s Authenticated\n", user.UserName())
+			zap.S().Infow("auth/token: authentication successful",
+				"email", email,
+				"username", user.UserName())
 			next.ServeHTTP(w, r)
 
 		} else {
@@ -130,26 +151,48 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		},
 	}).Decode(&dbEmailResp)
 	if err != nil {
+		zap.S().Errorw("ValidateUser: user not found",
+			"email", email,
+			"error", err)
 		return nil, fmt.Errorf("failed to validate user by email, %v", err)
 	}
 
 	expectedUsernameHash := sha256.Sum256([]byte(strings.ToLower(dbEmailResp.Details.Email)))
 	usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1
 
+	if !usernameMatch {
+		zap.S().Warnw("ValidateUser: username hash mismatch",
+			"email", email,
+			"dbEmail", dbEmailResp.Details.Email)
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
+	// Check if password field is empty
+	if dbEmailResp.Details.Password == "" {
+		zap.S().Errorw("ValidateUser: password field is empty",
+			"email", email,
+			"userID", dbEmailResp.ID)
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
 	err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp.Details.Password), []byte(password))
 	if err != nil {
-		return nil, fmt.Errorf("failed to compare password")
+		zap.S().Warnw("ValidateUser: password mismatch",
+			"email", email,
+			"userID", dbEmailResp.ID,
+			"error", err)
+		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	if usernameMatch {
-		// Check if the user is deactivated
-		if dbEmailResp.Details.IsDeactivated {
-			return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
-		}
-
-		return auth.NewDefaultUser(email, "1", nil, nil), nil
+	// Check if the user is deactivated
+	if dbEmailResp.Details.IsDeactivated {
+		zap.S().Warnw("ValidateUser: account is deactivated",
+			"email", email,
+			"userID", dbEmailResp.ID)
+		return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
 	}
-	return nil, fmt.Errorf("invalid credentials")
+
+	return auth.NewDefaultUser(email, "1", nil, nil), nil
 }
 
 // RevokeToken revokes a token
