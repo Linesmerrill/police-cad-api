@@ -1187,9 +1187,10 @@ type tempPasswordResponse struct {
 func (h Admin) AdminUserTempPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Extract user ID from URL path
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 6 {
+	// Extract user ID from URL path using mux.Vars
+	vars := mux.Vars(r)
+	userID, ok := vars["id"]
+	if !ok || userID == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 			Success: false,
@@ -1198,7 +1199,6 @@ func (h Admin) AdminUserTempPasswordHandler(w http.ResponseWriter, r *http.Reque
 		})
 		return
 	}
-	userID := pathParts[len(pathParts)-1]
 
 	// Validate ObjectID
 	objectID, err := primitive.ObjectIDFromHex(userID)

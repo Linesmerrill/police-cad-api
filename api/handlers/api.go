@@ -106,6 +106,7 @@ func (a *App) New() *mux.Router {
 
 	// Admin user management routes (specific before general)
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
+	apiCreate.Handle("/admin/users/{id}/temp-password", http.HandlerFunc(adminHandler.AdminUserTempPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")

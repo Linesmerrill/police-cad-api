@@ -130,26 +130,78 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		},
 	}).Decode(&dbEmailResp)
 	if err != nil {
+		zap.S().Errorw("ValidateUser: failed to find user",
+			"email", email,
+			"error", err)
 		return nil, fmt.Errorf("failed to validate user by email, %v", err)
+	}
+
+	// Log user found for debugging
+	zap.S().Debugw("ValidateUser: user found",
+		"email", email,
+		"userID", dbEmailResp.ID,
+		"hasEmail", dbEmailResp.Details.Email != "",
+		"hasPassword", dbEmailResp.Details.Password != "",
+		"passwordLength", len(dbEmailResp.Details.Password),
+		"isDeactivated", dbEmailResp.Details.IsDeactivated)
+
+	// Check if password field is empty or invalid
+	if dbEmailResp.Details.Password == "" {
+		zap.S().Errorw("ValidateUser: password field is empty",
+			"email", email,
+			"userID", dbEmailResp.ID)
+		return nil, fmt.Errorf("user password not set in database")
+	}
+
+	// Check if password is a valid bcrypt hash (starts with $2a$, $2b$, or $2y$)
+	passwordHash := dbEmailResp.Details.Password
+	if !strings.HasPrefix(passwordHash, "$2a$") && !strings.HasPrefix(passwordHash, "$2b$") && !strings.HasPrefix(passwordHash, "$2y$") {
+		prefixLen := 10
+		if len(passwordHash) < prefixLen {
+			prefixLen = len(passwordHash)
+		}
+		zap.S().Errorw("ValidateUser: password is not a valid bcrypt hash",
+			"email", email,
+			"userID", dbEmailResp.ID,
+			"passwordPrefix", passwordHash[:prefixLen])
+		return nil, fmt.Errorf("password stored in database is not a valid bcrypt hash")
+	}
+
+	// Check if the user is deactivated (check early but after we confirm user exists)
+	if dbEmailResp.Details.IsDeactivated {
+		zap.S().Warnw("ValidateUser: account is deactivated",
+			"email", email,
+			"userID", dbEmailResp.ID)
+		return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
 	}
 
 	expectedUsernameHash := sha256.Sum256([]byte(strings.ToLower(dbEmailResp.Details.Email)))
 	usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1
 
+	if !usernameMatch {
+		zap.S().Errorw("ValidateUser: username hash mismatch",
+			"email", email,
+			"dbEmail", dbEmailResp.Details.Email,
+			"emailLower", strings.ToLower(email),
+			"dbEmailLower", strings.ToLower(dbEmailResp.Details.Email))
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
 	err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp.Details.Password), []byte(password))
 	if err != nil {
-		return nil, fmt.Errorf("failed to compare password")
-	}
-
-	if usernameMatch {
-		// Check if the user is deactivated
-		if dbEmailResp.Details.IsDeactivated {
-			return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
+		prefixLen := 20
+		if len(dbEmailResp.Details.Password) < prefixLen {
+			prefixLen = len(dbEmailResp.Details.Password)
 		}
-
-		return auth.NewDefaultUser(email, "1", nil, nil), nil
+		zap.S().Errorw("ValidateUser: password comparison failed",
+			"email", email,
+			"userID", dbEmailResp.ID,
+			"passwordHashPrefix", dbEmailResp.Details.Password[:prefixLen],
+			"error", err)
+		return nil, fmt.Errorf("invalid password")
 	}
-	return nil, fmt.Errorf("invalid credentials")
+
+	return auth.NewDefaultUser(email, "1", nil, nil), nil
 }
 
 // RevokeToken revokes a token
