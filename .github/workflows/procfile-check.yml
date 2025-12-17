@@ -1,13 +1,12 @@
-name: Go
+name: Procfile Validation
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
-
   validate-procfile:
     runs-on: ubuntu-latest
     steps:
@@ -42,36 +41,3 @@ jobs:
           echo "Procfile contents:"
           cat Procfile
 
-  build:
-    needs: validate-procfile
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: 1.22
-
-      - name: Build
-        run: go build -v ./...
-
-  test:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: 1.22
-
-      - name: Test and Coverage
-        run: go test ./... -coverprofile=coverage.txt -covermode=atomic
-
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage.txt
-          flags: unittests

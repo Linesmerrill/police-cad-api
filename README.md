@@ -17,6 +17,15 @@ To view the routes, check our swagger [here](https://police-cad-api.herokuapp.co
 3. Attach the jwt header as an `Authorization: Bearer` token. See [How to attach an Auth Bearer Token](#how-to-attach-an-auth-bearer-token) for more details.
 4. MongoDB installed. See [download and install MongoDB](https://docs.mongodb.com/manual/installation/) to get started.
 
+## ⚠️ Critical: Heroku Deployment
+
+**IMPORTANT**: The `Procfile` is **REQUIRED** for Heroku deployment. Never delete or modify it without understanding the consequences. See [DEPLOYMENT.md](./DEPLOYMENT.md) for details.
+
+Before pushing to Heroku, always validate:
+```bash
+make check-procfile
+```
+
 ## Pre-requisites
 
 1. MongoDB installed and running on your local machine.

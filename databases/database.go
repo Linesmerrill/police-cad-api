@@ -2,6 +2,7 @@ package databases
 
 import (
 	"context"
+	"time"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -94,7 +95,16 @@ type mongoSession struct {
 
 // NewClient uses the values from the config and returns a mongo client
 func NewClient(conf *config.Config) (ClientHelper, error) {
-	c, err := mongo.NewClient(options.Client().ApplyURI(conf.URL))
+	// Configure connection pool for better performance
+	clientOptions := options.Client().ApplyURI(conf.URL).
+		SetMaxPoolSize(100).                    // Maximum number of connections in pool
+		SetMinPoolSize(10).                     // Minimum number of connections in pool
+		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s
+		SetServerSelectionTimeout(5 * time.Second). // Timeout for server selection
+		SetSocketTimeout(30 * time.Second).     // Timeout for socket operations
+		SetConnectTimeout(10 * time.Second)    // Timeout for initial connection
+
+	c, err := mongo.NewClient(clientOptions)
 
 	return &mongoClient{cl: c}, err
 }

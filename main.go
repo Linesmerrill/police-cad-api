@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -22,6 +23,15 @@ func main() {
 		return
 	}
 
+	// Configure HTTP server with timeouts to prevent resource exhaustion
+	server := &http.Server{
+		Addr:         ":" + a.Config.Port,
+		Handler:      handlers.CorsMiddleware(a.Router),
+		ReadTimeout:  30 * time.Second,  // Maximum time to read request
+		WriteTimeout: 30 * time.Second,  // Maximum time to write response
+		IdleTimeout:  120 * time.Second, // Maximum time to wait for next request
+	}
+
 	zap.S().Infow("police-cad-api is up and running", "url", a.Config.BaseURL, "port", a.Config.Port)
-	log.Fatal(http.ListenAndServe(":"+a.Config.Port, handlers.CorsMiddleware(a.Router)))
+	log.Fatal(server.ListenAndServe())
 }
