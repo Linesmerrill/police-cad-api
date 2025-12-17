@@ -116,6 +116,7 @@ func (a *App) New() *mux.Router {
 	// Admin management routes (specific before general)
 	apiCreate.Handle("/admin/admins/{id}/activity", http.HandlerFunc(adminHandler.AdminGetActivityHandler)).Methods("POST")
 	apiCreate.Handle("/admin/admins/{id}/roles", http.HandlerFunc(adminHandler.AdminChangeRolesHandler)).Methods("PUT")
+	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminUpdateLastLoginHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminGetAdminDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminDeleteAdminHandler)).Methods("DELETE")
 	apiCreate.Handle("/admin/admins", http.HandlerFunc(adminHandler.AdminGetAllAdminsHandler)).Methods("POST")

@@ -80,6 +80,11 @@ type ChangeRolesRequest struct {
 	Roles []string `json:"roles" validate:"required,min=1,dive,oneof=admin owner"`
 }
 
+// UpdateAdminLastLoginRequest represents a request to update admin's last login time
+type UpdateAdminLastLoginRequest struct {
+	LastLoginAt time.Time `json:"lastLoginAt"`
+}
+
 // ChangeRoleResponse represents the response when changing an admin's role
 type ChangeRoleResponse struct {
 	Success bool   `json:"success"`

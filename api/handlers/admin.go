@@ -1839,6 +1839,111 @@ func (h Admin) AdminGetAdminDetailsHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// AdminUpdateLastLoginHandler updates an admin's last login time
+func (h Admin) AdminUpdateLastLoginHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from URL path using mux.Vars
+	vars := mux.Vars(r)
+	adminID, ok := vars["id"]
+	if !ok || adminID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Parse request body
+	var req models.UpdateAdminLastLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request data",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Check if admin exists
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Admin not found",
+				Code:    "NOT_FOUND",
+			})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Failed to fetch admin",
+				Code:    "DATABASE_ERROR",
+			})
+		}
+		return
+	}
+
+	// Update lastLoginAt
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"lastLoginAt": req.LastLoginAt,
+		},
+	})
+	if err != nil {
+		log.Printf("Failed to update admin lastLoginAt: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to update admin last login",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Fetch updated admin
+	updatedAdmin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		// If fetch fails, return success with original admin data
+		admin.LastLoginAt = &req.LastLoginAt
+		updatedAdmin = admin
+	} else {
+		updatedAdmin.LastLoginAt = &req.LastLoginAt
+	}
+
+	// Ensure role field is populated for backward compatibility
+	if updatedAdmin.Role == "" && len(updatedAdmin.Roles) > 0 {
+		updatedAdmin.Role = updatedAdmin.Roles[0]
+	} else if updatedAdmin.Role != "" && len(updatedAdmin.Roles) == 0 {
+		updatedAdmin.Roles = []string{updatedAdmin.Role}
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Admin last login updated",
+		"admin":   updatedAdmin,
+	})
+}
+
 // AdminChangeRoleHandler changes an admin's role
 func (h Admin) AdminChangeRoleHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
