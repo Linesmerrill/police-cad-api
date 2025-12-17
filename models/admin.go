@@ -154,24 +154,27 @@ type AdminActionActivity struct {
 
 // AdminActivityStorage represents a single admin activity event for storage in database
 type AdminActivityStorage struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	AdminID   string            `bson:"adminId" json:"adminId"`
-	Type      string            `bson:"type" json:"type"`
-	Title     string            `bson:"title" json:"title"`
-	Details   string            `bson:"details" json:"details"`
-	Timestamp time.Time         `bson:"timestamp" json:"timestamp"`
-	IP        string            `bson:"ip" json:"ip"`
-	CreatedAt time.Time         `bson:"createdAt" json:"createdAt"`
+	ID             primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	AdminID        string            `bson:"adminId" json:"adminId"`
+	Type           string            `bson:"type" json:"type"`
+	Title          string            `bson:"title" json:"title"`
+	Details        string            `bson:"details" json:"details"`
+	Timestamp      time.Time         `bson:"timestamp" json:"timestamp"`
+	IP             string            `bson:"ip" json:"ip"`
+	CreatedAt      time.Time         `bson:"createdAt" json:"createdAt"`
+	SessionDuration string           `bson:"sessionDuration,omitempty" json:"sessionDuration,omitempty"` // For logout events
 }
 
 // AdminActivityLogRequest represents the request to log admin activity
 type AdminActivityLogRequest struct {
-	AdminID   string    `json:"adminId"`
-	Type      string    `json:"type"`
-	Title     string    `json:"title"`
-	Details   string    `json:"details"`
-	Timestamp time.Time `json:"timestamp"`
-	IP        string    `json:"ip"`
+	AdminID        string    `json:"adminId"`
+	Type           string    `json:"type"`
+	Title          string    `json:"title"`
+	Details        string    `json:"details"`
+	Timestamp      time.Time `json:"timestamp"`
+	IP             string    `json:"ip"`
+	SessionDuration string   `json:"sessionDuration,omitempty"` // Optional: session duration for logout events
+	CurrentUser    map[string]interface{} `json:"currentUser,omitempty"` // For permission checking
 }
 
 // AdminPasswordReset stores password reset tokens for admin accounts

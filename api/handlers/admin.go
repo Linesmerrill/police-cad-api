@@ -1159,9 +1159,13 @@ func (h Admin) AdminUserReactivateHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Track the action
-	if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
-		h.trackAdminAction(oid, "user_reactivated", userID, "user", fmt.Sprintf("User account reactivated: %s", user.Details.Email), r)
+	// Track the action - use account_reactivated type
+	// Extract admin ID from current user email
+	if req.CurrentUser.Email != "" {
+		admin, err := h.ADB.FindOne(r.Context(), bson.M{"email": req.CurrentUser.Email})
+		if err == nil {
+			h.trackAdminAction(admin.ID, "account_reactivated", userID, "user", fmt.Sprintf("Reactivated user account: %s", user.Details.Email), r)
+		}
 	}
 
 	// Return success response
@@ -2469,181 +2473,118 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 		startTime = now.AddDate(0, 0, -30) // fallback to 30 days
 	}
 
-	// Build activity data
-	activity := map[string]interface{}{
-		"totalLogins":            0,
-		"passwordResets":         0,
-		"passwordResetsInitiated": 0,
-		"avgSessionTime":         "0m",
-		"chartData":              []map[string]interface{}{},
-		"recentActivity":         []map[string]interface{}{},
-	}
-
-
-	
-	// Count total logins - use the admin activity database, not admin database
-	loginFilter := bson.M{
+	// Calculate LIFETIME TOTALS (not filtered by timeframe)
+	// Count total logins - LIFETIME TOTAL
+	loginCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
 		"adminId": objectID.Hex(),
 		"type":    "login",
-		"timestamp": bson.M{
-			"$gte": startTime,
-		},
-	}
-	log.Printf("Login count filter: %+v", loginFilter)
-	
-	loginCount, err := h.AADB.CountDocuments(r.Context(), loginFilter)
-	if err == nil {
-		activity["totalLogins"] = int(loginCount)
-		log.Printf("Found %d login activities for admin %s", loginCount, objectID.Hex())
-	} else {
+	})
+	if err != nil {
 		log.Printf("Failed to count logins: %v", err)
-		activity["totalLogins"] = 0
+		loginCount = 0
 	}
 
-	// Count password resets
+	// Count password resets - LIFETIME TOTAL
 	passwordResetCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
 		"adminId": objectID.Hex(),
 		"type":    "password_reset",
-		"timestamp": bson.M{
-			"$gte": startTime,
-		},
 	})
-	if err == nil {
-		activity["passwordResets"] = int(passwordResetCount)
-		log.Printf("Found %d password reset activities for admin %s (timeframe: %s)", passwordResetCount, objectID.Hex(), timeframe)
-	} else {
+	if err != nil {
 		log.Printf("Failed to count password resets: %v", err)
-		activity["passwordResets"] = 0
+		passwordResetCount = 0
 	}
 
-	// Count password resets initiated
-	passwordResetInitiatedCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
+	// Count accounts reactivated - LIFETIME TOTAL (replaces passwordResetsInitiated)
+	accountsReactivatedCount, err := h.AADB.CountDocuments(r.Context(), bson.M{
 		"adminId": objectID.Hex(),
-		"type":    "password_reset_initiated",
-		"timestamp": bson.M{
-			"$gte": startTime,
-		},
+		"type":    "account_reactivated",
 	})
-	if err == nil {
-		activity["passwordResetsInitiated"] = int(passwordResetInitiatedCount)
-	} else {
-		log.Printf("Failed to count password resets initiated: %v", err)
-		activity["passwordResetsInitiated"] = 0
+	if err != nil {
+		log.Printf("Failed to count accounts reactivated: %v", err)
+		accountsReactivatedCount = 0
 	}
 
-	// Calculate average session time from login/logout pairs
+	// Calculate average session time - can use timeframe or lifetime
+	// Using timeframe for now, but can be changed to lifetime
 	avgSessionTime, err := h.calculateAverageSessionTime(r.Context(), objectID, startTime)
-	if err == nil {
-		activity["avgSessionTime"] = avgSessionTime
-	} else {
-		activity["avgSessionTime"] = "0m"
+	if err != nil {
+		avgSessionTime = "0m"
 	}
 
-	// Generate chart data based on timeframe
-	chartData := []map[string]interface{}{}
+	// Build stats object (lifetime totals)
+	stats := map[string]interface{}{
+		"totalLogins":        int(loginCount),
+		"passwordResets":     int(passwordResetCount),
+		"accountsReactivated": int(accountsReactivatedCount),
+		"avgSessionTime":    avgSessionTime,
+	}
+
+	// Generate timeline data (filtered by timeframe) - format: {date, count}
+	timeline := []map[string]interface{}{}
 	
+	// Calculate number of days to show based on timeframe
+	var daysToShow int
 	switch timeframe {
 	case "1d":
-		// Hourly data for 1 day
-		for i := 23; i >= 0; i-- {
-			hour := now.Add(-time.Duration(i) * time.Hour)
-			dateStr := hour.Format("2006-01-02")
-			label := hour.Format("3:04 PM")
-			
-			// Count activities for this hour
-			hourStart := hour.Truncate(time.Hour)
-			hourEnd := hourStart.Add(time.Hour)
-			
-			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
-				"adminId": objectID.Hex(),
-				"timestamp": bson.M{
-					"$gte": hourStart,
-					"$lt":  hourEnd,
-				},
-			})
-			
-			chartData = append(chartData, map[string]interface{}{
-				"date":  dateStr,
-				"value": int(count),
-				"label": label,
-			})
-		}
+		daysToShow = 1
 	case "7d":
-		// Daily data for 7 days
-		for i := 6; i >= 0; i-- {
-			date := now.AddDate(0, 0, -i)
-			dateStr := date.Format("2006-01-02")
-			label := date.Format("Jan 02")
-			
-			// Count activities for this day
-			dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-			dayEnd := dayStart.AddDate(0, 0, 1)
-			
-			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
-				"adminId": objectID.Hex(),
-				"timestamp": bson.M{
-					"$gte": dayStart,
-					"$lt":  dayEnd,
-				},
-			})
-			
-			chartData = append(chartData, map[string]interface{}{
-				"date":  dateStr,
-				"value": int(count),
-				"label": label,
-			})
-		}
+		daysToShow = 7
 	case "30d":
-		// Daily data for 30 days
-		for i := 29; i >= 0; i-- {
-			date := now.AddDate(0, 0, -i)
-			dateStr := date.Format("2006-01-02")
-			label := date.Format("Jan 02")
-			
-			// Count activities for this day
-			dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-			dayEnd := dayStart.AddDate(0, 0, 1)
-			
-			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
-				"adminId": objectID.Hex(),
-				"timestamp": bson.M{
-					"$gte": dayStart,
-					"$lt":  dayEnd,
-				},
-			})
-			
-			chartData = append(chartData, map[string]interface{}{
-				"date":  dateStr,
-				"value": int(count),
-				"label": label,
-			})
+		daysToShow = 30
+	case "1m":
+		daysToShow = 30
+	case "3m":
+		daysToShow = 90
+	case "6m":
+		daysToShow = 180
+	case "1y":
+		daysToShow = 365
+	case "all":
+		// For "all", show daily data from admin creation date
+		// Use admin.CreatedAt if available, otherwise use a default date
+		adminCreatedAt := admin.CreatedAt
+		if adminCreatedAt.IsZero() {
+			// If CreatedAt is not set, use a default date (1 year ago)
+			adminCreatedAt = now.AddDate(-1, 0, 0)
+		}
+		daysToShow = int(now.Sub(adminCreatedAt).Hours() / 24)
+		if daysToShow > 365 {
+			daysToShow = 365 // Cap at 1 year for performance
+		}
+		if daysToShow < 1 {
+			daysToShow = 1 // Ensure at least 1 day
 		}
 	default:
-		// For other timeframes, show weekly data
-		for i := 3; i >= 0; i-- {
-			weekStart := now.AddDate(0, 0, -7*i)
-			weekEnd := weekStart.AddDate(0, 0, 7)
-			dateStr := weekStart.Format("2006-01-02")
-			label := fmt.Sprintf("Week of %s", weekStart.Format("Jan 02"))
-			
-			count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
-				"adminId": objectID.Hex(),
-				"timestamp": bson.M{
-					"$gte": weekStart,
-					"$lt":  weekEnd,
-				},
-			})
-			
-			chartData = append(chartData, map[string]interface{}{
-				"date":  dateStr,
-				"value": int(count),
-				"label": label,
-			})
-		}
+		daysToShow = 30
 	}
 	
-	// Store chart data in activity map
-	activity["chartData"] = chartData
+	// Generate timeline entries for each day in the timeframe
+	for i := daysToShow - 1; i >= 0; i-- {
+		date := now.AddDate(0, 0, -i)
+		dateStr := date.Format("2006-01-02")
+		
+		// Count activities for this day (filtered by timeframe)
+		dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+		dayEnd := dayStart.AddDate(0, 0, 1)
+		
+		// Only count if within the requested timeframe
+		if dayStart.Before(startTime) {
+			continue
+		}
+		
+		count, _ := h.AADB.CountDocuments(r.Context(), bson.M{
+			"adminId": objectID.Hex(),
+			"timestamp": bson.M{
+				"$gte": dayStart,
+				"$lt":  dayEnd,
+			},
+		})
+		
+		timeline = append(timeline, map[string]interface{}{
+			"date":  dateStr,
+			"count": int(count),
+		})
+	}
 
 	// Get recent activity with pagination
 	recentFilter := bson.M{
@@ -2656,47 +2597,60 @@ func (h Admin) AdminGetActivityHandler(w http.ResponseWriter, r *http.Request) {
 	// Get total count for pagination metadata
 	totalCount, _ := h.AADB.CountDocuments(r.Context(), recentFilter)
 
-	// Get recent activities from admin activity database with pagination
+	// Get recent activities from admin activity database with pagination (filtered by timeframe)
 	recentCursor, err := h.AADB.Find(r.Context(), recentFilter, &options.FindOptions{
 		Sort:  bson.M{"timestamp": -1}, // Sort by timestamp descending (newest first)
 		Skip:  &skip,
 		Limit: &limit64,
 	})
+	
+	recentActivity := []map[string]interface{}{}
 	if err == nil {
 		defer recentCursor.Close(r.Context())
 		
 		var recentActivities []models.AdminActivityStorage
 		if err = recentCursor.All(r.Context(), &recentActivities); err == nil {
 			for _, activityItem := range recentActivities {
-				recentActivity := activity["recentActivity"].([]map[string]interface{})
-				recentActivity = append(recentActivity, map[string]interface{}{
+				activityEntry := map[string]interface{}{
+					"id":        activityItem.ID.Hex(),
 					"type":      activityItem.Type,
 					"title":     activityItem.Title,
 					"details":   activityItem.Details,
 					"timestamp": activityItem.Timestamp,
-				})
-				activity["recentActivity"] = recentActivity
+					"ip":        activityItem.IP,
+				}
+				
+				// Add sessionDuration if present (for logout events)
+				if activityItem.SessionDuration != "" {
+					activityEntry["sessionDuration"] = activityItem.SessionDuration
+				}
+				
+				recentActivity = append(recentActivity, activityEntry)
 			}
 		}
 	}
 
-	// Add pagination metadata to the response
-	activity["pagination"] = map[string]interface{}{
-		"currentPage": page,
-		"limit":       limit,
-		"totalRecords": totalCount,
-		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
-		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)),
-		"hasPrevPage": page > 1,
+	// Calculate pagination metadata
+	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
+	if totalPages == 0 {
+		totalPages = 1
 	}
 
-
-
-	// Return activity data
+	// Build response matching the spec
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":  true,
-		"activity": activity,
+		"success": true,
+		"activity": map[string]interface{}{
+			"stats": stats,
+			"timeline": timeline,
+			"recentActivity": recentActivity,
+			"pagination": map[string]interface{}{
+				"currentPage":  page,
+				"totalPages":   totalPages,
+				"totalRecords": totalCount,
+				"limit":        limit,
+			},
+		},
 	})
 }
 
@@ -2729,7 +2683,7 @@ func (h Admin) trackAdminLogin(adminID primitive.ObjectID, r *http.Request) {
 	}
 }
 
-// trackAdminLogout tracks when an admin logs out
+// trackAdminLogout tracks when an admin logs out and calculates session duration
 func (h Admin) trackAdminLogout(adminID primitive.ObjectID, r *http.Request) {
 	// Get client IP
 	ip := r.Header.Get("X-Forwarded-For")
@@ -2740,19 +2694,64 @@ func (h Admin) trackAdminLogout(adminID primitive.ObjectID, r *http.Request) {
 		ip = r.RemoteAddr
 	}
 
-	// Create logout activity record
+	logoutTime := time.Now()
+	sessionDuration := ""
+
+	// Find the most recent login event for this admin
+	loginFilter := bson.M{
+		"adminId": adminID.Hex(),
+		"type":    "login",
+	}
+	
+	limitOne := int64(1)
+	loginCursor, err := h.AADB.Find(r.Context(), loginFilter, &options.FindOptions{
+		Sort:  bson.M{"timestamp": -1}, // Most recent first
+		Limit: &limitOne,
+	})
+	
+	if err == nil {
+		defer loginCursor.Close(r.Context())
+		
+		var loginEvents []models.AdminActivityStorage
+		if err = loginCursor.All(r.Context(), &loginEvents); err == nil && len(loginEvents) > 0 {
+			// Calculate session duration from most recent login
+			loginTime := loginEvents[0].Timestamp
+			duration := logoutTime.Sub(loginTime)
+			
+			// Format duration as "Xh Ym", "Ym", or "Xs"
+			seconds := int(duration.Seconds())
+			minutes := seconds / 60
+			hours := minutes / 60
+			
+			if hours > 0 {
+				remainingMinutes := minutes % 60
+				if remainingMinutes > 0 {
+					sessionDuration = fmt.Sprintf("%dh %dm", hours, remainingMinutes)
+				} else {
+					sessionDuration = fmt.Sprintf("%dh", hours)
+				}
+			} else if minutes > 0 {
+				sessionDuration = fmt.Sprintf("%dm", minutes)
+			} else {
+				sessionDuration = fmt.Sprintf("%ds", seconds)
+			}
+		}
+	}
+
+	// Create logout activity record with session duration
 	logoutActivity := models.AdminActivityStorage{
-		AdminID:   adminID.Hex(),
-		Type:      "logout",
-		Title:     "Admin logged out",
-		Details:   fmt.Sprintf("IP: %s", ip),
-		Timestamp: time.Now(),
-		IP:        ip,
-		CreatedAt: time.Now(),
+		AdminID:        adminID.Hex(),
+		Type:           "logout",
+		Title:          "Admin logged out",
+		Details:        fmt.Sprintf("IP: %s", ip),
+		Timestamp:      logoutTime,
+		IP:             ip,
+		CreatedAt:      time.Now(),
+		SessionDuration: sessionDuration,
 	}
 
 	// Insert the activity record
-	_, err := h.AADB.InsertOne(r.Context(), logoutActivity)
+	_, err = h.AADB.InsertOne(r.Context(), logoutActivity)
 	if err != nil {
 		log.Printf("Failed to track admin logout: %v", err)
 	}
@@ -2940,7 +2939,9 @@ func getActionTitle(actionType string) string {
 	case "logout":
 		return "Admin logged out"
 	case "password_reset":
-		return "Password reset requested"
+		return "Password reset completed"
+	case "account_reactivated":
+		return "User account reactivated"
 	case "user_reset_initiated":
 		return "User password reset initiated"
 	case "temp_password_created":
@@ -2983,19 +2984,44 @@ func (h Admin) AdminActivityLogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check permissions if currentUser is provided
+	if req.CurrentUser != nil {
+		if err := checkAdminPermissions(req.CurrentUser); err != nil {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Insufficient permissions",
+				Code:    "INSUFFICIENT_PERMISSIONS",
+			})
+			return
+		}
+	}
+
+	// Get client IP if not provided
+	if req.IP == "" {
+		req.IP = r.Header.Get("X-Forwarded-For")
+		if req.IP == "" {
+			req.IP = r.Header.Get("X-Real-IP")
+		}
+		if req.IP == "" {
+			req.IP = r.RemoteAddr
+		}
+	}
+
 	// Create activity record
 	activity := models.AdminActivityStorage{
-		AdminID:   req.AdminID,
-		Type:      req.Type,
-		Title:     req.Title,
-		Details:   req.Details,
-		Timestamp: req.Timestamp,
-		IP:        req.IP,
-		CreatedAt: time.Now(),
+		AdminID:        req.AdminID,
+		Type:           req.Type,
+		Title:          req.Title,
+		Details:        req.Details,
+		Timestamp:      req.Timestamp,
+		IP:             req.IP,
+		CreatedAt:      time.Now(),
+		SessionDuration: req.SessionDuration,
 	}
 
 	// Insert into database
-	_, err := h.AADB.InsertOne(r.Context(), activity)
+	result, err := h.AADB.InsertOne(r.Context(), activity)
 	if err != nil {
 		log.Printf("Error logging admin activity: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -3007,11 +3033,21 @@ func (h Admin) AdminActivityLogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return success
+	// Get the inserted ID
+	insertedID := result.Decode()
+	var activityIDStr string
+	if oid, ok := insertedID.(primitive.ObjectID); ok {
+		activityIDStr = oid.Hex()
+	} else if str, ok := insertedID.(string); ok {
+		activityIDStr = str
+	}
+
+	// Return success with activity ID
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Activity logged successfully",
+		"success":    true,
+		"message":    "Activity logged successfully",
+		"activityId": activityIDStr,
 	})
 }
 
