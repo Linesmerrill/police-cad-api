@@ -653,6 +653,20 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Validate and fix civilianCreationLimit if it's empty
+	if val, exists := req["civilianCreationLimit"]; exists {
+		// Check if it's nil first (to avoid panic on type assertion)
+		if val == nil {
+			// If nil, default to 1
+			req["civilianCreationLimit"] = 1
+			zap.S().Debugf("civilianCreationLimit was nil, defaulting to 1")
+		} else if strVal, ok := val.(string); ok && strVal == "" {
+			// Check if it's an empty string
+			req["civilianCreationLimit"] = 1
+			zap.S().Debugf("civilianCreationLimit was empty string, defaulting to 1")
+		}
+	}
+
 	// Prefix the keys with "community." to update nested fields
 	update := bson.M{}
 	for key, value := range req {
