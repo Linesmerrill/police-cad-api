@@ -41,12 +41,12 @@ var (
 
 // Community struct mostly used for mocking tests
 type Community struct {
-	DB      databases.CommunityDatabase
-	UDB     databases.UserDatabase
-	ADB     databases.ArchivedCommunityDatabase
-	IDB     databases.InviteCodeDatabase
-	UPDB    databases.UserPreferencesDatabase
-	CDB     databases.CivilianDatabase
+	DB       databases.CommunityDatabase
+	UDB      databases.UserDatabase
+	ADB      databases.ArchivedCommunityDatabase
+	IDB      databases.InviteCodeDatabase
+	UPDB     databases.UserPreferencesDatabase
+	CDB      databases.CivilianDatabase
 	DBHelper databases.DatabaseHelper
 }
 
@@ -653,17 +653,20 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Validate and fix civilianCreationLimit if it's empty
-	if val, exists := req["civilianCreationLimit"]; exists {
-		// Check if it's nil first (to avoid panic on type assertion)
-		if val == nil {
-			// If nil, default to 1
-			req["civilianCreationLimit"] = 1
-			zap.S().Debugf("civilianCreationLimit was nil, defaulting to 1")
-		} else if strVal, ok := val.(string); ok && strVal == "" {
-			// Check if it's an empty string
-			req["civilianCreationLimit"] = 1
-			zap.S().Debugf("civilianCreationLimit was empty string, defaulting to 1")
+	// Validate and fix creation limit fields if they're empty (should only be int values)
+	creationLimitFields := []string{"civilianCreationLimit", "vehicleCreationLimit", "firearmCreationLimit"}
+	for _, field := range creationLimitFields {
+		if val, exists := req[field]; exists {
+			// Check if it's nil first (to avoid panic on type assertion)
+			if val == nil {
+				// If nil, default to 1
+				req[field] = 1
+				zap.S().Debugf("%s was nil, defaulting to 1", field)
+			} else if strVal, ok := val.(string); ok && strVal == "" {
+				// Check if it's an empty string
+				req[field] = 1
+				zap.S().Debugf("%s was empty string, defaulting to 1", field)
+			}
 		}
 	}
 
@@ -4056,19 +4059,19 @@ func (c *Community) FetchCommunityMembersExcludeRoleHandlerV2(w http.ResponseWri
 	hasNextPage := page < totalPages
 	hasPrevPage := page > 1
 
-	        response := map[string]interface{}{
-                "members": filteredUsers,
-                "pagination": map[string]interface{}{
-                        "currentPage": page,
-                        "totalPages":  totalPages,
-                        "totalCount":  totalCount,
-                        "hasNextPage": hasNextPage,
-                        "hasPrevPage": hasPrevPage,
-                },
-        }
+	response := map[string]interface{}{
+		"members": filteredUsers,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalCount,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+		},
+	}
 
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(response)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // UpdateDepartmentComponentsHandler updates the components of a department with pagination
@@ -4279,15 +4282,15 @@ func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *ht
 
 		// Build the populated invite code
 		populatedInviteCode := map[string]interface{}{
-			"_id":            inviteCode.ID,
-			"code":           inviteCode.Code,
-			"communityId":    inviteCode.CommunityID,
-			"expiresAt":      inviteCode.ExpiresAt,
-			"maxUses":        inviteCode.MaxUses,
-			"remainingUses":  inviteCode.RemainingUses,
-			"createdBy":      inviteCode.CreatedBy,
-			"createdByUser":  createdByUser,
-			"createdAt":      inviteCode.CreatedAt,
+			"_id":           inviteCode.ID,
+			"code":          inviteCode.Code,
+			"communityId":   inviteCode.CommunityID,
+			"expiresAt":     inviteCode.ExpiresAt,
+			"maxUses":       inviteCode.MaxUses,
+			"remainingUses": inviteCode.RemainingUses,
+			"createdBy":     inviteCode.CreatedBy,
+			"createdByUser": createdByUser,
+			"createdAt":     inviteCode.CreatedAt,
 		}
 
 		populatedInviteCodes = append(populatedInviteCodes, populatedInviteCode)
@@ -4302,12 +4305,12 @@ func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *ht
 	response := map[string]interface{}{
 		"inviteCodes": populatedInviteCodes,
 		"pagination": map[string]interface{}{
-			"currentPage":  page,
-			"totalPages":   totalPages,
-			"totalCount":   totalInviteCodes,
-			"hasNextPage":  hasNextPage,
-			"hasPrevPage":  hasPrevPage,
-			"limit":        limit,
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalInviteCodes,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+			"limit":       limit,
 		},
 	}
 
@@ -4438,12 +4441,12 @@ func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http
 	response := map[string]interface{}{
 		"civilians": populatedCivilians,
 		"pagination": map[string]interface{}{
-			"currentPage":  page,
-			"totalPages":   totalPages,
-			"totalCount":   totalCivilians,
-			"hasNextPage":  hasNextPage,
-			"hasPrevPage":  hasPrevPage,
-			"limit":        limit,
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalCivilians,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+			"limit":       limit,
 		},
 	}
 
@@ -4569,21 +4572,21 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	response := map[string]interface{}{
 		"members": populatedMembers,
 		"pagination": map[string]interface{}{
-			"currentPage":  page,
-			"totalPages":   totalPages,
-			"totalCount":   totalCount,
-			"hasNextPage":  page < totalPages,
-			"hasPrevPage":  page > 1,
-			"limit":        limit,
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalCount,
+			"hasNextPage": page < totalPages,
+			"hasPrevPage": page > 1,
+			"limit":       limit,
 		},
 		"query": query,
 	}
 
-        w.Header().Set("Content-Type", "application/json")
-        if err := json.NewEncoder(w).Encode(response); err != nil {
-                config.ErrorStatus("failed to encode response", http.StatusInternalServerError, w, err)                                                         
-                return
-        }
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		config.ErrorStatus("failed to encode response", http.StatusInternalServerError, w, err)
+		return
+	}
 }
 
 // CreatePanicAlertHandler creates a new panic alert for a user in a community
@@ -4600,9 +4603,9 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 
 	// Parse request body
 	var request struct {
-		UserID        string `json:"userId"`
-		Username      string `json:"username"`
-		CallSign      string `json:"callSign"`
+		UserID         string `json:"userId"`
+		Username       string `json:"username"`
+		CallSign       string `json:"callSign"`
 		DepartmentType string `json:"departmentType"`
 	}
 
@@ -4622,16 +4625,16 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 
 	// Create panic alert
 	panicAlert := models.PanicAlert{
-		AlertID:       alertID,
-		UserID:        request.UserID,
-		Username:      request.Username,
-		CallSign:      request.CallSign,
+		AlertID:        alertID,
+		UserID:         request.UserID,
+		Username:       request.Username,
+		CallSign:       request.CallSign,
 		DepartmentType: request.DepartmentType,
-		CommunityID:   communityID,
-		TriggeredAt:   primitive.NewDateTimeFromTime(time.Now()),
-		Status:        "active",
-		ClearedBy:     nil,
-		ClearedAt:     nil,
+		CommunityID:    communityID,
+		TriggeredAt:    primitive.NewDateTimeFromTime(time.Now()),
+		Status:         "active",
+		ClearedBy:      nil,
+		ClearedAt:      nil,
 	}
 
 	// Add panic alert to community
@@ -4653,30 +4656,30 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 
 	// Broadcast panic alert created event to all connected users
 	panicData := map[string]interface{}{
-		"alertId":     alertID,
-		"userId":      request.UserID,
-		"username":    request.Username,
-		"callSign":    request.CallSign,
+		"alertId":        alertID,
+		"userId":         request.UserID,
+		"username":       request.Username,
+		"callSign":       request.CallSign,
 		"departmentType": request.DepartmentType,
-		"communityId": communityID,
-		"triggeredAt": panicAlert.TriggeredAt,
-		"action":      "created",
+		"communityId":    communityID,
+		"triggeredAt":    panicAlert.TriggeredAt,
+		"action":         "created",
 	}
-	
+
 	zap.S().Infof("PANIC ALERT CREATED - About to broadcast socket events for alertId: %s, userId: %s", alertID, request.UserID)
 	broadcastPanicAlertEvent("panic_alert_created", panicData)
-	
+
 	// Also emit a generic alert event in case frontend is listening for that
 	broadcastPanicAlertEvent("alert", map[string]interface{}{
-		"type":        "panic",
-		"action":      "created",
-		"alertId":     alertID,
-		"userId":      request.UserID,
-		"username":    request.Username,
-		"callSign":    request.CallSign,
+		"type":           "panic",
+		"action":         "created",
+		"alertId":        alertID,
+		"userId":         request.UserID,
+		"username":       request.Username,
+		"callSign":       request.CallSign,
 		"departmentType": request.DepartmentType,
-		"communityId": communityID,
-		"triggeredAt": panicAlert.TriggeredAt,
+		"communityId":    communityID,
+		"triggeredAt":    panicAlert.TriggeredAt,
 	})
 	zap.S().Infof("PANIC ALERT CREATED - Socket events broadcast completed for alertId: %s", alertID)
 
@@ -4768,7 +4771,7 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 		config.ErrorStatus("failed to find panic alert", http.StatusNotFound, w, err)
 		return
 	}
-	
+
 	// Find the alert and get its userId
 	for _, alert := range community.Details.ActivePanicAlerts {
 		if alert.AlertID == alertID {
@@ -4782,8 +4785,8 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 		"$set": bson.M{
 			"community.activePanicAlerts.$.status":    "cleared",
 			"community.activePanicAlerts.$.clearedBy": request.ClearedBy,
-			"community.activePanicAlerts.$.clearedAt":  primitive.NewDateTimeFromTime(time.Now()),
-			"community.updatedAt":                       primitive.NewDateTimeFromTime(time.Now()),
+			"community.activePanicAlerts.$.clearedAt": primitive.NewDateTimeFromTime(time.Now()),
+			"community.updatedAt":                     primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 
@@ -4800,10 +4803,10 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 		"clearedBy":   request.ClearedBy,
 		"action":      "cleared",
 	}
-	
+
 	zap.S().Infof("PANIC ALERT CLEARED - About to broadcast socket events for alertId: %s, userId: %s", alertID, alertUserId)
 	broadcastPanicAlertEvent("panic_button_cleared", clearData)
-	
+
 	// Also emit a generic alert event in case frontend is listening for that
 	broadcastPanicAlertEvent("alert", map[string]interface{}{
 		"type":        "panic",
@@ -4874,7 +4877,7 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 	update := bson.M{
 		"$set": bson.M{
 			"community.activePanicAlerts": community.Details.ActivePanicAlerts,
-			"community.updatedAt":           primitive.NewDateTimeFromTime(time.Now()),
+			"community.updatedAt":         primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 
@@ -4891,10 +4894,10 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 		"clearedBy":   request.ClearedBy,
 		"action":      "cleared",
 	}
-	
+
 	zap.S().Infof("USER PANIC ALERTS CLEARED - About to broadcast socket events for userId: %s", userID)
 	broadcastPanicAlertEvent("panic_button_cleared", clearData)
-	
+
 	// Also emit a generic alert event in case frontend is listening for that
 	broadcastPanicAlertEvent("alert", map[string]interface{}{
 		"type":        "panic",
@@ -4929,30 +4932,30 @@ func (c Community) TestPanicSocketHandler(w http.ResponseWriter, r *http.Request
 
 	// Test socket emission
 	testData := map[string]interface{}{
-		"alertId":     "test-alert-123",
-		"userId":      "test-user-456",
-		"username":    "TestUser",
-		"callSign":    "TEST01",
+		"alertId":        "test-alert-123",
+		"userId":         "test-user-456",
+		"username":       "TestUser",
+		"callSign":       "TEST01",
 		"departmentType": "police",
-		"communityId": communityID,
-		"action":      "test",
+		"communityId":    communityID,
+		"action":         "test",
 	}
 
 	zap.S().Infof("TEST PANIC SOCKET - Broadcasting test socket events for community: %s", communityID)
-	
+
 	// Emit test events
 	broadcastPanicAlertEvent("panic_alert_created", testData)
 	broadcastPanicAlertEvent("alert", map[string]interface{}{
-		"type":        "panic",
-		"action":      "test",
-		"alertId":     "test-alert-123",
-		"userId":      "test-user-456",
-		"username":    "TestUser",
-		"callSign":    "TEST01",
+		"type":           "panic",
+		"action":         "test",
+		"alertId":        "test-alert-123",
+		"userId":         "test-user-456",
+		"username":       "TestUser",
+		"callSign":       "TEST01",
 		"departmentType": "police",
-		"communityId": communityID,
+		"communityId":    communityID,
 	})
-	
+
 	zap.S().Infof("TEST PANIC SOCKET - Test socket events broadcast completed for community: %s", communityID)
 
 	// Response
@@ -4989,14 +4992,14 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	if len(missingParams) > 0 {
-		errorMessage := fmt.Sprintf("Missing required query parameters: %s. Required parameters: timeframe (weekly|monthly|allTime), statType (members|activity|growth)", 
+		errorMessage := fmt.Sprintf("Missing required query parameters: %s. Required parameters: timeframe (weekly|monthly|allTime), statType (members|activity|growth)",
 			strings.Join(missingParams, ", "))
-		
+
 		errorResponse := map[string]interface{}{
 			"success": false,
 			"error": map[string]interface{}{
-				"message":   errorMessage,
-				"code":      "MISSING_REQUIRED_PARAMETERS",
+				"message": errorMessage,
+				"code":    "MISSING_REQUIRED_PARAMETERS",
 				"required": map[string]interface{}{
 					"timeframe": "weekly | monthly | allTime",
 					"statType":  "members | activity | growth",
@@ -5048,7 +5051,7 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-    // NOTE: optimized members leaderboard moved after pagination/ctx initialization
+	// NOTE: optimized members leaderboard moved after pagination/ctx initialization
 
 	// Parse pagination parameters
 	page, err := strconv.Atoi(r.URL.Query().Get("page"))
@@ -5125,11 +5128,11 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 		pipeline := mongo.Pipeline{
 			bson.D{{Key: "$match", Value: match}},
 			bson.D{{Key: "$project", Value: bson.M{
-				"_id":           1,
-				"name":          "$community.name",
-				"imageLink":     "$community.imageLink",
-				"membersCount":  "$community.membersCount",
-				"plan":          "$community.subscription.plan",
+				"_id":          1,
+				"name":         "$community.name",
+				"imageLink":    "$community.imageLink",
+				"membersCount": "$community.membersCount",
+				"plan":         "$community.subscription.plan",
 			}}},
 			bson.D{{Key: "$sort", Value: bson.M{"membersCount": -1}}},
 			bson.D{{Key: "$skip", Value: int64(page * limit)}},
@@ -5162,15 +5165,25 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 		responseData := make([]map[string]interface{}, 0, len(docs))
 		for _, d := range docs {
 			item := map[string]interface{}{
-				"_id":              d.ID.Hex(),
-				"name":             d.Name,
-				"imageLink":        func() interface{} { if d.ImageLink == "" { return nil }; return d.ImageLink }(),
+				"_id":  d.ID.Hex(),
+				"name": d.Name,
+				"imageLink": func() interface{} {
+					if d.ImageLink == "" {
+						return nil
+					}
+					return d.ImageLink
+				}(),
 				"membersCount":     d.MembersCount,
 				"onlineCount":      0,
 				"activityScore":    0,
 				"growthPercentage": 0.0,
 				"subscription": map[string]interface{}{
-					"plan": func() interface{} { if d.Plan == "" { return nil }; return d.Plan }(),
+					"plan": func() interface{} {
+						if d.Plan == "" {
+							return nil
+						}
+						return d.Plan
+					}(),
 				},
 			}
 			responseData = append(responseData, item)
@@ -5244,11 +5257,11 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 
 	// Calculate stats for each community
 	type CommunityStats struct {
-		Community      models.Community
-		MembersCount   int
-		OnlineCount    int
-		ActivityScore  float64
-		GrowthPercent  float64
+		Community     models.Community
+		MembersCount  int
+		OnlineCount   int
+		ActivityScore float64
+		GrowthPercent float64
 	}
 
 	var statsList []CommunityStats
@@ -5400,12 +5413,12 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 	for _, stats := range paginatedStats {
 		comm := stats.Community
 		item := map[string]interface{}{
-			"_id":           comm.ID.Hex(),
-			"name":          comm.Details.Name,
-			"imageLink":     comm.Details.ImageLink,
-			"membersCount":  stats.MembersCount,
-			"onlineCount":   stats.OnlineCount,
-			"activityScore": stats.ActivityScore,
+			"_id":              comm.ID.Hex(),
+			"name":             comm.Details.Name,
+			"imageLink":        comm.Details.ImageLink,
+			"membersCount":     stats.MembersCount,
+			"onlineCount":      stats.OnlineCount,
+			"activityScore":    stats.ActivityScore,
 			"growthPercentage": stats.GrowthPercent,
 			"subscription": map[string]interface{}{
 				"plan": comm.Details.Subscription.Plan,
