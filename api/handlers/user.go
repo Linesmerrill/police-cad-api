@@ -3602,6 +3602,19 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// If no communities match the filter, return empty response
+	if len(filteredCommunities) == 0 {
+		response := map[string]interface{}{
+			"data":       []interface{}{},
+			"page":       page,
+			"limit":      limit,
+			"totalCount": 0,
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
 	// Build Mongo filter and fetch communities
 	communityFilter := bson.M{"_id": bson.M{"$in": filteredCommunities}}
 	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
