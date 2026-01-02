@@ -6,6 +6,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 
 	"github.com/linesmerrill/police-cad-api/config"
 )
@@ -116,10 +117,11 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 		SetConnectTimeout(30 * time.Second).    // Increased timeout for initial connection (was 10s, now 30s)
 		SetRetryWrites(true).                   // Enable retry writes for transient failures
 		SetRetryReads(true).                    // Enable retry reads for transient failures
-		SetHeartbeatInterval(10 * time.Second)  // Check server status every 10 seconds
-		// Note: The Go driver discovers all replica set members and tries to authenticate with each
-		// If one member has auth issues, it may cause connection problems even if others work
-		// The driver should still function by connecting to healthy members, but will log warnings
+		SetHeartbeatInterval(10 * time.Second). // Check server status every 10 seconds
+		SetReadPreference(readpref.Primary())   // Prefer connecting to PRIMARY, only use secondaries if primary unavailable
+		// Note: The Go driver must discover all replica set members to build the topology
+		// It will try to authenticate with all members, but will prefer PRIMARY for operations
+		// If a member is in ROLLBACK or has auth issues, the driver will skip it and use healthy members
 
 	c, err := mongo.NewClient(clientOptions)
 
