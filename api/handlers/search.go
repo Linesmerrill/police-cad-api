@@ -6,8 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"context"
-
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -83,17 +82,21 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 			{"_id": bson.M{"$ne": currentUserObjectID}},
 		},
 	}
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	userOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	cursor, err := s.UserDB.Find(context.Background(), userFilter, userOptions)
+	cursor, err := s.UserDB.Find(ctx, userFilter, userOptions)
 	if err != nil {
 		config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var users []models.User
-	if err = cursor.All(context.Background(), &users); err != nil {
+	if err = cursor.All(ctx, &users); err != nil {
 		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -111,15 +114,15 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	communityCursor, err := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
+	communityCursor, err := s.CommDB.Find(ctx, communityFilter, communityOptions)
 	if err != nil {
 		config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer communityCursor.Close(context.Background())
+	defer communityCursor.Close(ctx)
 
 	var communities []models.Community
-	if err = communityCursor.All(context.Background(), &communities); err != nil {
+	if err = communityCursor.All(ctx, &communities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -167,6 +170,10 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 
 	skip := (page - 1) * limit
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Search for communities with visibility set to "public"
 	communityFilter := bson.M{
 		"$and": []bson.M{
@@ -175,21 +182,21 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	communityCursor, err := s.CommDB.Find(context.Background(), communityFilter, communityOptions)
+	communityCursor, err := s.CommDB.Find(ctx, communityFilter, communityOptions)
 	if err != nil {
 		config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer communityCursor.Close(context.Background())
+	defer communityCursor.Close(ctx)
 
 	var communities []models.Community
-	if err = communityCursor.All(context.Background(), &communities); err != nil {
+	if err = communityCursor.All(ctx, &communities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Get the total count of matching documents
-	totalCount, err := s.CommDB.CountDocuments(context.Background(), communityFilter)
+	totalCount, err := s.CommDB.CountDocuments(ctx, communityFilter)
 	if err != nil {
 		config.ErrorStatus("failed to count communities", http.StatusInternalServerError, w, err)
 		return
