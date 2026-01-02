@@ -92,8 +92,12 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 
 	email = strings.ToLower(email)
 
+	// Use request context with timeout for database query
+	ctx, cancel := WithQueryTimeout(r.Context())
+	defer cancel()
+
 	user := models.User{}
-	err := m.DB.FindOne(context.Background(), bson.M{
+	err := m.DB.FindOne(ctx, bson.M{
 		"$expr": bson.M{
 			"$eq": []interface{}{
 				bson.M{"$toLower": "$user.email"},
@@ -142,8 +146,12 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 
 	email = strings.ToLower(email)
 
+	// Use context with timeout for database query (preserves request trace if available)
+	queryCtx, cancel := WithQueryTimeout(ctx)
+	defer cancel()
+
 	dbEmailResp := models.User{}
-	err := m.DB.FindOne(context.Background(), bson.M{
+	err := m.DB.FindOne(queryCtx, bson.M{
 		"$expr": bson.M{
 			"$eq": []interface{}{
 				bson.M{"$toLower": "$user.email"},
