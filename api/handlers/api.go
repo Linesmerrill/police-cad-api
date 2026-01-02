@@ -481,7 +481,7 @@ func (a *App) Initialize() error {
 
 	// seed head admin (optional)
 	if err := databases.EnsureHeadAdmin(a.dbHelper); err != nil {
-		zap.S().With(err).Error("failed to ensure head admin")
+		zap.S().Errorw("failed to ensure head admin", "error", err)
 	}
 
 	// initialize api router

@@ -6,6 +6,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 
 	"github.com/linesmerrill/police-cad-api/config"
 )
@@ -111,16 +112,17 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 		SetMaxPoolSize(100).                    // Maximum number of connections in pool
 		SetMinPoolSize(10).                     // Minimum number of connections in pool
 		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s
-		SetServerSelectionTimeout(30 * time.Second). // Increased timeout for server selection (was 5s, now 30s to handle high RTT)
+		SetServerSelectionTimeout(60 * time.Second). // Increased timeout for server selection during migration (was 30s, now 60s)
 		SetSocketTimeout(60 * time.Second).     // Increased timeout for socket operations (was 30s, now 60s)
-		SetConnectTimeout(30 * time.Second).    // Increased timeout for initial connection (was 10s, now 30s)
+		SetConnectTimeout(5 * time.Second).     // Reduced timeout for initial connection - fail fast on bad servers during discovery (was 30s)
 		SetRetryWrites(true).                   // Enable retry writes for transient failures
 		SetRetryReads(true).                    // Enable retry reads for transient failures
-		SetHeartbeatInterval(10 * time.Second)  // Check server status every 10 seconds
-		// Note: Default read preference is PrimaryPreferred - driver automatically prefers PRIMARY
-		// and will skip unhealthy members (like those in ROLLBACK) during server selection
-		// The driver must discover all replica set members to build topology, but will only
-		// use healthy members for operations. No explicit read preference needed.
+		SetHeartbeatInterval(10 * time.Second). // Check server status every 10 seconds
+		SetReadPreference(readpref.PrimaryPreferred()) // Prefer PRIMARY, but allow SECONDARY reads during migration when PRIMARY unavailable
+		// During free-to-dedicated migration, replica set may not have a stable PRIMARY
+		// PrimaryPreferred allows reads from SECONDARY if PRIMARY is unavailable, making the app more resilient
+		// Reduced ConnectTimeout to 5s so bad servers fail fast during topology discovery
+		// High ServerSelectionTimeout (60s) gives time to find a suitable server
 
 	c, err := mongo.NewClient(clientOptions)
 
