@@ -10,6 +10,15 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 )
 
+// DBQueryRecorder is a function type for recording DB queries
+// This avoids import cycles by allowing the api package to register a recorder
+var DBQueryRecorder func(context.Context, string, string, time.Duration, error)
+
+// SetDBQueryRecorder sets the function to record DB queries
+func SetDBQueryRecorder(recorder func(context.Context, string, string, time.Duration, error)) {
+	DBQueryRecorder = recorder
+}
+
 // MongoCollectionHelper defines the methods required for collection operations (for real and mock collections)
 type MongoCollectionHelper interface {
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) SingleResultHelper
@@ -72,7 +81,8 @@ type mongoDatabase struct {
 
 // MongoCollection contains the collection to be used to access the methods
 type MongoCollection struct {
-	coll *mongo.Collection
+	coll           *mongo.Collection
+	collectionName string
 }
 
 type mongoSingleResult struct {
@@ -130,7 +140,7 @@ func (mc *mongoClient) Connect() error {
 
 func (md *mongoDatabase) Collection(name string) MongoCollectionHelper {
 	collection := md.db.Collection(name)
-	return &MongoCollection{coll: collection}
+	return &MongoCollection{coll: collection, collectionName: name}
 }
 
 func (md *mongoDatabase) Client() ClientHelper {
@@ -140,13 +150,23 @@ func (md *mongoDatabase) Client() ClientHelper {
 
 // FindOne returns a single result from the collection
 func (mc *MongoCollection) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper {
+	start := time.Now()
 	singleResult := mc.coll.FindOne(ctx, filter, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "FindOne", mc.collectionName, duration, nil)
+	}
 	return &mongoSingleResult{sr: singleResult}
 }
 
 // InsertOne inserts a single document into the collection
 func (mc *MongoCollection) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	start := time.Now()
 	insertOneResult, err := mc.coll.InsertOne(ctx, document, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "InsertOne", mc.collectionName, duration, err)
+	}
 	if err != nil {
 		return &mongoInsertOneResult{}, err
 	}
@@ -155,7 +175,12 @@ func (mc *MongoCollection) InsertOne(ctx context.Context, document interface{}, 
 
 // Find returns a cursor to iterate over the collection
 func (mc *MongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error) {
+	start := time.Now()
 	cursor, err := mc.coll.Find(ctx, filter, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "Find", mc.collectionName, duration, err)
+	}
 	if err != nil {
 		println(err)
 	}
@@ -164,7 +189,12 @@ func (mc *MongoCollection) Find(ctx context.Context, filter interface{}, opts ..
 
 // Aggregate returns a cursor to iterate over the collection
 func (mc *MongoCollection) Aggregate(ctx context.Context, pipeline interface{}, opts ...*options.AggregateOptions) (*MongoCursor, error) {
+	start := time.Now()
 	cursor, err := mc.coll.Aggregate(ctx, pipeline, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "Aggregate", mc.collectionName, duration, err)
+	}
 	if err != nil {
 		println(err)
 	}
@@ -173,18 +203,34 @@ func (mc *MongoCollection) Aggregate(ctx context.Context, pipeline interface{}, 
 
 // DeleteOne deletes a single document from the collection
 func (mc *MongoCollection) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	start := time.Now()
 	_, err := mc.coll.DeleteOne(ctx, filter, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "DeleteOne", mc.collectionName, duration, err)
+	}
 	return err
 }
 
 // FindOneAndUpdate updates a single document and returns the result
 func (mc *MongoCollection) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult {
-	return mc.coll.FindOneAndUpdate(ctx, filter, update, opts...)
+	start := time.Now()
+	result := mc.coll.FindOneAndUpdate(ctx, filter, update, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "FindOneAndUpdate", mc.collectionName, duration, result.Err())
+	}
+	return result
 }
 
 // UpdateOne updates a single document in the collection
 func (mc *MongoCollection) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	start := time.Now()
 	res, err := mc.coll.UpdateOne(ctx, filter, update, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "UpdateOne", mc.collectionName, duration, err)
+	}
 	if err != nil {
 		println(err)
 	}
@@ -193,7 +239,12 @@ func (mc *MongoCollection) UpdateOne(ctx context.Context, filter interface{}, up
 
 // CountDocuments returns the number of documents in the collection
 func (mc *MongoCollection) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	start := time.Now()
 	count, err := mc.coll.CountDocuments(ctx, filter, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "CountDocuments", mc.collectionName, duration, err)
+	}
 	if err != nil {
 		println(err)
 	}
@@ -202,7 +253,12 @@ func (mc *MongoCollection) CountDocuments(ctx context.Context, filter interface{
 
 // UpdateMany updates multiple documents in the collection
 func (mc *MongoCollection) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	start := time.Now()
 	res, err := mc.coll.UpdateMany(ctx, filter, update, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "UpdateMany", mc.collectionName, duration, err)
+	}
 	if err != nil {
 		println(err)
 	}
@@ -210,6 +266,8 @@ func (mc *MongoCollection) UpdateMany(ctx context.Context, filter interface{}, u
 }
 
 func (sr *mongoSingleResult) Decode(v interface{}) error {
+	// Note: Decode timing is included in the operation timing
+	// since it's part of the same query execution
 	return sr.sr.Decode(v)
 }
 

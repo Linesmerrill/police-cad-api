@@ -7,13 +7,21 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/linesmerrill/police-cad-api/databases"
 
 	_ "github.com/linesmerrill/police-cad-api/docs" // This line is necessary for go-swagger to find the docs
 )
 
 func main() {
+	// Initialize metrics collection (10k traces, 1 hour window)
+	api.InitMetrics(10000, 1*time.Hour)
+	// Register DB query recorder to avoid import cycles
+	databases.SetDBQueryRecorder(api.RecordDBQueryFromContext)
+	zap.S().Info("Metrics collection initialized")
+
 	a := handlers.App{}
 	a.Config = *config.New()
 
@@ -23,10 +31,14 @@ func main() {
 		return
 	}
 
+	// Wrap router with metrics middleware, then CORS
+	handler := api.MetricsMiddleware(a.Router)
+	handler = handlers.CorsMiddleware(handler)
+
 	// Configure HTTP server with timeouts to prevent resource exhaustion
 	server := &http.Server{
 		Addr:         ":" + a.Config.Port,
-		Handler:      handlers.CorsMiddleware(a.Router),
+		Handler:      handler,
 		ReadTimeout:  30 * time.Second,  // Maximum time to read request
 		WriteTimeout: 30 * time.Second,  // Maximum time to write response
 		IdleTimeout:  120 * time.Second, // Maximum time to wait for next request

@@ -88,6 +88,13 @@ func (a *App) New() *mux.Router {
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 	apiV2 := r.PathPrefix("/api/v2").Subrouter()
+
+	// Metrics handler (must be after apiV2 is defined)
+	metricsHandler := MetricsHandler{}
+	apiV2.Handle("/metrics", http.HandlerFunc(metricsHandler.GetMetricsDashboard)).Methods("GET")
+	apiV2.Handle("/metrics/summary", http.HandlerFunc(metricsHandler.GetMetricsSummary)).Methods("GET")
+	apiV2.Handle("/metrics/route", http.HandlerFunc(metricsHandler.GetRouteMetrics)).Methods("GET")
+	apiV2.Handle("/metrics/slow-queries", http.HandlerFunc(metricsHandler.GetSlowQueries)).Methods("GET")
 	ws := r.PathPrefix("/ws").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
@@ -435,6 +442,11 @@ func (a *App) New() *mux.Router {
 
 	// Websocket routes
 	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")
+
+	// Metrics dashboard
+	r.HandleFunc("/metrics-dashboard", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./docs/metrics-dashboard.html")
+	}).Methods("GET")
 
 	// swagger docs hosted at "/"
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./docs/"))))

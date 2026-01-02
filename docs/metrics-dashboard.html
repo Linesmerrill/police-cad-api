@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Performance Metrics Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+            padding: 20px;
+            color: #e0e0e0;
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        /* Floating dots background */
+        .floating-dots {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
+        
+        .dot {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(1px);
+            animation: float 20s infinite ease-in-out;
+        }
+        
+        .dot:nth-child(1) {
+            width: 120px;
+            height: 120px;
+            left: 10%;
+            animation-duration: 25s;
+            animation-delay: 0s;
+        }
+        
+        .dot:nth-child(2) {
+            width: 150px;
+            height: 150px;
+            left: 30%;
+            animation-duration: 30s;
+            animation-delay: -5s;
+        }
+        
+        .dot:nth-child(3) {
+            width: 100px;
+            height: 100px;
+            left: 50%;
+            animation-duration: 22s;
+            animation-delay: -10s;
+        }
+        
+        .dot:nth-child(4) {
+            width: 180px;
+            height: 180px;
+            left: 70%;
+            animation-duration: 35s;
+            animation-delay: -15s;
+        }
+        
+        .dot:nth-child(5) {
+            width: 130px;
+            height: 130px;
+            left: 85%;
+            animation-duration: 28s;
+            animation-delay: -8s;
+        }
+        
+        .dot:nth-child(6) {
+            width: 160px;
+            height: 160px;
+            left: 20%;
+            animation-duration: 32s;
+            animation-delay: -12s;
+        }
+        
+        .dot:nth-child(7) {
+            width: 110px;
+            height: 110px;
+            left: 60%;
+            animation-duration: 26s;
+            animation-delay: -18s;
+        }
+        
+        .dot:nth-child(8) {
+            width: 140px;
+            height: 140px;
+            left: 40%;
+            animation-duration: 29s;
+            animation-delay: -3s;
+        }
+        
+        @keyframes float {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+                opacity: 0.3;
+            }
+            25% {
+                transform: translate(30px, -50px) scale(1.1);
+                opacity: 0.4;
+            }
+            50% {
+                transform: translate(-20px, -100px) scale(0.9);
+                opacity: 0.25;
+            }
+            75% {
+                transform: translate(40px, -30px) scale(1.05);
+                opacity: 0.35;
+            }
+        }
+        
+        /* Overlay to make dots more subtle */
+        .dots-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(15, 12, 41, 0.4) 0%, rgba(48, 43, 99, 0.3) 50%, rgba(36, 36, 62, 0.4) 100%);
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        .container {
+            position: relative;
+            z-index: 2;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #ffffff;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            font-weight: 700;
+            text-align: center;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            letter-spacing: -0.5px;
+        }
+        
+        .controls {
+            margin-bottom: 30px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        button {
+            padding: 12px 24px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        button:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        select {
+            padding: 12px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        select:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        select option {
+            background: #1a1a2e;
+            color: #ffffff;
+        }
+        
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-4px);
+            background: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+        
+        .card h3 {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 13px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+        
+        .card .value {
+            font-size: 36px;
+            font-weight: 700;
+            color: #ffffff;
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+        
+        .card .subvalue {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 8px;
+        }
+        
+        .section {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 28px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            margin-bottom: 24px;
+        }
+        
+        .section h2 {
+            color: #ffffff;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        th {
+            background: rgba(255, 255, 255, 0.05);
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+            position: sticky;
+            top: 0;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        tbody tr {
+            transition: all 0.2s ease;
+        }
+        
+        tbody tr:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        
+        td {
+            color: rgba(255, 255, 255, 0.85);
+            font-size: 14px;
+        }
+        
+        .method {
+            font-weight: 600;
+            color: #64b5f6;
+            font-family: 'Courier New', monospace;
+            padding: 4px 8px;
+            background: rgba(100, 181, 246, 0.15);
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        
+        .duration {
+            font-family: 'Courier New', monospace;
+            font-weight: 500;
+        }
+        
+        .slow {
+            color: #ef5350;
+            font-weight: 600;
+        }
+        
+        .fast {
+            color: #66bb6a;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 16px;
+        }
+        
+        .loading::after {
+            content: '...';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+        
+        .error {
+            background: rgba(239, 83, 80, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(239, 83, 80, 0.3);
+            color: #ffcdd2;
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(239, 83, 80, 0.2);
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 14px;
+        }
+        
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 5px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        /* Pulse animation for auto-refresh indicator */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .icon {
+            width: 18px;
+            height: 18px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 6px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        
+        button .icon {
+            margin-right: 8px;
+        }
+        
+        .auto-refresh-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #66bb6a;
+            display: inline-block;
+            margin-left: 8px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        .refreshing {
+            opacity: 0.7;
+            transition: opacity 0.3s ease;
+        }
+        
+        .value-updating {
+            transition: all 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .value-updated {
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .refresh-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(100, 181, 246, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(100, 181, 246, 0.3);
+            padding: 8px 16px;
+            border-radius: 20px;
+            color: #64b5f6;
+            font-size: 12px;
+            display: none;
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+            align-items: center;
+        }
+        
+        .refresh-indicator.active {
+            display: flex;
+        }
+        
+        .refresh-indicator .icon {
+            width: 14px;
+            height: 14px;
+            margin-right: 6px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            margin-top: 20px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            min-width: 40px;
+        }
+        
+        .pagination .page-info {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination button:disabled:hover {
+            transform: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="floating-dots">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+    </div>
+    <div class="dots-overlay"></div>
+    <div class="container">
+        <h1>API Performance Metrics</h1>
+        
+        <div class="controls">
+            <button onclick="loadMetrics()">
+                <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                Refresh
+            </button>
+            <button id="autoRefreshBtn" onclick="toggleAutoRefresh()">
+                <svg class="icon" id="autoRefreshIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                <span id="autoRefreshText">Pause Auto-Refresh</span>
+                <span class="auto-refresh-indicator" id="autoRefreshDot"></span>
+            </button>
+            <button onclick="loadSlowQueries()">
+                <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Slow Queries
+            </button>
+            <select id="timeRange" onchange="loadMetrics()">
+                <option value="5m">Last 5 minutes</option>
+                <option value="15m">Last 15 minutes</option>
+                <option value="1h" selected>Last hour</option>
+                <option value="6h">Last 6 hours</option>
+            </select>
+        </div>
+
+        <div id="error" style="display: none;"></div>
+        <div id="loading" class="loading" style="display: none;">Loading metrics</div>
+        <div id="refreshIndicator" class="refresh-indicator">
+            <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            Refreshing...
+        </div>
+        <div id="content">
+            <div class="summary" id="summary"></div>
+            
+            <div class="section">
+                <h2>
+                    <svg class="icon" style="width: 24px; height: 24px; margin-right: 8px; vertical-align: middle;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    Slowest Routes
+                </h2>
+                <div id="slowestRoutes"></div>
+                <div id="slowestRoutesPagination" class="pagination" style="display: none;"></div>
+            </div>
+
+            <div class="section">
+                <h2>
+                    <svg class="icon" style="width: 24px; height: 24px; margin-right: 8px; vertical-align: middle;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    Most Frequent Routes
+                </h2>
+                <div id="mostFrequentRoutes"></div>
+                <div id="mostFrequentRoutesPagination" class="pagination" style="display: none;"></div>
+            </div>
+
+            <div class="section" id="slowQueriesSection" style="display: none;">
+                <h2>
+                    <svg class="icon" style="width: 24px; height: 24px; margin-right: 8px; vertical-align: middle;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    Slow Database Queries
+                </h2>
+                <div id="slowQueries"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v2/metrics';
+        
+        function formatDuration(ms) {
+            if (typeof ms === 'string') {
+                return ms;
+            }
+            if (ms < 1000) {
+                return ms.toFixed(0) + 'ms';
+            }
+            return (ms / 1000).toFixed(2) + 's';
+        }
+
+        function getDurationClass(duration) {
+            const ms = typeof duration === 'string' ? parseFloat(duration) : duration;
+            if (ms > 1000) return 'slow';
+            if (ms < 100) return 'fast';
+            return '';
+        }
+
+        function formatNumber(num) {
+            return num.toLocaleString();
+        }
+
+        function formatPercent(num) {
+            return (num * 100).toFixed(2) + '%';
+        }
+
+        // Pagination state
+        let slowestRoutesOffset = 0;
+        let mostFrequentRoutesOffset = 0;
+        const routesPerPage = 20;
+
+        async function loadMetrics(showLoading = false) {
+            const timeRange = document.getElementById('timeRange').value;
+            const since = timeRange;
+            
+            try {
+                // Show subtle refresh indicator instead of hiding content
+                const refreshIndicator = document.getElementById('refreshIndicator');
+                refreshIndicator.classList.add('active');
+                
+                // Only show full loading on initial load
+                if (showLoading) {
+                    document.getElementById('loading').style.display = 'block';
+                    document.getElementById('content').style.display = 'none';
+                } else {
+                    // Add refreshing class for subtle visual feedback
+                    document.getElementById('content').classList.add('refreshing');
+                }
+                
+                document.getElementById('error').style.display = 'none';
+
+                const response = await fetch(`${API_BASE}?since=${since}&limit=${routesPerPage}&offset=0`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+
+                // Update values smoothly without hiding content
+                updateSummary(data.summary);
+                updateSlowestRoutes(data.routes.slowest, data.pagination);
+                updateMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
+
+                // Hide loading indicators
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+                document.getElementById('content').classList.remove('refreshing');
+                refreshIndicator.classList.remove('active');
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').classList.remove('refreshing');
+                refreshIndicator.classList.remove('active');
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = 'Error loading metrics: ' + error.message;
+            }
+        }
+        
+        // Smooth number update function
+        function updateNumber(element, newValue, formatter) {
+            if (!element) return;
+            const currentValue = element.textContent.trim();
+            const formattedNew = formatter(newValue);
+            
+            if (currentValue !== formattedNew) {
+                element.classList.add('value-updated');
+                element.textContent = formattedNew;
+                setTimeout(() => {
+                    element.classList.remove('value-updated');
+                }, 300);
+            }
+        }
+
+        async function loadSlowestRoutesPage(offset) {
+            const timeRange = document.getElementById('timeRange').value;
+            slowestRoutesOffset = offset;
+            
+            try {
+                const response = await fetch(`${API_BASE}?since=${timeRange}&limit=${routesPerPage}&offset=${offset}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                renderSlowestRoutes(data.routes.slowest, data.pagination);
+            } catch (error) {
+                alert('Error loading routes: ' + error.message);
+            }
+        }
+
+        async function loadMostFrequentRoutesPage(offset) {
+            const timeRange = document.getElementById('timeRange').value;
+            mostFrequentRoutesOffset = offset;
+            
+            try {
+                const response = await fetch(`${API_BASE}?since=${timeRange}&limit=${routesPerPage}&offset=${offset}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                renderMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
+            } catch (error) {
+                alert('Error loading routes: ' + error.message);
+            }
+        }
+
+        async function loadSlowQueries() {
+            const timeRange = document.getElementById('timeRange').value;
+            
+            try {
+                const response = await fetch(`${API_BASE}/slow-queries?since=${timeRange}&minDuration=100ms&limit=100`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+
+                renderSlowQueries(data.slowQueries);
+                document.getElementById('slowQueriesSection').style.display = 'block';
+                // Scroll to slow queries section
+                document.getElementById('slowQueriesSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (error) {
+                alert('Error loading slow queries: ' + error.message);
+            }
+        }
+
+        function renderSummary(summary) {
+            const html = `
+                <div class="card">
+                    <h3>Total Requests</h3>
+                    <div class="value" id="summary-total-requests">${formatNumber(summary.totalRequests)}</div>
+                </div>
+                <div class="card">
+                    <h3>TPS</h3>
+                    <div class="value" id="summary-tps">${summary.tps.toFixed(2)}</div>
+                    <div class="subvalue">requests/second</div>
+                </div>
+                <div class="card">
+                    <h3>Error Rate</h3>
+                    <div class="value" id="summary-error-rate">${formatPercent(summary.errorRate)}</div>
+                    <div class="subvalue" id="summary-error-count">${formatNumber(summary.totalErrors)} errors</div>
+                </div>
+                <div class="card">
+                    <h3>DB Queries</h3>
+                    <div class="value" id="summary-db-queries">${formatNumber(summary.totalDBQueries)}</div>
+                    <div class="subvalue" id="summary-db-avg-time">Avg: ${summary.avgDBTime}</div>
+                </div>
+                <div class="card">
+                    <h3>Routes</h3>
+                    <div class="value" id="summary-route-count">${summary.routeCount}</div>
+                    <div class="subvalue" id="summary-trace-count">${summary.traceCount} traces</div>
+                </div>
+            `;
+            document.getElementById('summary').innerHTML = html;
+        }
+        
+        function updateSummary(summary) {
+            // Update values smoothly without re-rendering entire cards
+            updateNumber(document.getElementById('summary-total-requests'), summary.totalRequests, formatNumber);
+            updateNumber(document.getElementById('summary-tps'), summary.tps, (v) => v.toFixed(2));
+            updateNumber(document.getElementById('summary-error-rate'), summary.errorRate, formatPercent);
+            updateNumber(document.getElementById('summary-error-count'), summary.totalErrors, (v) => formatNumber(v) + ' errors');
+            updateNumber(document.getElementById('summary-db-queries'), summary.totalDBQueries, formatNumber);
+            const dbAvgEl = document.getElementById('summary-db-avg-time');
+            if (dbAvgEl && dbAvgEl.textContent !== `Avg: ${summary.avgDBTime}`) {
+                dbAvgEl.classList.add('value-updated');
+                dbAvgEl.textContent = `Avg: ${summary.avgDBTime}`;
+                setTimeout(() => dbAvgEl.classList.remove('value-updated'), 300);
+            }
+            updateNumber(document.getElementById('summary-route-count'), summary.routeCount, formatNumber);
+            updateNumber(document.getElementById('summary-trace-count'), summary.traceCount, (v) => formatNumber(v) + ' traces');
+        }
+
+        function renderSlowestRoutes(routes, pagination) {
+            if (!routes || routes.length === 0) {
+                document.getElementById('slowestRoutes').innerHTML = '<div class="empty-state">No route data available</div>';
+                document.getElementById('slowestRoutesPagination').style.display = 'none';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Path</th>
+                            <th>Count</th>
+                            <th>Avg Time</th>
+                            <th>P50</th>
+                            <th>P95</th>
+                            <th>P99</th>
+                            <th>Max Time</th>
+                            <th>DB Avg Time</th>
+                            <th>Error Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${routes.map((route, idx) => `
+                            <tr data-route-key="${route.method}-${route.path}">
+                                <td><span class="method">${route.method}</span></td>
+                                <td>${route.path}</td>
+                                <td class="route-count">${formatNumber(route.count)}</td>
+                                <td class="duration ${getDurationClass(route.avgTime)} route-avg-time">${formatDuration(route.avgTime)}</td>
+                                <td class="duration">${formatDuration(route.p50Time)}</td>
+                                <td class="duration">${formatDuration(route.p95Time)}</td>
+                                <td class="duration">${formatDuration(route.p99Time)}</td>
+                                <td class="duration slow">${formatDuration(route.maxTime)}</td>
+                                <td class="duration">${formatDuration(route.dbAvgTime)}</td>
+                                <td>${formatPercent(route.errorCount / route.count)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('slowestRoutes').innerHTML = html;
+            
+            // Render pagination
+            if (pagination && pagination.total > routesPerPage) {
+                renderPagination('slowestRoutesPagination', pagination, slowestRoutesOffset, loadSlowestRoutesPage);
+            } else {
+                document.getElementById('slowestRoutesPagination').style.display = 'none';
+            }
+        }
+        
+        function updateSlowestRoutes(routes, pagination) {
+            // Only update if routes exist and table exists
+            const container = document.getElementById('slowestRoutes');
+            if (!routes || routes.length === 0 || !container.querySelector('table')) {
+                renderSlowestRoutes(routes, pagination);
+                return;
+            }
+            
+            // Update existing rows or render new ones
+            routes.forEach(route => {
+                const row = container.querySelector(`tr[data-route-key="${route.method}-${route.path}"]`);
+                if (row) {
+                    // Update existing row values smoothly
+                    const countCell = row.querySelector('.route-count');
+                    const avgTimeCell = row.querySelector('.route-avg-time');
+                    if (countCell) updateNumber(countCell, route.count, formatNumber);
+                    if (avgTimeCell) {
+                        const newValue = formatDuration(route.avgTime);
+                        if (avgTimeCell.textContent !== newValue) {
+                            avgTimeCell.classList.add('value-updated');
+                            avgTimeCell.textContent = newValue;
+                            avgTimeCell.className = `duration ${getDurationClass(route.avgTime)} route-avg-time`;
+                            setTimeout(() => avgTimeCell.classList.remove('value-updated'), 300);
+                        }
+                    }
+                } else {
+                    // If route doesn't exist, re-render (might be new route or pagination changed)
+                    renderSlowestRoutes(routes, pagination);
+                    return;
+                }
+            });
+        }
+
+        function renderMostFrequentRoutes(routes, pagination) {
+            if (!routes || routes.length === 0) {
+                document.getElementById('mostFrequentRoutes').innerHTML = '<div class="empty-state">No route data available</div>';
+                document.getElementById('mostFrequentRoutesPagination').style.display = 'none';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Path</th>
+                            <th>Count</th>
+                            <th>Avg Time</th>
+                            <th>P95</th>
+                            <th>DB Avg Time</th>
+                            <th>Error Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${routes.map((route, idx) => `
+                            <tr data-route-key="${route.method}-${route.path}">
+                                <td><span class="method">${route.method}</span></td>
+                                <td>${route.path}</td>
+                                <td class="route-count">${formatNumber(route.count)}</td>
+                                <td class="duration ${getDurationClass(route.avgTime)} route-avg-time">${formatDuration(route.avgTime)}</td>
+                                <td class="duration">${formatDuration(route.p95Time)}</td>
+                                <td class="duration">${formatDuration(route.dbAvgTime)}</td>
+                                <td>${formatPercent(route.errorCount / route.count)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('mostFrequentRoutes').innerHTML = html;
+            
+            // Render pagination
+            if (pagination && pagination.total > routesPerPage) {
+                renderPagination('mostFrequentRoutesPagination', pagination, mostFrequentRoutesOffset, loadMostFrequentRoutesPage);
+            } else {
+                document.getElementById('mostFrequentRoutesPagination').style.display = 'none';
+            }
+        }
+        
+        function updateMostFrequentRoutes(routes, pagination) {
+            // Only update if routes exist and table exists
+            const container = document.getElementById('mostFrequentRoutes');
+            if (!routes || routes.length === 0 || !container.querySelector('table')) {
+                renderMostFrequentRoutes(routes, pagination);
+                return;
+            }
+            
+            // Update existing rows or render new ones
+            routes.forEach(route => {
+                const row = container.querySelector(`tr[data-route-key="${route.method}-${route.path}"]`);
+                if (row) {
+                    // Update existing row values smoothly
+                    const countCell = row.querySelector('.route-count');
+                    const avgTimeCell = row.querySelector('.route-avg-time');
+                    if (countCell) updateNumber(countCell, route.count, formatNumber);
+                    if (avgTimeCell) {
+                        const newValue = formatDuration(route.avgTime);
+                        if (avgTimeCell.textContent !== newValue) {
+                            avgTimeCell.classList.add('value-updated');
+                            avgTimeCell.textContent = newValue;
+                            avgTimeCell.className = `duration ${getDurationClass(route.avgTime)} route-avg-time`;
+                            setTimeout(() => avgTimeCell.classList.remove('value-updated'), 300);
+                        }
+                    }
+                } else {
+                    // If route doesn't exist, re-render (might be new route or pagination changed)
+                    renderMostFrequentRoutes(routes, pagination);
+                    return;
+                }
+            });
+        }
+
+        function renderPagination(containerId, pagination, currentOffset, loadPageFn) {
+            const container = document.getElementById(containerId);
+            const total = pagination.total;
+            const limit = pagination.limit;
+            const currentPage = Math.floor(currentOffset / limit) + 1;
+            const totalPages = Math.ceil(total / limit);
+            const lastOffset = Math.max(0, Math.floor((total - 1) / limit) * limit);
+            
+            // Create buttons with proper event handlers
+            container.innerHTML = '';
+            
+            const firstBtn = document.createElement('button');
+            firstBtn.innerHTML = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>First';
+            firstBtn.disabled = currentOffset === 0;
+            firstBtn.onclick = () => loadPageFn(0);
+            container.appendChild(firstBtn);
+            
+            const prevBtn = document.createElement('button');
+            prevBtn.innerHTML = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Prev';
+            prevBtn.disabled = currentOffset === 0;
+            prevBtn.onclick = () => loadPageFn(Math.max(0, currentOffset - limit));
+            container.appendChild(prevBtn);
+            
+            const pageInfo = document.createElement('span');
+            pageInfo.className = 'page-info';
+            pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${formatNumber(total)} total routes)`;
+            container.appendChild(pageInfo);
+            
+            const nextBtn = document.createElement('button');
+            nextBtn.innerHTML = 'Next<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
+            nextBtn.disabled = !pagination.hasMore;
+            nextBtn.onclick = () => loadPageFn(currentOffset + limit);
+            container.appendChild(nextBtn);
+            
+            const lastBtn = document.createElement('button');
+            lastBtn.innerHTML = 'Last<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>';
+            lastBtn.disabled = !pagination.hasMore;
+            lastBtn.onclick = () => loadPageFn(lastOffset);
+            container.appendChild(lastBtn);
+            
+            container.style.display = 'flex';
+        }
+
+        function renderSlowQueries(queries) {
+            if (!queries || queries.length === 0) {
+                document.getElementById('slowQueries').innerHTML = '<div class="empty-state">No slow queries found</div>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Request</th>
+                            <th>Operation</th>
+                            <th>Collection</th>
+                            <th>Duration</th>
+                            <th>Error</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${queries.map(query => `
+                            <tr>
+                                <td>${new Date(query.timestamp).toLocaleTimeString()}</td>
+                                <td><span class="method">${query.method}</span> ${query.path}</td>
+                                <td>${query.operation}</td>
+                                <td>${query.collection}</td>
+                                <td class="duration slow">${query.duration}</td>
+                                <td>${query.error || '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('slowQueries').innerHTML = html;
+        }
+
+        // Auto-refresh control
+        let autoRefreshInterval = null;
+        let autoRefreshEnabled = true;
+        const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
+
+        function startAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            autoRefreshInterval = setInterval(loadMetrics, AUTO_REFRESH_INTERVAL);
+            document.getElementById('autoRefreshDot').style.display = 'inline-block';
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            document.getElementById('autoRefreshDot').style.display = 'none';
+        }
+
+        function toggleAutoRefresh() {
+            autoRefreshEnabled = !autoRefreshEnabled;
+            const btn = document.getElementById('autoRefreshBtn');
+            const icon = document.getElementById('autoRefreshIcon');
+            const text = document.getElementById('autoRefreshText');
+            const dot = document.getElementById('autoRefreshDot');
+            
+            if (autoRefreshEnabled) {
+                startAutoRefresh();
+                icon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+                text.textContent = 'Pause Auto-Refresh';
+                dot.style.display = 'inline-block';
+            } else {
+                stopAutoRefresh();
+                icon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+                text.textContent = 'Resume Auto-Refresh';
+                dot.style.display = 'none';
+            }
+        }
+
+        // Start auto-refresh (30 seconds interval)
+        startAutoRefresh();
+        
+        // Load on page load (show loading on initial load)
+        loadMetrics(true);
+    </script>
+</body>
+</html>
