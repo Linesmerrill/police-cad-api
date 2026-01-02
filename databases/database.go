@@ -105,14 +105,21 @@ type mongoSession struct {
 
 // NewClient uses the values from the config and returns a mongo client
 func NewClient(conf *config.Config) (ClientHelper, error) {
-	// Configure connection pool for better performance
+	// Configure connection pool for better performance and resilience
+	// Increased timeouts to handle high latency and network issues
 	clientOptions := options.Client().ApplyURI(conf.URL).
 		SetMaxPoolSize(100).                    // Maximum number of connections in pool
 		SetMinPoolSize(10).                     // Minimum number of connections in pool
 		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s
-		SetServerSelectionTimeout(5 * time.Second). // Timeout for server selection
-		SetSocketTimeout(30 * time.Second).     // Timeout for socket operations
-		SetConnectTimeout(10 * time.Second)    // Timeout for initial connection
+		SetServerSelectionTimeout(30 * time.Second). // Increased timeout for server selection (was 5s, now 30s to handle high RTT)
+		SetSocketTimeout(60 * time.Second).     // Increased timeout for socket operations (was 30s, now 60s)
+		SetConnectTimeout(30 * time.Second).    // Increased timeout for initial connection (was 10s, now 30s)
+		SetRetryWrites(true).                   // Enable retry writes for transient failures
+		SetRetryReads(true).                    // Enable retry reads for transient failures
+		SetHeartbeatInterval(10 * time.Second)  // Check server status every 10 seconds
+		// Note: The Go driver discovers all replica set members and tries to authenticate with each
+		// If one member has auth issues, it may cause connection problems even if others work
+		// The driver should still function by connecting to healthy members, but will log warnings
 
 	c, err := mongo.NewClient(clientOptions)
 
@@ -135,7 +142,10 @@ func (mc *mongoClient) StartSession() (mongo.Session, error) {
 }
 
 func (mc *mongoClient) Connect() error {
-	return mc.cl.Connect(nil)
+	// Use context with timeout for connection
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return mc.cl.Connect(ctx)
 }
 
 func (md *mongoDatabase) Collection(name string) MongoCollectionHelper {
