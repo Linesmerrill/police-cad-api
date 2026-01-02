@@ -47,7 +47,10 @@ func (c *vehicleDatabase) Find(ctx context.Context, filter interface{}, opts ...
 	if err != nil {
 		return nil, err
 	}
-	err = cur.Decode(&vehicles)
+	defer cur.Close(ctx) // Ensure cursor is closed
+	
+	// Use All() with context instead of Decode() which uses context.Background()
+	err = cur.All(ctx, &vehicles)
 	if err != nil {
 		return nil, err
 	}

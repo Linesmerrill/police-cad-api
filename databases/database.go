@@ -276,6 +276,8 @@ func (ior *mongoInsertOneResult) Decode() interface{} {
 }
 
 // Decode decodes the cursor into the provided interface
+// NOTE: This method uses context.Background() which may not have timeout or trace tracking.
+// Prefer using All(ctx, v) directly with a proper context.
 func (cr *MongoCursor) Decode(v interface{}) error {
 	return cr.All(context.Background(), v)
 }

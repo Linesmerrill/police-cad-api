@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -153,32 +154,59 @@ func (v Vehicle) VehiclesByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 
 	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
 
-	var dbResp []models.Vehicle
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
 
-	// Query to fetch vehicles
-	err = nil
-	dbResp, err = v.DB.Find(context.TODO(), bson.M{
+	// Build filter once (reused for both queries)
+	filter := bson.M{
 		"$or": []bson.M{
 			{"vehicle.registeredOwnerID": registeredOwnerID}, // Deprecated, use linkedCivilianID
 			{"vehicle.linkedCivilianID": registeredOwnerID},
 		},
-	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-	if err != nil {
-		config.ErrorStatus("failed to get vehicles by registered owner id", http.StatusNotFound, w, err)
+	}
+
+	// Execute queries in parallel for better performance
+	type findResult struct {
+		vehicles []models.Vehicle
+		err      error
+	}
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Query to fetch vehicles (async)
+	go func() {
+		dbResp, err := v.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+		findChan <- findResult{vehicles: dbResp, err: err}
+	}()
+
+	// Count total vehicles for pagination (async)
+	go func() {
+		total, err := v.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	// Wait for both queries to complete
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get vehicles by registered owner id", http.StatusNotFound, w, findRes.err)
 		return
 	}
 
-	// Count total vehicles for pagination
-	total, err := v.DB.CountDocuments(context.TODO(), bson.M{
-		"$or": []bson.M{
-			{"vehicle.registeredOwnerID": registeredOwnerID},
-			{"vehicle.linkedCivilianID": registeredOwnerID},
-		},
-	})
-	if err != nil {
-		config.ErrorStatus("failed to count vehicles", http.StatusInternalServerError, w, err)
+	if countRes.err != nil {
+		config.ErrorStatus("failed to count vehicles", http.StatusInternalServerError, w, countRes.err)
 		return
 	}
+
+	dbResp := findRes.vehicles
+	total := countRes.total
 
 	// Ensure the response is always an array
 	if len(dbResp) == 0 {
