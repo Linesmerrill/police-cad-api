@@ -43,9 +43,19 @@ func New() *Config {
 // ErrorStatus is a useful function that will log, write http headers and body for a
 // give message, status code and err
 func ErrorStatus(message string, httpStatusCode int, w http.ResponseWriter, err error) {
-	zap.S().With(err).Error(message)
+	if err != nil {
+		zap.S().Errorw(message, "error", err)
+	} else {
+		zap.S().Error(message)
+	}
 	w.WriteHeader(httpStatusCode)
-	b, _ := json.Marshal(models.ErrorMessageResponse{Response: models.MessageError{Message: message, Error: err.Error()}})
+	var errorMsg string
+	if err != nil {
+		errorMsg = err.Error()
+	} else {
+		errorMsg = message
+	}
+	b, _ := json.Marshal(models.ErrorMessageResponse{Response: models.MessageError{Message: message, Error: errorMsg}})
 	w.Write(b)
 	return
 }
