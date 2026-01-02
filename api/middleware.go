@@ -21,6 +21,7 @@ import (
 	"github.com/shaj13/go-guardian/auth/strategies/basic"
 	"github.com/shaj13/go-guardian/store"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -151,9 +152,17 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		},
 	}).Decode(&dbEmailResp)
 	if err != nil {
-		zap.S().Errorw("ValidateUser: user not found",
-			"email", email,
-			"error", err)
+		// User not found is normal during authentication - log as debug/warn, not error
+		// Only log as error if it's a database connection issue (timeout, network, etc.)
+		if err == mongo.ErrNoDocuments || strings.Contains(err.Error(), "no documents") {
+			zap.S().Debugw("ValidateUser: user not found",
+				"email", email)
+		} else {
+			// Database connection/timeout errors are actual errors
+			zap.S().Errorw("ValidateUser: database error while looking up user",
+				"email", email,
+				"error", err)
+		}
 		return nil, fmt.Errorf("failed to validate user by email, %v", err)
 	}
 
