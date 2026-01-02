@@ -289,7 +289,8 @@
         }
         
         th {
-            background: rgba(255, 255, 255, 0.05);
+            background: #0f0c29;
+            backdrop-filter: blur(10px);
             font-weight: 600;
             color: rgba(255, 255, 255, 0.9);
             position: sticky;
@@ -297,6 +298,50 @@
             font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            z-index: 10;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s ease;
+            padding-right: 24px;
+            position: relative;
+        }
+        
+        th:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        th.sortable {
+            padding-right: 28px;
+        }
+        
+        .sort-icon {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 12px;
+            height: 12px;
+            opacity: 0.5;
+            transition: opacity 0.2s ease;
+        }
+        
+        th:hover .sort-icon {
+            opacity: 0.8;
+        }
+        
+        th.sort-asc .sort-icon,
+        th.sort-desc .sort-icon {
+            opacity: 1;
+        }
+        
+        th.sort-asc {
+            color: #64b5f6;
+        }
+        
+        th.sort-desc {
+            color: #64b5f6;
         }
         
         tbody tr {
@@ -329,6 +374,11 @@
         
         .slow {
             color: #ef5350;
+            font-weight: 600;
+        }
+        
+        .medium {
+            color: #ffb74d;
             font-weight: 600;
         }
         
@@ -595,8 +645,9 @@
 
         function getDurationClass(duration) {
             const ms = typeof duration === 'string' ? parseFloat(duration) : duration;
-            if (ms > 1000) return 'slow';
-            if (ms < 100) return 'fast';
+            if (ms > 2000) return 'slow'; // Red: > 2 seconds
+            if (ms >= 1000 && ms <= 2000) return 'medium'; // Yellow: 1-2 seconds
+            if (ms < 1000) return 'fast'; // Green: < 1 second
             return '';
         }
 
@@ -612,6 +663,12 @@
         let slowestRoutesOffset = 0;
         let mostFrequentRoutesOffset = 0;
         const routesPerPage = 20;
+        
+        // Sorting state
+        let slowestRoutesSort = { column: null, direction: 'asc' };
+        let mostFrequentRoutesSort = { column: null, direction: 'asc' };
+        let slowestRoutesData = [];
+        let mostFrequentRoutesData = [];
 
         async function loadMetrics(showLoading = false) {
             const timeRange = document.getElementById('timeRange').value;
@@ -639,10 +696,21 @@
                 }
                 const data = await response.json();
 
-                // Update values smoothly without hiding content
-                updateSummary(data.summary);
-                updateSlowestRoutes(data.routes.slowest, data.pagination);
-                updateMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
+                // Render or update summary (always render on initial load)
+                if (showLoading || !document.getElementById('summary-total-requests')) {
+                    renderSummary(data.summary);
+                } else {
+                    updateSummary(data.summary);
+                }
+                
+                // Render or update routes
+                if (showLoading || !document.getElementById('slowestRoutes').querySelector('table')) {
+                    renderSlowestRoutes(data.routes.slowest, data.pagination);
+                    renderMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
+                } else {
+                    updateSlowestRoutes(data.routes.slowest, data.pagination);
+                    updateMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
+                }
 
                 // Hide loading indicators
                 document.getElementById('loading').style.display = 'none';
@@ -771,41 +839,133 @@
             updateNumber(document.getElementById('summary-trace-count'), summary.traceCount, (v) => formatNumber(v) + ' traces');
         }
 
+        function getSortIcon(column, currentSort) {
+            if (currentSort.column !== column) {
+                return '<svg class="sort-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M7 3v18M15 3v18M3 7h8M3 11h8M3 15h8M3 19h8M13 7h8M13 11h8M13 15h8M13 19h8"/></svg>';
+            }
+            if (currentSort.direction === 'asc') {
+                return '<svg class="sort-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>';
+            }
+            return '<svg class="sort-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
+        }
+        
+        function sortRoutes(routes, column, direction) {
+            const sorted = [...routes];
+            sorted.sort((a, b) => {
+                let aVal, bVal;
+                
+                switch(column) {
+                    case 'method':
+                        aVal = a.method || '';
+                        bVal = b.method || '';
+                        return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                    case 'path':
+                        aVal = a.path || '';
+                        bVal = b.path || '';
+                        return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                    case 'count':
+                        aVal = a.count || 0;
+                        bVal = b.count || 0;
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    case 'avgTime':
+                        aVal = a.avgTime || 0;
+                        bVal = b.avgTime || 0;
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    case 'p50':
+                        aVal = a.p50Time || 0;
+                        bVal = b.p50Time || 0;
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    case 'p95':
+                        aVal = a.p95Time || 0;
+                        bVal = b.p95Time || 0;
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    case 'p99':
+                        aVal = a.p99Time || 0;
+                        bVal = b.p99Time || 0;
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    case 'maxTime':
+                        aVal = a.maxTime || 0;
+                        bVal = b.maxTime || 0;
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    case 'dbAvgTime':
+                        aVal = a.dbAvgTime || 0;
+                        bVal = b.dbAvgTime || 0;
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    case 'errorRate':
+                        aVal = (a.errorCount || 0) / (a.count || 1);
+                        bVal = (b.errorCount || 0) / (b.count || 1);
+                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+                    default:
+                        return 0;
+                }
+            });
+            return sorted;
+        }
+        
         function renderSlowestRoutes(routes, pagination) {
             if (!routes || routes.length === 0) {
                 document.getElementById('slowestRoutes').innerHTML = '<div class="empty-state">No route data available</div>';
                 document.getElementById('slowestRoutesPagination').style.display = 'none';
                 return;
             }
+            
+            // Store routes data for sorting
+            slowestRoutesData = routes;
+            
+            // Apply sorting if active
+            let displayRoutes = routes;
+            if (slowestRoutesSort.column) {
+                displayRoutes = sortRoutes(routes, slowestRoutesSort.column, slowestRoutesSort.direction);
+            }
 
             const html = `
                 <table>
                     <thead>
                         <tr>
-                            <th>Method</th>
-                            <th>Path</th>
-                            <th>Count</th>
-                            <th>Avg Time</th>
-                            <th>P50</th>
-                            <th>P95</th>
-                            <th>P99</th>
-                            <th>Max Time</th>
-                            <th>DB Avg Time</th>
-                            <th>Error Rate</th>
+                            <th class="sortable ${slowestRoutesSort.column === 'method' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('method')">
+                                Method${getSortIcon('method', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'path' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('path')">
+                                Path${getSortIcon('path', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'count' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('count')">
+                                Count${getSortIcon('count', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'avgTime' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('avgTime')">
+                                Avg Time${getSortIcon('avgTime', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'p50' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('p50')">
+                                P50${getSortIcon('p50', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'p95' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('p95')">
+                                P95${getSortIcon('p95', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'p99' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('p99')">
+                                P99${getSortIcon('p99', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'maxTime' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('maxTime')">
+                                Max Time${getSortIcon('maxTime', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'dbAvgTime' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('dbAvgTime')">
+                                DB Avg Time${getSortIcon('dbAvgTime', slowestRoutesSort)}
+                            </th>
+                            <th class="sortable ${slowestRoutesSort.column === 'errorRate' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('errorRate')">
+                                Error Rate${getSortIcon('errorRate', slowestRoutesSort)}
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${routes.map((route, idx) => `
+                        ${displayRoutes.map((route, idx) => `
                             <tr data-route-key="${route.method}-${route.path}">
                                 <td><span class="method">${route.method}</span></td>
                                 <td>${route.path}</td>
                                 <td class="route-count">${formatNumber(route.count)}</td>
                                 <td class="duration ${getDurationClass(route.avgTime)} route-avg-time">${formatDuration(route.avgTime)}</td>
-                                <td class="duration">${formatDuration(route.p50Time)}</td>
-                                <td class="duration">${formatDuration(route.p95Time)}</td>
-                                <td class="duration">${formatDuration(route.p99Time)}</td>
-                                <td class="duration slow">${formatDuration(route.maxTime)}</td>
-                                <td class="duration">${formatDuration(route.dbAvgTime)}</td>
+                                <td class="duration ${getDurationClass(route.p50Time)}">${formatDuration(route.p50Time)}</td>
+                                <td class="duration ${getDurationClass(route.p95Time)}">${formatDuration(route.p95Time)}</td>
+                                <td class="duration ${getDurationClass(route.p99Time)}">${formatDuration(route.p99Time)}</td>
+                                <td class="duration ${getDurationClass(route.maxTime)}">${formatDuration(route.maxTime)}</td>
+                                <td class="duration ${getDurationClass(route.dbAvgTime)}">${formatDuration(route.dbAvgTime)}</td>
                                 <td>${formatPercent(route.errorCount / route.count)}</td>
                             </tr>
                         `).join('')}
@@ -820,6 +980,20 @@
             } else {
                 document.getElementById('slowestRoutesPagination').style.display = 'none';
             }
+        }
+        
+        function sortSlowestRoutes(column) {
+            if (slowestRoutesSort.column === column) {
+                // Toggle direction if same column
+                slowestRoutesSort.direction = slowestRoutesSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, default to ascending
+                slowestRoutesSort.column = column;
+                slowestRoutesSort.direction = 'asc';
+            }
+            // Re-render with new sort
+            const pagination = { total: slowestRoutesData.length, limit: routesPerPage, hasMore: false };
+            renderSlowestRoutes(slowestRoutesData, pagination);
         }
         
         function updateSlowestRoutes(routes, pagination) {
@@ -861,29 +1035,52 @@
                 document.getElementById('mostFrequentRoutesPagination').style.display = 'none';
                 return;
             }
+            
+            // Store routes data for sorting
+            mostFrequentRoutesData = routes;
+            
+            // Apply sorting if active
+            let displayRoutes = routes;
+            if (mostFrequentRoutesSort.column) {
+                displayRoutes = sortRoutes(routes, mostFrequentRoutesSort.column, mostFrequentRoutesSort.direction);
+            }
 
             const html = `
                 <table>
                     <thead>
                         <tr>
-                            <th>Method</th>
-                            <th>Path</th>
-                            <th>Count</th>
-                            <th>Avg Time</th>
-                            <th>P95</th>
-                            <th>DB Avg Time</th>
-                            <th>Error Rate</th>
+                            <th class="sortable ${mostFrequentRoutesSort.column === 'method' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('method')">
+                                Method${getSortIcon('method', mostFrequentRoutesSort)}
+                            </th>
+                            <th class="sortable ${mostFrequentRoutesSort.column === 'path' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('path')">
+                                Path${getSortIcon('path', mostFrequentRoutesSort)}
+                            </th>
+                            <th class="sortable ${mostFrequentRoutesSort.column === 'count' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('count')">
+                                Count${getSortIcon('count', mostFrequentRoutesSort)}
+                            </th>
+                            <th class="sortable ${mostFrequentRoutesSort.column === 'avgTime' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('avgTime')">
+                                Avg Time${getSortIcon('avgTime', mostFrequentRoutesSort)}
+                            </th>
+                            <th class="sortable ${mostFrequentRoutesSort.column === 'p95' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('p95')">
+                                P95${getSortIcon('p95', mostFrequentRoutesSort)}
+                            </th>
+                            <th class="sortable ${mostFrequentRoutesSort.column === 'dbAvgTime' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('dbAvgTime')">
+                                DB Avg Time${getSortIcon('dbAvgTime', mostFrequentRoutesSort)}
+                            </th>
+                            <th class="sortable ${mostFrequentRoutesSort.column === 'errorRate' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('errorRate')">
+                                Error Rate${getSortIcon('errorRate', mostFrequentRoutesSort)}
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${routes.map((route, idx) => `
+                        ${displayRoutes.map((route, idx) => `
                             <tr data-route-key="${route.method}-${route.path}">
                                 <td><span class="method">${route.method}</span></td>
                                 <td>${route.path}</td>
                                 <td class="route-count">${formatNumber(route.count)}</td>
                                 <td class="duration ${getDurationClass(route.avgTime)} route-avg-time">${formatDuration(route.avgTime)}</td>
-                                <td class="duration">${formatDuration(route.p95Time)}</td>
-                                <td class="duration">${formatDuration(route.dbAvgTime)}</td>
+                                <td class="duration ${getDurationClass(route.p95Time)}">${formatDuration(route.p95Time)}</td>
+                                <td class="duration ${getDurationClass(route.dbAvgTime)}">${formatDuration(route.dbAvgTime)}</td>
                                 <td>${formatPercent(route.errorCount / route.count)}</td>
                             </tr>
                         `).join('')}
@@ -898,6 +1095,20 @@
             } else {
                 document.getElementById('mostFrequentRoutesPagination').style.display = 'none';
             }
+        }
+        
+        function sortMostFrequentRoutes(column) {
+            if (mostFrequentRoutesSort.column === column) {
+                // Toggle direction if same column
+                mostFrequentRoutesSort.direction = mostFrequentRoutesSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, default to ascending
+                mostFrequentRoutesSort.column = column;
+                mostFrequentRoutesSort.direction = 'asc';
+            }
+            // Re-render with new sort
+            const pagination = { total: mostFrequentRoutesData.length, limit: routesPerPage, hasMore: false };
+            renderMostFrequentRoutes(mostFrequentRoutesData, pagination);
         }
         
         function updateMostFrequentRoutes(routes, pagination) {
