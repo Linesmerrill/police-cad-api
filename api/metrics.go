@@ -461,17 +461,72 @@ type requestTraceContext struct {
 	mu    sync.Mutex
 }
 
+// Global map to store traces by request ID (for cases where context.Background() is used)
+// This is a fallback mechanism - primary method is via context values
+var (
+	traceMap   = make(map[string]*requestTraceContext)
+	traceMapMu sync.RWMutex
+)
+
 // getRequestTraceFromContext gets the request trace from context
 func getRequestTraceFromContext(ctx context.Context) *requestTraceContext {
+	// First try to get from context value (primary method)
 	if val := ctx.Value(requestTraceContextKey{}); val != nil {
 		return val.(*requestTraceContext)
 	}
+	
+	// Fallback: try to get from request ID if available
+	// This handles cases where handlers use context.Background() instead of r.Context()
+	if requestID := getRequestIDFromContext(ctx); requestID != "" {
+		traceMapMu.RLock()
+		defer traceMapMu.RUnlock()
+		if trace, exists := traceMap[requestID]; exists {
+			return trace
+		}
+	}
+	
 	return nil
+}
+
+// requestIDContextKey is a type for storing request ID in context
+type requestIDContextKey struct{}
+
+// getRequestIDFromContext extracts request ID from context if available
+func getRequestIDFromContext(ctx context.Context) string {
+	if val := ctx.Value(requestIDContextKey{}); val != nil {
+		return val.(string)
+	}
+	return ""
 }
 
 // WithRequestTrace adds request trace to context
 func WithRequestTrace(ctx context.Context, trace *RequestTrace) context.Context {
-	return context.WithValue(ctx, requestTraceContextKey{}, &requestTraceContext{trace: trace})
+	traceCtx := &requestTraceContext{trace: trace}
+	
+	// Store in context value (primary method)
+	ctx = context.WithValue(ctx, requestTraceContextKey{}, traceCtx)
+	
+	// Also store in global map as fallback (keyed by request ID)
+	// This allows DB queries called with context.Background() to still find the trace
+	if trace.RequestID != "" {
+		traceMapMu.Lock()
+		traceMap[trace.RequestID] = traceCtx
+		traceMapMu.Unlock()
+		
+		// Store request ID in context for fallback lookup
+		ctx = context.WithValue(ctx, requestIDContextKey{}, trace.RequestID)
+		
+		// Clean up old trace after request completes (async, non-blocking)
+		go func() {
+			// Wait for request to complete (rough estimate: 30 seconds max)
+			time.Sleep(30 * time.Second)
+			traceMapMu.Lock()
+			delete(traceMap, trace.RequestID)
+			traceMapMu.Unlock()
+		}()
+	}
+	
+	return ctx
 }
 
 // RecordDBQueryFromContext records a DB query from context (called from databases package)

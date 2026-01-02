@@ -51,7 +51,7 @@ func (u User) UserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": cID}).Decode(&dbResp)
+	err = u.DB.FindOne(r.Context(), bson.M{"_id": cID}).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -3573,7 +3573,7 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 
 	// Fetch the user document
 	var user models.User
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	err = u.DB.FindOne(r.Context(), bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 		return
