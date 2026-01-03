@@ -1291,11 +1291,11 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Fetch user and community in parallel for better performance
 	type userResult struct {
-		user models.User
+		user *models.User
 		err  error
 	}
 	type communityResult struct {
-		community models.Community
+		community *models.Community
 		err       error
 	}
 
@@ -1306,7 +1306,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	go func() {
 		var user models.User
 		err := c.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user)
-		userChan <- userResult{user: user, err: err}
+		userChan <- userResult{user: &user, err: err}
 	}()
 
 	// Fetch community (async)
@@ -1328,8 +1328,8 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user := userRes.user
-	community := communityRes.community
+	user := *userRes.user
+	community := *communityRes.community
 
 	// Step 2 & 3: Check existing community status
 	var existingCommunity *models.UserCommunity
