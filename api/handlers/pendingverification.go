@@ -63,7 +63,7 @@ func (pv PendingVerification) CreatePendingVerificationHandler(w http.ResponseWr
 
 	// Check if email exists in the users collection
 	existingUser := models.User{}
-	err = pv.UDB.FindOne(ctx, bson.M{"email": requestBody.Email}).Decode(&existingUser)
+	err = pv.UDB.FindOne(ctx, bson.M{"user.email": requestBody.Email}).Decode(&existingUser)
 	if err == nil {
 		http.Error(w, `{"success": false, "message": "Email already exists"}`, http.StatusBadRequest)
 		return
@@ -167,7 +167,11 @@ func (pv PendingVerification) VerifyCodeHandler(w http.ResponseWriter, r *http.R
 	// Find the pending verification by email
 	pendingVerification, err := pv.PVDB.FindOne(ctx, bson.M{"email": requestBody.Email})
 	if err != nil {
-		config.ErrorStatus("failed to find pending verification", http.StatusNotFound, w, err)
+		if err == mongo.ErrNoDocuments {
+			config.ErrorStatus("pending verification not found", http.StatusNotFound, w, err)
+			return
+		}
+		config.ErrorStatus("failed to find pending verification", http.StatusInternalServerError, w, err)
 		return
 	}
 
