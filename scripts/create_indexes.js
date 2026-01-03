@@ -4,7 +4,7 @@
 
 // CRITICAL: User Email Index (Case-Insensitive)
 // This is used in authentication on EVERY request - most critical index
-print("Creating user email index...");
+// DONE
 db.users.createIndex(
   { "user.email": 1 }, 
   { 
@@ -13,10 +13,9 @@ db.users.createIndex(
     background: true  // Don't block operations while building
   }
 );
-print("✓ User email index created");
 
 // HIGH PRIORITY: User Communities Index
-print("Creating user communities index...");
+// DONE
 db.users.createIndex(
   { "user.communities.communityId": 1, "user.communities.status": 1 }, 
   {
@@ -24,10 +23,9 @@ db.users.createIndex(
     background: true
   }
 );
-print("✓ User communities index created");
 
 // HIGH PRIORITY: User Search Text Index
-print("Creating user search text index...");
+// DONE
 db.users.createIndex(
   { 
     "user.username": "text", 
@@ -39,10 +37,9 @@ db.users.createIndex(
     background: true
   }
 );
-print("✓ User search text index created");
 
 // MEDIUM PRIORITY: Community Name Text Index
-print("Creating community name text index...");
+// DONE
 db.communities.createIndex(
   { "community.name": "text" }, 
   {
@@ -50,10 +47,9 @@ db.communities.createIndex(
     background: true
   }
 );
-print("✓ Community name text index created");
 
 // MEDIUM PRIORITY: Community Visibility Index
-print("Creating community visibility index...");
+// DONE
 db.communities.createIndex(
   { "community.visibility": 1 }, 
   {
@@ -61,10 +57,9 @@ db.communities.createIndex(
     background: true
   }
 );
-print("✓ Community visibility index created");
 
 // CRITICAL: Vehicle Registered Owner Index (for /vehicles/registered-owner/{id})
-print("Creating vehicle registered owner index...");
+// DONE
 db.vehicles.createIndex(
   { "vehicle.linkedCivilianID": 1, "vehicle.registeredOwnerID": 1 },
   {
@@ -72,10 +67,9 @@ db.vehicles.createIndex(
     background: true
   }
 );
-print("✓ Vehicle registered owner index created");
 
 // CRITICAL: Vehicle User ID Index (for /vehicles/user/{id})
-print("Creating vehicle user ID index...");
+// DONE
 db.vehicles.createIndex(
   { "vehicle.userID": 1, "vehicle.activeCommunityID": 1 },
   {
@@ -83,10 +77,9 @@ db.vehicles.createIndex(
     background: true
   }
 );
-print("✓ Vehicle user ID index created");
 
 // CRITICAL: Civilian User ID Index (for /civilians/user/{id})
-print("Creating civilian user ID index...");
+// DONE
 db.civilians.createIndex(
   { "civilian.userID": 1, "civilian.activeCommunityID": 1 },
   {
@@ -94,10 +87,9 @@ db.civilians.createIndex(
     background: true
   }
 );
-print("✓ Civilian user ID index created");
 
 // CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
-print("Creating firearm registered owner index...");
+// DONE
 db.firearms.createIndex(
   { "firearm.linkedCivilianID": 1, "firearm.registeredOwnerID": 1 },
   {
@@ -105,10 +97,9 @@ db.firearms.createIndex(
     background: true
   }
 );
-print("✓ Firearm registered owner index created");
 
 // CRITICAL: Call Community ID Index (for /calls/community/{id})
-print("Creating call community ID index...");
+// DONE
 db.calls.createIndex(
   { "call.communityID": 1, "call.status": 1 },
   {
@@ -116,10 +107,9 @@ db.calls.createIndex(
     background: true
   }
 );
-print("✓ Call community ID index created");
 
 // CRITICAL: Community Subscription Plan + Visibility Index (for elite communities queries)
-print("Creating community subscription plan + visibility index...");
+// DONE
 db.communities.createIndex(
   { "community.subscription.plan": 1, "community.visibility": 1 },
   {
@@ -127,10 +117,9 @@ db.communities.createIndex(
     background: true
   }
 );
-print("✓ Community subscription plan + visibility index created");
 
 // MEDIUM PRIORITY: Community Tags Index (for tag-based queries)
-print("Creating community tags index...");
+// DONE
 db.communities.createIndex(
   { "community.tags": 1 },
   {
@@ -138,10 +127,9 @@ db.communities.createIndex(
     background: true
   }
 );
-print("✓ Community tags index created");
 
 // CRITICAL: Community Tags + Visibility Compound Index (for /communities/tag/{tag})
-print("Creating community tags + visibility compound index...");
+// DONE
 db.communities.createIndex(
   { "community.tags": 1, "community.visibility": 1 },
   {
@@ -149,10 +137,9 @@ db.communities.createIndex(
     background: true
   }
 );
-print("✓ Community tags + visibility compound index created");
 
 // CRITICAL: Invite Code Index (for /community/invite/{code})
-print("Creating invite code index...");
+// DONE
 db.inviteCodes.createIndex(
   { "code": 1 },
   {
@@ -161,10 +148,9 @@ db.inviteCodes.createIndex(
     background: true
   }
 );
-print("✓ Invite code index created");
 
 // CRITICAL: Announcement Community + isActive + createdAt Index (for /community/{id}/announcements)
-print("Creating announcement community + isActive + createdAt index...");
+// DONE
 db.announcements.createIndex(
   { "community": 1, "isActive": 1, "createdAt": -1 },
   {
@@ -172,13 +158,4 @@ db.announcements.createIndex(
     background: true
   }
 );
-print("✓ Announcement community + isActive + createdAt index created");
-
-print("\n✅ All indexes created! Check index status with:");
-print("db.users.getIndexes()");
-print("db.communities.getIndexes()");
-print("db.vehicles.getIndexes()");
-print("db.civilians.getIndexes()");
-print("db.firearms.getIndexes()");
-print("db.calls.getIndexes()");
 
