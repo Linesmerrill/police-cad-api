@@ -653,6 +653,10 @@ func (c Civilian) PendingApprovalsHandler(w http.ResponseWriter, r *http.Request
 
 	zap.S().Debugf("MongoDB filter: %+v", filter)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Set up pagination options
 	options := &options.FindOptions{
 		Limit: &limit64,
@@ -660,15 +664,45 @@ func (c Civilian) PendingApprovalsHandler(w http.ResponseWriter, r *http.Request
 		Sort:  bson.D{{Key: "civilian.createdAt", Value: -1}}, // Sort by creation date, newest first
 	}
 
-	// Find civilians with pending approval status
-	dbResp, err := c.DB.Find(context.TODO(), filter, options)
-	if err != nil {
-		config.ErrorStatus("failed to get pending approvals", http.StatusInternalServerError, w, err)
+	// Find civilians with pending approval status - run Find and CountDocuments in parallel
+	type findResult struct {
+		civilians []models.Civilian
+		err       error
+	}
+	type countResult struct {
+		count int64
+		err   error
+	}
+	
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+	
+	// Find query
+	go func() {
+		civilians, err := c.DB.Find(ctx, filter, options)
+		findChan <- findResult{civilians: civilians, err: err}
+	}()
+	
+	// Count query
+	go func() {
+		count, err := c.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{count: count, err: err}
+	}()
+	
+	// Wait for both results
+	findRes := <-findChan
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get pending approvals", http.StatusInternalServerError, w, findRes.err)
 		return
 	}
-
-	// Get total count for pagination metadata
-	totalCount, err := c.DB.CountDocuments(context.TODO(), filter)
+	dbResp := findRes.civilians
+	
+	countRes := <-countChan
+	if countRes.err != nil {
+		config.ErrorStatus("failed to get total count", http.StatusInternalServerError, w, countRes.err)
+		return
+	}
+	totalCount := countRes.count
 	if err != nil {
 		config.ErrorStatus("failed to get total count", http.StatusInternalServerError, w, err)
 		return

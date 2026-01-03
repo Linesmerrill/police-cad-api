@@ -185,18 +185,39 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 	}
 	paginatedMembers := approvedMembers[start:end]
 
-	// Enrich members with user data
-	var enrichedMembers []map[string]interface{}
-	for _, member := range paginatedMembers {
+	// OPTIMIZATION: Batch fetch all users in a single query to avoid N+1 queries
+	userIDs := make([]primitive.ObjectID, 0, len(paginatedMembers))
+	userIDMap := make(map[string]int) // Map userID string to index in paginatedMembers
+	for i, member := range paginatedMembers {
 		userID, err := primitive.ObjectIDFromHex(member.UserID)
 		if err != nil {
 			continue // Skip invalid user IDs
 		}
+		userIDs = append(userIDs, userID)
+		userIDMap[member.UserID] = i
+	}
 
-		// Fetch user details
-		var user models.User
-		err = c.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
-		if err != nil {
+	// Batch fetch all users
+	var users []models.User
+	if len(userIDs) > 0 {
+		cursor, err := c.UDB.Find(ctx, bson.M{"_id": bson.M{"$in": userIDs}})
+		if err == nil {
+			defer cursor.Close(ctx)
+			cursor.All(ctx, &users)
+		}
+	}
+
+	// Create a map for O(1) lookup
+	userMap := make(map[string]models.User)
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+
+	// Enrich members with user data
+	var enrichedMembers []map[string]interface{}
+	for _, member := range paginatedMembers {
+		user, exists := userMap[member.UserID]
+		if !exists {
 			continue // Skip if user not found
 		}
 

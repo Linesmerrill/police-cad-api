@@ -2811,8 +2811,8 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 		})
 	}
 
-	// Count total matching documents
-	totalCount, _ := c.DB.CountDocuments(context.TODO(), bson.M{
+	// Count total matching documents (use same ctx from aggregation)
+	totalCount, _ := c.DB.CountDocuments(ctx, bson.M{
 		"community.subscription.plan": "elite",
 		"community.visibility":        "public",
 	})

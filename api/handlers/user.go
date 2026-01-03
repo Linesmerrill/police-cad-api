@@ -3519,8 +3519,8 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 		})
 	}
 
-	// Count total matching documents
-	totalCount, _ := u.CDB.CountDocuments(context.TODO(), bson.M{"community.visibility": "public"})
+	// Count total matching documents (use same ctx from aggregation)
+	totalCount, _ := u.CDB.CountDocuments(ctx, bson.M{"community.visibility": "public"})
 
 	// Return response
 	response := map[string]interface{}{
