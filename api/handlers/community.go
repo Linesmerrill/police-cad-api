@@ -2285,13 +2285,17 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	update := bson.M{}
 	for key, value := range updatedDetails {
 		update["community.departments.$."+key] = value
 	}
 
 	filter := bson.M{"_id": cID, "community.departments._id": dID}
-	err = c.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
+	err = c.DB.UpdateOne(ctx, filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update department details", http.StatusInternalServerError, w, err)
 		return

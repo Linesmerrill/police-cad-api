@@ -267,7 +267,11 @@ func (c Civilian) CreateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	civilian.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	civilian.Details.UpdatedAt = civilian.Details.CreatedAt
 
-	_, err := c.DB.InsertOne(context.Background(), civilian)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err := c.DB.InsertOne(ctx, civilian)
 	if err != nil {
 		config.ErrorStatus("failed to create civilian", http.StatusInternalServerError, w, err)
 		return
