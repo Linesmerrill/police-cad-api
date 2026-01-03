@@ -77,24 +77,56 @@ func (m *medicalReportDatabase) GetMedicalReportsByCivilianID(ctx context.Contex
 		{"$limit": limit},
 	}
 
-	// Execute aggregation
-	cursor, err := m.collection.Aggregate(ctx, pipeline)
-	if err != nil {
-		return nil, err
+	// Execute aggregation and count in parallel for better performance
+	type aggResult struct {
+		reports []models.MedicalReportWithEms
+		err     error
 	}
-	defer cursor.Close(ctx)
-
-	// Decode results
-	var medicalReports []models.MedicalReportWithEms
-	if err := cursor.All(ctx, &medicalReports); err != nil {
-		return nil, err
+	type countResult struct {
+		total int64
+		err   error
 	}
 
-	// Get total count for pagination
-	totalCount, err := m.collection.CountDocuments(ctx, filter)
-	if err != nil {
-		return nil, err
+	aggChan := make(chan aggResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Execute aggregation (async)
+	go func() {
+		cursor, err := m.collection.Aggregate(ctx, pipeline)
+		if err != nil {
+			aggChan <- aggResult{err: err}
+			return
+		}
+		defer cursor.Close(ctx)
+
+		var medicalReports []models.MedicalReportWithEms
+		if err := cursor.All(ctx, &medicalReports); err != nil {
+			aggChan <- aggResult{err: err}
+			return
+		}
+		aggChan <- aggResult{reports: medicalReports}
+	}()
+
+	// Get total count for pagination (async)
+	go func() {
+		total, err := m.collection.CountDocuments(ctx, filter)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	// Wait for both queries to complete
+	aggRes := <-aggChan
+	countRes := <-countChan
+
+	if aggRes.err != nil {
+		return nil, aggRes.err
 	}
+
+	if countRes.err != nil {
+		return nil, countRes.err
+	}
+
+	medicalReports := aggRes.reports
+	totalCount := countRes.total
 
 	// Calculate pagination info
 	totalPages := (totalCount + limit - 1) / limit

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 )
@@ -58,8 +58,11 @@ func (h MedicalReport) GetMedicalReportsHandler(w http.ResponseWriter, r *http.R
 		}
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Get medical reports from database
-	ctx := context.Background()
 	response, err := h.DB.GetMedicalReportsByCivilianID(ctx, civilianID, activeCommunityID, limit, page)
 	if err != nil {
 		zap.S().With(err).Error("failed to get medical reports")
@@ -89,8 +92,11 @@ func (h MedicalReport) GetMedicalReportByIDHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Get medical report from database
-	ctx := context.Background()
 	medicalReport, err := h.DB.GetMedicalReportByID(ctx, id)
 	if err != nil {
 		zap.S().With(err).Error("failed to get medical report by ID")
@@ -142,8 +148,11 @@ func (h MedicalReport) CreateMedicalReportHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Create medical report in database
-	ctx := context.Background()
 	err = h.DB.CreateMedicalReport(ctx, &medicalReport)
 	if err != nil {
 		zap.S().With(err).Error("failed to create medical report")
@@ -204,8 +213,11 @@ func (h MedicalReport) UpdateMedicalReportHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update medical report in database
-	ctx := context.Background()
 	err = h.DB.UpdateMedicalReport(ctx, id, &medicalReport)
 	if err != nil {
 		zap.S().With(err).Error("failed to update medical report")
@@ -236,8 +248,11 @@ func (h MedicalReport) DeleteMedicalReportHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Delete medical report from database
-	ctx := context.Background()
 	err := h.DB.DeleteMedicalReport(ctx, id)
 	if err != nil {
 		zap.S().With(err).Error("failed to delete medical report")
