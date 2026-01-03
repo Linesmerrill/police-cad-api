@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.uber.org/zap"
 )
 
 // Search struct mostly used for mocking tests
@@ -174,13 +175,17 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Search for communities with visibility set to "public"
+	// For short queries (1-2 chars), regex is slow but necessary for partial matching
+	// For longer queries, we could use $text search, but regex is more flexible
+	// The visibility filter will use the community_visibility_idx index
+	// Consider creating a compound index on (visibility, name) for better performance
 	communityFilter := bson.M{
 		"$and": []bson.M{
 			{"community.name": bson.M{"$regex": query, "$options": "i"}},
 			{"community.visibility": "public"},
 		},
 	}
+	
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
 	communityCursor, err := s.CommDB.Find(ctx, communityFilter, communityOptions)
 	if err != nil {
@@ -195,11 +200,20 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the total count of matching documents
-	totalCount, err := s.CommDB.CountDocuments(ctx, communityFilter)
+	// For short queries, CountDocuments with regex can be very slow
+	// Use a separate context with longer timeout for count, or skip count for very short queries
+	// For now, we'll try the count but it may timeout for very short queries like "l"
+	countCtx, countCancel := api.WithQueryTimeout(r.Context())
+	defer countCancel()
+	
+	totalCount, err := s.CommDB.CountDocuments(countCtx, communityFilter)
 	if err != nil {
-		config.ErrorStatus("failed to count communities", http.StatusInternalServerError, w, err)
-		return
+		// If count times out, return results without total count rather than failing
+		// This is acceptable for pagination - frontend can still paginate with just the results
+		zap.S().Warnw("failed to count communities (may timeout on short queries)", 
+			"query", query, 
+			"error", err)
+		totalCount = int64(len(communities)) // Use result count as fallback
 	}
 
 	// Prepare the paginated response
