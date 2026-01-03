@@ -171,6 +171,16 @@ db.announcements.createIndex(
   }
 );
 
+// CRITICAL: Community Subscription Created By Index (for /community/{user_id}/subscriptions)
+// DONE
+db.communities.createIndex(
+  { "community.subscriptionCreatedBy": 1 },
+  {
+    name: "community_subscription_created_by_idx",
+    background: true
+  }
+);
+
 // CRITICAL: License Civilian ID Index (for /licenses/civilian/{id})
 // DONE
 db.licenses.createIndex(

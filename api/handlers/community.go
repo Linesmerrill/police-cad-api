@@ -2879,59 +2879,30 @@ func (c Community) GetCommunityUserSubscriptions(w http.ResponseWriter, r *http.
 	// Build the filter to match communities with subscriptionCreatedBy equal to user_id
 	filter := bson.M{"community.subscriptionCreatedBy": userID}
 
-	// Execute queries in parallel for better performance
-	type findResult struct {
-		communities []models.Community
-		err         error
-	}
-	type countResult struct {
-		total int64
-		err   error
-	}
-
-	findChan := make(chan findResult, 1)
-	countChan := make(chan countResult, 1)
-
-	// Fetch the paginated list of communities (async)
-	go func() {
-		opts := options.Find().SetSkip(skip).SetLimit(limit64)
-		cursor, err := c.DB.Find(ctx, filter, opts)
-		if err != nil {
-			findChan <- findResult{err: err}
-			return
-		}
-		defer cursor.Close(ctx)
-
-		var communities []models.Community
-		if err := cursor.All(ctx, &communities); err != nil {
-			findChan <- findResult{err: err}
-			return
-		}
-		findChan <- findResult{communities: communities}
-	}()
-
-	// Count the total number of matching communities (async)
-	go func() {
-		total, err := c.DB.CountDocuments(ctx, filter)
-		countChan <- countResult{total: total, err: err}
-	}()
-
-	// Wait for both queries to complete
-	findRes := <-findChan
-	countRes := <-countChan
-
-	if findRes.err != nil {
-		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, findRes.err)
+	// Fetch the paginated list of communities
+	opts := options.Find().SetSkip(skip).SetLimit(limit64)
+	cursor, err := c.DB.Find(ctx, filter, opts)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
 		return
 	}
+	defer cursor.Close(ctx)
 
-	if countRes.err != nil {
-		config.ErrorStatus("failed to count communities", http.StatusInternalServerError, w, countRes.err)
+	var communities []models.Community
+	if err := cursor.All(ctx, &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
-
-	communities := findRes.communities
-	totalCount := countRes.total
+	
+	// OPTIMIZATION: Estimate total count based on results (skip expensive CountDocuments)
+	// CountDocuments requires scanning even with index, estimate based on results
+	// If we got a full page, there's likely more; otherwise this is likely all
+	var totalCount int64
+	if len(communities) == int(limit64) {
+		totalCount = int64(len(communities)) + 1 // Indicate there might be more
+	} else {
+		totalCount = int64(len(communities))
+	}
 
 	// Create the paginated response
 	paginatedResponse := PaginatedDataResponse{
