@@ -2,25 +2,26 @@
 
 ## Important Limits & Specifications
 
-### Connection Limits
-- **Max Connections**: ~350 connections per cluster
+### Connection Limits (Updated January 2026)
+- **Max Connections**: **1,500 concurrent connections per node** (UPDATED - was ~350 per cluster)
 - **Connection Rate Limit**: **20 new connections per second per node** (CRITICAL)
   - M10 has 3 nodes (1 PRIMARY + 2 SECONDARY)
   - Total: ~60 new connections/second across all nodes
-  - **This is why we increased MaxPoolSize to 200** - it's safe and gives headroom
+  - **With 2 dynos × 150 MaxPoolSize = 300 connections** - well within 1,500 per node limit
 
 ### Current Configuration
-- **MaxPoolSize**: 200 (increased from 100)
+- **MaxPoolSize**: 150 (reduced from 200 for 2 dynos = 300 total connections)
 - **MinPoolSize**: 20 (increased from 10)
 - **MaxConnecting**: 10 (increased from 5)
 - **MaxConnIdleTime**: 30 seconds
 - **Query Timeout**: 10 seconds (via `api.WithQueryTimeout`)
 
 ### Why These Settings Work
-1. **200 max pool** is well under the 350 connection limit
+1. **150 max pool × 2 dynos = 300 connections** - well under 1,500 per node limit
 2. **10s query timeouts** ensure connections release quickly
 3. **20 min pool** keeps connections warm without wasting resources
 4. **30s idle timeout** closes unused connections
+5. **Read preference set to Primary()** - connects primarily to PRIMARY node (within 1,500 limit)
 
 ## Performance Considerations
 
