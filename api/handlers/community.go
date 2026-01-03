@@ -3603,50 +3603,47 @@ func (c Community) GetNonMemberDepartmentsHandler(w http.ResponseWriter, r *http
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Fetch the community
-	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	// OPTIMIZATION: Use aggregation to filter departments in MongoDB instead of loading entire community
+	// This avoids loading huge community documents with many departments/members
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.M{"_id": cID}}},
+		{{"$unwind", "$details.departments"}},
+		{{"$match", bson.M{
+			"details.departments.approvalRequired": true,
+			"$or": []bson.M{
+				{"details.departments.members": bson.M{"$exists": false}},
+				{"details.departments.members": bson.M{"$size": 0}},
+				{"details.departments.members": bson.M{
+					"$not": bson.M{
+						"$elemMatch": bson.M{
+							"userID": userID,
+							"status": "approved",
+						},
+					},
+				}},
+			},
+		}}},
+		{{"$project", bson.M{
+			"_id":              "$details.departments._id",
+			"name":             "$details.departments.name",
+			"description":      "$details.departments.description",
+			"image":            "$details.departments.image",
+			"approvalRequired": "$details.departments.approvalRequired",
+			"templateName":     "$details.departments.template.name",
+		}}},
+	}
+
+	cursor, err := c.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
+	defer cursor.Close(ctx)
 
-	// Filter departments that user is not a member of
 	var filteredDepartments []map[string]interface{}
-	for _, department := range community.Details.Departments {
-		// Only include departments that require approval
-		if !department.ApprovalRequired {
-			continue
-		}
-
-		// Check if user is NOT in the members list or is not "approved"
-		isMember := false
-		for _, member := range department.Members {
-			if member.UserID == userID {
-				if member.Status == "approved" {
-					isMember = true
-				}
-				break
-			}
-		}
-
-		// If user is not a member (or not approved), include this department
-		if !isMember {
-			// Add department with required fields
-			departmentData := map[string]interface{}{
-				"_id":              department.ID,
-				"name":             department.Name,
-				"description":      department.Description,
-				"image":            department.Image,
-				"approvalRequired": department.ApprovalRequired,
-			}
-
-			// Add template name if available (legacy template system)
-			if department.Template.Name != "" {
-				departmentData["templateName"] = department.Template.Name
-			}
-
-			filteredDepartments = append(filteredDepartments, departmentData)
-		}
+	if err = cursor.All(ctx, &filteredDepartments); err != nil {
+		config.ErrorStatus("Failed to fetch departments", http.StatusInternalServerError, w, err)
+		return
 	}
 
 	// Apply pagination

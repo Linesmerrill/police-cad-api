@@ -643,12 +643,11 @@ func (c Civilian) PendingApprovalsHandler(w http.ResponseWriter, r *http.Request
 	skip64 := int64(page * limit)
 
 	// Build filter for pending approvals
+	// OPTIMIZATION: Use $in instead of $or for better index usage
+	// The compound index (activeCommunityID + approvalStatus + createdAt) can be used more efficiently
 	filter := bson.M{
 		"civilian.activeCommunityID": communityID,
-		"$or": []bson.M{
-			{"civilian.approvalStatus": "pending"},
-			{"civilian.approvalStatus": "requested_review"},
-		},
+		"civilian.approvalStatus": bson.M{"$in": []string{"pending", "requested_review"}},
 	}
 
 	zap.S().Debugf("MongoDB filter: %+v", filter)
