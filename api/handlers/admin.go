@@ -562,32 +562,64 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	skip := int64(page * limit)
 	limit64 := int64(limit)
 
-	// Search by community name (case-insensitive)
-	filter := bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
+	// Use request context with timeout
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// OPTIMIZATION: Use $text search for queries >=3 chars (uses community_name_text_idx)
+	// For shorter queries, use prefix regex
+	queryLen := len(query)
+	var filter bson.M
+	var findOpts *options.FindOptions
 	
-	// Get total count for pagination metadata
-	totalCount, err := h.CDB.CountDocuments(r.Context(), filter)
-	if err != nil {
+	if queryLen >= 3 {
+		// Use $text search - much faster with text index
+		filter = bson.M{"$text": bson.M{"$search": query}}
+		findOpts = &options.FindOptions{
+			Skip:  &skip,
+			Limit: &limit64,
+			Sort:  bson.M{"score": bson.M{"$meta": "textScore"}, "community.name": 1},
+		}
+	} else {
+		// For short queries, use prefix regex
+		filter = bson.M{"community.name": bson.M{"$regex": "^" + query, "$options": "i"}}
+		findOpts = &options.FindOptions{
+			Skip:  &skip,
+			Limit: &limit64,
+			Sort:  bson.M{"community.name": 1},
+		}
+	}
+	
+	// Get total count for pagination metadata (skip for short queries)
+	var totalCount int64
+	if queryLen >= 3 {
+		totalCount, err = h.CDB.CountDocuments(ctx, filter)
+	} else {
+		// Estimate for short queries to avoid slow CountDocuments
+		totalCount = 0
+	}
+	if err != nil && queryLen >= 3 {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
 		return
 	}
 	
 	// Use community database to search with pagination
-	cursor, err := h.CDB.Find(r.Context(), filter, &options.FindOptions{
-		Skip:  &skip,
-		Limit: &limit64,
-		Sort:  bson.M{"community.name": 1}, // Sort by name for consistent results
-	})
+	cursor, err := h.CDB.Find(ctx, filter, findOpts)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
 		return
 	}
-	defer cursor.Close(r.Context())
+	defer cursor.Close(ctx)
+	
+	// Estimate count for short queries
+	if queryLen < 3 && totalCount == 0 {
+		totalCount = limit64 * int64(page + 1) // Rough estimate
+	}
 
 	var communities []models.Community
-	if err = cursor.All(r.Context(), &communities); err != nil {
+	if err = cursor.All(ctx, &communities); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode communities"})
 		return

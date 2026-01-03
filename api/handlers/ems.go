@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -32,7 +33,18 @@ func (e Ems) EmsHandler(w http.ResponseWriter, r *http.Request) {
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
-	dbResp, err := e.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
+	// Empty filter with limit/skip - add sort by _id for better performance
+	opts := options.Find().
+		SetLimit(limit64).
+		SetSkip(skip64).
+		SetSort(bson.M{"_id": -1}) // Sort by _id descending (most recent first) for better index usage
+	
+	dbResp, err := e.DB.Find(ctx, bson.D{}, opts)
 	if err != nil {
 		config.ErrorStatus("failed to get ems", http.StatusNotFound, w, err)
 		return

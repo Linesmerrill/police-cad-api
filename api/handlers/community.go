@@ -4777,6 +4777,22 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	// We need to find users who:
 	// 1. Have the community in their communities array with status "approved"
 	// 2. Match the search query in their callSign or username
+	queryLen := len(query)
+	var searchCondition bson.M
+	
+	// OPTIMIZATION: Use $text search for queries >=3 chars (uses user_search_text_idx)
+	// For shorter queries, use prefix regex
+	if queryLen >= 3 {
+		searchCondition = bson.M{"$text": bson.M{"$search": query}} // Uses user_search_text_idx
+	} else {
+		searchCondition = bson.M{
+			"$or": []bson.M{
+				{"user.callSign": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match
+				{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
+			},
+		}
+	}
+	
 	filter := bson.M{
 		"$and": []bson.M{
 			// User must be a member of the community with status "approved"
@@ -4788,13 +4804,8 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 					},
 				},
 			},
-			// User must match the search query in callSign or username
-			{
-				"$or": []bson.M{
-					{"user.callSign": bson.M{"$regex": query, "$options": "i"}},
-					{"user.username": bson.M{"$regex": query, "$options": "i"}},
-				},
-			},
+			// User must match the search query
+			searchCondition,
 		},
 	}
 

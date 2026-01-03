@@ -37,7 +37,13 @@ func (s Spotlight) SpotlightHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	dbResp, err := s.DB.Find(ctx, bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	// Empty filter with limit/skip - add sort by _id for better performance
+	opts := options.Find().
+		SetLimit(limit64).
+		SetSkip(skip64).
+		SetSort(bson.M{"_id": -1}) // Sort by _id descending (most recent first) for better index usage
+	
+	dbResp, err := s.DB.Find(ctx, bson.D{}, opts)
 	if err != nil {
 		config.ErrorStatus("failed to get spotlight", http.StatusNotFound, w, err)
 		return

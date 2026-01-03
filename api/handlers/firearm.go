@@ -40,7 +40,18 @@ func (f Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
-	dbResp, err := f.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
+	// Empty filter with limit/skip - add sort by _id for better performance
+	opts := options.Find().
+		SetLimit(limit64).
+		SetSkip(skip64).
+		SetSort(bson.M{"_id": -1}) // Sort by _id descending (most recent first) for better index usage
+	
+	dbResp, err := f.DB.Find(ctx, bson.D{}, opts)
 	if err != nil {
 		config.ErrorStatus("failed to get firearms", http.StatusNotFound, w, err)
 		return
@@ -360,28 +371,51 @@ func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 	Page := getPage(Page, r)
 	skip64 := int64(Page * Limit)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	var dbResp []models.Firearm
 
-	// Build the query
-	query := bson.M{
-		"$or": []bson.M{
-			{"firearm.name": bson.M{"$regex": name, "$options": "i"}},
-			{"firearm.serialNumber": bson.M{"$regex": serialNumber, "$options": "i"}},
-		},
+	// Build the query - use prefix regex for better performance than full regex
+	// TODO: Consider adding text index on firearm.name and firearm.serialNumber for better performance
+	query := bson.M{}
+	var orConditions []bson.M
+	
+	if name != "" {
+		orConditions = append(orConditions, bson.M{"firearm.name": bson.M{"$regex": "^" + name, "$options": "i"}}) // Prefix match is faster
+	}
+	if serialNumber != "" {
+		orConditions = append(orConditions, bson.M{"firearm.serialNumber": bson.M{"$regex": "^" + serialNumber, "$options": "i"}}) // Prefix match is faster
+	}
+	
+	if len(orConditions) > 0 {
+		query["$or"] = orConditions
 	}
 	if communityID != "" {
 		query["firearm.activeCommunityID"] = communityID
 	}
 
 	// Fetch firearms
-	dbResp, err = f.DB.Find(context.TODO(), query, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	opts := options.Find().
+		SetLimit(limit64).
+		SetSkip(skip64).
+		SetSort(bson.M{"_id": -1}) // Sort by _id for better index usage
+	
+	dbResp, err = f.DB.Find(ctx, query, opts)
 	if err != nil {
 		config.ErrorStatus("failed to search firearms", http.StatusNotFound, w, err)
 		return
 	}
 
-	// Count total firearms for pagination
-	total, err := f.DB.CountDocuments(context.TODO(), query)
+	// Count total firearms for pagination (skip if query is empty to avoid slow count)
+	var total int64
+	if len(query) > 0 {
+		total, err = f.DB.CountDocuments(ctx, query)
+	} else {
+		// Empty query - estimate from results
+		total = limit64 * int64(Page + 1)
+	}
 	if err != nil {
 		config.ErrorStatus("failed to count firearms", http.StatusInternalServerError, w, err)
 		return
