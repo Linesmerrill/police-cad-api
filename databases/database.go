@@ -109,7 +109,7 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 	// Configure connection pool for better performance and resilience
 	// Increased timeouts to handle high latency and network issues
 	clientOptions := options.Client().ApplyURI(conf.URL).
-		SetMaxPoolSize(200).                    // Maximum number of connections in pool (increased from 100 for high traffic)
+		SetMaxPoolSize(150).                    // Maximum number of connections in pool (150 × 2 dynos = 300 total, safe for M10 limit of ~350)
 		SetMinPoolSize(20).                     // Minimum number of connections in pool (increased from 10)
 		SetMaxConnecting(10).                   // Limit concurrent connection attempts (increased from 5 for faster pool growth)
 		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s
