@@ -60,8 +60,13 @@ const testQueries = [
   },
   {
     collection: "firearms",
-    name: "Firearms by registered owner",
-    query: { "firearm.registeredOwnerID": "test-owner-id" }
+    name: "Firearms by registered owner ($or query)",
+    query: { 
+      "$or": [
+        { "firearm.registeredOwnerID": "test-owner-id" },
+        { "firearm.linkedCivilianID": "test-owner-id" }
+      ]
+    }
   },
   {
     collection: "civilians",

@@ -89,6 +89,7 @@ db.civilians.createIndex(
 );
 
 // CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
+// The query uses $or with both fields, so we need separate indexes for each
 // DONE
 db.firearms.createIndex(
   { "firearm.linkedCivilianID": 1, "firearm.registeredOwnerID": 1 },
@@ -97,6 +98,25 @@ db.firearms.createIndex(
     background: true
   }
 );
+
+// CRITICAL: Separate indexes for $or queries (MongoDB can't use compound index efficiently for $or)
+// These allow MongoDB to use index intersection for $or queries
+print("Creating separate firearm indexes for $or queries...");
+db.firearms.createIndex(
+  { "firearm.registeredOwnerID": 1 },
+  {
+    name: "firearm_registered_owner_id_idx",
+    background: true
+  }
+);
+db.firearms.createIndex(
+  { "firearm.linkedCivilianID": 1 },
+  {
+    name: "firearm_linked_civilian_id_idx",
+    background: true
+  }
+);
+print("✓ Separate firearm indexes created");
 
 // CRITICAL: Call Community ID Index (for /calls/community/{id})
 // DONE
