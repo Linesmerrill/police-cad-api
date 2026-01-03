@@ -599,7 +599,11 @@ func (c Civilian) AdminCivilianApprovalHandler(w http.ResponseWriter, r *http.Re
 		update["$set"].(bson.M)["civilian.approvalNotes"] = requestBody.Notes
 	}
 
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update civilian approval status", http.StatusInternalServerError, w, err)
 		return
@@ -752,6 +756,10 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 	skip := int64(page * limit)
 	limit64 := int64(limit)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Search by name (case-insensitive) within the specified community
 	filter := bson.M{
 		"$and": []bson.M{
@@ -764,24 +772,54 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 		},
 	}
 	
-	// Get total count for pagination metadata
-	totalCount, err := c.DB.CountDocuments(r.Context(), filter)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
-		return
+	// Get total count for pagination metadata (run in parallel with Find for better performance)
+	type findResult struct {
+		civilians []models.Civilian
+		err        error
 	}
-	
-	// Search civilians with pagination
-	civilians, err := c.DB.Find(r.Context(), filter, &options.FindOptions{
-		Skip:  &skip,
-		Limit: &limit64,
-		Sort:  bson.M{"civilian.name": 1}, // Sort by name for consistent results
-	})
-	if err != nil {
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Search civilians with pagination (async)
+	go func() {
+		civilians, err := c.DB.Find(ctx, filter, &options.FindOptions{
+			Skip:  &skip,
+			Limit: &limit64,
+			Sort:  bson.M{"civilian.name": 1}, // Sort by name for consistent results
+		})
+		if err != nil {
+			findChan <- findResult{err: err}
+			return
+		}
+		findChan <- findResult{civilians: civilians}
+	}()
+
+	// Count total documents (async)
+	go func() {
+		totalCount, err := c.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{total: totalCount, err: err}
+	}()
+
+	// Wait for both queries to complete
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
 		return
+	}
+
+	civilians := findRes.civilians
+	totalCount := countRes.total
+	if countRes.err != nil {
+		// If count fails, use length of results as fallback
+		totalCount = int64(len(civilians))
 	}
 
 	// Ensure the response is always an array

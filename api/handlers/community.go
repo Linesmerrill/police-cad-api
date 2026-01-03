@@ -2106,8 +2106,12 @@ func (c Community) FetchDepartmentByIDHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -3149,15 +3153,16 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		} `bson:"community"`
 	}
 
-	// Build match stage
-	matchStage := bson.D{{"community.visibility", "public"}}
-	if tag != "all" {
-		matchStage = append(matchStage, bson.E{"community.tags", tag})
-	}
-
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Build match stage
+	matchStage := bson.D{{"community.visibility", "public"}}
+	if tag != "all" {
+		// Direct array matching - MongoDB will use array index efficiently
+		matchStage = append(matchStage, bson.E{"community.tags", tag})
+	}
 
 	// Aggregation pipeline with paging
 	pipeline := mongo.Pipeline{
@@ -3177,18 +3182,59 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		}}},
 	}
 
-	cursor, err := c.DB.Aggregate(ctx, pipeline)
-	if err != nil {
-		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
-		return
+	// Run aggregation and count in parallel for better performance
+	type aggResult struct {
+		results []liteCommunity
+		err     error
 	}
-	defer cursor.Close(ctx)
+	type countResult struct {
+		total int64
+		err   error
+	}
 
-	var results []liteCommunity
-	if err := cursor.All(ctx, &results); err != nil {
-		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+	aggChan := make(chan aggResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Run aggregation (async)
+	go func() {
+		cursor, err := c.DB.Aggregate(ctx, pipeline)
+		if err != nil {
+			aggChan <- aggResult{err: err}
+			return
+		}
+		defer cursor.Close(ctx)
+
+		var results []liteCommunity
+		if err := cursor.All(ctx, &results); err != nil {
+			aggChan <- aggResult{err: err}
+			return
+		}
+		aggChan <- aggResult{results: results}
+	}()
+
+	// Run count (async) - only if needed (skip for "all" tag to avoid expensive count)
+	go func() {
+		if tag == "all" && page == 0 {
+			// For first page of "all", we can skip count to save time
+			countChan <- countResult{total: -1} // -1 means "not calculated"
+			return
+		}
+		countFilter := bson.M{"community.visibility": "public"}
+		if tag != "all" {
+			countFilter["community.tags"] = tag
+		}
+		totalCount, err := c.DB.CountDocuments(ctx, countFilter)
+		countChan <- countResult{total: totalCount, err: err}
+	}()
+
+	// Wait for aggregation to complete
+	aggRes := <-aggChan
+	if aggRes.err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, aggRes.err)
 		return
 	}
+
+	results := aggRes.results
 
 	// Format response
 	var data []map[string]interface{}
@@ -3208,12 +3254,12 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		})
 	}
 
-	// Count total matching documents (run in parallel with aggregation for better performance)
-	countFilter := bson.M{"community.visibility": "public"}
-	if tag != "all" {
-		countFilter["community.tags"] = tag
+	// Get count result
+	countRes := <-countChan
+	totalCount := countRes.total
+	if countRes.err != nil {
+		totalCount = -1 // Indicate count failed
 	}
-	totalCount, _ := c.DB.CountDocuments(ctx, countFilter)
 
 	// Return response
 	w.WriteHeader(http.StatusOK)
