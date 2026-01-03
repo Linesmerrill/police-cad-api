@@ -10,19 +10,25 @@
   - **With 2 dynos × 150 MaxPoolSize = 300 connections** - well within 1,500 per node limit
 
 ### Current Configuration
-- **MaxPoolSize**: 150 per dyno (2 dynos × 150 = 300 total connections)
+- **MaxPoolSize**: 200 per dyno (2 dynos × 200 = 400 total connections)
 - **MinPoolSize**: 20 (keeps pool warm)
 - **MaxConnecting**: 10 (limits concurrent connection attempts)
 - **MaxConnIdleTime**: 30 seconds (closes idle connections)
 - **Query Timeout**: 10 seconds (via `api.WithQueryTimeout`)
 
 ### Why These Settings Work
-1. **150 max pool × 2 dynos = 300 connections** - only 20% of M10's 1,500 per node limit (plenty of headroom)
+1. **200 max pool × 2 dynos = 400 connections** - only 27% of M10's 1,500 per node limit (plenty of headroom for spikes)
 2. **10s query timeouts** ensure connections release quickly (prevents indefinite hangs)
 3. **20 min pool** keeps connections warm for faster queries
 4. **30s idle timeout** closes unused connections (releases resources)
 5. **Read preference set to Primary()** - connects primarily to PRIMARY node (within 1,500 limit)
 6. **10 MaxConnecting** prevents overwhelming MongoDB during connection spikes
+
+### Connection Pool Scaling Options
+- **Current**: 200 per dyno × 2 dynos = **400 total** (27% of limit)
+- **For larger spikes**: Increase to 250 per dyno × 2 dynos = **500 total** (33% of limit)
+- **For even more capacity**: Add 3rd dyno × 200 = **600 total** (40% of limit)
+- **Maximum safe**: Up to ~500 per dyno × 2 dynos = **1,000 total** (67% of limit, leaves buffer)
 
 ## Performance Considerations
 
