@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -101,6 +102,10 @@ func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	var dbResp []models.Firearm
 
 	// If the user is in a community then we want to search for firearms that
@@ -111,7 +116,7 @@ func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	// that are not in a community
 	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = f.DB.Find(context.TODO(), bson.M{
+		dbResp, err = f.DB.Find(ctx, bson.M{
 			"firearm.userID":            userID,
 			"firearm.activeCommunityID": activeCommunityID,
 		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
@@ -120,7 +125,7 @@ func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	} else {
-		dbResp, err = f.DB.Find(context.TODO(), bson.M{
+		dbResp, err = f.DB.Find(ctx, bson.M{
 			"firearm.userID": userID,
 			"$or": []bson.M{
 				{"firearm.activeCommunityID": nil},
@@ -160,32 +165,59 @@ func (f Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 
 	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
 
-	var dbResp []models.Firearm
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
 
-	// Query to fetch firearms
-	err = nil
-	dbResp, err = f.DB.Find(context.TODO(), bson.M{
+	// Build filter once (reused for both queries)
+	filter := bson.M{
 		"$or": []bson.M{
 			{"firearm.registeredOwnerID": registeredOwnerID}, // Deprecated, use linkedCivilianID
 			{"firearm.linkedCivilianID": registeredOwnerID},
 		},
-	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-	if err != nil {
-		config.ErrorStatus("failed to get firearms with empty registered owner id", http.StatusNotFound, w, err)
+	}
+
+	// Execute queries in parallel for better performance
+	type findResult struct {
+		firearms []models.Firearm
+		err      error
+	}
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Query to fetch firearms (async)
+	go func() {
+		dbResp, err := f.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+		findChan <- findResult{firearms: dbResp, err: err}
+	}()
+
+	// Count total firearms for pagination (async)
+	go func() {
+		total, err := f.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	// Wait for both queries to complete
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get firearms with empty registered owner id", http.StatusNotFound, w, findRes.err)
 		return
 	}
 
-	// Count total firearms for pagination
-	total, err := f.DB.CountDocuments(context.TODO(), bson.M{
-		"$or": []bson.M{
-			{"firearm.registeredOwnerID": registeredOwnerID},
-			{"firearm.linkedCivilianID": registeredOwnerID},
-		},
-	})
-	if err != nil {
-		config.ErrorStatus("failed to count firearms", http.StatusInternalServerError, w, err)
+	if countRes.err != nil {
+		config.ErrorStatus("failed to count firearms", http.StatusInternalServerError, w, countRes.err)
 		return
 	}
+
+	dbResp := findRes.firearms
+	total := countRes.total
 
 	// Ensure the response is always an array
 	if len(dbResp) == 0 {

@@ -18,6 +18,7 @@ import (
 
 	"math"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -283,8 +284,12 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	// Add the updatedAt field to track the update time
 	update["civilian.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the civilian in the database
-	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, bson.M{"$set": update})
+	err = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update civilian", http.StatusInternalServerError, w, err)
 		return

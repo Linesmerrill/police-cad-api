@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -64,23 +65,54 @@ func (l License) LicensesByCivilianIDHandler(w http.ResponseWriter, r *http.Requ
 	skip := int64((Page - 1) * Limit)
 	limit64 := int64(Limit)
 
-	// Fetch total count
-	totalCount, err := l.DB.CountDocuments(context.TODO(), bson.M{
-		"license.civilianID": civID,
-	})
-	if err != nil {
-		config.ErrorStatus("failed to get total count of licenses", http.StatusInternalServerError, w, err)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Build filter once (reused for both queries)
+	filter := bson.M{"license.civilianID": civID}
+
+	// Execute queries in parallel for better performance
+	type findResult struct {
+		licenses []models.License
+		err      error
+	}
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Fetch paginated data (async)
+	go func() {
+		dbResp, err := l.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip})
+		findChan <- findResult{licenses: dbResp, err: err}
+	}()
+
+	// Fetch total count (async)
+	go func() {
+		total, err := l.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	// Wait for both queries to complete
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get licenses by civilian id", http.StatusNotFound, w, findRes.err)
 		return
 	}
 
-	// Fetch paginated data
-	dbResp, err := l.DB.Find(context.TODO(), bson.M{
-		"license.civilianID": civID,
-	}, &options.FindOptions{Limit: &limit64, Skip: &skip})
-	if err != nil {
-		config.ErrorStatus("failed to get licenses by civilian id", http.StatusNotFound, w, err)
+	if countRes.err != nil {
+		config.ErrorStatus("failed to get total count of licenses", http.StatusInternalServerError, w, countRes.err)
 		return
 	}
+
+	dbResp := findRes.licenses
+	totalCount := countRes.total
 
 	// Ensure the response is not nil
 	if len(dbResp) == 0 {

@@ -1510,6 +1510,10 @@ func (u User) UpdateLastAccessedCommunityHandler(w http.ResponseWriter, r *http.
 	}
 	createdAtPrimitive := primitive.NewDateTimeFromTime(createdAt)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the user's lastAccessedCommunity details
 	filter := bson.M{"_id": uID}
 	update := bson.M{"$set": bson.M{
@@ -1517,7 +1521,7 @@ func (u User) UpdateLastAccessedCommunityHandler(w http.ResponseWriter, r *http.
 		"user.lastAccessedCommunity.createdAt":   createdAtPrimitive,
 	}}
 
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update lastAccessedCommunity", http.StatusInternalServerError, w, err)
 		return
@@ -2185,10 +2189,14 @@ func (u User) SetOnlineStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": uID}
 	update := bson.M{"$set": bson.M{"user.isOnline": requestBody.IsOnline}}
 
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update online status", http.StatusInternalServerError, w, err)
 		return

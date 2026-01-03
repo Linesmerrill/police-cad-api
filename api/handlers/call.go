@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -101,7 +102,11 @@ func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	dbResp, err := c.DB.Find(context.TODO(), filter)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := c.DB.Find(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to get calls with community id", http.StatusNotFound, w, err)
 		return

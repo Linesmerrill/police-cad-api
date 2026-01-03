@@ -95,6 +95,10 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	var dbResp []models.Vehicle
 
 	// If the user is in a community then we want to search for vehicles that
@@ -105,7 +109,7 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	// that are not in a community
 	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
+		dbResp, err = v.DB.Find(ctx, bson.M{
 			"vehicle.userID":            userID,
 			"vehicle.activeCommunityID": activeCommunityID,
 		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
@@ -114,7 +118,7 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	} else {
-		dbResp, err = v.DB.Find(context.TODO(), bson.M{
+		dbResp, err = v.DB.Find(ctx, bson.M{
 			"vehicle.userID": userID,
 			"$or": []bson.M{
 				{"vehicle.activeCommunityID": nil},

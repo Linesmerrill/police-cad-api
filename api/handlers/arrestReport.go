@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -146,27 +147,59 @@ func (a ArrestReport) GetArrestReportsByArresteeIDHandler(w http.ResponseWriter,
 	skip := int64(Page * Limit)
 	limit64 := int64(Limit)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Create the filter
 	filter := bson.M{
 		"arrestReport.arrestee.id": arresteeID,
 	}
 
-	// Fetch total count
-	totalCount, err := a.DB.CountDocuments(context.TODO(), filter)
-	if err != nil {
-		config.ErrorStatus("failed to get total count of arrest reports", http.StatusInternalServerError, w, err)
+	// Execute queries in parallel for better performance
+	type findResult struct {
+		reports []models.ArrestReport
+		err     error
+	}
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Fetch paginated data (async)
+	go func() {
+		dbResp, err := a.DB.Find(ctx, filter, &options.FindOptions{
+			Limit: &limit64,
+			Skip:  &skip,
+		})
+		findChan <- findResult{reports: dbResp, err: err}
+	}()
+
+	// Fetch total count (async)
+	go func() {
+		total, err := a.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	// Wait for both queries to complete
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get arrest reports", http.StatusNotFound, w, findRes.err)
 		return
 	}
 
-	// Fetch paginated data
-	dbResp, err := a.DB.Find(context.TODO(), filter, &options.FindOptions{
-		Limit: &limit64,
-		Skip:  &skip,
-	})
-	if err != nil {
-		config.ErrorStatus("failed to get arrest reports", http.StatusNotFound, w, err)
+	if countRes.err != nil {
+		config.ErrorStatus("failed to get total count of arrest reports", http.StatusInternalServerError, w, countRes.err)
 		return
 	}
+
+	dbResp := findRes.reports
+	totalCount := countRes.total
 
 	// Create paginated response
 	paginatedResponse := PaginatedDataResponse{
