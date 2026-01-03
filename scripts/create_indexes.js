@@ -63,7 +63,66 @@ db.communities.createIndex(
 );
 print("✓ Community visibility index created");
 
+// CRITICAL: Vehicle Registered Owner Index (for /vehicles/registered-owner/{id})
+print("Creating vehicle registered owner index...");
+db.vehicles.createIndex(
+  { "vehicle.linkedCivilianID": 1, "vehicle.registeredOwnerID": 1 },
+  {
+    name: "vehicle_registered_owner_idx",
+    background: true
+  }
+);
+print("✓ Vehicle registered owner index created");
+
+// CRITICAL: Vehicle User ID Index (for /vehicles/user/{id})
+print("Creating vehicle user ID index...");
+db.vehicles.createIndex(
+  { "vehicle.userID": 1, "vehicle.activeCommunityID": 1 },
+  {
+    name: "vehicle_user_community_idx",
+    background: true
+  }
+);
+print("✓ Vehicle user ID index created");
+
+// CRITICAL: Civilian User ID Index (for /civilians/user/{id})
+print("Creating civilian user ID index...");
+db.civilians.createIndex(
+  { "civilian.userID": 1, "civilian.activeCommunityID": 1 },
+  {
+    name: "civilian_user_community_idx",
+    background: true
+  }
+);
+print("✓ Civilian user ID index created");
+
+// CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
+print("Creating firearm registered owner index...");
+db.firearms.createIndex(
+  { "firearm.linkedCivilianID": 1, "firearm.registeredOwnerID": 1 },
+  {
+    name: "firearm_registered_owner_idx",
+    background: true
+  }
+);
+print("✓ Firearm registered owner index created");
+
+// CRITICAL: Call Community ID Index (for /calls/community/{id})
+print("Creating call community ID index...");
+db.calls.createIndex(
+  { "call.communityID": 1, "call.status": 1 },
+  {
+    name: "call_community_status_idx",
+    background: true
+  }
+);
+print("✓ Call community ID index created");
+
 print("\n✅ All indexes created! Check index status with:");
 print("db.users.getIndexes()");
 print("db.communities.getIndexes()");
+print("db.vehicles.getIndexes()");
+print("db.civilians.getIndexes()");
+print("db.firearms.getIndexes()");
+print("db.calls.getIndexes()");
 
