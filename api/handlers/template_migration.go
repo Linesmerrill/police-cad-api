@@ -146,6 +146,7 @@ func (tm *TemplateMigration) MigrateCommunityTemplatesHandler(w http.ResponseWri
 // MigrateAllCommunitiesTemplatesHandler migrates all communities' embedded templates to the new system
 func (tm *TemplateMigration) MigrateAllCommunitiesTemplatesHandler(w http.ResponseWriter, r *http.Request) {
 	// Find all communities
+	// NOTE: Empty filter is intentional here - migration needs to process ALL communities
 	cursor, err := tm.CommunityDB.Find(context.Background(), bson.M{})
 	if err != nil {
 		config.ErrorStatus("failed to retrieve communities", http.StatusInternalServerError, w, err)
@@ -266,6 +267,7 @@ func (tm *TemplateMigration) MigrateAllCommunitiesTemplatesHandler(w http.Respon
 // GetMigrationStatusHandler returns the status of template migration for all communities
 func (tm *TemplateMigration) GetMigrationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	// Find all communities
+	// NOTE: Empty filter is intentional here - status check needs to process ALL communities
 	cursor, err := tm.CommunityDB.Find(context.Background(), bson.M{})
 	if err != nil {
 		config.ErrorStatus("failed to retrieve communities", http.StatusInternalServerError, w, err)

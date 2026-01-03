@@ -2371,8 +2371,12 @@ func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Find all admin users
-	cursor, err := h.ADB.Find(r.Context(), bson.M{}, nil)
+	// Find all admin users with limit and sort for better performance
+	// Note: admin_users collection is small (3 docs), but adding limit/sort is best practice
+	opts := options.Find().
+		SetLimit(1000). // Reasonable upper limit
+		SetSort(bson.M{"_id": 1}) // Sort by _id for consistent ordering
+	cursor, err := h.ADB.Find(r.Context(), bson.M{}, opts)
 	if err != nil {
 		log.Printf("Admin get all error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
