@@ -1714,10 +1714,10 @@ func (c Community) FetchCommunityMembersByRoleIDHandlerV2(w http.ResponseWriter,
 		}
 	}
 
-	// Create a map for O(1) lookup
+	// Create a map for O(1) lookup (user.ID is already a string)
 	userMap := make(map[string]models.User)
 	for _, user := range users {
-		userMap[user.ID.Hex()] = user
+		userMap[user.ID] = user
 	}
 
 	// Populate user details for each member (now using batch-fetched data)
