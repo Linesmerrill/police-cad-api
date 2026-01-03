@@ -383,3 +383,191 @@ createIndexSafe(
   }
 );
 
+// ============================================================================
+// PERFORMANCE ADVISOR RECOMMENDED INDEXES
+// Based on MongoDB Performance Advisor analysis of slow queries
+// ============================================================================
+
+// HIGH PRIORITY: User Username + _id Index (Performance Advisor)
+// Expected Impact: Can reduce up to 269.1 MB of disk reads from 13.08 queries/hour
+// Avg Execution Time: 44474 ms, Avg Docs Scanned: 705303
+createIndexSafe(
+  db.users,
+  { "user.username": 1, "_id": 1 },
+  {
+    name: "user_username_id_idx",
+    background: true
+  }
+);
+
+// HIGH PRIORITY: User Name + _id Index (Performance Advisor)
+// Expected Impact: Can reduce up to 269.1 MB of disk reads from 13.08 queries/hour
+// Avg Execution Time: 44474 ms, Avg Docs Scanned: 705303
+createIndexSafe(
+  db.users,
+  { "user.name": 1, "_id": 1 },
+  {
+    name: "user_name_id_idx",
+    background: true
+  }
+);
+
+// HIGH PRIORITY: User Email Index (Performance Advisor)
+// Expected Impact: Can reduce up to 306.8 MB of disk reads from 9.46 queries/hour
+// Avg Execution Time: 60026 ms, Avg Docs Scanned: 804243
+// NOTE: This is for top-level "email" field, different from "user.email" index above
+createIndexSafe(
+  db.users,
+  { "email": 1 },
+  {
+    name: "email_idx",
+    background: true
+  }
+);
+
+// HIGH PRIORITY: Community Visibility + Name Index (Performance Advisor)
+// Expected Impact: 15.5 queries/hour
+// Avg Execution Time: 15056 ms, Avg Docs Scanned: 37670
+createIndexSafe(
+  db.communities,
+  { "community.visibility": 1, "community.name": 1 },
+  {
+    name: "community_visibility_name_idx",
+    background: true
+  }
+);
+
+// MEDIUM PRIORITY: Community Visibility + _id Index (Performance Advisor)
+// Expected Impact: 4.5 queries/hour
+// Avg Execution Time: 2556 ms, Avg Docs Scanned: 3825
+createIndexSafe(
+  db.communities,
+  { "community.visibility": 1, "_id": 1 },
+  {
+    name: "community_visibility_id_idx",
+    background: true
+  }
+);
+
+// LOW PRIORITY: Community Visibility + MembersCount Index (Performance Advisor)
+// Expected Impact: 0.13 queries/hour
+// Avg Execution Time: 1092 ms, Avg Docs Scanned: 3825
+createIndexSafe(
+  db.communities,
+  { "community.visibility": 1, "community.membersCount": 1 },
+  {
+    name: "community_visibility_membersCount_idx",
+    background: true
+  }
+);
+
+// HIGH PRIORITY: Pending Verification Email Index (Performance Advisor)
+// Expected Impact: 4.46 queries/hour
+// Avg Execution Time: 774 ms, Avg Docs Scanned: 6214
+createIndexSafe(
+  db.pendingVerifications,
+  { "email": 1 },
+  {
+    name: "email_idx",
+    background: true
+  }
+);
+
+// MEDIUM PRIORITY: Invite Code + Remaining Uses Index (Performance Advisor)
+// Expected Impact: 0.71 queries/hour
+// Avg Execution Time: 1047 ms, Avg Docs Scanned: 6680
+createIndexSafe(
+  db.inviteCodes,
+  { "code": 1, "remainingUses": 1 },
+  {
+    name: "code_remainingUses_idx",
+    background: true
+  }
+);
+
+// LOW PRIORITY: Invite Code CommunityId + CreatedAt Index (Performance Advisor)
+// Expected Impact: 0.04 queries/hour
+// Avg Execution Time: 472 ms, Avg Docs Scanned: 7808
+createIndexSafe(
+  db.inviteCodes,
+  { "communityId": 1, "createdAt": -1 },
+  {
+    name: "communityId_createdAt_idx",
+    background: true
+  }
+);
+
+// LOW PRIORITY: EMS Vehicle ActiveCommunityID + UserID Index (Performance Advisor)
+// Expected Impact: 0.13 queries/hour
+// Avg Execution Time: 522 ms, Avg Docs Scanned: 38803
+createIndexSafe(
+  db.emsvehicles,
+  { "vehicle.activeCommunityID": 1, "vehicle.userID": 1 },
+  {
+    name: "vehicle_activeCommunityID_userID_idx",
+    background: true
+  }
+);
+
+// LOW PRIORITY: EMS Persona ActiveCommunityID + UserID Index (Performance Advisor)
+// Expected Impact: 0.08 queries/hour
+// Avg Execution Time: 6208 ms, Avg Docs Scanned: 48919
+createIndexSafe(
+  db.ems,
+  { "persona.activeCommunityID": 1, "persona.userID": 1 },
+  {
+    name: "persona_activeCommunityID_userID_idx",
+    background: true
+  }
+);
+
+// MEDIUM PRIORITY: Vehicle ActiveCommunityID + VIN Index (Performance Advisor)
+// Expected Impact: 2.46 queries/hour
+// Avg Execution Time: 1824 ms, Avg Docs Scanned: 957
+createIndexSafe(
+  db.vehicles,
+  { "vehicle.activeCommunityID": 1, "vehicle.vin": 1 },
+  {
+    name: "vehicle_activeCommunityID_vin_idx",
+    background: true
+  }
+);
+
+// MEDIUM PRIORITY: Vehicle ActiveCommunityID + Make Index (Performance Advisor)
+// Expected Impact: 2.46 queries/hour
+// Avg Execution Time: 1824 ms, Avg Docs Scanned: 957
+createIndexSafe(
+  db.vehicles,
+  { "vehicle.activeCommunityID": 1, "vehicle.make": 1 },
+  {
+    name: "vehicle_activeCommunityID_make_idx",
+    background: true
+  }
+);
+
+// MEDIUM PRIORITY: Vehicle ActiveCommunityID + Model Index (Performance Advisor)
+// Expected Impact: 2.46 queries/hour
+// Avg Execution Time: 1824 ms, Avg Docs Scanned: 957
+createIndexSafe(
+  db.vehicles,
+  { "vehicle.activeCommunityID": 1, "vehicle.model": 1 },
+  {
+    name: "vehicle_activeCommunityID_model_idx",
+    background: true
+  }
+);
+
+// MEDIUM PRIORITY: Civilian ActiveCommunityID + Name Index (Performance Advisor)
+// Expected Impact: 1.04 queries/hour
+// Avg Execution Time: 1197 ms, Avg Docs Scanned: 799
+createIndexSafe(
+  db.civilians,
+  { "civilian.activeCommunityID": 1, "civilian.name": 1 },
+  {
+    name: "civilian_activeCommunityID_name_idx",
+    background: true
+  }
+);
+
+print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
+

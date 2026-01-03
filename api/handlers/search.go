@@ -114,8 +114,28 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	cursor, err := s.UserDB.Find(ctx, userFilter, userOptions)
 	if err != nil {
-		config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)
-		return
+		// If text search fails (e.g., index doesn't exist), fallback to regex for queries >= 3 chars
+		if queryLen >= 3 {
+			zap.S().Warnw("text search failed, falling back to regex", "query", query, "error", err)
+			userFilter = bson.M{
+				"$and": []bson.M{
+					{"$or": []bson.M{
+						{"user.name": bson.M{"$regex": query, "$options": "i"}},
+						{"user.username": bson.M{"$regex": query, "$options": "i"}},
+					}},
+					{"_id": bson.M{"$ne": currentUserObjectID}},
+				},
+			}
+			userOptions = options.Find().SetLimit(limit).SetSkip(skip)
+			cursor, err = s.UserDB.Find(ctx, userFilter, userOptions)
+			if err != nil {
+				config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)
+				return
+			}
+		} else {
+			config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	defer cursor.Close(ctx)
