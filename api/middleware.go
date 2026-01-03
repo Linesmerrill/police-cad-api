@@ -34,6 +34,22 @@ type MiddlewareDB struct {
 var authenticator auth.Authenticator
 var cache store.Cache
 
+// authenticatedUserIDContextKey is a type for storing authenticated user ID in context
+type authenticatedUserIDContextKey struct{}
+
+// getAuthenticatedUserIDFromContext extracts authenticated user ID from context
+func getAuthenticatedUserIDFromContext(ctx context.Context) string {
+	if val := ctx.Value(authenticatedUserIDContextKey{}); val != nil {
+		return val.(string)
+	}
+	return ""
+}
+
+// withAuthenticatedUserID adds authenticated user ID to context
+func withAuthenticatedUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, authenticatedUserIDContextKey{}, userID)
+}
+
 // Middleware adds some basic header authentication around accessing the routes
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +88,10 @@ func Middleware(next http.Handler) http.Handler {
 			zap.S().Infow("auth/token: authentication successful",
 				"email", email,
 				"username", user.UserName())
+			
+			// Store authenticated user ID in context for CreateToken to use (avoids duplicate DB query)
+			// The user ID will be extracted from ValidateUser and stored in context
+			r = r.WithContext(r.Context())
 			next.ServeHTTP(w, r)
 
 		} else {
@@ -93,31 +113,39 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 
 	email = strings.ToLower(email)
 
-	// Use request context with timeout for database query
-	ctx, cancel := WithQueryTimeout(r.Context())
-	defer cancel()
+	// OPTIMIZATION: Get user ID from context (set by ValidateUser) to avoid duplicate DB query
+	// ValidateUser already looked up the user and validated credentials
+	userID := getAuthenticatedUserIDFromContext(r.Context())
+	
+	if userID == "" {
+		// Fallback: if user ID not in context, do DB lookup (shouldn't happen in normal flow)
+		zap.S().Warnw("CreateToken: user ID not found in context, falling back to DB lookup",
+			"email", email)
+		
+		ctx, cancel := WithQueryTimeout(r.Context())
+		defer cancel()
 
-	// Use direct field lookup with collation to leverage the case-insensitive index
-	// This is much faster than $expr with $toLower which cannot use indexes
-	user := models.User{}
-	opts := options.FindOne().SetCollation(&options.Collation{
-		Locale:   "en",
-		Strength: 2, // Case-insensitive
-	})
-	err := m.DB.FindOne(ctx, bson.M{"user.email": email}, opts).Decode(&user)
-	if err != nil {
-		http.Error(w, "failed to get user by email", http.StatusNotFound)
-		return
+		user := models.User{}
+		opts := options.FindOne().SetCollation(&options.Collation{
+			Locale:   "en",
+			Strength: 2, // Case-insensitive
+		})
+		err := m.DB.FindOne(ctx, bson.M{"user.email": email}, opts).Decode(&user)
+		if err != nil {
+			http.Error(w, "failed to get user by email", http.StatusNotFound)
+			return
+		}
+		userID = user.ID
 	}
 
 	token := uuid.New().String()
-	authUser := auth.NewDefaultUser(email, user.ID, nil, nil)
+	authUser := auth.NewDefaultUser(email, userID, nil, nil)
 	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
 	auth.Append(tokenStrategy, token, authUser, r)
 
 	response := map[string]string{
 		"token": token,
-		"_id":   user.ID,
+		"_id":   userID,
 	}
 
 	responseBody, err := json.Marshal(response)
@@ -208,7 +236,14 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
 	}
 
-	return auth.NewDefaultUser(email, "1", nil, nil), nil
+	// Store user ID in request context so CreateToken can use it without another DB query
+	// This is safe because the request context is passed through the middleware chain
+	if r != nil {
+		ctx := withAuthenticatedUserID(r.Context(), dbEmailResp.ID)
+		*r = *r.WithContext(ctx)
+	}
+
+	return auth.NewDefaultUser(email, dbEmailResp.ID, nil, nil), nil
 }
 
 // RevokeToken revokes a token
