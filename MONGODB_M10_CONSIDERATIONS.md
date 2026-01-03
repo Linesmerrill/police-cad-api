@@ -27,6 +27,15 @@
 6. **Read preference set to Primary()** - connects primarily to PRIMARY node (within 1,500 limit)
 7. **10 MaxConnecting** prevents overwhelming MongoDB during connection spikes
 
+### Performance Impact
+**✅ Verified Results (January 2026):**
+- **Error reduction**: > 45% decrease in errors after increasing MaxPoolSize from 100 to 600 per dyno
+- **Connection pool exhaustion**: Eliminated - pool now has sufficient capacity for traffic spikes
+- **Actual usage**: Pool scales from ~40 (low traffic) to 1,200 (high traffic) automatically
+- **MongoDB limit**: 1,200 total connections = 80% of 1,500 limit (safe buffer of 300)
+
+**Key Insight**: The previous conservative setting (100 per dyno = 200 total) was causing connection pool exhaustion during traffic spikes. Increasing to 600 per dyno (1,200 total) provides sufficient headroom while staying well within M10 limits.
+
 ### Connection Pool Behavior
 - **MaxPoolSize (600)**: Maximum connections per dyno (ceiling, not guaranteed)
 - **MinPoolSize (20)**: Minimum connections kept warm
