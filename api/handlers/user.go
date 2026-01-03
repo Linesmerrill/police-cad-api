@@ -1839,8 +1839,12 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	user := models.User{}
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's communities", http.StatusInternalServerError, w, err)
 		return
@@ -1856,7 +1860,7 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 		update := bson.M{
 			"$set": bson.M{"user.communities": []models.UserCommunity{pendingRequest}},
 		}
-		_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
+		_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, update)
 		if err != nil {
 			config.ErrorStatus("failed to initialize user's communities", http.StatusInternalServerError, w, err)
 			return
@@ -1864,7 +1868,7 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 	} else {
 		// Check if the communityId already exists in the user's pending community requests
 		existingUser := models.User{}
-		err := u.DB.FindOne(context.Background(), bson.M{
+		err := u.DB.FindOne(ctx, bson.M{
 			"_id": uID,
 			"user.communities": bson.M{
 				"$elemMatch": bson.M{
@@ -1887,7 +1891,7 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 		// Update the user's pending community requests array
 		filter := bson.M{"_id": uID}
 		update := bson.M{"$addToSet": bson.M{"user.communities": pendingRequest}} // $addToSet ensures no duplicates
-		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		_, err = u.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to update user's pending community requests", http.StatusInternalServerError, w, err)
 			return
