@@ -43,7 +43,8 @@ func (c *warrantDatabase) Find(ctx context.Context, filter interface{}, opts ...
 	if err != nil {
 		return nil, err
 	}
-	err = curr.Decode(&warrants)
+	defer curr.Close(ctx) // Ensure cursor is closed
+	err = curr.All(ctx, &warrants) // Use All() instead of Decode() for multiple documents
 	if err != nil {
 		return nil, err
 	}

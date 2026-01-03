@@ -275,3 +275,14 @@ createIndexSafe(
   }
 );
 
+// CRITICAL: Warrant Accused ID + Status Index (for /warrants/user/{id})
+// Large collection (203K docs) - needs index for efficient queries
+createIndexSafe(
+  db.warrants,
+  { "warrant.accusedID": 1, "warrant.status": 1 },
+  {
+    name: "warrant_accused_id_status_idx",
+    background: true
+  }
+);
+

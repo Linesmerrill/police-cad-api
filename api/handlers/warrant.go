@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -38,7 +38,12 @@ func (v Warrant) WarrantHandler(w http.ResponseWriter, r *http.Request) {
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
-	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
+	dbResp, err := v.DB.Find(ctx, bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get warrants", http.StatusNotFound, w, err)
 		return
@@ -70,7 +75,11 @@ func (v Warrant) WarrantByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := v.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := v.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get warrant by ID", http.StatusNotFound, w, err)
 		return
@@ -101,6 +110,10 @@ func (v Warrant) WarrantsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	var dbResp []models.Warrant
 
 	// If the user is in a community then we want to search for warrants that
@@ -114,8 +127,7 @@ func (v Warrant) WarrantsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 		statusBool = false
 	}
 
-	err = nil
-	dbResp, err = v.DB.Find(context.TODO(), bson.M{
+	dbResp, err = v.DB.Find(ctx, bson.M{
 		"warrant.accusedID": userID,
 		"warrant.status":    statusBool,
 	}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
