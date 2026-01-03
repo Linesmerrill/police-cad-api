@@ -142,11 +142,12 @@ createIndexSafe(
 
 // CRITICAL: Civilian Active Community ID Index (single field for queries filtering only by activeCommunityID)
 // Needed for queries that filter by activeCommunityID without approvalStatus
+// This fixes Query Targeting alerts for civilians queries
 createIndexSafe(
   db.civilians,
   { "civilian.activeCommunityID": 1 },
   {
-    name: "civilian_active_community_id_idx",
+    name: "civilian_active_community_idx",
     background: true
   }
 );
@@ -185,11 +186,12 @@ createIndexSafe(
 
 // CRITICAL: Firearm Active Community ID Index (for queries filtering by activeCommunityID)
 // Needed for queries that filter by activeCommunityID
+// This fixes Query Targeting alerts for firearms queries
 createIndexSafe(
   db.firearms,
   { "firearm.activeCommunityID": 1 },
   {
-    name: "firearm_active_community_id_idx",
+    name: "firearm_active_community_idx",
     background: true
   }
 );
