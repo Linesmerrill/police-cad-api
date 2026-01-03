@@ -152,6 +152,17 @@ db.inviteCodes.createIndex(
 );
 print("✓ Invite code index created");
 
+// CRITICAL: Announcement Community + isActive + createdAt Index (for /community/{id}/announcements)
+print("Creating announcement community + isActive + createdAt index...");
+db.announcements.createIndex(
+  { "community": 1, "isActive": 1, "createdAt": -1 },
+  {
+    name: "announcement_community_active_created_idx",
+    background: true
+  }
+);
+print("✓ Announcement community + isActive + createdAt index created");
+
 print("\n✅ All indexes created! Check index status with:");
 print("db.users.getIndexes()");
 print("db.communities.getIndexes()");
