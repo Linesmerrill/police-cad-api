@@ -51,8 +51,12 @@ func (u User) UserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	dbResp := models.User{}
-	err = u.DB.FindOne(r.Context(), bson.M{"_id": cID}).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, bson.M{"_id": cID}).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return

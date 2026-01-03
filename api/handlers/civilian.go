@@ -108,6 +108,10 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	var dbResp []models.Civilian
 
 	// If the user is in a community then we want to search for civilians that
@@ -116,9 +120,8 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	//
 	// Likewise, if the user is not in a community, then we will display only the civilians
 	// that are not in a community
-	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
-		dbResp, err = c.DB.Find(context.TODO(), bson.M{
+		dbResp, err = c.DB.Find(ctx, bson.M{
 			"civilian.userID":            userID,
 			"civilian.activeCommunityID": activeCommunityID,
 		}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
@@ -127,7 +130,7 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	} else {
-		dbResp, err = c.DB.Find(context.TODO(), bson.M{
+		dbResp, err = c.DB.Find(ctx, bson.M{
 			"civilian.userID": userID,
 			"$or": []bson.M{
 				{"civilian.activeCommunityID": nil},
