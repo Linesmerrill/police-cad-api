@@ -34,7 +34,12 @@ func (v Vehicle) VehicleHandler(w http.ResponseWriter, r *http.Request) {
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
-	dbResp, err := v.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := v.DB.Find(ctx, bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get vehicles", http.StatusNotFound, w, err)
 		return
@@ -65,7 +70,11 @@ func (v Vehicle) VehicleByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := v.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := v.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get vehicle by ID", http.StatusNotFound, w, err)
 		return
@@ -256,8 +265,6 @@ func (v Vehicle) VehicleSearchHandler(w http.ResponseWriter, r *http.Request) {
 	zap.S().Debugf("model: '%v'", model)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
-	var dbResp []models.Vehicle
-
 	// Build the query
 	query := bson.M{
 		"$or": []bson.M{
@@ -271,19 +278,51 @@ func (v Vehicle) VehicleSearchHandler(w http.ResponseWriter, r *http.Request) {
 		query["vehicle.activeCommunityID"] = activeCommunityID
 	}
 
-	// Fetch vehicles
-	dbResp, err = v.DB.Find(context.TODO(), query, &options.FindOptions{Limit: &limit64, Skip: &skip64})
-	if err != nil {
-		config.ErrorStatus("failed to search vehicles", http.StatusNotFound, w, err)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Execute queries in parallel for better performance
+	type findResult struct {
+		vehicles []models.Vehicle
+		err      error
+	}
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Fetch vehicles (async)
+	go func() {
+		dbResp, err := v.DB.Find(ctx, query, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+		findChan <- findResult{vehicles: dbResp, err: err}
+	}()
+
+	// Count total vehicles for pagination (async)
+	go func() {
+		total, err := v.DB.CountDocuments(ctx, query)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	// Wait for both queries to complete
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to search vehicles", http.StatusNotFound, w, findRes.err)
 		return
 	}
 
-	// Count total vehicles for pagination
-	total, err := v.DB.CountDocuments(context.TODO(), query)
-	if err != nil {
-		config.ErrorStatus("failed to count vehicles", http.StatusInternalServerError, w, err)
+	if countRes.err != nil {
+		config.ErrorStatus("failed to count vehicles", http.StatusInternalServerError, w, countRes.err)
 		return
 	}
+
+	dbResp := findRes.vehicles
+	total := countRes.total
 
 	// Ensure the response is always an array
 	if len(dbResp) == 0 {
@@ -320,7 +359,11 @@ func (v Vehicle) CreateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 	vehicle.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	vehicle.Details.UpdatedAt = vehicle.Details.CreatedAt
 
-	_, err := v.DB.InsertOne(context.Background(), vehicle)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err := v.DB.InsertOne(ctx, vehicle)
 	if err != nil {
 		config.ErrorStatus("failed to create vehicle", http.StatusInternalServerError, w, err)
 		return
@@ -343,7 +386,11 @@ func (v Vehicle) DeleteVehicleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = v.DB.DeleteOne(context.Background(), bson.M{"_id": vID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	err = v.DB.DeleteOne(ctx, bson.M{"_id": vID})
 	if err != nil {
 		config.ErrorStatus("failed to delete vehicle", http.StatusInternalServerError, w, err)
 		return
@@ -365,9 +412,13 @@ func (v Vehicle) UpdateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Retrieve the existing vehicle data
 	// var existingVehicle models.Vehicle
-	existingVehicle, err := v.DB.FindOne(context.Background(), bson.M{"_id": vID})
+	existingVehicle, err := v.DB.FindOne(ctx, bson.M{"_id": vID})
 	if err != nil {
 		config.ErrorStatus("failed to find vehicle", http.StatusNotFound, w, err)
 		return
@@ -397,7 +448,7 @@ func (v Vehicle) UpdateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(data, &updatedDetails)
 
 	// Update the vehicle in the database
-	err = v.DB.UpdateOne(context.Background(), bson.M{"_id": vID}, bson.M{"$set": bson.M{"vehicle": updatedDetails}})
+	err = v.DB.UpdateOne(ctx, bson.M{"_id": vID}, bson.M{"$set": bson.M{"vehicle": updatedDetails}})
 	if err != nil {
 		config.ErrorStatus("failed to update vehicle", http.StatusInternalServerError, w, err)
 		return
