@@ -21,8 +21,11 @@ func MetricsMiddleware(next http.Handler) http.Handler {
 		   path == "/api/v2/metrics/route" || 
 		   path == "/api/v2/metrics/slow-queries" ||
 		   path == "/metrics-dashboard" ||
-		   path == "/health" {
+		   path == "/health" ||
+		   path == "/ws/notifications" {
 			// Skip metrics collection for these endpoints
+			// WebSocket routes are excluded because they maintain long-lived connections
+			// and tracking their full duration would be misleading (they're supposed to stay open)
 			next.ServeHTTP(w, r)
 			return
 		}
