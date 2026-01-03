@@ -998,9 +998,13 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Delete the community by ID
 	communityFilter := bson.M{"_id": cID}
-	err = c.DB.DeleteOne(context.Background(), communityFilter)
+	err = c.DB.DeleteOne(ctx, communityFilter)
 	if err != nil {
 		config.ErrorStatus("failed to delete community", http.StatusInternalServerError, w, err)
 		return
@@ -1009,7 +1013,7 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 	// Remove the community references from all users
 	userFilter := bson.M{"user.communities.communityId": communityID}
 	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}
-	_, err = c.UDB.UpdateMany(context.Background(), userFilter, userUpdate)
+	_, err = c.UDB.UpdateMany(ctx, userFilter, userUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to remove community references from users", http.StatusInternalServerError, w, err)
 		return
@@ -1688,21 +1692,39 @@ func (c Community) FetchCommunityMembersByRoleIDHandlerV2(w http.ResponseWriter,
 	// Get paginated member IDs
 	paginatedMemberIDs := role.Members[offset:end]
 
-	// Populate user details for each member
-	var populatedMembers []map[string]interface{}
+	// Convert member IDs to ObjectIDs for batch query
+	var memberObjectIDs []primitive.ObjectID
 	for _, memberID := range paginatedMemberIDs {
-		// Convert memberID string to ObjectID
 		memberObjectID, err := primitive.ObjectIDFromHex(memberID)
 		if err != nil {
 			// Skip invalid ObjectIDs
 			continue
 		}
+		memberObjectIDs = append(memberObjectIDs, memberObjectID)
+	}
 
-		// Find user by ID
-		userFilter := bson.M{"_id": memberObjectID}
-		var user models.User
-		err = c.UDB.FindOne(context.Background(), userFilter).Decode(&user)
-		if err != nil {
+	// Batch fetch all users in a single query (fixes N+1 query problem)
+	var users []models.User
+	if len(memberObjectIDs) > 0 {
+		userFilter := bson.M{"_id": bson.M{"$in": memberObjectIDs}}
+		cursor, err := c.UDB.Find(ctx, userFilter)
+		if err == nil {
+			defer cursor.Close(ctx)
+			cursor.All(ctx, &users)
+		}
+	}
+
+	// Create a map for O(1) lookup
+	userMap := make(map[string]models.User)
+	for _, user := range users {
+		userMap[user.ID.Hex()] = user
+	}
+
+	// Populate user details for each member (now using batch-fetched data)
+	var populatedMembers []map[string]interface{}
+	for _, memberID := range paginatedMemberIDs {
+		user, exists := userMap[memberID]
+		if !exists {
 			// Skip users that can't be found
 			continue
 		}
