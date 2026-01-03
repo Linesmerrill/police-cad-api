@@ -1239,6 +1239,10 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Step 1: Validate the invite code with conditional decrement
 	var invite models.InviteCode
 	pipeline := bson.A{
@@ -1255,7 +1259,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 	if err := c.IDB.FindOneAndUpdate(
-		context.Background(),
+		ctx,
 		bson.M{"code": req.InviteCode, "remainingUses": bson.M{"$gte": -1}},
 		pipeline, // Pass the pipeline array directly
 	).Decode(&invite); err != nil {
@@ -1285,18 +1289,47 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Fetch user and community
-	var user models.User
-	if err := c.UDB.FindOne(context.Background(), bson.M{"_id": userObjID}).Decode(&user); err != nil {
-		config.ErrorStatus("Failed to fetch user", http.StatusInternalServerError, w, err)
+	// Fetch user and community in parallel for better performance
+	type userResult struct {
+		user models.User
+		err  error
+	}
+	type communityResult struct {
+		community models.Community
+		err       error
+	}
+
+	userChan := make(chan userResult, 1)
+	communityChan := make(chan communityResult, 1)
+
+	// Fetch user (async)
+	go func() {
+		var user models.User
+		err := c.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user)
+		userChan <- userResult{user: user, err: err}
+	}()
+
+	// Fetch community (async)
+	go func() {
+		community, err := c.DB.FindOne(ctx, bson.M{"_id": communityObjID})
+		communityChan <- communityResult{community: community, err: err}
+	}()
+
+	// Wait for both queries to complete
+	userRes := <-userChan
+	communityRes := <-communityChan
+
+	if userRes.err != nil {
+		config.ErrorStatus("Failed to fetch user", http.StatusInternalServerError, w, userRes.err)
 		return
 	}
-	// var community models.Community
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": communityObjID})
-	if err != nil {
-		config.ErrorStatus("Failed to fetch community", http.StatusInternalServerError, w, err)
+	if communityRes.err != nil {
+		config.ErrorStatus("Failed to fetch community", http.StatusInternalServerError, w, communityRes.err)
 		return
 	}
+
+	user := userRes.user
+	community := communityRes.community
 
 	// Step 2 & 3: Check existing community status
 	var existingCommunity *models.UserCommunity
@@ -1322,7 +1355,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			// Match the specific communityId in the query
 			_, err = c.UDB.UpdateOne(
-				context.Background(),
+				ctx,
 				bson.M{"_id": userObjID, "user.communities.communityId": invite.CommunityID},
 				update,
 			)
@@ -1354,7 +1387,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 			}
 
 			_, err = c.UDB.UpdateOne(
-				context.Background(),
+				ctx,
 				bson.M{"_id": userObjID},
 				update,
 			)
@@ -1372,7 +1405,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	isNewEntry := existingCommunity == nil && !contains(community.Details.BanList, req.UserID)
 	if isNewEntry {
 		if err := c.DB.UpdateOne(
-			context.Background(),
+			ctx,
 			bson.M{"_id": communityObjID},
 			bson.M{"$inc": bson.M{"community.membersCount": 1}},
 		); err != nil {
