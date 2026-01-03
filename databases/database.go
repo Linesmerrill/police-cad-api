@@ -109,9 +109,9 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 	// Configure connection pool for better performance and resilience
 	// Increased timeouts to handle high latency and network issues
 	clientOptions := options.Client().ApplyURI(conf.URL).
-		SetMaxPoolSize(100).                    // Maximum number of connections in pool
-		SetMinPoolSize(10).                     // Minimum number of connections in pool
-		SetMaxConnecting(5).                    // Limit concurrent connection attempts to prevent overwhelming the cluster
+		SetMaxPoolSize(200).                    // Maximum number of connections in pool (increased from 100 for high traffic)
+		SetMinPoolSize(20).                     // Minimum number of connections in pool (increased from 10)
+		SetMaxConnecting(10).                   // Limit concurrent connection attempts (increased from 5 for faster pool growth)
 		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s
 		SetServerSelectionTimeout(60 * time.Second). // Increased timeout for server selection during migration (was 30s, now 60s)
 		SetSocketTimeout(60 * time.Second).     // Increased timeout for socket operations (was 30s, now 60s)
