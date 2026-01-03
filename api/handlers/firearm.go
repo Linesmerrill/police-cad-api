@@ -330,8 +330,12 @@ func (f Firearm) DeleteFirearmHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Delete the firearm from the database
-	err = f.DB.DeleteOne(context.Background(), bson.M{"_id": fID})
+	err = f.DB.DeleteOne(ctx, bson.M{"_id": fID})
 	if err != nil {
 		config.ErrorStatus("failed to delete firearm", http.StatusInternalServerError, w, err)
 		return
