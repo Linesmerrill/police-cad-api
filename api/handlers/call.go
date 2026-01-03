@@ -106,7 +106,21 @@ func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	dbResp, err := c.DB.Find(ctx, filter)
+	// Add pagination/limit to prevent loading all calls at once
+	limitParam := r.URL.Query().Get("limit")
+	limit := int64(100) // Default limit
+	if limitParam != "" {
+		if l, err := strconv.ParseInt(limitParam, 10, 64); err == nil && l > 0 && l <= 1000 {
+			limit = l
+		}
+	}
+
+	// Sort by most recent first (by _id which is ObjectID and includes timestamp)
+	findOptions := options.Find().
+		SetLimit(limit).
+		SetSort(bson.M{"_id": -1}) // Most recent first (ObjectID includes timestamp)
+
+	dbResp, err := c.DB.Find(ctx, filter, findOptions)
 	if err != nil {
 		config.ErrorStatus("failed to get calls with community id", http.StatusNotFound, w, err)
 		return

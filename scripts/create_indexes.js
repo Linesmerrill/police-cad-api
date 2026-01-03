@@ -172,3 +172,14 @@ db.announcements.createIndex(
   }
 );
 
+// CRITICAL: License Civilian ID Index (for /licenses/civilian/{id})
+print("Creating license civilian ID index...");
+db.licenses.createIndex(
+  { "license.civilianID": 1 },
+  {
+    name: "license_civilian_id_idx",
+    background: true
+  }
+);
+print("✓ License civilian ID index created");
+

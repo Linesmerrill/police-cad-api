@@ -2622,8 +2622,12 @@ func (c Community) SetCommunityFinesHandler(w http.ResponseWriter, r *http.Reque
 		},
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the community in the database
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update community fines", http.StatusInternalServerError, w, err)
 		return
@@ -4066,27 +4070,57 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Count the total number of users
-	totalUsers, err := c.UDB.CountDocuments(ctx, filter)
-	if err != nil {
-		config.ErrorStatus("failed to count users", http.StatusInternalServerError, w, err)
+	// Execute CountDocuments and Find in parallel for better performance
+	type findResult struct {
+		users []models.User
+		err   error
+	}
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	// Fetch users with pagination (async)
+	go func() {
+		findOptions := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
+		cursor, err := c.UDB.Find(ctx, filter, findOptions)
+		if err != nil {
+			findChan <- findResult{err: err}
+			return
+		}
+		defer cursor.Close(ctx)
+
+		var users []models.User
+		if err = cursor.All(ctx, &users); err != nil {
+			findChan <- findResult{err: err}
+			return
+		}
+		findChan <- findResult{users: users}
+	}()
+
+	// Count total users (async)
+	go func() {
+		total, err := c.UDB.CountDocuments(ctx, filter)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	// Wait for both queries to complete
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, findRes.err)
 		return
 	}
 
-	// Fetch users with pagination
-	findOptions := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
-	cursor, err := c.UDB.Find(ctx, filter, findOptions)
-	if err != nil {
-		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	defer cursor.Close(ctx)
-
-	var users []models.User
-	if err = cursor.All(ctx, &users); err != nil {
-		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
-		return
+	users := findRes.users
+	totalUsers := countRes.total
+	if countRes.err != nil {
+		// If count fails, use length of results as fallback
+		totalUsers = int64(len(users))
 	}
 
 	// Populate user details for each member

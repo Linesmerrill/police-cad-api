@@ -36,7 +36,11 @@ func (l License) LicenseByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := l.DB.FindOne(context.Background(), bson.M{"_id": lID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := l.DB.FindOne(ctx, bson.M{"_id": lID})
 	if err != nil {
 		config.ErrorStatus("failed to get license by ID", http.StatusNotFound, w, err)
 		return
