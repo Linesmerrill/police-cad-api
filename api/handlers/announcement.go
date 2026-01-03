@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -58,6 +59,10 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Build filter
 	filter := bson.M{
 		"community": commID,
@@ -73,7 +78,7 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 
 	// Get total count for pagination first
 	var totalCount int64
-	totalCount, err = a.ADB.CountDocuments(context.Background(), filter)
+	totalCount, err = a.ADB.CountDocuments(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("Failed to count announcements", http.StatusInternalServerError, w, err)
 		return
@@ -85,28 +90,66 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		SetLimit(int64(limit)).
 		SetSort(bson.D{{Key: "createdAt", Value: -1}})
 
-	cursor, err := a.ADB.Find(context.Background(), filter, findOptions)
+	cursor, err := a.ADB.Find(ctx, filter, findOptions)
 	if err != nil {
 		config.ErrorStatus("Failed to fetch announcements", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var announcements []models.Announcement
-	if err := cursor.All(context.Background(), &announcements); err != nil {
+	if err := cursor.All(ctx, &announcements); err != nil {
 		config.ErrorStatus("Failed to decode announcements", http.StatusInternalServerError, w, err)
 		return
 	}
 
 
 
+	// Collect all unique user IDs to batch fetch
+	userIDs := make(map[primitive.ObjectID]bool)
+	for _, ann := range announcements {
+		userIDs[ann.Creator] = true
+		if ann.Reactions != nil {
+			for _, reaction := range ann.Reactions {
+				userIDs[reaction.User] = true
+			}
+		}
+		if ann.Comments != nil {
+			for _, comment := range ann.Comments {
+				userIDs[comment.User] = true
+			}
+		}
+	}
+
+	// Batch fetch all users in parallel
+	userIDList := make([]primitive.ObjectID, 0, len(userIDs))
+	for id := range userIDs {
+		userIDList = append(userIDList, id)
+	}
+
+	userMap := make(map[primitive.ObjectID]UserDoc)
+	if len(userIDList) > 0 {
+		// Fetch all users in one query
+		userFilter := bson.M{"_id": bson.M{"$in": userIDList}}
+		userCursor, err := a.UDB.Find(ctx, userFilter)
+		if err == nil {
+			var users []UserDoc
+			if err := userCursor.All(ctx, &users); err == nil {
+				for _, user := range users {
+					userMap[user.ID] = user
+				}
+			}
+			userCursor.Close(ctx)
+		}
+	}
+
 	// Convert to response format
 	var announcementResponses []models.AnnouncementResponse
 	for _, ann := range announcements {
-		// For the creator:
-		creatorDoc := UserDoc{}
-		creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": ann.Creator})
-		if err := creatorResult.Decode(&creatorDoc); err != nil {
+		// Get creator from batch-fetched map
+		creatorDoc, exists := userMap[ann.Creator]
+		if !exists {
+			creatorDoc = UserDoc{}
 			creatorDoc.User.Username = "Unknown"
 			creatorDoc.User.ProfilePicture = nil
 		}
@@ -148,9 +191,10 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		// Populate reactions (handle null values from database)
 		if ann.Reactions != nil {
 			for _, reaction := range ann.Reactions {
-				userDoc := UserDoc{}
-				userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
-				if err := userResult.Decode(&userDoc); err != nil {
+				// Get user from batch-fetched map
+				userDoc, exists := userMap[reaction.User]
+				if !exists {
+					userDoc = UserDoc{}
 					userDoc.User.Username = "Unknown"
 					userDoc.User.ProfilePicture = nil
 				}
@@ -170,9 +214,10 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		// Populate comments (handle null values from database)
 		if ann.Comments != nil {
 			for _, comment := range ann.Comments {
-				userDoc := UserDoc{}
-				userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
-				if err := userResult.Decode(&userDoc); err != nil {
+				// Get user from batch-fetched map
+				userDoc, exists := userMap[comment.User]
+				if !exists {
+					userDoc = UserDoc{}
 					userDoc.User.Username = "Unknown"
 					userDoc.User.ProfilePicture = nil
 				}
@@ -220,6 +265,10 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Request) {
 	announcementID := mux.Vars(r)["announcementId"]
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Convert announcement ID to ObjectID
 	annID, err := primitive.ObjectIDFromHex(announcementID)
 	if err != nil {
@@ -232,7 +281,7 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 	update := bson.M{"$inc": bson.M{"viewCount": 1}}
 
 	announcement, err := a.ADB.FindOneAndUpdate(
-		context.Background(),
+		ctx,
 		filter,
 		update,
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
@@ -242,12 +291,45 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Get creator user data
-	creatorDoc := UserDoc{}
-	creatorResult := a.UDB.FindOne(context.Background(), bson.M{"_id": announcement.Creator})
-	if err := creatorResult.Decode(&creatorDoc); err != nil {
-		// For now, create a minimal creator response since we know the user exists
-		// TODO: Fix user database query issue
+	// Collect all unique user IDs to batch fetch
+	userIDs := make(map[primitive.ObjectID]bool)
+	userIDs[announcement.Creator] = true
+	if announcement.Reactions != nil {
+		for _, reaction := range announcement.Reactions {
+			userIDs[reaction.User] = true
+		}
+	}
+	if announcement.Comments != nil {
+		for _, comment := range announcement.Comments {
+			userIDs[comment.User] = true
+		}
+	}
+
+	// Batch fetch all users in one query
+	userIDList := make([]primitive.ObjectID, 0, len(userIDs))
+	for id := range userIDs {
+		userIDList = append(userIDList, id)
+	}
+
+	userMap := make(map[primitive.ObjectID]UserDoc)
+	if len(userIDList) > 0 {
+		userFilter := bson.M{"_id": bson.M{"$in": userIDList}}
+		userCursor, err := a.UDB.Find(ctx, userFilter)
+		if err == nil {
+			var users []UserDoc
+			if err := userCursor.All(ctx, &users); err == nil {
+				for _, user := range users {
+					userMap[user.ID] = user
+				}
+			}
+			userCursor.Close(ctx)
+		}
+	}
+
+	// Get creator from batch-fetched map
+	creatorDoc, exists := userMap[announcement.Creator]
+	if !exists {
+		creatorDoc = UserDoc{}
 		creatorDoc.User.Username = "Unknown"
 		creatorDoc.User.ProfilePicture = nil
 	}
@@ -281,9 +363,8 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		announcement.Reactions = []models.Reaction{}
 	}
 	for _, reaction := range announcement.Reactions {
-		userDoc := UserDoc{}
-		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": reaction.User})
-		if err := userResult.Decode(&userDoc); err != nil {
+		userDoc, exists := userMap[reaction.User]
+		if !exists {
 			continue // Skip if user not found
 		}
 
@@ -303,9 +384,8 @@ func (a Announcement) GetAnnouncementHandler(w http.ResponseWriter, r *http.Requ
 		announcement.Comments = []models.Comment{}
 	}
 	for _, comment := range announcement.Comments {
-		userDoc := UserDoc{}
-		userResult := a.UDB.FindOne(context.Background(), bson.M{"_id": comment.User})
-		if err := userResult.Decode(&userDoc); err != nil {
+		userDoc, exists := userMap[comment.User]
+		if !exists {
 			continue // Skip if user not found
 		}
 
