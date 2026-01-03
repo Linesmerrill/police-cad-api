@@ -181,8 +181,12 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	// Add the Head Admin role to the community
 	newCommunity.Details.Roles = append(newCommunity.Details.Roles, headAdminRole)
 
+	// Use request context with timeout for all database operations
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Insert the new community into the database
-	_, err := c.DB.InsertOne(context.Background(), newCommunity)
+	_, err := c.DB.InsertOne(ctx, newCommunity)
 	if err != nil {
 		config.ErrorStatus("failed to create community", http.StatusInternalServerError, w, err)
 		return
@@ -207,7 +211,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	filter := bson.M{"_id": uID}
 
 	user := models.User{}
-	err = c.UDB.FindOne(context.Background(), filter).Decode(&user)
+	err = c.UDB.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's communities", http.StatusInternalServerError, w, err)
 		return
@@ -228,7 +232,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	update := bson.M{
 		"$set": bson.M{"user.communities": user.Details.Communities}, // Ensure communities is an array
 	}
-	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
+	_, err = c.UDB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
 		return
@@ -238,7 +242,7 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	update = bson.M{
 		"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
 	}
-	_, err = c.UDB.UpdateOne(context.Background(), filter, update)
+	_, err = c.UDB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
 		return
