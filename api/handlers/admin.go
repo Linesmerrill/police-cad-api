@@ -595,6 +595,7 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	var err error
 	if queryLen >= 3 {
 		totalCount, err = h.CDB.CountDocuments(ctx, filter)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
 			return
