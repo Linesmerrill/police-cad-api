@@ -287,3 +287,51 @@ createIndexSafe(
   }
 );
 
+// CRITICAL: User IsOnline Index (for /community/{id}/online-users)
+// Large collection (804K docs) - COLLSCAN found: 804,288 scanned, 12,854 returned (62.57:1 ratio, 33.4s)
+createIndexSafe(
+  db.users,
+  { "user.isOnline": 1 },
+  {
+    name: "user_is_online_idx",
+    background: true
+  }
+);
+
+// CRITICAL: User Email Verification Token Index (for email verification queries)
+// Large collection (804K docs) - COLLSCAN found: 804,288 scanned, 0 returned (Infinity ratio, 35-37s)
+// Compound index includes expires for efficient token + expiration queries
+createIndexSafe(
+  db.users,
+  { "user.emailVerificationToken": 1, "user.emailVerificationExpires": 1 },
+  {
+    name: "user_email_verification_token_idx",
+    background: true
+  }
+);
+
+// CRITICAL: Call Status Index (for queries filtering by call status)
+// Medium collection (44K docs) - COLLSCAN found: 43,927 scanned, 0 returned (Infinity ratio, 4.3s)
+// Note: Compound index on call.communityID + call.status exists, but single-field needed for status-only queries
+createIndexSafe(
+  db.calls,
+  { "call.status": 1 },
+  {
+    name: "call_status_idx",
+    background: true
+  }
+);
+
+// CRITICAL: Announcement Community Index (for /community/{id}/announcements)
+// Small collection (107 docs) but COLLSCAN found - ensure index exists
+// Note: Compound index exists on {community, isActive, createdAt}, but verify field names match
+// The query uses "announcement.community" but index might use "community" - check actual schema
+createIndexSafe(
+  db.announcements,
+  { "announcement.community": 1, "announcement.isActive": 1, "announcement.createdAt": -1 },
+  {
+    name: "announcement_community_active_created_idx_v2",
+    background: true
+  }
+);
+
