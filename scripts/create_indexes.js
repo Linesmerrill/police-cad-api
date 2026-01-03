@@ -138,6 +138,19 @@ db.communities.createIndex(
   }
 );
 
+// CRITICAL: Community Tags + Visibility + Name Compound Index (for /communities/tag/{tag} with sorting)
+// MongoDB was using visibility+name index and filtering tags in memory (5.4s slow!)
+// This index allows MongoDB to use tag filter AND sort by name efficiently
+print("Creating community tags + visibility + name compound index...");
+db.communities.createIndex(
+  { "community.tags": 1, "community.visibility": 1, "community.name": 1 },
+  {
+    name: "community_tags_visibility_name_idx",
+    background: true
+  }
+);
+print("✓ Community tags + visibility + name compound index created");
+
 // CRITICAL: Invite Code Index (for /community/invite/{code})
 // DONE
 db.inviteCodes.createIndex(
