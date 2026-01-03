@@ -1455,7 +1455,7 @@ func contains(slice []string, item string) bool {
 }
 
 // sortDepartmentsByUserPreferences sorts departments based on user's custom order preference
-func (c Community) sortDepartmentsByUserPreferences(departments []models.Department, userID, communityID string) []models.Department {
+func (c Community) sortDepartmentsByUserPreferences(ctx context.Context, departments []models.Department, userID, communityID string) []models.Department {
 	// If no userID provided, return departments as-is
 	if userID == "" {
 		return departments
@@ -1463,7 +1463,7 @@ func (c Community) sortDepartmentsByUserPreferences(departments []models.Departm
 
 	// Get user preferences
 	var userPreferences models.UserPreferences
-	err := c.UPDB.FindOne(context.Background(), bson.M{"userId": userID}).Decode(&userPreferences)
+	err := c.UPDB.FindOne(ctx, bson.M{"userId": userID}).Decode(&userPreferences)
 	if err != nil {
 		// If no preferences found, return departments as-is
 		return departments
@@ -1752,8 +1752,12 @@ func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -1765,7 +1769,7 @@ func (c Community) FetchUserDepartmentsHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Sort departments based on user preferences first
-	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+	sortedDepartments := c.sortDepartmentsByUserPreferences(ctx, community.Details.Departments, userID, communityID)
 
 	// Initialize the userDepartments slice
 	var userDepartments []models.Department
@@ -1812,8 +1816,12 @@ func (c Community) FetchAllCommunityDepartmentsHandler(w http.ResponseWriter, r 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -1825,7 +1833,7 @@ func (c Community) FetchAllCommunityDepartmentsHandler(w http.ResponseWriter, r 
 	}
 
 	// Sort departments based on user preferences if userID is provided
-	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+	sortedDepartments := c.sortDepartmentsByUserPreferences(ctx, community.Details.Departments, userID, communityID)
 
 	// Return the departments array
 	response := map[string]interface{}{
@@ -3410,15 +3418,19 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch the community
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
 
 	// Sort departments based on user preferences first
-	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+	sortedDepartments := c.sortDepartmentsByUserPreferences(ctx, community.Details.Departments, userID, communityID)
 
 	// Filter and paginate departments
 	var filteredDepartments []map[string]interface{}
@@ -3589,15 +3601,19 @@ func (c Community) GetPaginatedAllDepartmentsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch the community
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
 	}
 
 	// Sort departments based on user preferences first
-	sortedDepartments := c.sortDepartmentsByUserPreferences(community.Details.Departments, userID, communityID)
+	sortedDepartments := c.sortDepartmentsByUserPreferences(ctx, community.Details.Departments, userID, communityID)
 
 	// Filter departments
 	var filteredDepartments []map[string]interface{}
