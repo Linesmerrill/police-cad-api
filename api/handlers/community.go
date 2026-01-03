@@ -1937,19 +1937,8 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Find the community by ID
-	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
-	if err != nil {
-		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
-		return
-	}
-
-	// Initialize the departments slice if it is null
-	if community.Details.Departments == nil {
-		community.Details.Departments = []models.Department{}
-	}
-
 	// Update the community to add the new department
+	// Note: $push works even if community.departments is null - MongoDB will create the array
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$push": bson.M{"community.departments": department}}
 	err = c.DB.UpdateOne(ctx, filter, update)
