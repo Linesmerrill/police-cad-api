@@ -1229,7 +1229,7 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// var community models.Community
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": communityObjID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": communityObjID})
 	if err != nil {
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
