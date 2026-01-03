@@ -23,6 +23,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gorilla/mux"
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 	templates "github.com/linesmerrill/police-cad-api/templates/html"
@@ -419,6 +420,8 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	// Use request context with timeout
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+	
+	var err error
 
 	if queryLen >= 3 {
 		// Use $text search for name/username, direct lookup for email
@@ -476,7 +479,7 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	if queryLen < 3 && totalCount == 0 {
 		// Estimate: if we got full limit, there might be more
 		// This is a rough estimate to avoid slow CountDocuments
-		totalCount = limit64 * (page + 1) // Rough estimate
+		totalCount = limit64 * int64(page + 1) // Rough estimate
 	}
 
 	var users []models.User
