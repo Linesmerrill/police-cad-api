@@ -3605,15 +3605,16 @@ func (c Community) GetNonMemberDepartmentsHandler(w http.ResponseWriter, r *http
 
 	// OPTIMIZATION: Use aggregation to filter departments in MongoDB instead of loading entire community
 	// This avoids loading huge community documents with many departments/members
+	// Note: Details field is mapped to "community" in BSON
 	pipeline := mongo.Pipeline{
 		{{"$match", bson.M{"_id": cID}}},
-		{{"$unwind", "$details.departments"}},
+		{{"$unwind", "$community.departments"}},
 		{{"$match", bson.M{
-			"details.departments.approvalRequired": true,
+			"community.departments.approvalRequired": true,
 			"$or": []bson.M{
-				{"details.departments.members": bson.M{"$exists": false}},
-				{"details.departments.members": bson.M{"$size": 0}},
-				{"details.departments.members": bson.M{
+				{"community.departments.members": bson.M{"$exists": false}},
+				{"community.departments.members": bson.M{"$size": 0}},
+				{"community.departments.members": bson.M{
 					"$not": bson.M{
 						"$elemMatch": bson.M{
 							"userID": userID,
@@ -3624,12 +3625,12 @@ func (c Community) GetNonMemberDepartmentsHandler(w http.ResponseWriter, r *http
 			},
 		}}},
 		{{"$project", bson.M{
-			"_id":              "$details.departments._id",
-			"name":             "$details.departments.name",
-			"description":      "$details.departments.description",
-			"image":            "$details.departments.image",
-			"approvalRequired": "$details.departments.approvalRequired",
-			"templateName":     "$details.departments.template.name",
+			"_id":              "$community.departments._id",
+			"name":             "$community.departments.name",
+			"description":      "$community.departments.description",
+			"image":            "$community.departments.image",
+			"approvalRequired": "$community.departments.approvalRequired",
+			"templateName":     "$community.departments.template.name",
 		}}},
 	}
 
