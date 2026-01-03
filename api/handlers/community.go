@@ -263,7 +263,12 @@ func (c Community) CommunityByCommunityAndOwnerIDHandler(w http.ResponseWriter, 
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 		return
 	}
-	dbResp, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID, "community.ownerID": ownerID})
+
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := c.DB.FindOne(ctx, bson.M{"_id": cID, "community.ownerID": ownerID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID and ownerID", http.StatusNotFound, w, err)
 		return
@@ -538,8 +543,12 @@ func (c Community) GetEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	comm, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	comm, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
