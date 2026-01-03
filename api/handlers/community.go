@@ -441,8 +441,12 @@ func (c Community) GetEventsByCommunityIDHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	comm, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	comm, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -3330,6 +3334,10 @@ func (c *Community) GetOnlineUsersHandler(w http.ResponseWriter, r *http.Request
 	}
 	skip := (page - 1) * limit
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Query for users with the specified communityId and status "online" in the communities array
 	filter := bson.M{
 		"user.communities": bson.M{
@@ -3342,21 +3350,21 @@ func (c *Community) GetOnlineUsersHandler(w http.ResponseWriter, r *http.Request
 	}
 	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
 
-	cursor, err := c.UDB.Find(context.Background(), filter, opts)
+	cursor, err := c.UDB.Find(ctx, filter, opts)
 	if err != nil {
 		config.ErrorStatus("Failed to fetch online users", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var users []models.User
-	if err := cursor.All(context.Background(), &users); err != nil {
+	if err := cursor.All(ctx, &users); err != nil {
 		config.ErrorStatus("Failed to parse users", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Get the total count of online users
-	total, err := c.UDB.CountDocuments(context.Background(), filter)
+	total, err := c.UDB.CountDocuments(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("Failed to count online users", http.StatusInternalServerError, w, err)
 		return
