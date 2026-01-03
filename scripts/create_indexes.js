@@ -140,6 +140,18 @@ db.communities.createIndex(
 );
 print("✓ Community tags index created");
 
+// CRITICAL: Invite Code Index (for /community/invite/{code})
+print("Creating invite code index...");
+db.inviteCodes.createIndex(
+  { "code": 1 },
+  {
+    name: "invite_code_idx",
+    unique: true,
+    background: true
+  }
+);
+print("✓ Invite code index created");
+
 print("\n✅ All indexes created! Check index status with:");
 print("db.users.getIndexes()");
 print("db.communities.getIndexes()");

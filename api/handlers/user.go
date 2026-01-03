@@ -3618,9 +3618,13 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch the user document
 	var user models.User
-	err = u.DB.FindOne(r.Context(), bson.M{"_id": uID}).Decode(&user)
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 		return
@@ -3665,12 +3669,12 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	// Build Mongo filter and fetch communities
 	communityFilter := bson.M{"_id": bson.M{"$in": filteredCommunities}}
 	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
-	cursor, err := u.CDB.Find(context.Background(), communityFilter, opts)
+	cursor, err := u.CDB.Find(ctx, communityFilter, opts)
 	if err != nil {
 		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	// Decode all documents
 	var decodedCommunities []struct {
@@ -3685,7 +3689,7 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 			PromotionalText string `bson:"promotionalText"`
 		} `bson:"community"`
 	}
-	if err := cursor.Decode(&decodedCommunities); err != nil {
+	if err := cursor.All(ctx, &decodedCommunities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
