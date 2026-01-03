@@ -277,6 +277,7 @@ createIndexSafe(
 
 // CRITICAL: Warrant Accused ID + Status Index (for /warrants/user/{id})
 // Large collection (203K docs) - needs index for efficient queries
+// DONE
 createIndexSafe(
   db.warrants,
   { "warrant.accusedID": 1, "warrant.status": 1 },

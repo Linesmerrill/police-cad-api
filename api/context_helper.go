@@ -6,9 +6,10 @@ import (
 )
 
 // QueryTimeout is the default timeout for database queries
-// Reduced from 10s to 7s to release connections faster and prevent pool exhaustion
+// Set to 10s to allow queries to complete while still preventing indefinite hangs
 // If queries consistently timeout, check for missing indexes or slow query patterns
-const QueryTimeout = 7 * time.Second
+// Connection pool is reduced (100 per dyno) to prevent exhaustion even with 10s timeouts
+const QueryTimeout = 10 * time.Second
 
 // WithQueryTimeout creates a context with query timeout
 // IMPORTANT: This preserves the request trace from the parent context
