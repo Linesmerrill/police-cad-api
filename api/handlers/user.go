@@ -846,25 +846,61 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 	}
 	paginatedNotifications := sortedNotifications[start:end]
 
-	var detailedNotifications []map[string]interface{}
+	// OPTIMIZATION: Batch fetch all senders in a single query to avoid N+1 queries
+	senderIDs := make([]primitive.ObjectID, 0, len(paginatedNotifications))
 	for _, notification := range paginatedNotifications {
 		senderID, err := primitive.ObjectIDFromHex(notification.SentFromID)
 		if err != nil {
-			config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, fmt.Errorf("failed to get objectID from Hex: %w", err))
+			zap.S().Warnw("invalid sender ID in notification", "notificationID", notification.ID, "sentFromID", notification.SentFromID, "error", err)
+			continue
+		}
+		senderIDs = append(senderIDs, senderID)
+	}
+
+	// Batch fetch all senders
+	senders := make(map[primitive.ObjectID]models.User)
+	if len(senderIDs) > 0 {
+		cursor, err := u.DB.Find(ctx, bson.M{"_id": bson.M{"$in": senderIDs}})
+		if err != nil {
+			zap.S().Errorw("failed to batch fetch senders", "error", err, "senderIDs", senderIDs)
+			config.ErrorStatus("failed to fetch senders", http.StatusInternalServerError, w, err)
+			return
+		}
+		defer cursor.Close(ctx)
+
+		var senderList []models.User
+		if err = cursor.All(ctx, &senderList); err != nil {
+			zap.S().Errorw("failed to decode senders", "error", err)
+			config.ErrorStatus("failed to decode senders", http.StatusInternalServerError, w, err)
 			return
 		}
 
-		sender := models.User{}
-		err = u.DB.FindOne(context.Background(), bson.M{"_id": senderID}).Decode(&sender)
-		if err == mongo.ErrNoDocuments {
-			// Sender doesn't exist, remove the notification
-			filter := bson.M{"_id": uID}
-			update := bson.M{"$pull": bson.M{"user.notifications": bson.M{"_id": notification.ID}}}
-			_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		// Build map for quick lookup (User.ID is a string, convert to ObjectID for map key)
+		for _, sender := range senderList {
+			senderObjID, err := primitive.ObjectIDFromHex(sender.ID)
 			if err != nil {
-				config.ErrorStatus("failed to remove invalid notification", http.StatusInternalServerError, w, err)
-				return
+				zap.S().Warnw("invalid sender ID", "senderID", sender.ID, "error", err)
+				continue
 			}
+			senders[senderObjID] = sender
+		}
+	}
+
+	var detailedNotifications []map[string]interface{}
+	var invalidNotificationIDs []string // Notification IDs are strings
+
+	for _, notification := range paginatedNotifications {
+		senderID, err := primitive.ObjectIDFromHex(notification.SentFromID)
+		if err != nil {
+			zap.S().Warnw("invalid sender ID in notification", "notificationID", notification.ID, "sentFromID", notification.SentFromID, "error", err)
+			invalidNotificationIDs = append(invalidNotificationIDs, notification.ID)
+			continue
+		}
+
+		sender, senderExists := senders[senderID]
+		if !senderExists {
+			// Sender doesn't exist, mark for removal
+			invalidNotificationIDs = append(invalidNotificationIDs, notification.ID)
 			// Decrement the total notifications count
 			totalCount--
 			// Decrement the unseen count if the notification was unseen
@@ -872,10 +908,6 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 				unseenCount--
 			}
 			continue
-		} else if err != nil {
-			// Handle other errors
-			config.ErrorStatus("failed to fetch sender", http.StatusInternalServerError, w, err)
-			return
 		}
 
 		// Calculate timeAgo
@@ -941,6 +973,18 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 			"senderProfilePic": senderProfilePicture,
 		}
 		detailedNotifications = append(detailedNotifications, detailedNotification)
+	}
+
+	// Remove invalid notifications in batch (if any)
+	if len(invalidNotificationIDs) > 0 {
+		filter := bson.M{"_id": uID}
+		// Use $in with string IDs for notification removal
+		update := bson.M{"$pull": bson.M{"user.notifications": bson.M{"_id": bson.M{"$in": invalidNotificationIDs}}}}
+		_, err = u.DB.UpdateOne(ctx, filter, update)
+		if err != nil {
+			zap.S().Warnw("failed to remove invalid notifications", "error", err, "notificationIDs", invalidNotificationIDs)
+			// Don't fail the request, just log the warning
+		}
 	}
 
 	// Prepare the response

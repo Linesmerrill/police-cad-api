@@ -1949,7 +1949,12 @@ func (c Community) DeleteCommunityDepartmentByIDHandler(w http.ResponseWriter, r
 	// Update the community to pull the department by ID
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$pull": bson.M{"community.departments": bson.M{"_id": dID}}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete department from community", http.StatusInternalServerError, w, err)
 		return
@@ -1983,9 +1988,13 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	for _, memberID := range requestBody.Members {
 		// Step 1: Load the community document
-		communityDoc, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+		communityDoc, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 		if err != nil {
 			config.ErrorStatus("community not found", http.StatusNotFound, w, err)
 			return
