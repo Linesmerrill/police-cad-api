@@ -2574,23 +2574,34 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 		{{"$limit", limit64}},
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Execute the aggregation
-	cursor, err := c.DB.Aggregate(context.TODO(), pipeline)
+	cursor, err := c.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to fetch elite communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.TODO())
+	defer cursor.Close(ctx)
 
 	// Decode the results
 	var communities []models.Community
-	if err := cursor.All(context.TODO(), &communities); err != nil {
+	if err := cursor.All(ctx, &communities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Create the paginated response
-	totalCount, _ := c.DB.CountDocuments(context.TODO(), bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})
+	// Use same filter for count - consider making this resilient if it times out
+	countFilter := bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}
+	totalCount, err := c.DB.CountDocuments(ctx, countFilter)
+	if err != nil {
+		// If count fails, use result count as fallback
+		zap.S().Warnw("failed to count elite communities", "error", err)
+		totalCount = int64(len(communities))
+	}
 	paginatedResponse := PaginatedDataResponse{
 		Page:       Page,
 		TotalCount: totalCount,
@@ -2625,12 +2636,16 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 		{{"$limit", limit64}},
 	}
 
-	cursor, err := c.DB.Aggregate(context.TODO(), pipeline)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	cursor, err := c.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to fetch elite communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.TODO())
+	defer cursor.Close(ctx)
 
 	// Decode all results
 	var decodedCommunities []struct {
@@ -2644,7 +2659,7 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 			PromotionalDescription string   `bson:"promotionalDescription"`
 		} `bson:"community"`
 	}
-	if err := cursor.All(context.TODO(), &decodedCommunities); err != nil {
+	if err := cursor.All(ctx, &decodedCommunities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
