@@ -117,6 +117,18 @@ createIndexSafe(
   }
 );
 
+// CRITICAL: Vehicle Active Community ID Index (single field for queries filtering only by activeCommunityID)
+// Needed for queries that filter by activeCommunityID without userID
+// This fixes Query Targeting alerts for vehicles queries
+createIndexSafe(
+  db.vehicles,
+  { "vehicle.activeCommunityID": 1 },
+  {
+    name: "vehicle_active_community_idx",
+    background: true
+  }
+);
+
 // CRITICAL: Civilian User ID Index (for /civilians/user/{id})
 // DONE
 createIndexSafe(
