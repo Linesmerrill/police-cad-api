@@ -46,7 +46,8 @@ func (c *callDatabase) Find(ctx context.Context, filter interface{}, opts ...*op
 	if err != nil {
 		return nil, err
 	}
-	err = cr.Decode(&calls)
+	defer cr.Close(ctx) // Ensure cursor is closed
+	err = cr.All(ctx, &calls) // Use All() instead of Decode() for multiple documents
 	if err != nil {
 		return nil, err
 	}

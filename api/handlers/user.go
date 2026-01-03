@@ -402,9 +402,13 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the user by userId
 	user := models.User{}
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to get user by userId", http.StatusNotFound, w, err)
 		return
@@ -424,7 +428,7 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	community, err := u.CDB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := u.CDB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
