@@ -74,7 +74,11 @@ func (c Civilian) CivilianByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get civilian by ID", http.StatusNotFound, w, err)
 		return
@@ -374,9 +378,13 @@ func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Reque
 		},
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Perform the update
 	result := c.DB.FindOneAndUpdate(
-		context.Background(),
+		ctx,
 		filter,
 		update,
 	)
@@ -423,10 +431,14 @@ func (c Civilian) UpdateCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	// Add the updatedAt field to track the update time
 	updatedFields["civilian.criminalHistory.$.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": cID, "civilian.criminalHistory._id": historyID} // Match by the new ID field
 	update := bson.M{"$set": updatedFields}                                 // Dynamically update only the provided fields
 
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update criminal history", http.StatusInternalServerError, w, err)
 		return

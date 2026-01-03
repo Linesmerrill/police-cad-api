@@ -301,20 +301,24 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 		},
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Execute the pipeline to get friend IDs
-	cursor, err := u.DB.Aggregate(context.Background(), pipeline)
+	cursor, err := u.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to fetch friends", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	// Define the result struct
 	type friendResult struct {
 		FriendIDs []string `bson:"friendIDs"`
 	}
 	var results []friendResult
-	if err = cursor.All(context.Background(), &results); err != nil {
+	if err = cursor.All(ctx, &results); err != nil {
 		config.ErrorStatus("failed to decode friends", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -357,16 +361,16 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Execute the aggregation
-	cursor, err = u.DB.Aggregate(context.Background(), pipeline)
+	cursor, err = u.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to get discover people recommendations", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	// Decode the results
 	var users []models.User
-	if err = cursor.All(context.Background(), &users); err != nil {
+	if err = cursor.All(ctx, &users); err != nil {
 		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}

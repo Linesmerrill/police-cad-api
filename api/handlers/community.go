@@ -1996,8 +1996,12 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -2018,7 +2022,7 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	// Update the community in the database
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$set": bson.M{"community.members": members}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update member Ten-Code", http.StatusInternalServerError, w, err)
 		return
@@ -2283,6 +2287,10 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{
 		"_id": cID,
 	}
@@ -2290,7 +2298,7 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		"$pull": bson.M{"community.tenCodes": bson.M{"_id": tID}},
 	}
 
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete Ten-Code", http.StatusInternalServerError, w, err)
 		return
@@ -2332,11 +2340,15 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		update["community.tenCodes.$[tenCode]."+key] = value
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
 		Filters: []interface{}{bson.M{"tenCode._id": tID}},
 	})
 
-	err = c.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update}, arrayFilters)
+	err = c.DB.UpdateOne(ctx, filter, bson.M{"$set": update}, arrayFilters)
 	if err != nil {
 		config.ErrorStatus("failed to update Ten-Code", http.StatusInternalServerError, w, err)
 		return
@@ -2373,6 +2385,10 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 		Description: requestBody.Description,
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{
 		"_id": cID,
 	}
@@ -2380,7 +2396,7 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 		"$push": bson.M{"community.tenCodes": newTenCode},
 	}
 
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add Ten-Code", http.StatusInternalServerError, w, err)
 		return
@@ -3264,8 +3280,12 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch the community
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
