@@ -265,6 +265,7 @@ createIndexSafe(
 );
 
 // CRITICAL: Arrest Report Arrestee ID Index (for /arrest-report/arrestee/{id})
+// DONE
 createIndexSafe(
   db.arrestreports,
   { "arrestReport.arrestee.id": 1 },
