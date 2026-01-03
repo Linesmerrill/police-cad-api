@@ -297,19 +297,23 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 	// Calculate the offset for pagination
 	offset := (page - 1) * limit
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find communities by owner ID with pagination
 	filter := bson.M{"community.ownerID": ownerID}
 	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
 
-	cursor, err := c.DB.Find(context.Background(), filter, options)
+	cursor, err := c.DB.Find(ctx, filter, options)
 	if err != nil {
 		config.ErrorStatus("failed to get communities by ownerID", http.StatusNotFound, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var communities []models.Community
-	if err = cursor.All(context.Background(), &communities); err != nil {
+	if err = cursor.All(ctx, &communities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -355,24 +359,28 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Count the total number of users
-	totalUsers, err := c.UDB.CountDocuments(context.Background(), filter)
+	totalUsers, err := c.UDB.CountDocuments(ctx, filter)
 	if err != nil {
 		return
 	}
 
 	// Fetch only the first 10 users' details
 	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
-	cursor, err := c.UDB.Find(context.Background(), filter, options)
+	cursor, err := c.UDB.Find(ctx, filter, options)
 	if err != nil {
 		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var users []models.User
-	if err = cursor.All(context.Background(), &users); err != nil {
+	if err = cursor.All(ctx, &users); err != nil {
 		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -702,9 +710,13 @@ func (c Community) GetRolesByCommunityIDHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
 	var community *models.Community
-	community, err = c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err = c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -1185,9 +1197,13 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	inviteCode := vars["invite_code"]
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Query the inviteCodes collection
 	// var invite models.InviteCode
-	invite, err := c.IDB.FindOne(context.Background(), bson.M{"code": inviteCode})
+	invite, err := c.IDB.FindOne(ctx, bson.M{"code": inviteCode})
 	if err != nil {
 		config.ErrorStatus("Invite code not found", http.StatusNotFound, w, err)
 		return

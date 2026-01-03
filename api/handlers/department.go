@@ -1,12 +1,12 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
@@ -37,8 +37,12 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	community, err := c.DB.FindOne(
-		context.Background(),
+		ctx,
 		bson.M{
 			"_id":             cID,
 			"community.roles": bson.M{"$exists": true}, // Ensures roles field exists
@@ -51,7 +55,7 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 
 	userFilter := bson.M{"_id": uID}
 	userData := models.User{}
-	err = c.UDB.FindOne(context.Background(), userFilter).Decode(&userData)
+	err = c.UDB.FindOne(ctx, userFilter).Decode(&userData)
 	if err != nil {
 		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
 		return
@@ -138,8 +142,12 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch the community
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		http.Error(w, "Community not found", http.StatusNotFound)
 		return
@@ -187,7 +195,7 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 
 		// Fetch user details
 		var user models.User
-		err = c.UDB.FindOne(context.Background(), bson.M{"_id": userID}).Decode(&user)
+		err = c.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
 		if err != nil {
 			continue // Skip if user not found
 		}

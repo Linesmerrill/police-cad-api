@@ -238,9 +238,13 @@ func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
 	// Normalize email to lowercase
 	user.Email = strings.TrimSpace(strings.ToLower(user.Email))
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// check if the user already exists
 	existingUser := models.User{}
-	_ = u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email}).Decode(&existingUser)
+	_ = u.DB.FindOne(ctx, bson.M{"user.email": user.Email}).Decode(&existingUser)
 	if existingUser.ID != "" {
 		config.ErrorStatus("email already exists", http.StatusConflict, w, fmt.Errorf("duplicate email"))
 		return
@@ -754,10 +758,14 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 	}
 	skip := (page - 1) * limit
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch user notifications
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, fmt.Errorf("failed to fetch user notifications: %w", err))
 		return

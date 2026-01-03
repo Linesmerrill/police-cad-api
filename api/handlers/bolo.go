@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -41,7 +41,11 @@ func (b Bolo) GetBoloByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := bson.M{"_id": bID}
-	bolo, err := b.DB.FindOne(context.Background(), filter)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	bolo, err := b.DB.FindOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to find BOLO", http.StatusNotFound, w, err)
 		return
@@ -93,15 +97,19 @@ func (b Bolo) FetchDepartmentBolosHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch total count
-	totalCount, err := b.DB.CountDocuments(context.TODO(), filter)
+	totalCount, err := b.DB.CountDocuments(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to get total count of BOLOs", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Fetch paginated data
-	dbResp, err := b.DB.Find(context.TODO(), filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	dbResp, err := b.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get BOLOs", http.StatusNotFound, w, err)
 		return
@@ -138,7 +146,11 @@ func (b Bolo) CreateBoloHandler(w http.ResponseWriter, r *http.Request) {
 	newBolo.ID = primitive.NewObjectID()
 	newBolo.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
-	_, err := b.DB.InsertOne(context.TODO(), newBolo)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err := b.DB.InsertOne(ctx, newBolo)
 	if err != nil {
 		config.ErrorStatus("failed to create new BOLO", http.StatusInternalServerError, w, err)
 		return
@@ -175,8 +187,12 @@ func (b Bolo) UpdateBoloHandler(w http.ResponseWriter, r *http.Request) {
 	// Set updatedAt to the current time
 	update["bolo.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": bID}
-	err = b.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
+	err = b.DB.UpdateOne(ctx, filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update BOLO", http.StatusInternalServerError, w, err)
 		return
@@ -196,8 +212,12 @@ func (b Bolo) DeleteBoloHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": bID}
-	err = b.DB.DeleteOne(context.Background(), filter)
+	err = b.DB.DeleteOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to delete BOLO", http.StatusInternalServerError, w, err)
 		return

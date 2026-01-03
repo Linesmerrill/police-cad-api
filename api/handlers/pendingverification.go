@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -49,8 +49,12 @@ func (pv PendingVerification) CreatePendingVerificationHandler(w http.ResponseWr
 	// Normalize email to lowercase
 	requestBody.Email = strings.TrimSpace(strings.ToLower(requestBody.Email))
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Check if email already exists in pendingVerifications
-	_, err := pv.PVDB.FindOne(context.Background(), bson.M{"email": requestBody.Email})
+	_, err := pv.PVDB.FindOne(ctx, bson.M{"email": requestBody.Email})
 	if err == nil {
 		http.Error(w, `{"success": false, "message": "Verification already in progress for this email"}`, http.StatusBadRequest)
 		return
@@ -58,7 +62,7 @@ func (pv PendingVerification) CreatePendingVerificationHandler(w http.ResponseWr
 
 	// Check if email exists in the users collection
 	existingUser := models.User{}
-	err = pv.UDB.FindOne(context.Background(), bson.M{"email": requestBody.Email}).Decode(&existingUser)
+	err = pv.UDB.FindOne(ctx, bson.M{"email": requestBody.Email}).Decode(&existingUser)
 	if err == nil {
 		http.Error(w, `{"success": false, "message": "Email already exists"}`, http.StatusBadRequest)
 		return
@@ -74,7 +78,7 @@ func (pv PendingVerification) CreatePendingVerificationHandler(w http.ResponseWr
 		Code:      code,
 		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
 	}
-	_, err = pv.PVDB.InsertOne(context.Background(), newPending)
+	_, err = pv.PVDB.InsertOne(ctx, newPending)
 	if err != nil {
 		config.ErrorStatus("failed to create pending verification", http.StatusInternalServerError, w, err)
 		return
@@ -137,8 +141,12 @@ func (pv PendingVerification) VerifyCodeHandler(w http.ResponseWriter, r *http.R
 	// Normalize email to lowercase
 	requestBody.Email = strings.TrimSpace(strings.ToLower(requestBody.Email))
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the pending verification by email
-	pendingVerification, err := pv.PVDB.FindOne(context.Background(), bson.M{"email": requestBody.Email})
+	pendingVerification, err := pv.PVDB.FindOne(ctx, bson.M{"email": requestBody.Email})
 	if err != nil {
 		config.ErrorStatus("failed to find pending verification", http.StatusNotFound, w, err)
 		return
@@ -148,7 +156,7 @@ func (pv PendingVerification) VerifyCodeHandler(w http.ResponseWriter, r *http.R
 	if pendingVerification.Code != requestBody.Code {
 		// Increment the attempts
 		err := pv.PVDB.UpdateOne(
-			context.Background(),
+			ctx,
 			bson.M{"email": requestBody.Email},
 			bson.M{"$inc": bson.M{"attempts": 1}},
 		)
@@ -162,7 +170,7 @@ func (pv PendingVerification) VerifyCodeHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Delete the verified item from the database
-	err = pv.PVDB.DeleteOne(context.Background(), bson.M{"email": requestBody.Email})
+	err = pv.PVDB.DeleteOne(ctx, bson.M{"email": requestBody.Email})
 	if err != nil {
 		config.ErrorStatus("failed to delete verified item", http.StatusInternalServerError, w, err)
 		return
@@ -195,16 +203,20 @@ func (pv PendingVerification) ResendVerificationCodeHandler(w http.ResponseWrite
 	// Normalize email to lowercase
 	requestBody.Email = strings.TrimSpace(strings.ToLower(requestBody.Email))
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Check if the user already exists in the user database
 	existingUser := models.User{}
-	err := pv.UDB.FindOne(context.Background(), bson.M{"email": requestBody.Email}).Decode(&existingUser)
+	err := pv.UDB.FindOne(ctx, bson.M{"email": requestBody.Email}).Decode(&existingUser)
 	if err == nil {
 		http.Error(w, `{"success": false, "message": "Email already exists"}`, http.StatusBadRequest)
 		return
 	}
 
 	// Check if the email exists in the pendingVerification database
-	pendingVerification, err := pv.PVDB.FindOne(context.Background(), bson.M{"email": requestBody.Email})
+	pendingVerification, err := pv.PVDB.FindOne(ctx, bson.M{"email": requestBody.Email})
 	if err != nil {
 		config.ErrorStatus("failed to find pending verification", http.StatusNotFound, w, err)
 		return
@@ -234,7 +246,7 @@ func (pv PendingVerification) ResendVerificationCodeHandler(w http.ResponseWrite
 			"attempts":  0,
 		},
 	}
-	err = pv.PVDB.UpdateOne(context.Background(), bson.M{"email": requestBody.Email}, update)
+	err = pv.PVDB.UpdateOne(ctx, bson.M{"email": requestBody.Email}, update)
 	if err != nil {
 		config.ErrorStatus("failed to update pending verification", http.StatusInternalServerError, w, err)
 		return
