@@ -254,93 +254,18 @@ func (u User) UserCheckEmailHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // UsersDiscoverPeopleHandler returns a list of users that we suggest to the user to follow
+// TODO: Implement proper discover people logic - this is currently hardcoded to return random users
 func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
-	// Parse query parameters
-	userID := r.URL.Query().Get("userId")
-	if userID == "" {
-		config.ErrorStatus("query param userId is required", http.StatusBadRequest, w, fmt.Errorf("query param userId is required"))
-		return
-	}
-
-	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || limit <= 0 {
-		limit = 10 // Default limit
-	}
-
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
-	if err != nil || page < 1 {
-		page = 1 // Default page
-	}
-	skip := (page - 1) * limit
-
-	// Convert userID to ObjectID
-	uID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		config.ErrorStatus("invalid userId", http.StatusBadRequest, w, err)
-		return
-	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// OPTIMIZATION: Instead of expensive $unwind aggregation, use direct field access
-	// First, get the user document
-	var currentUser models.User
-	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&currentUser)
-	if err != nil {
-		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Extract friend IDs directly from the user document (much faster than aggregation)
-	friendIDs := []string{}
-	if currentUser.Details.Friends != nil {
-		for _, friend := range currentUser.Details.Friends {
-			if friend.Status == "approved" || friend.Status == "pending" {
-				friendIDs = append(friendIDs, friend.FriendID)
-			}
-		}
-	}
-
-	// Convert friend IDs to ObjectIDs
-	friendObjectIDs := make([]primitive.ObjectID, 0, len(friendIDs))
-	for _, fid := range friendIDs {
-		if oid, err := primitive.ObjectIDFromHex(fid); err == nil {
-			friendObjectIDs = append(friendObjectIDs, oid)
-		}
-	}
-
-	// Pipeline to find random users excluding friends and the current user
-	// OPTIMIZATION: $sample is slow, especially with $skip/$limit after it
-	// Instead: sample a larger pool upfront, then apply pagination
-	// For better performance, we'll sample (skip + limit) users, then skip and limit
-	sampleSize := skip + limit
-	if sampleSize > 100 {
-		sampleSize = 100 // Cap sample size to prevent performance issues
-	}
-	if sampleSize < limit {
-		sampleSize = limit // Ensure we have enough samples
-	}
-
+	// Simple pipeline to get a few random users
 	pipeline := []bson.M{
 		{
-			"$match": bson.M{
-				"_id": bson.M{
-					"$nin": append(friendObjectIDs, uID), // Exclude friends and current user
-				},
-			},
-		},
-		{
-			"$sample": bson.M{"size": sampleSize}, // Sample larger pool upfront
-		},
-		{
-			"$skip": skip, // Pagination: skip for the current page
-		},
-		{
-			"$limit": limit, // Pagination: limit to requested size
+			"$sample": bson.M{"size": 3}, // Get 3 random users
 		},
 	}
 
@@ -366,8 +291,6 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"users": users,
-		"page":  page,
-		"limit": limit,
 	})
 }
 
