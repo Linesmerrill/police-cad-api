@@ -592,16 +592,16 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	
 	// Get total count for pagination metadata (skip for short queries)
 	var totalCount int64
+	var err error
 	if queryLen >= 3 {
 		totalCount, err = h.CDB.CountDocuments(ctx, filter)
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+			return
+		}
 	} else {
 		// Estimate for short queries to avoid slow CountDocuments
 		totalCount = 0
-	}
-	if err != nil && queryLen >= 3 {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
-		return
 	}
 	
 	// Use community database to search with pagination
