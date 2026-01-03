@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -1543,10 +1544,14 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	user := models.User{}
 
 	// Find the user by ID
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1576,24 +1581,26 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Find communities that the user does not belong to and are public
+	// Use visibility index first, then filter by $nin
 	filter := bson.M{
 		"_id":                  bson.M{"$nin": communityObjectIDs},
 		"community.visibility": "public",
 	}
-	opt := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"$natural": 1})
+	// Use _id sort instead of $natural for better performance (can use _id index)
+	opt := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"_id": 1})
 
-	cursor, err := u.CDB.Find(context.Background(), filter, opt)
+	cursor, err := u.CDB.Find(ctx, filter, opt)
 	if err != nil {
 		config.ErrorStatus("failed to find communities", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// If the cursor comes back as nil, that means there are no public communities - so we can just return an empty array
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var communities []models.Community
 
-	if err = cursor.All(context.Background(), &communities); err != nil {
+	if err = cursor.All(ctx, &communities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
