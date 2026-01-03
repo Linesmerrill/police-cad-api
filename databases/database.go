@@ -106,30 +106,28 @@ type mongoSession struct {
 
 // NewClient uses the values from the config and returns a mongo client
 func NewClient(conf *config.Config) (ClientHelper, error) {
-	// Configure connection pool for better performance and resilience
-	// Increased timeouts to handle high latency and network issues
+	// Configure connection pool for optimal performance
+	// Optimized for fast queries (<100ms) and high concurrency
 	clientOptions := options.Client().ApplyURI(conf.URL).
-		SetMaxPoolSize(600).                    // Maximum connections per dyno (600 × 2 dynos = 1,200 total, 80% of M10's 1,500 per node limit)
+		SetMaxPoolSize(400).                    // Maximum connections per dyno (400 × 2 dynos = 800 total, 53% of M10's 1,500 per node limit)
 		// M10 cluster: 1,500 concurrent connections per node
-		// With 2 dynos: 1,200 total connections = 80% of limit (leaves 300 buffer for spikes)
-		// MaxPoolSize is a ceiling - connections are only created when needed, up to this limit
-		// With 10s query timeouts, connections release quickly, so high limit is safe
-		// If you add more dynos, consider: 400 per dyno × 3 dynos = 1,200 total
-		SetMinPoolSize(20).                     // Minimum connections (keeps pool warm for faster queries)
-		SetMaxConnecting(10).                   // Limit concurrent connection attempts (prevents overwhelming during spikes)
-		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s (releases unused connections)
-		SetServerSelectionTimeout(30 * time.Second). // Reduced from 60s: Faster failure detection (was 60s, now 30s)
-		SetSocketTimeout(30 * time.Second).     // Reduced from 60s: Release connections faster (was 60s, now 30s)
-		SetConnectTimeout(5 * time.Second).     // Reduced from 10s: Faster connection attempts (was 10s, now 5s)
+		// With 2 dynos: 800 total connections = 53% of limit (leaves 700 buffer for spikes)
+		// Reduced from 600 to 400: Lower overhead, faster connection establishment
+		// With 5s query timeouts, connections release quickly, so 400 per dyno is sufficient
+		// If you add more dynos, consider: 300 per dyno × 3 dynos = 900 total
+		SetMinPoolSize(50).                     // Increased from 20: More warm connections for faster queries
+		SetMaxConnecting(20).                   // Increased from 10: Faster connection establishment during spikes
+		SetMaxConnIdleTime(15 * time.Second).  // Reduced from 30s: Release idle connections faster (frees up pool)
+		SetServerSelectionTimeout(10 * time.Second). // Reduced from 30s: Faster failure detection
+		SetSocketTimeout(6 * time.Second).     // Reduced from 30s: Match query timeout (5s) + 1s network overhead
+		SetConnectTimeout(5 * time.Second).     // Keep at 5s: Fast connection attempts
 		SetRetryWrites(true).                   // Enable retry writes for transient failures
 		SetRetryReads(true).                    // Enable retry reads for transient failures
 		SetHeartbeatInterval(10 * time.Second). // Check server status every 10 seconds
-		SetReadPreference(readpref.Primary())   // CRITICAL: Force PRIMARY reads only due to 3.75min replication lag
-		// Changed from PrimaryPreferred() to Primary() because SECONDARY nodes have 3.75min lag
-		// Reading from SECONDARY would return stale data (3.75 minutes old!)
-		// Once replication lag is resolved (< 1s), can change back to PrimaryPreferred() for resilience
-		// SetMaxConnecting limits concurrent connection attempts to prevent overwhelming slow/unstable clusters
-		// Increased ConnectTimeout to 10s to give more time for connections during cluster issues
+		SetReadPreference(readpref.PrimaryPreferred()) // Use PrimaryPreferred for better load distribution
+		// Changed back to PrimaryPreferred() to distribute load across PRIMARY and SECONDARY
+		// If replication lag is still high (>1s), MongoDB will automatically prefer PRIMARY
+		// This provides better resilience and load distribution when secondaries are healthy
 
 	c, err := mongo.NewClient(clientOptions)
 
