@@ -14,7 +14,7 @@ const userName = "users"
 
 // UserDatabase contains the methods to use with the user database
 type UserDatabase interface {
-	FindOne(ctx context.Context, filter interface{}) SingleResultHelper
+	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	InsertOne(ctx context.Context, userDetails models.UserDetails) (InsertOneResultHelper, error)
@@ -34,9 +34,9 @@ func NewUserDatabase(db DatabaseHelper) UserDatabase {
 	}
 }
 
-func (u *userDatabase) FindOne(ctx context.Context, filter interface{}) SingleResultHelper {
+func (u *userDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper {
 	// user := &models.User{}
-	return u.db.Collection(userName).FindOne(ctx, filter)
+	return u.db.Collection(userName).FindOne(ctx, filter, opts...)
 	// if err != nil {
 	// 	return nil, err
 	// }

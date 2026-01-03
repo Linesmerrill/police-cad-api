@@ -22,6 +22,7 @@ import (
 	"github.com/shaj13/go-guardian/store"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -96,15 +97,14 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Use direct field lookup with collation to leverage the case-insensitive index
+	// This is much faster than $expr with $toLower which cannot use indexes
 	user := models.User{}
-	err := m.DB.FindOne(ctx, bson.M{
-		"$expr": bson.M{
-			"$eq": []interface{}{
-				bson.M{"$toLower": "$user.email"},
-				email,
-			},
-		},
-	}).Decode(&user)
+	opts := options.FindOne().SetCollation(&options.Collation{
+		Locale:   "en",
+		Strength: 2, // Case-insensitive
+	})
+	err := m.DB.FindOne(ctx, bson.M{"user.email": email}, opts).Decode(&user)
 	if err != nil {
 		http.Error(w, "failed to get user by email", http.StatusNotFound)
 		return
@@ -150,15 +150,14 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 	queryCtx, cancel := WithQueryTimeout(ctx)
 	defer cancel()
 
+	// Use direct field lookup with collation to leverage the case-insensitive index
+	// This is much faster than $expr with $toLower which cannot use indexes
 	dbEmailResp := models.User{}
-	err := m.DB.FindOne(queryCtx, bson.M{
-		"$expr": bson.M{
-			"$eq": []interface{}{
-				bson.M{"$toLower": "$user.email"},
-				email,
-			},
-		},
-	}).Decode(&dbEmailResp)
+	opts := options.FindOne().SetCollation(&options.Collation{
+		Locale:   "en",
+		Strength: 2, // Case-insensitive
+	})
+	err := m.DB.FindOne(queryCtx, bson.M{"user.email": email}, opts).Decode(&dbEmailResp)
 	if err != nil {
 		// User not found is normal during authentication - log as debug/warn, not error
 		// Only log as error if it's a database connection issue (timeout, network, etc.)
