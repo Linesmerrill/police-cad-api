@@ -89,9 +89,8 @@ func Middleware(next http.Handler) http.Handler {
 				"email", email,
 				"username", user.UserName())
 			
-			// Store authenticated user ID in context for CreateToken to use (avoids duplicate DB query)
-			// The user ID will be extracted from ValidateUser and stored in context
-			r = r.WithContext(r.Context())
+			// The user ID should already be in context (set by ValidateUser)
+			// If not, CreateToken will fall back to DB lookup
 			next.ServeHTTP(w, r)
 
 		} else {
