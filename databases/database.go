@@ -109,13 +109,16 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 	// Configure connection pool for better performance and resilience
 	// Increased timeouts to handle high latency and network issues
 	clientOptions := options.Client().ApplyURI(conf.URL).
-		SetMaxPoolSize(150).                    // Maximum number of connections in pool (150 × 2 dynos = 300 total, well within M10 limit of 1,500 per node)
-		SetMinPoolSize(20).                     // Minimum number of connections in pool (increased from 10)
-		SetMaxConnecting(10).                   // Limit concurrent connection attempts (increased from 5 for faster pool growth)
-		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s
-		SetServerSelectionTimeout(60 * time.Second). // Increased timeout for server selection during migration (was 30s, now 60s)
-		SetSocketTimeout(60 * time.Second).     // Increased timeout for socket operations (was 30s, now 60s)
-		SetConnectTimeout(10 * time.Second).    // Increased timeout for initial connection (was 5s) - give more time during cluster issues
+		SetMaxPoolSize(100).                    // Reduced from 150: Maximum connections per dyno (100 × 2 dynos = 200 total, safer buffer for M10)
+		// Reduced to prevent sudden connection pool exhaustion
+		// When pool fills up (200 connections), leaves buffer for spikes
+		// If you have 3+ dynos, reduce further: 75 per dyno
+		SetMinPoolSize(15).                     // Reduced from 20: Minimum connections (still keeps pool warm)
+		SetMaxConnecting(8).                    // Reduced from 10: Limit concurrent connection attempts (prevents overwhelming during spikes)
+		SetMaxConnIdleTime(20 * time.Second).  // Reduced from 30s: Close idle connections faster (releases connections sooner)
+		SetServerSelectionTimeout(30 * time.Second). // Reduced from 60s: Faster failure detection (was 60s, now 30s)
+		SetSocketTimeout(30 * time.Second).     // Reduced from 60s: Release connections faster (was 60s, now 30s)
+		SetConnectTimeout(5 * time.Second).     // Reduced from 10s: Faster connection attempts (was 10s, now 5s)
 		SetRetryWrites(true).                   // Enable retry writes for transient failures
 		SetRetryReads(true).                    // Enable retry reads for transient failures
 		SetHeartbeatInterval(10 * time.Second). // Check server status every 10 seconds

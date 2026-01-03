@@ -6,7 +6,9 @@ import (
 )
 
 // QueryTimeout is the default timeout for database queries
-const QueryTimeout = 10 * time.Second
+// Reduced from 10s to 7s to release connections faster and prevent pool exhaustion
+// If queries consistently timeout, check for missing indexes or slow query patterns
+const QueryTimeout = 7 * time.Second
 
 // WithQueryTimeout creates a context with query timeout
 // IMPORTANT: This preserves the request trace from the parent context
