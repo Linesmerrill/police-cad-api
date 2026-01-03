@@ -282,62 +282,27 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Aggregation pipeline to get approved and pending friend IDs
-	pipeline := []bson.M{
-		{
-			"$match": bson.M{"_id": uID},
-		},
-		{
-			"$unwind": bson.M{
-				"path":                       "$user.friends",
-				"preserveNullAndEmptyArrays": true,
-			},
-		},
-		{
-			"$match": bson.M{
-				"$or": []bson.M{
-					{"user.friends.status": "approved"},
-					{"user.friends.status": "pending"},
-				},
-			},
-		},
-		{
-			"$group": bson.M{
-				"_id":       nil,
-				"friendIDs": bson.M{"$addToSet": "$user.friends.friend_id"},
-			},
-		},
-	}
-
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Execute the pipeline to get friend IDs
-	cursor, err := u.DB.Aggregate(ctx, pipeline)
+	// OPTIMIZATION: Instead of expensive $unwind aggregation, use direct field access
+	// First, get the user document
+	var currentUser models.User
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&currentUser)
 	if err != nil {
-		config.ErrorStatus("failed to fetch friends", http.StatusInternalServerError, w, err)
-		return
-	}
-	defer cursor.Close(ctx)
-
-	// Define the result struct
-	type friendResult struct {
-		FriendIDs []string `bson:"friendIDs"`
-	}
-	var results []friendResult
-	if err = cursor.All(ctx, &results); err != nil {
-		config.ErrorStatus("failed to decode friends", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Extract friendIDs from results
+	// Extract friend IDs directly from the user document (much faster than aggregation)
 	friendIDs := []string{}
-	if len(results) > 0 {
-		friendIDs = results[0].FriendIDs
-	}
-	if friendIDs == nil {
-		friendIDs = []string{}
+	if currentUser.Details.Friends != nil {
+		for _, friend := range currentUser.Details.Friends {
+			if friend.Status == "approved" || friend.Status == "pending" {
+				friendIDs = append(friendIDs, friend.FriendID)
+			}
+		}
 	}
 
 	// Convert friend IDs to ObjectIDs
@@ -349,7 +314,18 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Pipeline to find random users excluding friends and the current user
-	pipeline = []bson.M{
+	// OPTIMIZATION: $sample is slow, especially with $skip/$limit after it
+	// Instead: sample a larger pool upfront, then apply pagination
+	// For better performance, we'll sample (skip + limit) users, then skip and limit
+	sampleSize := skip + limit
+	if sampleSize > 100 {
+		sampleSize = 100 // Cap sample size to prevent performance issues
+	}
+	if sampleSize < limit {
+		sampleSize = limit // Ensure we have enough samples
+	}
+
+	pipeline := []bson.M{
 		{
 			"$match": bson.M{
 				"_id": bson.M{
@@ -358,7 +334,7 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 			},
 		},
 		{
-			"$sample": bson.M{"size": limit}, // Randomly select 'limit' users
+			"$sample": bson.M{"size": sampleSize}, // Sample larger pool upfront
 		},
 		{
 			"$skip": skip, // Pagination: skip for the current page
@@ -369,7 +345,7 @@ func (u User) UsersDiscoverPeopleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Execute the aggregation
-	cursor, err = u.DB.Aggregate(ctx, pipeline)
+	cursor, err := u.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to get discover people recommendations", http.StatusInternalServerError, w, err)
 		return

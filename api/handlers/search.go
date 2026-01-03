@@ -251,22 +251,15 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		zap.S().Debugw("skipped count for short query", "query", query, "estimatedCount", totalCount)
 	} else {
-		// For longer queries, try to get accurate count
-		countCtx, countCancel := api.WithQueryTimeout(r.Context())
-		defer countCancel()
-		
-		totalCount, err = s.CommDB.CountDocuments(countCtx, communityFilter)
-		if err != nil {
-			// If count fails, use result count as fallback
-			zap.S().Warnw("failed to count communities", 
-				"query", query, 
-				"error", err)
-			if len(communities) == int(limit) {
-				totalCount = int64(len(communities)) + 1
-			} else {
-				totalCount = int64(len(communities))
-			}
+		// OPTIMIZATION: Skip CountDocuments for longer queries too - it's expensive
+		// The $text search is already fast, but CountDocuments still requires scanning
+		// Estimate based on results: if we got a full page, there's likely more
+		if len(communities) == int(limit) {
+			totalCount = int64(len(communities)) + 1 // Indicate there might be more
+		} else {
+			totalCount = int64(len(communities))
 		}
+		zap.S().Debugw("skipped count for query", "query", query, "estimatedCount", totalCount)
 	}
 
 	// Prepare the paginated response
