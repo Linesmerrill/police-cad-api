@@ -2,10 +2,38 @@
 // Run this in MongoDB Atlas → Your Cluster → "Browse Collections" → "Shell" tab
 // OR connect via mongosh and run: mongosh "YOUR_CONNECTION_STRING" < create_indexes.js
 
+// Helper function to safely create index (skips if index with same key pattern exists)
+function createIndexSafe(collection, key, options) {
+  const indexes = collection.getIndexes();
+  const keyStr = JSON.stringify(key);
+  
+  // Check if index with same key pattern already exists
+  const exists = indexes.some(idx => JSON.stringify(idx.key) === keyStr);
+  
+  if (exists) {
+    const existingIdx = indexes.find(idx => JSON.stringify(idx.key) === keyStr);
+    print(`⚠️  Index already exists: ${existingIdx.name} (skipping ${options.name || 'unnamed'})`);
+    return;
+  }
+  
+  try {
+    collection.createIndex(key, options);
+    print(`✓ Created index: ${options.name || 'unnamed'}`);
+  } catch (e) {
+    if (e.code === 85 || e.message.includes("already exists")) {
+      print(`⚠️  Index already exists (different name): ${options.name || 'unnamed'} - skipping`);
+    } else {
+      print(`❌ Error creating index ${options.name || 'unnamed'}: ${e.message}`);
+      throw e;
+    }
+  }
+}
+
 // CRITICAL: User Email Index (Case-Insensitive)
 // This is used in authentication on EVERY request - most critical index
 // DONE
-db.users.createIndex(
+createIndexSafe(
+  db.users,
   { "user.email": 1 }, 
   { 
     name: "user_email_idx",
@@ -16,7 +44,8 @@ db.users.createIndex(
 
 // HIGH PRIORITY: User Communities Index
 // DONE
-db.users.createIndex(
+createIndexSafe(
+  db.users,
   { "user.communities.communityId": 1, "user.communities.status": 1 }, 
   {
     name: "user_communities_idx",
@@ -26,7 +55,8 @@ db.users.createIndex(
 
 // HIGH PRIORITY: User Search Text Index
 // DONE
-db.users.createIndex(
+createIndexSafe(
+  db.users,
   { 
     "user.username": "text", 
     "user.callSign": "text",
@@ -40,7 +70,8 @@ db.users.createIndex(
 
 // MEDIUM PRIORITY: Community Name Text Index
 // DONE
-db.communities.createIndex(
+createIndexSafe(
+  db.communities,
   { "community.name": "text" }, 
   {
     name: "community_name_text_idx",
@@ -50,7 +81,8 @@ db.communities.createIndex(
 
 // MEDIUM PRIORITY: Community Visibility Index
 // DONE
-db.communities.createIndex(
+createIndexSafe(
+  db.communities,
   { "community.visibility": 1 }, 
   {
     name: "community_visibility_idx",
@@ -60,7 +92,8 @@ db.communities.createIndex(
 
 // CRITICAL: Vehicle Registered Owner Index (for /vehicles/registered-owner/{id})
 // DONE
-db.vehicles.createIndex(
+createIndexSafe(
+  db.vehicles,
   { "vehicle.linkedCivilianID": 1, "vehicle.registeredOwnerID": 1 },
   {
     name: "vehicle_registered_owner_idx",
@@ -70,7 +103,8 @@ db.vehicles.createIndex(
 
 // CRITICAL: Vehicle User ID Index (for /vehicles/user/{id})
 // DONE
-db.vehicles.createIndex(
+createIndexSafe(
+  db.vehicles,
   { "vehicle.userID": 1, "vehicle.activeCommunityID": 1 },
   {
     name: "vehicle_user_community_idx",
@@ -80,7 +114,8 @@ db.vehicles.createIndex(
 
 // CRITICAL: Civilian User ID Index (for /civilians/user/{id})
 // DONE
-db.civilians.createIndex(
+createIndexSafe(
+  db.civilians,
   { "civilian.userID": 1, "civilian.activeCommunityID": 1 },
   {
     name: "civilian_user_community_idx",
@@ -91,7 +126,8 @@ db.civilians.createIndex(
 // CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
 // The query uses $or with both fields, so we need separate indexes for each
 // DONE
-db.firearms.createIndex(
+createIndexSafe(
+  db.firearms,
   { "firearm.linkedCivilianID": 1, "firearm.registeredOwnerID": 1 },
   {
     name: "firearm_registered_owner_idx",
@@ -102,14 +138,16 @@ db.firearms.createIndex(
 // CRITICAL: Separate indexes for $or queries (MongoDB can't use compound index efficiently for $or)
 // These allow MongoDB to use index intersection for $or queries
 print("Creating separate firearm indexes for $or queries...");
-db.firearms.createIndex(
+createIndexSafe(
+  db.firearms,
   { "firearm.registeredOwnerID": 1 },
   {
     name: "firearm_registered_owner_id_idx",
     background: true
   }
 );
-db.firearms.createIndex(
+createIndexSafe(
+  db.firearms,
   { "firearm.linkedCivilianID": 1 },
   {
     name: "firearm_linked_civilian_id_idx",
@@ -120,7 +158,8 @@ print("✓ Separate firearm indexes created");
 
 // CRITICAL: Call Community ID Index (for /calls/community/{id})
 // DONE
-db.calls.createIndex(
+createIndexSafe(
+  db.calls,
   { "call.communityID": 1, "call.status": 1 },
   {
     name: "call_community_status_idx",
@@ -130,7 +169,8 @@ db.calls.createIndex(
 
 // CRITICAL: Community Subscription Plan + Visibility Index (for elite communities queries)
 // DONE
-db.communities.createIndex(
+createIndexSafe(
+  db.communities,
   { "community.subscription.plan": 1, "community.visibility": 1 },
   {
     name: "community_subscription_visibility_idx",
@@ -140,7 +180,8 @@ db.communities.createIndex(
 
 // MEDIUM PRIORITY: Community Tags Index (for tag-based queries)
 // DONE
-db.communities.createIndex(
+createIndexSafe(
+  db.communities,
   { "community.tags": 1 },
   {
     name: "community_tags_idx",
@@ -150,7 +191,8 @@ db.communities.createIndex(
 
 // CRITICAL: Community Tags + Visibility Compound Index (for /communities/tag/{tag})
 // DONE
-db.communities.createIndex(
+createIndexSafe(
+  db.communities,
   { "community.tags": 1, "community.visibility": 1 },
   {
     name: "community_tags_visibility_idx",
@@ -162,7 +204,8 @@ db.communities.createIndex(
 // MongoDB was using visibility+name index and filtering tags in memory (5.4s slow!)
 // This index allows MongoDB to use tag filter AND sort by name efficiently
 // DONE
-db.communities.createIndex(
+createIndexSafe(
+  db.communities,
   { "community.tags": 1, "community.visibility": 1, "community.name": 1 },
   {
     name: "community_tags_visibility_name_idx",
@@ -172,7 +215,8 @@ db.communities.createIndex(
 
 // CRITICAL: Invite Code Index (for /community/invite/{code})
 // DONE
-db.inviteCodes.createIndex(
+createIndexSafe(
+  db.inviteCodes,
   { "code": 1 },
   {
     name: "invite_code_idx",
@@ -183,7 +227,8 @@ db.inviteCodes.createIndex(
 
 // CRITICAL: Announcement Community + isActive + createdAt Index (for /community/{id}/announcements)
 // DONE
-db.announcements.createIndex(
+createIndexSafe(
+  db.announcements,
   { "community": 1, "isActive": 1, "createdAt": -1 },
   {
     name: "announcement_community_active_created_idx",
@@ -193,7 +238,8 @@ db.announcements.createIndex(
 
 // CRITICAL: Community Subscription Created By Index (for /community/{user_id}/subscriptions)
 // DONE
-db.communities.createIndex(
+createIndexSafe(
+  db.communities,
   { "community.subscriptionCreatedBy": 1 },
   {
     name: "community_subscription_created_by_idx",
@@ -203,7 +249,8 @@ db.communities.createIndex(
 
 // CRITICAL: License Civilian ID Index (for /licenses/civilian/{id})
 // DONE
-db.licenses.createIndex(
+createIndexSafe(
+  db.licenses,
   { "license.civilianID": 1 },
   {
     name: "license_civilian_id_idx",
