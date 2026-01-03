@@ -140,6 +140,17 @@ createIndexSafe(
   }
 );
 
+// CRITICAL: Civilian Active Community ID Index (single field for queries filtering only by activeCommunityID)
+// Needed for queries that filter by activeCommunityID without approvalStatus
+createIndexSafe(
+  db.civilians,
+  { "civilian.activeCommunityID": 1 },
+  {
+    name: "civilian_active_community_id_idx",
+    background: true
+  }
+);
+
 // CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
 // The query uses $or with both fields, so we need separate indexes for each
 // DONE
