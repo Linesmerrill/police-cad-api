@@ -74,21 +74,44 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	results := map[string]interface{}{}
 
-	// Search for users
-	userFilter := bson.M{
-		"$and": []bson.M{
-			{"$or": []bson.M{
-				{"user.name": bson.M{"$regex": query, "$options": "i"}},
-				{"user.username": bson.M{"$regex": query, "$options": "i"}},
-			}},
-			{"_id": bson.M{"$ne": currentUserObjectID}},
-		},
-	}
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	userOptions := options.Find().SetLimit(limit).SetSkip(skip)
+	// OPTIMIZATION: Use $text search instead of regex for much better performance
+	// The user_search_text_idx index exists for user.username, user.callSign, user.name
+	queryLen := len(query)
+	var userFilter bson.M
+	var userOptions *options.FindOptions
+
+	if queryLen >= 3 {
+		// Use $text search for longer queries - much faster with text index
+		userFilter = bson.M{
+			"$and": []bson.M{
+				{"$text": bson.M{"$search": query}}, // Uses user_search_text_idx
+				{"_id": bson.M{"$ne": currentUserObjectID}},
+			},
+		}
+		// Sort by text score for relevance
+		userOptions = options.Find().
+			SetLimit(limit).
+			SetSkip(skip).
+			SetSort(bson.M{"score": bson.M{"$meta": "textScore"}, "user.name": 1})
+	} else {
+		// For very short queries (<3 chars), use regex but limit results aggressively
+		// This is still slow but necessary for short queries
+		userFilter = bson.M{
+			"$and": []bson.M{
+				{"$or": []bson.M{
+					{"user.name": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match is faster
+					{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
+				}},
+				{"_id": bson.M{"$ne": currentUserObjectID}},
+			},
+		}
+		userOptions = options.Find().SetLimit(limit).SetSkip(skip)
+	}
+
 	cursor, err := s.UserDB.Find(ctx, userFilter, userOptions)
 	if err != nil {
 		config.ErrorStatus("failed to search users", http.StatusInternalServerError, w, err)

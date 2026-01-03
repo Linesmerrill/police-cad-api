@@ -410,38 +410,77 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	skip := int64(page * limit)
 	limit64 := int64(limit)
 
-	// Search by email, name, or username (case-insensitive)
-	filter := bson.M{
-		"$or": []bson.M{
-			{"user.email": bson.M{"$regex": query, "$options": "i"}},
-			{"user.name": bson.M{"$regex": query, "$options": "i"}},
-			{"user.username": bson.M{"$regex": query, "$options": "i"}},
-		},
+	// OPTIMIZATION: Use $text search for name/username (much faster than regex)
+	// For email, use direct field lookup with collation (has index)
+	queryLen := len(query)
+	var filter bson.M
+	var findOpts *options.FindOptions
+
+	// Use request context with timeout
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	if queryLen >= 3 {
+		// Use $text search for name/username, direct lookup for email
+		filter = bson.M{
+			"$or": []bson.M{
+				{"user.email": query}, // Direct lookup uses user_email_idx (case-insensitive collation)
+				{"$text": bson.M{"$search": query}}, // Uses user_search_text_idx for name/username
+			},
+		}
+		findOpts = &options.FindOptions{
+			Skip:  &skip,
+			Limit: &limit64,
+			Sort:  bson.M{"score": bson.M{"$meta": "textScore"}, "user.email": 1},
+		}
+	} else {
+		// For very short queries, use regex but limit aggressively
+		filter = bson.M{
+			"$or": []bson.M{
+				{"user.email": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match
+				{"user.name": bson.M{"$regex": "^" + query, "$options": "i"}},
+				{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
+			},
+		}
+		findOpts = &options.FindOptions{
+			Skip:  &skip,
+			Limit: &limit64,
+			Sort:  bson.M{"user.email": 1},
+		}
 	}
 	
-	// Get total count for pagination metadata
-	totalCount, err := h.UDB.CountDocuments(r.Context(), filter)
-	if err != nil {
+	// Get total count for pagination metadata (skip for very short queries to avoid slow count)
+	var totalCount int64
+	if queryLen >= 3 {
+		totalCount, err = h.UDB.CountDocuments(ctx, filter)
+	} else {
+		// For short queries, estimate count based on results (faster)
+		totalCount = 0 // Will be estimated from results
+	}
+	if err != nil && queryLen >= 3 {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
 		return
 	}
 	
 	// Use existing user database to search with pagination
-	cursor, err := h.UDB.Find(r.Context(), filter, &options.FindOptions{
-		Skip:  &skip,
-		Limit: &limit64,
-		Sort:  bson.M{"user.email": 1}, // Sort by email for consistent results
-	})
+	cursor, err := h.UDB.Find(ctx, filter, findOpts)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
 		return
 	}
-	defer cursor.Close(r.Context())
+	defer cursor.Close(ctx)
+	
+	// If we skipped count for short queries, estimate from results
+	if queryLen < 3 && totalCount == 0 {
+		// Estimate: if we got full limit, there might be more
+		// This is a rough estimate to avoid slow CountDocuments
+		totalCount = limit64 * (page + 1) // Rough estimate
+	}
 
 	var users []models.User
-	if err = cursor.All(r.Context(), &users); err != nil {
+	if err = cursor.All(ctx, &users); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode users"})
 		return
