@@ -3599,8 +3599,12 @@ func (c Community) GetNonMemberDepartmentsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Fetch the community
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
 		return
