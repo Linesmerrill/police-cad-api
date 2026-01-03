@@ -140,6 +140,17 @@ db.communities.createIndex(
 );
 print("✓ Community tags index created");
 
+// CRITICAL: Community Tags + Visibility Compound Index (for /communities/tag/{tag})
+print("Creating community tags + visibility compound index...");
+db.communities.createIndex(
+  { "community.tags": 1, "community.visibility": 1 },
+  {
+    name: "community_tags_visibility_idx",
+    background: true
+  }
+);
+print("✓ Community tags + visibility compound index created");
+
 // CRITICAL: Invite Code Index (for /community/invite/{code})
 print("Creating invite code index...");
 db.inviteCodes.createIndex(

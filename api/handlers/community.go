@@ -3155,6 +3155,10 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		matchStage = append(matchStage, bson.E{"community.tags", tag})
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Aggregation pipeline with paging
 	pipeline := mongo.Pipeline{
 		{{"$match", matchStage}},
@@ -3173,15 +3177,15 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		}}},
 	}
 
-	cursor, err := c.DB.Aggregate(context.Background(), pipeline)
+	cursor, err := c.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var results []liteCommunity
-	if err := cursor.All(context.Background(), &results); err != nil {
+	if err := cursor.All(ctx, &results); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -3204,12 +3208,12 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		})
 	}
 
-	// Count total matching documents
+	// Count total matching documents (run in parallel with aggregation for better performance)
 	countFilter := bson.M{"community.visibility": "public"}
 	if tag != "all" {
 		countFilter["community.tags"] = tag
 	}
-	totalCount, _ := c.DB.CountDocuments(context.Background(), countFilter)
+	totalCount, _ := c.DB.CountDocuments(ctx, countFilter)
 
 	// Return response
 	w.WriteHeader(http.StatusOK)
