@@ -203,7 +203,11 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 		filter["civilian.activeCommunityID"] = activeCommunityID
 	}
 
-	dbResp, err = c.DB.Find(context.TODO(), filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err = c.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get civilian name search", http.StatusNotFound, w, err)
 		return

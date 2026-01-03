@@ -485,9 +485,13 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		// Return an empty array if no user is found
 		w.WriteHeader(http.StatusOK)
@@ -512,17 +516,47 @@ func (u User) UserFriendsHandler(w http.ResponseWriter, r *http.Request) {
 
 	paginatedFriends := friends[start:end]
 
-	// Fetch user details for each friend
-	var detailedFriends []map[string]interface{}
-	for _, friend := range paginatedFriends {
+	// CRITICAL OPTIMIZATION: Batch fetch all friend details in one query instead of N+1 queries
+	if len(paginatedFriends) == 0 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+		return
+	}
+
+	// Collect all friend IDs
+	friendIDs := make([]primitive.ObjectID, 0, len(paginatedFriends))
+	friendIDMap := make(map[string]int) // Map friendID string to index in paginatedFriends
+	for i, friend := range paginatedFriends {
 		fID, err := primitive.ObjectIDFromHex(friend.FriendID)
 		if err != nil {
 			continue
 		}
-		friendDetails := models.User{}
-		err = u.DB.FindOne(context.Background(), bson.M{"_id": fID}).Decode(&friendDetails)
-		if err != nil {
-			continue
+		friendIDs = append(friendIDs, fID)
+		friendIDMap[friend.FriendID] = i
+	}
+
+	// Batch fetch all friends in one query
+	friendDetailsMap := make(map[string]models.User)
+	if len(friendIDs) > 0 {
+		friendFilter := bson.M{"_id": bson.M{"$in": friendIDs}}
+		cursor, err := u.DB.Find(ctx, friendFilter)
+		if err == nil {
+			var friendsList []models.User
+			if err := cursor.All(ctx, &friendsList); err == nil {
+				for _, friendDetail := range friendsList {
+					friendDetailsMap[friendDetail.ID] = friendDetail
+				}
+			}
+			cursor.Close(ctx)
+		}
+	}
+
+	// Build response using batch-fetched data
+	var detailedFriends []map[string]interface{}
+	for _, friend := range paginatedFriends {
+		friendDetails, exists := friendDetailsMap[friend.FriendID]
+		if !exists {
+			continue // Skip if friend not found
 		}
 
 		detailedFriend := map[string]interface{}{
