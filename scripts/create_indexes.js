@@ -264,3 +264,13 @@ createIndexSafe(
   }
 );
 
+// CRITICAL: Arrest Report Arrestee ID Index (for /arrest-report/arrestee/{id})
+createIndexSafe(
+  db.arrestreports,
+  { "arrestReport.arrestee.id": 1 },
+  {
+    name: "arrest_report_arrestee_id_idx",
+    background: true
+  }
+);
+

@@ -47,7 +47,8 @@ func (c *arrestReportDatabase) Find(ctx context.Context, filter interface{}, opt
 	if err != nil {
 		return nil, err
 	}
-	err = cr.Decode(&arrestReports)
+	defer cr.Close(ctx)
+	err = cr.All(ctx, &arrestReports)
 	if err != nil {
 		return nil, err
 	}

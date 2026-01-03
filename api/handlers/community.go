@@ -3148,10 +3148,22 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		matchStage = append(matchStage, bson.E{"community.tags", tag})
 	}
 
+	// OPTIMIZATION: For "all" tag, skip expensive sort on large collection
+	// Use _id sort instead (can use _id index) or skip sort entirely for first page
+	var sortStage bson.D
+	if tag == "all" && page == 0 {
+		// For first page of "all", skip sort to avoid expensive operation
+		// Just use natural order (or _id sort which is faster)
+		sortStage = bson.D{{"_id", 1}}
+	} else {
+		// For other cases, sort by name for consistent pagination
+		sortStage = bson.D{{"community.name", 1}}
+	}
+
 	// Aggregation pipeline with paging
 	pipeline := mongo.Pipeline{
 		{{"$match", matchStage}},
-		{{"$sort", bson.D{{"community.name", 1}}}}, // consistent order for pagination
+		{{"$sort", sortStage}},
 		{{"$skip", skip}},
 		{{"$limit", int64(limit)}},
 		{{"$project", bson.D{

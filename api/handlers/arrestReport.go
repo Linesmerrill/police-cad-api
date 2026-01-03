@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -41,7 +40,12 @@ func (a ArrestReport) GetArrestReportByIDHandler(w http.ResponseWriter, r *http.
 	}
 
 	filter := bson.M{"_id": bID}
-	arrestReport, err := a.DB.FindOne(context.Background(), filter)
+	
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
+	arrestReport, err := a.DB.FindOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to find Arrest report", http.StatusNotFound, w, err)
 		return
@@ -62,7 +66,11 @@ func (a ArrestReport) CreateArrestReportHandler(w http.ResponseWriter, r *http.R
 	newArrestReport.ID = primitive.NewObjectID()
 	newArrestReport.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
-	_, err := a.DB.InsertOne(context.TODO(), newArrestReport)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err := a.DB.InsertOne(ctx, newArrestReport)
 	if err != nil {
 		config.ErrorStatus("failed to create new Arrest report", http.StatusInternalServerError, w, err)
 		return
@@ -100,7 +108,12 @@ func (a ArrestReport) UpdateArrestReportHandler(w http.ResponseWriter, r *http.R
 	update["arrestReport.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
 	filter := bson.M{"_id": bID}
-	err = a.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
+	
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
+	err = a.DB.UpdateOne(ctx, filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update Arrest report", http.StatusInternalServerError, w, err)
 		return
@@ -121,7 +134,12 @@ func (a ArrestReport) DeleteArrestReportHandler(w http.ResponseWriter, r *http.R
 	}
 
 	filter := bson.M{"_id": bID}
-	err = a.DB.DeleteOne(context.Background(), filter)
+	
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
+	err = a.DB.DeleteOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to delete Arrest report", http.StatusInternalServerError, w, err)
 		return

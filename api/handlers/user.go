@@ -1603,8 +1603,9 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		if community.Status == "approved" {
 			objID, err := primitive.ObjectIDFromHex(community.CommunityID)
 			if err != nil {
-				config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
-				return
+				// Log error but continue - invalid IDs shouldn't break the query
+				zap.S().Warnw("invalid community ID in user communities", "communityID", community.CommunityID, "error", err)
+				continue
 			}
 			communityObjectIDs = append(communityObjectIDs, objID)
 		}
@@ -1614,29 +1615,69 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		communityObjectIDs = []primitive.ObjectID{}
 	}
 
-	// Find communities that the user does not belong to and are public
-	// Use visibility index first, then filter by $nin
-	filter := bson.M{
-		"_id":                  bson.M{"$nin": communityObjectIDs},
-		"community.visibility": "public",
-	}
-	// Use _id sort instead of $natural for better performance (can use _id index)
-	opt := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"_id": 1})
-
-	cursor, err := u.CDB.Find(ctx, filter, opt)
-	if err != nil {
-		config.ErrorStatus("failed to find communities", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// If the cursor comes back as nil, that means there are no public communities - so we can just return an empty array
-	defer cursor.Close(ctx)
-
+	// OPTIMIZATION: Use aggregation with $sample for better performance when user has many communities
+	// $nin with large arrays can be slow, so we'll sample first then filter
 	var communities []models.Community
+	
+	// If user has many communities, use aggregation with $sample for better performance
+	if len(communityObjectIDs) > 50 {
+		// Use aggregation pipeline: sample large pool, then filter out user communities
+		pipeline := mongo.Pipeline{
+			{{"$match", bson.M{"community.visibility": "public"}}},
+			{{"$sample", bson.M{"size": limit * 5}}}, // Sample 5x the limit to account for filtering
+		}
+		
+		cursor, err := u.CDB.Aggregate(ctx, pipeline)
+		if err != nil {
+			zap.S().Errorw("failed to aggregate random communities", "error", err, "userId", userID)
+			config.ErrorStatus("failed to find communities", http.StatusInternalServerError, w, err)
+			return
+		}
+		defer cursor.Close(ctx)
+		
+		var sampledCommunities []models.Community
+		if err = cursor.All(ctx, &sampledCommunities); err != nil {
+			zap.S().Errorw("failed to decode sampled communities", "error", err, "userId", userID)
+			config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+			return
+		}
+		
+		// Filter out user communities
+		userCommunityMap := make(map[primitive.ObjectID]bool)
+		for _, id := range communityObjectIDs {
+			userCommunityMap[id] = true
+		}
+		
+		for _, comm := range sampledCommunities {
+			if !userCommunityMap[comm.ID] {
+				communities = append(communities, comm)
+				if len(communities) >= limit {
+					break
+				}
+			}
+		}
+	} else {
+		// For users with few communities, use direct Find with $nin (more efficient)
+		filter := bson.M{
+			"_id":                  bson.M{"$nin": communityObjectIDs},
+			"community.visibility": "public",
+		}
+		// Use _id sort instead of $natural for better performance (can use _id index)
+		opt := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"_id": 1})
 
-	if err = cursor.All(ctx, &communities); err != nil {
-		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
-		return
+		cursor, err := u.CDB.Find(ctx, filter, opt)
+		if err != nil {
+			zap.S().Errorw("failed to find communities", "error", err, "userId", userID)
+			config.ErrorStatus("failed to find communities", http.StatusInternalServerError, w, err)
+			return
+		}
+		defer cursor.Close(ctx)
+
+		if err = cursor.All(ctx, &communities); err != nil {
+			zap.S().Errorw("failed to decode communities", "error", err, "userId", userID)
+			config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	// Return an empty array if no communities are found
