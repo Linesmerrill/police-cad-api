@@ -20,11 +20,16 @@ function createIndexSafe(collection, key, options) {
     collection.createIndex(key, options);
     print(`✓ Created index: ${options.name || 'unnamed'}`);
   } catch (e) {
-    if (e.code === 85 || e.message.includes("already exists")) {
+    if (e.code === 85 || e.message.includes("already exists") || e.message.includes("IndexOptionsConflict")) {
       print(`⚠️  Index already exists (different name): ${options.name || 'unnamed'} - skipping`);
+    } else if (e.code === 11000 || e.message.includes("duplicate key")) {
+      print(`⚠️  Cannot create unique index ${options.name || 'unnamed'}: duplicate keys found in collection`);
+      print(`   This means there are duplicate values in the collection.`);
+      print(`   You may need to clean up duplicates or make the index non-unique.`);
+      // Don't throw - continue with other indexes
     } else {
       print(`❌ Error creating index ${options.name || 'unnamed'}: ${e.message}`);
-      throw e;
+      // Don't throw - continue with other indexes
     }
   }
 }
@@ -214,7 +219,9 @@ createIndexSafe(
 );
 
 // CRITICAL: Invite Code Index (for /community/invite/{code})
-// DONE
+// NOTE: If this fails with duplicate key error, you need to clean up duplicate codes first:
+// db.inviteCodes.aggregate([{$group: {_id: "$code", count: {$sum: 1}, docs: {$push: "$$ROOT"}}}, {$match: {count: {$gt: 1}}}])
+// Then remove duplicates before creating the unique index
 createIndexSafe(
   db.inviteCodes,
   { "code": 1 },
