@@ -4821,10 +4821,20 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))
 
 	// Fetch paginated results
-	findOptions := options.Find().
-		SetSkip(skip).
-		SetLimit(int64(limit)).
-		SetSort(bson.M{"user.name": 1}) // Sort by name for consistent results
+	var findOptions *options.FindOptions
+	if queryLen >= 3 {
+		// For $text search, sort by text score for relevance
+		findOptions = options.Find().
+			SetSkip(skip).
+			SetLimit(int64(limit)).
+			SetSort(bson.M{"score": bson.M{"$meta": "textScore"}, "user.name": 1})
+	} else {
+		// For regex search, sort by name
+		findOptions = options.Find().
+			SetSkip(skip).
+			SetLimit(int64(limit)).
+			SetSort(bson.M{"user.name": 1})
+	}
 
 	cursor, err := c.UDB.Find(ctx, filter, findOptions)
 	if err != nil {
