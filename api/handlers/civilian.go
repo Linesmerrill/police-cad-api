@@ -703,10 +703,6 @@ func (c Civilian) PendingApprovalsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	totalCount := countRes.count
-	if err != nil {
-		config.ErrorStatus("failed to get total count", http.StatusInternalServerError, w, err)
-		return
-	}
 
 	// Calculate pagination info
 	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))

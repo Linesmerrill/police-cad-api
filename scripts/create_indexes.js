@@ -128,6 +128,18 @@ createIndexSafe(
   }
 );
 
+// CRITICAL: Civilian Pending Approvals Index (for /civilian/pending-approvals)
+// Query filters by activeCommunityID + approvalStatus (pending/requested_review)
+// Compound index optimizes this exact query pattern
+createIndexSafe(
+  db.civilians,
+  { "civilian.activeCommunityID": 1, "civilian.approvalStatus": 1, "civilian.createdAt": -1 },
+  {
+    name: "civilian_pending_approvals_idx",
+    background: true
+  }
+);
+
 // CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
 // The query uses $or with both fields, so we need separate indexes for each
 // DONE
