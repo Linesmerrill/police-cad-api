@@ -3494,6 +3494,12 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 	tenCodeID := memberDetails.TenCodeID
 
+	// Check if tenCodeID is empty
+	if tenCodeID == "" {
+		config.ErrorStatus("User does not have an active ten code", http.StatusNotFound, w, fmt.Errorf("tenCodeID is empty for user"))
+		return
+	}
+
 	tenCodeIDObjectID, err := primitive.ObjectIDFromHex(tenCodeID)
 	if err != nil {
 		config.ErrorStatus("Invalid tenCodeId", http.StatusBadRequest, w, err)
@@ -3511,7 +3517,7 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if code == "" || description == "" {
-		config.ErrorStatus("TenCode not found", http.StatusNotFound, w, fmt.Errorf("tenCode not found"))
+		config.ErrorStatus("TenCode not found in community", http.StatusNotFound, w, fmt.Errorf("tenCode with id %s not found in community tenCodes array", tenCodeID))
 		return
 	}
 
