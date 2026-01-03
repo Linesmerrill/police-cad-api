@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -32,7 +33,12 @@ func (s Spotlight) SpotlightHandler(w http.ResponseWriter, r *http.Request) {
 	limit64 := int64(Limit)
 	Page = getPage(Page, r)
 	skip64 := int64(Page * Limit)
-	dbResp, err := s.DB.Find(context.TODO(), bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := s.DB.Find(ctx, bson.D{}, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
 		config.ErrorStatus("failed to get spotlight", http.StatusNotFound, w, err)
 		return
@@ -63,7 +69,11 @@ func (s Spotlight) SpotlightByIDHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	dbResp, err := s.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := s.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get spotlight by ID", http.StatusNotFound, w, err)
 		return
@@ -87,7 +97,11 @@ func (s Spotlight) SpotlightCreateHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h, err := s.DB.InsertOne(context.Background(), spotlightDetails)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	h, err := s.DB.InsertOne(ctx, spotlightDetails)
 	if err != nil {
 		config.ErrorStatus("failed to insert spotlight", http.StatusInternalServerError, w, err)
 		return
