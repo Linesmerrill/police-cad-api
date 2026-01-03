@@ -109,11 +109,12 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 	// Configure connection pool for better performance and resilience
 	// Increased timeouts to handle high latency and network issues
 	clientOptions := options.Client().ApplyURI(conf.URL).
-		SetMaxPoolSize(200).                    // Maximum connections per dyno (200 × 2 dynos = 400 total, well under M10's 1,500 per node limit)
+		SetMaxPoolSize(600).                    // Maximum connections per dyno (600 × 2 dynos = 1,200 total, 80% of M10's 1,500 per node limit)
 		// M10 cluster: 1,500 concurrent connections per node
-		// With 2 dynos: 400 total connections = only 27% of limit (plenty of headroom for spikes)
-		// If you have 3+ dynos, consider: 150 per dyno (450 total) or 200 per dyno (600 total)
-		// To handle larger spikes, increase MaxPoolSize per dyno or add more dynos
+		// With 2 dynos: 1,200 total connections = 80% of limit (leaves 300 buffer for spikes)
+		// MaxPoolSize is a ceiling - connections are only created when needed, up to this limit
+		// With 10s query timeouts, connections release quickly, so high limit is safe
+		// If you add more dynos, consider: 400 per dyno × 3 dynos = 1,200 total
 		SetMinPoolSize(20).                     // Minimum connections (keeps pool warm for faster queries)
 		SetMaxConnecting(10).                   // Limit concurrent connection attempts (prevents overwhelming during spikes)
 		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s (releases unused connections)
