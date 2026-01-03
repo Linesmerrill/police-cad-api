@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
@@ -175,22 +176,59 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// For short queries (1-2 chars), regex is slow but necessary for partial matching
-	// For longer queries, we could use $text search, but regex is more flexible
-	// The visibility filter will use the community_visibility_idx index
-	// Consider creating a compound index on (visibility, name) for better performance
-	communityFilter := bson.M{
-		"$and": []bson.M{
-			{"community.name": bson.M{"$regex": query, "$options": "i"}},
-			{"community.visibility": "public"},
-		},
+	// For very short queries (1-2 chars), regex causes full collection scans
+	// For queries 3+ chars, use $text search with text index for much better performance
+	// Always filter by visibility to use the visibility index
+	queryLen := len(strings.TrimSpace(query))
+	var communityFilter bson.M
+	var communityOptions *options.FindOptions
+	
+	if queryLen >= 3 {
+		// Use $text search for longer queries - much faster with text index
+		communityFilter = bson.M{
+			"$and": []bson.M{
+				{"$text": bson.M{"$search": query}}, // Uses community_name_text_idx
+				{"community.visibility": "public"},  // Uses community_visibility_idx
+			},
+		}
+		// Sort by text score for relevance, then by name
+		communityOptions = options.Find().
+			SetLimit(limit).
+			SetSkip(skip).
+			SetSort(bson.M{"score": bson.M{"$meta": "textScore"}, "community.name": 1})
+	} else {
+		// For short queries, use regex but optimize by filtering visibility first
+		// The visibility index will help reduce the scan set
+		communityFilter = bson.M{
+			"$and": []bson.M{
+				{"community.name": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match is slightly faster than full regex
+				{"community.visibility": "public"},
+			},
+		}
+		communityOptions = options.Find().SetLimit(limit).SetSkip(skip)
 	}
 	
-	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
 	communityCursor, err := s.CommDB.Find(ctx, communityFilter, communityOptions)
 	if err != nil {
-		config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
-		return
+		// If text search fails (e.g., index doesn't exist), fallback to regex
+		if queryLen >= 3 {
+			zap.S().Warnw("text search failed, falling back to regex", "query", query, "error", err)
+			communityFilter = bson.M{
+				"$and": []bson.M{
+					{"community.name": bson.M{"$regex": query, "$options": "i"}},
+					{"community.visibility": "public"},
+				},
+			}
+			communityOptions = options.Find().SetLimit(limit).SetSkip(skip)
+			communityCursor, err = s.CommDB.Find(ctx, communityFilter, communityOptions)
+			if err != nil {
+				config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
+				return
+			}
+		} else {
+			config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 	defer communityCursor.Close(ctx)
 
@@ -200,20 +238,35 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For short queries, CountDocuments with regex can be very slow
-	// Use a separate context with longer timeout for count, or skip count for very short queries
-	// For now, we'll try the count but it may timeout for very short queries like "l"
-	countCtx, countCancel := api.WithQueryTimeout(r.Context())
-	defer countCancel()
-	
-	totalCount, err := s.CommDB.CountDocuments(countCtx, communityFilter)
-	if err != nil {
-		// If count times out, return results without total count rather than failing
-		// This is acceptable for pagination - frontend can still paginate with just the results
-		zap.S().Warnw("failed to count communities (may timeout on short queries)", 
-			"query", query, 
-			"error", err)
-		totalCount = int64(len(communities)) // Use result count as fallback
+	// For very short queries (1-2 chars), skip expensive CountDocuments
+	// Return results with estimated count based on current page results
+	var totalCount int64
+	if queryLen <= 2 {
+		// Skip count for very short queries - it's too expensive
+		// Estimate: if we got a full page, there might be more; otherwise this is likely all
+		if len(communities) == int(limit) {
+			totalCount = int64(len(communities)) + 1 // Indicate there might be more
+		} else {
+			totalCount = int64(len(communities))
+		}
+		zap.S().Debugw("skipped count for short query", "query", query, "estimatedCount", totalCount)
+	} else {
+		// For longer queries, try to get accurate count
+		countCtx, countCancel := api.WithQueryTimeout(r.Context())
+		defer countCancel()
+		
+		totalCount, err = s.CommDB.CountDocuments(countCtx, communityFilter)
+		if err != nil {
+			// If count fails, use result count as fallback
+			zap.S().Warnw("failed to count communities", 
+				"query", query, 
+				"error", err)
+			if len(communities) == int(limit) {
+				totalCount = int64(len(communities)) + 1
+			} else {
+				totalCount = int64(len(communities))
+			}
+		}
 	}
 
 	// Prepare the paginated response
