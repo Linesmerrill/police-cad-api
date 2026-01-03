@@ -5,6 +5,7 @@
 - **Status**: All 3 nodes showing warning icons (including PRIMARY)
 - **Disk Usage**: 6.6 GB / 10 GB (66% - getting high)
 - **Operations**: R: 30.3, W: 10.7 ops/sec (low to moderate)
+- **CRITICAL**: Replication Lag: **3.75 MINUTES** on one SECONDARY node
 
 ## Critical: Warning Icons on All Nodes
 
@@ -24,16 +25,30 @@ Go to **Alerts** tab in MongoDB Atlas and check for:
 - Network connectivity issues
 - Health check failures
 
-### 2. Check Replication Lag
+### 2. Check Replication Lag ⚠️ CRITICAL ISSUE
 In MongoDB Atlas, go to **Metrics** → **Replication Lag**:
 - **Normal**: < 1 second
 - **Warning**: 1-5 seconds
 - **Critical**: > 5 seconds
+- **CURRENT**: **3.75 MINUTES** (EXTREMELY CRITICAL!)
 
-High replication lag can cause:
-- Slow reads from SECONDARY nodes
-- Write conflicts
-- Data inconsistency
+**What 3.75min lag means:**
+- SECONDARY nodes are 3.75 minutes behind PRIMARY
+- Reads from SECONDARY return data that's 3.75 minutes old
+- This causes degraded status and warning icons
+- Can cause connection timeouts and slow queries
+
+**Immediate fix applied:**
+- Changed read preference from `PrimaryPreferred()` to `Primary()`
+- Forces all reads to PRIMARY to avoid stale data
+- Once lag is resolved, can change back to `PrimaryPreferred()`
+
+**Causes of high replication lag:**
+1. **High write volume** - SECONDARY can't keep up with PRIMARY writes
+2. **Slow disk I/O** - SECONDARY nodes have slow storage
+3. **Network issues** - Latency between PRIMARY and SECONDARY
+4. **Resource pressure** - SECONDARY nodes low on CPU/Memory
+5. **Large operations** - Big documents or batch writes taking too long
 
 ### 3. Check Heroku Dyno Count
 **CRITICAL**: Each Heroku dyno creates its own connection pool!

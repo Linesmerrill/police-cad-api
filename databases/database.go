@@ -119,9 +119,10 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 		SetRetryWrites(true).                   // Enable retry writes for transient failures
 		SetRetryReads(true).                    // Enable retry reads for transient failures
 		SetHeartbeatInterval(10 * time.Second). // Check server status every 10 seconds
-		SetReadPreference(readpref.PrimaryPreferred()) // Prefer PRIMARY, but allow SECONDARY reads during migration when PRIMARY unavailable
-		// During free-to-dedicated migration, replica set may not have a stable PRIMARY
-		// PrimaryPreferred allows reads from SECONDARY if PRIMARY is unavailable, making the app more resilient
+		SetReadPreference(readpref.Primary())   // CRITICAL: Force PRIMARY reads only due to 3.75min replication lag
+		// Changed from PrimaryPreferred() to Primary() because SECONDARY nodes have 3.75min lag
+		// Reading from SECONDARY would return stale data (3.75 minutes old!)
+		// Once replication lag is resolved (< 1s), can change back to PrimaryPreferred() for resilience
 		// SetMaxConnecting limits concurrent connection attempts to prevent overwhelming slow/unstable clusters
 		// Increased ConnectTimeout to 10s to give more time for connections during cluster issues
 
