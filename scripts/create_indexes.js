@@ -142,7 +142,7 @@ createIndexSafe(
 
 // CRITICAL: Separate indexes for $or queries (MongoDB can't use compound index efficiently for $or)
 // These allow MongoDB to use index intersection for $or queries
-print("Creating separate firearm indexes for $or queries...");
+// DONE
 createIndexSafe(
   db.firearms,
   { "firearm.registeredOwnerID": 1 },
@@ -159,7 +159,6 @@ createIndexSafe(
     background: true
   }
 );
-print("✓ Separate firearm indexes created");
 
 // CRITICAL: Call Community ID Index (for /calls/community/{id})
 // DONE
