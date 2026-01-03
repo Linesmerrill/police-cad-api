@@ -232,7 +232,7 @@ func (pv PendingVerification) ResendVerificationCodeHandler(w http.ResponseWrite
 
 	// Check if the user already exists in the user database (non-blocking check)
 	existingUser := models.User{}
-	err := pv.UDB.FindOne(ctx, bson.M{"email": requestBody.Email}).Decode(&existingUser)
+	err := pv.UDB.FindOne(ctx, bson.M{"user.email": requestBody.Email}).Decode(&existingUser)
 	if err == nil {
 		// User already exists - this is expected, return success to prevent email enumeration
 		w.Header().Set("Content-Type", "application/json")
