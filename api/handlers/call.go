@@ -102,24 +102,28 @@ func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) 
 	zap.S().Debugf("community_id: '%v'", communityID)
 	zap.S().Debugf("status: '%v'", status)
 
-	var filter bson.M
-	if communityID != "" && communityID != "null" && communityID != "undefined" {
-		filter = bson.M{
-			"call.communityID": communityID,
-		}
-		if status != "" {
-			statusB, err := strconv.ParseBool(status)
-			if err != nil {
-				config.ErrorStatus("invalid status value", http.StatusBadRequest, w, err)
-				return
-			}
-			filter["call.status"] = statusB
-		}
+	// Validate communityID is provided
+	if communityID == "" || communityID == "null" || communityID == "undefined" {
+		config.ErrorStatus("community_id is required", http.StatusBadRequest, w, fmt.Errorf("community_id is required"))
+		return
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Build filter - always require communityID to prevent full collection scans
+	filter := bson.M{
+		"call.communityID": communityID,
+	}
+	if status != "" {
+		statusB, err := strconv.ParseBool(status)
+		if err != nil {
+			config.ErrorStatus("invalid status value", http.StatusBadRequest, w, err)
+			return
+		}
+		filter["call.status"] = statusB
+	}
 
 	// Add pagination/limit to prevent loading all calls at once
 	limitParam := r.URL.Query().Get("limit")
