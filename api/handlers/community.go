@@ -507,8 +507,12 @@ func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -522,7 +526,7 @@ func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Req
 	// Update the community to add the new event
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$push": bson.M{"community.events": event}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add event to community", http.StatusInternalServerError, w, err)
 		return
@@ -622,9 +626,13 @@ func (c Community) UpdateEventByIDHandler(w http.ResponseWriter, r *http.Request
 		update["community.events.$."+key] = value
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the event in the community
 	filter := bson.M{"_id": cID, "community.events._id": eID}
-	err = c.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
+	err = c.DB.UpdateOne(ctx, filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update event in community", http.StatusInternalServerError, w, err)
 		return
@@ -653,10 +661,14 @@ func (c Community) DeleteEventByIDHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the community to pull the event by ID
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$pull": bson.M{"community.events": bson.M{"_id": eID}}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete event from community", http.StatusInternalServerError, w, err)
 		return
@@ -700,13 +712,17 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Prefix the keys with "community." to update nested fields
 	update := bson.M{}
 	for key, value := range req {
 		update["community."+key] = value
 	}
 
-	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": objID}, bson.M{"$set": update})
+	err = c.DB.UpdateOne(ctx, bson.M{"_id": objID}, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update community", http.StatusInternalServerError, w, err)
 		return
@@ -822,10 +838,14 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the community to add the new role
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$push": bson.M{"community.roles": role}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add role to community", http.StatusInternalServerError, w, err)
 		return
@@ -865,6 +885,10 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Append new member IDs to the array
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{
 		"$addToSet": bson.M{
@@ -873,7 +897,7 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 			},
 		},
 	}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update role members", http.StatusInternalServerError, w, err)
 		return
@@ -909,10 +933,14 @@ func (c Community) UpdateRoleNameHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the role name in the community
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{"$set": bson.M{"community.roles.$.name": requestBody.Name}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update role name", http.StatusInternalServerError, w, err)
 		return
@@ -939,10 +967,14 @@ func (c Community) DeleteRoleByIDHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the community to pull the role by ID
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$pull": bson.M{"community.roles": bson.M{"_id": rID}}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete role from community", http.StatusInternalServerError, w, err)
 		return
@@ -978,10 +1010,14 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the role permissions in the community
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{"$set": bson.M{"community.roles.$.permissions": requestBody.Permissions}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update role permissions", http.StatusInternalServerError, w, err)
 		return
@@ -1039,8 +1075,12 @@ func (c Community) GetBannedUsersHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -170,13 +169,17 @@ func (c Call) CreateCallHandler(w http.ResponseWriter, r *http.Request) {
 	requestBody.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	requestBody.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	newCall := bson.M{
 		"_id":  primitive.NewObjectID(),
 		"call": requestBody,
 		"__v":  0,
 	}
 
-	_, err := c.DB.InsertOne(context.Background(), newCall)
+	_, err := c.DB.InsertOne(ctx, newCall)
 	if err != nil {
 		config.ErrorStatus("failed to create call", http.StatusInternalServerError, w, err)
 		return
@@ -214,12 +217,16 @@ func (c Call) UpdateCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 		updateFields["call."+key] = value
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	update := bson.M{
 		"$set": updateFields,
 	}
 
 	filter := bson.M{"_id": cID}
-	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	_, err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update call", http.StatusInternalServerError, w, err)
 		return
@@ -241,8 +248,12 @@ func (c Call) DeleteCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": cID}
-	err = c.DB.DeleteOne(context.Background(), filter)
+	err = c.DB.DeleteOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to delete call", http.StatusInternalServerError, w, err)
 		return
@@ -274,10 +285,14 @@ func (c Call) AddCallNoteHandler(w http.ResponseWriter, r *http.Request) {
 	newNote.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	newNote.UpdatedAt = primitive.NewDateTimeFromTime(time.Now())
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Check if call.callNotes is null and initialize it if necessary
 	filter := bson.M{"_id": cID}
 
-	callDoc, err := c.DB.FindOne(context.Background(), filter)
+	callDoc, err := c.DB.FindOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to find call", http.StatusInternalServerError, w, err)
 		return
@@ -289,7 +304,7 @@ func (c Call) AddCallNoteHandler(w http.ResponseWriter, r *http.Request) {
 				"call.callNotes": []models.CallNotes{},
 			},
 		}
-		_, err = c.DB.UpdateOne(context.Background(), filter, update)
+		_, err = c.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to initialize call notes", http.StatusInternalServerError, w, err)
 			return
@@ -303,7 +318,7 @@ func (c Call) AddCallNoteHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	_, err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add call note", http.StatusInternalServerError, w, err)
 		return
@@ -335,6 +350,10 @@ func (c Call) EditCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) {
 	// Add the updatedAt field to the requestBody
 	requestBody["call.callNotes.$.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the call by ID and update the specific note by note ID
 	filter := bson.M{"_id": cID, "call.callNotes._id": noteID}
 	update := bson.M{
@@ -344,7 +363,7 @@ func (c Call) EditCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	_, err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update call note", http.StatusInternalServerError, w, err)
 		return
@@ -367,6 +386,10 @@ func (c Call) DeleteCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": cID}
 	update := bson.M{
 		"$pull": bson.M{
@@ -374,7 +397,7 @@ func (c Call) DeleteCallNoteByIDHandler(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 
-	_, err = c.DB.UpdateOne(context.Background(), filter, update)
+	_, err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete call note", http.StatusInternalServerError, w, err)
 		return

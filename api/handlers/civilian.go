@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -338,7 +337,11 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err = c.DB.DeleteOne(context.Background(), bson.M{"_id": cID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	err = c.DB.DeleteOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to delete civilian", http.StatusInternalServerError, w, err)
 		return
@@ -491,12 +494,16 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Define the filter and update for removing the citation
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$pull": bson.M{"civilian.criminalHistory": bson.M{"_id": citID}}}
 
 	// Perform the update operation
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete criminal history", http.StatusInternalServerError, w, err)
 		return
@@ -537,6 +544,10 @@ func (c Civilian) CivilianApprovalHandler(w http.ResponseWriter, r *http.Request
 	// Handle different actions
 	switch requestBody.Action {
 	case "send_for_approval":
+		// Use request context with timeout for proper trace tracking and timeout handling
+		ctx, cancel := api.WithQueryTimeout(r.Context())
+		defer cancel()
+
 		// Update civilian status to "requested_review" for admin review
 		filter := bson.M{"_id": civID}
 		update := bson.M{
@@ -546,7 +557,7 @@ func (c Civilian) CivilianApprovalHandler(w http.ResponseWriter, r *http.Request
 			},
 		}
 
-		err = c.DB.UpdateOne(context.Background(), filter, update)
+		err = c.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to update civilian approval status", http.StatusInternalServerError, w, err)
 			return

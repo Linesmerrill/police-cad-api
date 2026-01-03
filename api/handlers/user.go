@@ -78,15 +78,19 @@ func (u User) UsersFindAllHandler(w http.ResponseWriter, r *http.Request) {
 
 	zap.S().Debugf("active_community_id: %v", commID)
 
-	cursor, err := u.DB.Find(context.Background(), bson.M{"user.activeCommunity": commID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	cursor, err := u.DB.Find(ctx, bson.M{"user.activeCommunity": commID})
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var users []models.User
-	if err = cursor.All(context.Background(), &users); err != nil {
+	if err = cursor.All(ctx, &users); err != nil {
 		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -126,16 +130,20 @@ func (u User) FetchUsersByIdsHandler(w http.ResponseWriter, r *http.Request) {
 		objectIDs = append(objectIDs, objID)
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": bson.M{"$in": objectIDs}}
-	cursor, err := u.DB.Find(context.Background(), filter)
+	cursor, err := u.DB.Find(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to fetch users", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var users []models.User
-	if err = cursor.All(context.Background(), &users); err != nil {
+	if err = cursor.All(ctx, &users); err != nil {
 		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -154,11 +162,15 @@ func (u User) FetchUsersByIdsHandler(w http.ResponseWriter, r *http.Request) {
 func (u User) UserLoginHandler(w http.ResponseWriter, r *http.Request) {
 	email, password, ok := r.BasicAuth()
 	if ok {
+		// Use request context with timeout for proper trace tracking and timeout handling
+		ctx, cancel := api.WithQueryTimeout(r.Context())
+		defer cancel()
+
 		usernameHash := sha256.Sum256([]byte(email))
 
 		// fetch email & pass from db
 		dbEmailResp := models.User{}
-		err := u.DB.FindOne(context.Background(), bson.M{"user.email": email}).Decode(&dbEmailResp)
+		err := u.DB.FindOne(ctx, bson.M{"user.email": email}).Decode(&dbEmailResp)
 		if err != nil {
 			config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 			return
@@ -197,9 +209,13 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 	// Normalize email to lowercase
 	user.Email = strings.TrimSpace(strings.ToLower(user.Email))
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// check if the user already exists
 	existingUser := models.User{}
-	_ = u.DB.FindOne(context.Background(), bson.M{"user.email": user.Email}).Decode(&existingUser)
+	_ = u.DB.FindOne(ctx, bson.M{"user.email": user.Email}).Decode(&existingUser)
 	if existingUser.ID != "" {
 		config.ErrorStatus("email already exists", http.StatusConflict, w, fmt.Errorf("duplicate email"))
 		return
@@ -215,7 +231,7 @@ func (u User) UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 	user.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
 	// insert the user
-	_, err = u.DB.InsertOne(context.Background(), user)
+	_, err = u.DB.InsertOne(ctx, user)
 	if err != nil {
 		config.ErrorStatus("failed to insert user", http.StatusInternalServerError, w, err)
 		return
@@ -498,10 +514,14 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Retrieve the user's details
 	filter := bson.M{"_id": uID}
 	user := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&user)
+	err = u.DB.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
 		return
@@ -517,7 +537,7 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		update := bson.M{
 			"$set": bson.M{"user.friends": []models.Friend{newFriend}},
 		}
-		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		_, err = u.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to initialize user's friends", http.StatusInternalServerError, w, err)
 			return
@@ -525,7 +545,7 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Check if the friend already exists
 		existingFriend := models.User{}
-		err := u.DB.FindOne(context.Background(), bson.M{"_id": uID, "user.friends.friend_id": friend.FriendID}).Decode(&existingFriend)
+		err := u.DB.FindOne(ctx, bson.M{"_id": uID, "user.friends.friend_id": friend.FriendID}).Decode(&existingFriend)
 		if err == nil && existingFriend.Details.Friends != nil {
 			for _, f := range existingFriend.Details.Friends {
 				if f.FriendID == friend.FriendID {
@@ -549,7 +569,7 @@ func (u User) AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		update := bson.M{"$push": bson.M{"user.friends": newFriend}}
 		opts := options.Update().SetUpsert(false)
 
-		_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
+		_, err = u.DB.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			config.ErrorStatus("failed to add friend", http.StatusInternalServerError, w, err)
 			return
@@ -569,6 +589,10 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Perform blocked user check only if the notification type is "friend_request"
 	if notification.Type == "friend_request" {
 		nID, err := primitive.ObjectIDFromHex(notification.SentToID)
@@ -579,7 +603,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 
 		filter := bson.M{"_id": nID}
 		dbResp := models.User{}
-		err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+		err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 		if err != nil {
 			config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 			return
@@ -617,7 +641,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 
 	filter := bson.M{"_id": nID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 		return
@@ -628,7 +652,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		update := bson.M{
 			"$set": bson.M{"user.notifications": []models.Notification{newNotification}},
 		}
-		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		_, err = u.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to initialize user's notifications", http.StatusInternalServerError, w, err)
 			return
@@ -638,7 +662,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		update := bson.M{"$push": bson.M{"user.notifications": newNotification}}
 		opts := options.Update().SetUpsert(false)
 
-		_, err = u.DB.UpdateOne(context.Background(), filter, update, opts)
+		_, err = u.DB.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			config.ErrorStatus("failed to create notification", http.StatusInternalServerError, w, err)
 			return
@@ -946,9 +970,13 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, err)
 		return
@@ -968,7 +996,7 @@ func (u User) GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request
 		}
 
 		sender := models.User{}
-		err = u.DB.FindOne(context.Background(), bson.M{"_id": senderID}).Decode(&sender)
+		err = u.DB.FindOne(ctx, bson.M{"_id": senderID}).Decode(&sender)
 		if err != nil {
 			// Skip this notification if the sender is not found
 			continue
@@ -1077,10 +1105,14 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the user's friend status
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1107,7 +1139,7 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	update := bson.M{"$set": bson.M{"user.friends": friends}}
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update friend status", http.StatusInternalServerError, w, err)
 		return
@@ -1116,7 +1148,7 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 	// Update the friend's friend status
 	friendFilter := bson.M{"_id": fID}
 	friendResp := models.User{}
-	err = u.DB.FindOne(context.Background(), friendFilter).Decode(&friendResp)
+	err = u.DB.FindOne(ctx, friendFilter).Decode(&friendResp)
 	if err != nil {
 		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
 		return
@@ -1146,7 +1178,7 @@ func (u User) UpdateFriendStatusHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	friendUpdate := bson.M{"$set": bson.M{"user.friends": friendFriends}}
-	_, err = u.DB.UpdateOne(context.Background(), friendFilter, friendUpdate)
+	_, err = u.DB.UpdateOne(ctx, friendFilter, friendUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to update friend's friend status", http.StatusInternalServerError, w, err)
 		return
@@ -1173,9 +1205,13 @@ func (u User) MarkNotificationAsReadHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1202,7 +1238,7 @@ func (u User) MarkNotificationAsReadHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	update := bson.M{"$set": bson.M{"user.notifications": notifications}}
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to mark notification as read", http.StatusInternalServerError, w, err)
 		return
@@ -1229,9 +1265,13 @@ func (u User) DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1258,7 +1298,7 @@ func (u User) DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	update := bson.M{"$set": bson.M{"user.notifications": notifications}}
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete notification", http.StatusInternalServerError, w, err)
 		return
@@ -1284,9 +1324,13 @@ func (u User) fetchUserFriendsByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	filter := bson.M{"_id": uID}
 	dbResp := models.User{}
-	err = u.DB.FindOne(context.Background(), filter).Decode(&dbResp)
+	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1341,9 +1385,13 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	friendFilter := bson.M{"_id": fID}
 	friendResp := models.User{}
-	err = u.DB.FindOne(context.Background(), friendFilter).Decode(&friendResp)
+	err = u.DB.FindOne(ctx, friendFilter).Decode(&friendResp)
 	if err != nil {
 		config.ErrorStatus("failed to get friend by ID", http.StatusNotFound, w, err)
 		return
@@ -1351,7 +1399,7 @@ func (u User) fetchFriendsAndMutualFriendsCount(w http.ResponseWriter, r *http.R
 
 	userFilter := bson.M{"_id": uID}
 	userResp := models.User{}
-	err = u.DB.FindOne(context.Background(), userFilter).Decode(&userResp)
+	err = u.DB.FindOne(ctx, userFilter).Decode(&userResp)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1414,10 +1462,14 @@ func (u User) GetUserCommunitiesHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	user := models.User{}
 
 	// Find the user by ID
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to get user by ID", http.StatusNotFound, w, err)
 		return
@@ -1694,9 +1746,13 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Check if the community exists
 	communityFilter := bson.M{"_id": cID}
-	_, err = u.CDB.FindOne(context.Background(), communityFilter)
+	_, err = u.CDB.FindOne(ctx, communityFilter)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			config.ErrorStatus("community does not exist", http.StatusBadRequest, w, fmt.Errorf("community does not exist: %s", requestBody.CommunityID))
@@ -1709,7 +1765,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	// Fetch the user document
 	filter := bson.M{"_id": uID}
 	var user models.User
-	err = u.DB.FindOne(context.Background(), filter).Decode(&user)
+	err = u.DB.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		if migration {
 			// Initialize communities array and insert the first record during migration
@@ -1721,14 +1777,14 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 			update := bson.M{
 				"$set": bson.M{"user.communities": []models.UserCommunity{newCommunity}},
 			}
-			_, err = u.DB.UpdateOne(context.Background(), filter, update)
+			_, err = u.DB.UpdateOne(ctx, filter, update)
 			if err != nil {
 				config.ErrorStatus("failed to initialize communities during migration", http.StatusInternalServerError, w, fmt.Errorf("failed to initialize communities during migration: %w", err))
 				return
 			}
 			// Increment membersCount for the community during migration
 			communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": 1}}
-			err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+			err = u.CDB.UpdateOne(ctx, communityFilter, communityUpdate)
 			if err != nil {
 				config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, fmt.Errorf("failed to increment community membersCount: %w", err))
 				return
@@ -1766,7 +1822,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 				bson.M{"elem.communityId": requestBody.CommunityID},
 			},
 		})
-		result, err := u.DB.UpdateOne(context.Background(), filter, update, arrayFilters)
+		result, err := u.DB.UpdateOne(ctx, filter, update, arrayFilters)
 		if err != nil {
 			config.ErrorStatus("failed to update community status", http.StatusInternalServerError, w, fmt.Errorf("failed to update community status: %w", err))
 			return
@@ -1783,7 +1839,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		// Increment membersCount only if transitioning to "approved" from a non-approved state
 		if requestBody.Status == "approved" && existingCommunity.Status != "approved" {
 			communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": 1}}
-			err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+			err = u.CDB.UpdateOne(ctx, communityFilter, communityUpdate)
 			if err != nil {
 				config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, fmt.Errorf("failed to increment community membersCount: %w", err))
 				return
@@ -1810,7 +1866,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		update := bson.M{
 			"$set": bson.M{"user.communities": []models.UserCommunity{newCommunity}},
 		}
-		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		_, err = u.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to initialize communities", http.StatusInternalServerError, w, fmt.Errorf("failed to initialize communities: %w", err))
 			return
@@ -1818,7 +1874,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	} else {
 		// Insert the new community into the existing array
 		update := bson.M{"$push": bson.M{"user.communities": newCommunity}}
-		_, err = u.DB.UpdateOne(context.Background(), filter, update)
+		_, err = u.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to add community", http.StatusInternalServerError, w, fmt.Errorf("failed to add community: %w", err))
 			return
@@ -1827,7 +1883,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Increment the membersCount in the community document
 	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": 1}}
-	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+	err = u.CDB.UpdateOne(ctx, communityFilter, communityUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, fmt.Errorf("failed to increment community membersCount: %w", err))
 		return
@@ -1945,10 +2001,14 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Check if the community exists in the user's communities array
 	userFilter := bson.M{"_id": uID}
 	var user models.User
-	err = u.DB.FindOne(context.Background(), userFilter).Decode(&user)
+	err = u.DB.FindOne(ctx, userFilter).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
 		return
@@ -1970,7 +2030,7 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 
 	// Update the user's communities array to remove the specified community
 	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
-	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
+	_, err = u.DB.UpdateOne(ctx, userFilter, userUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to remove community from user's communities", http.StatusInternalServerError, w, err)
 		return
@@ -1979,18 +2039,18 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 	// Find the community by community ID and decrement the membersCount
 	communityFilter := bson.M{"_id": cID}
 	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": -1}}
-	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+	err = u.CDB.UpdateOne(ctx, communityFilter, communityUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to decrement community membersCount", http.StatusInternalServerError, w, err)
 		return
 	}
-	community, err := u.CDB.FindOne(context.Background(), communityFilter)
+	community, err := u.CDB.FindOne(ctx, communityFilter)
 
 	// Iterate through the roles and remove the user ID from the members array
 	for _, role := range community.Details.Roles {
 		roleFilter := bson.M{"_id": cID, "community.roles._id": role.ID, "community.roles.members": userID}
 		roleUpdate := bson.M{"$pull": bson.M{"community.roles.$.members": userID}}
-		err := u.CDB.UpdateOne(context.Background(), roleFilter, roleUpdate)
+		err := u.CDB.UpdateOne(ctx, roleFilter, roleUpdate)
 		if err != nil {
 			config.ErrorStatus("failed to remove user from role members", http.StatusInternalServerError, w, err)
 			return
@@ -2026,6 +2086,10 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Update the user's community status to "banned"
 	userFilter := bson.M{
 		"_id":                          uID,
@@ -2036,7 +2100,7 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 			"user.communities.$.status": "banned",
 		},
 	}
-	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
+	_, err = u.DB.UpdateOne(ctx, userFilter, userUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to update community status", http.StatusInternalServerError, w, err)
 		return
@@ -2049,7 +2113,7 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 			"community.banList": userID,
 		},
 	}
-	err = u.CDB.UpdateOne(context.Background(), communityFilter, communityUpdate)
+	err = u.CDB.UpdateOne(ctx, communityFilter, communityUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to update community ban list", http.StatusInternalServerError, w, err)
 		return
@@ -2077,6 +2141,10 @@ func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Set the updatedAt field to the current time
 	updatedFields["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 
@@ -2088,7 +2156,7 @@ func (u User) UpdateUserByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Update the user in the database
 	filter := bson.M{"_id": uID}
-	_, err = u.DB.UpdateOne(context.Background(), filter, bson.M{"$set": update})
+	_, err = u.DB.UpdateOne(ctx, filter, bson.M{"$set": update})
 	if err != nil {
 		config.ErrorStatus("failed to update user", http.StatusInternalServerError, w, err)
 		return
@@ -2122,9 +2190,13 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Retrieve the user's friends array
 	user := models.User{}
-	err = u.DB.FindOne(context.Background(), bson.M{"_id": uID}).Decode(&user)
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
 	if err != nil {
 		config.ErrorStatus("failed to retrieve user's friends", http.StatusInternalServerError, w, err)
 		return
@@ -2138,7 +2210,7 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 			"created_at": time.Now(),
 		}
 		update := bson.M{"$set": bson.M{"user.friends": []bson.M{newFriend}}}
-		_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
+		_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, update)
 		if err != nil {
 			config.ErrorStatus("failed to initialize user's friends", http.StatusInternalServerError, w, err)
 			return
@@ -2147,7 +2219,7 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		// Check if the friendId exists in the user's friends list
 		filter := bson.M{"_id": uID, "user.friends.friend_id": requestBody.FriendID}
 		update := bson.M{"$set": bson.M{"user.friends.$.status": "blocked"}}
-		result, err := u.DB.UpdateOne(context.Background(), filter, update)
+		result, err := u.DB.UpdateOne(ctx, filter, update)
 		if err != nil {
 			config.ErrorStatus("failed to update friend status", http.StatusInternalServerError, w, err)
 			return
@@ -2161,7 +2233,7 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 				"created_at": time.Now(),
 			}
 			update = bson.M{"$push": bson.M{"user.friends": newFriend}}
-			_, err = u.DB.UpdateOne(context.Background(), bson.M{"_id": uID}, update)
+			_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, update)
 			if err != nil {
 				config.ErrorStatus("failed to insert new friend with status blocked", http.StatusInternalServerError, w, err)
 				return
@@ -2172,7 +2244,7 @@ func (u User) BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 	// Remove the userId from the friendId's friends list
 	friendFilter := bson.M{"_id": fID}
 	friendUpdate := bson.M{"$pull": bson.M{"user.friends": bson.M{"friend_id": requestBody.UserID}}}
-	_, err = u.DB.UpdateOne(context.Background(), friendFilter, friendUpdate)
+	_, err = u.DB.UpdateOne(ctx, friendFilter, friendUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to remove user from friend's friends list", http.StatusInternalServerError, w, err)
 		return
@@ -2201,10 +2273,14 @@ func (u User) UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Remove the friendId from the user's friends list
 	filter := bson.M{"_id": uID}
 	update := bson.M{"$pull": bson.M{"user.friends": bson.M{"friend_id": requestBody.FriendID}}}
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to remove friend from user's friends list", http.StatusInternalServerError, w, err)
 		return
@@ -2271,10 +2347,14 @@ func (u User) UnfriendUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Remove the friend from the user's friends list
 	userFilter := bson.M{"_id": uID}
 	userUpdate := bson.M{"$pull": bson.M{"user.friends": bson.M{"friend_id": requestBody.FriendID}}}
-	_, err = u.DB.UpdateOne(context.Background(), userFilter, userUpdate)
+	_, err = u.DB.UpdateOne(ctx, userFilter, userUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to remove friend from user's friends list", http.StatusInternalServerError, w, err)
 		return
@@ -2283,7 +2363,7 @@ func (u User) UnfriendUserHandler(w http.ResponseWriter, r *http.Request) {
 	// Remove the user from the friend's friends list
 	friendFilter := bson.M{"_id": fID}
 	friendUpdate := bson.M{"$pull": bson.M{"user.friends": bson.M{"friend_id": requestBody.UserID}}}
-	_, err = u.DB.UpdateOne(context.Background(), friendFilter, friendUpdate)
+	_, err = u.DB.UpdateOne(ctx, friendFilter, friendUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to remove user from friend's friends list", http.StatusInternalServerError, w, err)
 		return
@@ -2319,8 +2399,12 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := u.CDB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := u.CDB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to find community by ID", http.StatusNotFound, w, err)
 		return
@@ -2353,7 +2437,7 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 
 	// Update the community in the database
 	update := bson.M{"$set": bson.M{"community.departments": community.Details.Departments}}
-	err = u.CDB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
+	err = u.CDB.UpdateOne(ctx, bson.M{"_id": cID}, update)
 	if err != nil {
 		config.ErrorStatus("failed to update community", http.StatusInternalServerError, w, err)
 		return
@@ -2646,6 +2730,10 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	isActive := requestBody.Status == "active"
 
 	filter := bson.M{"_id": userID}
@@ -2660,7 +2748,7 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to subscribe user", http.StatusInternalServerError, w, err)
 		return
