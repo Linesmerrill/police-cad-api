@@ -3286,23 +3286,27 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 		{{"$limit", limit64}},
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Execute the aggregation
-	cursor, err := u.CDB.Aggregate(context.TODO(), pipeline)
+	cursor, err := u.CDB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to fetch prioritized communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.TODO())
+	defer cursor.Close(ctx)
 
 	// Decode the results
 	var communities []models.Community
-	if err := cursor.All(context.TODO(), &communities); err != nil {
+	if err := cursor.All(ctx, &communities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Create the paginated response
-	totalCount, _ := u.CDB.CountDocuments(context.TODO(), bson.M{"community.visibility": "public"})
+	totalCount, _ := u.CDB.CountDocuments(ctx, bson.M{"community.visibility": "public"})
 	paginatedResponse := PaginatedDataResponse{
 		Page:       Page,
 		TotalCount: totalCount,
@@ -3358,12 +3362,16 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 		{{"$limit", limit64}},
 	}
 
-	cursor, err := u.CDB.Aggregate(context.TODO(), pipeline)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	cursor, err := u.CDB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to fetch prioritized communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.TODO())
+	defer cursor.Close(ctx)
 
 	// Decode results
 	var decodedCommunities []struct {
@@ -3381,7 +3389,7 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 			} `bson:"subscription"`
 		} `bson:"community"`
 	}
-	if err := cursor.All(context.TODO(), &decodedCommunities); err != nil {
+	if err := cursor.All(ctx, &decodedCommunities); err != nil {
 		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
 		return
 	}

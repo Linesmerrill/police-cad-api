@@ -118,6 +118,28 @@ db.calls.createIndex(
 );
 print("✓ Call community ID index created");
 
+// CRITICAL: Community Subscription Plan + Visibility Index (for elite communities queries)
+print("Creating community subscription plan + visibility index...");
+db.communities.createIndex(
+  { "community.subscription.plan": 1, "community.visibility": 1 },
+  {
+    name: "community_subscription_visibility_idx",
+    background: true
+  }
+);
+print("✓ Community subscription plan + visibility index created");
+
+// MEDIUM PRIORITY: Community Tags Index (for tag-based queries)
+print("Creating community tags index...");
+db.communities.createIndex(
+  { "community.tags": 1 },
+  {
+    name: "community_tags_idx",
+    background: true
+  }
+);
+print("✓ Community tags index created");
+
 print("\n✅ All indexes created! Check index status with:");
 print("db.users.getIndexes()");
 print("db.communities.getIndexes()");

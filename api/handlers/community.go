@@ -3011,15 +3011,19 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 		}}},
 	}
 
-	cursor, err := c.DB.Aggregate(context.Background(), pipeline)
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	cursor, err := c.DB.Aggregate(ctx, pipeline)
 	if err != nil {
 		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
 		return
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var allCommunities []models.Community
-	if err := cursor.All(context.Background(), &allCommunities); err != nil {
+	if err := cursor.All(ctx, &allCommunities); err != nil {
 		config.ErrorStatus("failed to parse communities", http.StatusInternalServerError, w, err)
 		return
 	}
