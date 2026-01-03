@@ -183,6 +183,17 @@ createIndexSafe(
   }
 );
 
+// CRITICAL: Firearm Active Community ID Index (for queries filtering by activeCommunityID)
+// Needed for queries that filter by activeCommunityID
+createIndexSafe(
+  db.firearms,
+  { "firearm.activeCommunityID": 1 },
+  {
+    name: "firearm_active_community_id_idx",
+    background: true
+  }
+);
+
 // CRITICAL: Call Community ID Index (for /calls/community/{id})
 // DONE
 createIndexSafe(
