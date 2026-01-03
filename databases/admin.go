@@ -71,8 +71,9 @@ func EnsureHeadAdmin(db DatabaseHelper) error {
 	if headEmail == "" {
 		return nil
 	}
-	// Use timeout context to prevent hanging during cluster issues
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Use longer timeout during startup to handle slow cluster connections
+	// This is called during app initialization, so we give more time for connection pool to establish
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	// Check if exists
 	err := db.Collection(adminCollectionName).FindOne(ctx, bson.M{"email": headEmail}).Decode(&struct{}{})

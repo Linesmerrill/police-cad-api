@@ -111,18 +111,19 @@ func NewClient(conf *config.Config) (ClientHelper, error) {
 	clientOptions := options.Client().ApplyURI(conf.URL).
 		SetMaxPoolSize(100).                    // Maximum number of connections in pool
 		SetMinPoolSize(10).                     // Minimum number of connections in pool
+		SetMaxConnecting(5).                    // Limit concurrent connection attempts to prevent overwhelming the cluster
 		SetMaxConnIdleTime(30 * time.Second).  // Close idle connections after 30s
 		SetServerSelectionTimeout(60 * time.Second). // Increased timeout for server selection during migration (was 30s, now 60s)
 		SetSocketTimeout(60 * time.Second).     // Increased timeout for socket operations (was 30s, now 60s)
-		SetConnectTimeout(5 * time.Second).     // Reduced timeout for initial connection - fail fast on bad servers during discovery (was 30s)
+		SetConnectTimeout(10 * time.Second).    // Increased timeout for initial connection (was 5s) - give more time during cluster issues
 		SetRetryWrites(true).                   // Enable retry writes for transient failures
 		SetRetryReads(true).                    // Enable retry reads for transient failures
 		SetHeartbeatInterval(10 * time.Second). // Check server status every 10 seconds
 		SetReadPreference(readpref.PrimaryPreferred()) // Prefer PRIMARY, but allow SECONDARY reads during migration when PRIMARY unavailable
 		// During free-to-dedicated migration, replica set may not have a stable PRIMARY
 		// PrimaryPreferred allows reads from SECONDARY if PRIMARY is unavailable, making the app more resilient
-		// Reduced ConnectTimeout to 5s so bad servers fail fast during topology discovery
-		// High ServerSelectionTimeout (60s) gives time to find a suitable server
+		// SetMaxConnecting limits concurrent connection attempts to prevent overwhelming slow/unstable clusters
+		// Increased ConnectTimeout to 10s to give more time for connections during cluster issues
 
 	c, err := mongo.NewClient(clientOptions)
 

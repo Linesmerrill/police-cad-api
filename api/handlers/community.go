@@ -22,6 +22,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -3859,25 +3860,29 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 		},
 	}
 
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Count the total number of users
-	totalUsers, err := c.UDB.CountDocuments(context.Background(), filter)
+	totalUsers, err := c.UDB.CountDocuments(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to count users", http.StatusInternalServerError, w, err)
 		return
 	}
 
 	// Fetch users with pagination
-	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
-	cursor, err := c.UDB.Find(context.Background(), filter, options)
+	findOptions := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
+	cursor, err := c.UDB.Find(ctx, filter, findOptions)
 	if err != nil {
 		config.ErrorStatus("failed to get users by community ID", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var users []models.User
-	if err = cursor.All(context.Background(), &users); err != nil {
+	if err = cursor.All(ctx, &users); err != nil {
 		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
 		return
 	}
