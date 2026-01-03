@@ -65,7 +65,11 @@ func (c Call) CallByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbResp, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	// Use request context with timeout for database query
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	dbResp, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get call by ID", http.StatusNotFound, w, err)
 		return

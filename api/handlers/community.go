@@ -1933,8 +1933,12 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Use request context with timeout for database operations
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
@@ -1948,7 +1952,7 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 	// Update the community to add the new department
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$push": bson.M{"community.departments": department}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to add department to community", http.StatusInternalServerError, w, err)
 		return
@@ -4394,8 +4398,12 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Use request context with timeout for database operations
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
 	// Find the community and department
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to find community", http.StatusNotFound, w, err)
 		return
@@ -4471,7 +4479,7 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 		},
 	}
 
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update department components", http.StatusInternalServerError, w, err)
 		return
