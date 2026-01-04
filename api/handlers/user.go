@@ -1924,51 +1924,78 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Check if the communities array is nil or empty
-	if user.Details.Communities == nil || len(user.Details.Communities) == 0 {
-		pendingRequest := models.UserCommunity{
-			ID:          primitive.NewObjectID().Hex(),
-			CommunityID: requestBody.CommunityID,
-			Status:      "pending",
+	// Check if a community request with this communityId already exists
+	var existingCommunity *models.UserCommunity
+	if user.Details.Communities != nil && len(user.Details.Communities) > 0 {
+		for i := range user.Details.Communities {
+			if user.Details.Communities[i].CommunityID == requestBody.CommunityID {
+				existingCommunity = &user.Details.Communities[i]
+				break
+			}
 		}
-		update := bson.M{
-			"$set": bson.M{"user.communities": []models.UserCommunity{pendingRequest}},
-		}
-		_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, update)
-		if err != nil {
-			config.ErrorStatus("failed to initialize user's communities", http.StatusInternalServerError, w, err)
-			return
-		}
-	} else {
-		// Check if the communityId already exists in the user's pending community requests
-		existingUser := models.User{}
-		err := u.DB.FindOne(ctx, bson.M{
-			"_id": uID,
-			"user.communities": bson.M{
-				"$elemMatch": bson.M{
-					"communityId": requestBody.CommunityID,
-				},
-			},
-		}).Decode(&existingUser)
-		if err == nil && len(existingUser.Details.Communities) > 0 {
+	}
+
+	// Handle based on existing request status
+	if existingCommunity != nil {
+		switch existingCommunity.Status {
+		case "pending":
+			// If already pending, return error
 			config.ErrorStatus("community request already exists", http.StatusConflict, w, fmt.Errorf("community request already exists"))
 			return
+		case "declined":
+			// If declined, update to pending
+			filter := bson.M{"_id": uID, "user.communities.communityId": requestBody.CommunityID}
+			update := bson.M{
+				"$set": bson.M{"user.communities.$.status": "pending"},
+			}
+			_, err = u.DB.UpdateOne(ctx, filter, update)
+			if err != nil {
+				config.ErrorStatus("failed to update community request status", http.StatusInternalServerError, w, err)
+				return
+			}
+			// Return success - status updated to pending
+		case "blocked":
+			// If blocked, silently process but don't change status (just return success)
+			// No database update needed
+		default:
+			// For any other status, treat as new request and update to pending
+			filter := bson.M{"_id": uID, "user.communities.communityId": requestBody.CommunityID}
+			update := bson.M{
+				"$set": bson.M{"user.communities.$.status": "pending"},
+			}
+			_, err = u.DB.UpdateOne(ctx, filter, update)
+			if err != nil {
+				config.ErrorStatus("failed to update community request status", http.StatusInternalServerError, w, err)
+				return
+			}
 		}
-
-		// Create a new pending community request object
+	} else {
+		// No existing request found, add a new pending request
 		pendingRequest := models.UserCommunity{
 			ID:          primitive.NewObjectID().Hex(),
 			CommunityID: requestBody.CommunityID,
 			Status:      "pending",
 		}
 
-		// Update the user's pending community requests array
-		filter := bson.M{"_id": uID}
-		update := bson.M{"$addToSet": bson.M{"user.communities": pendingRequest}} // $addToSet ensures no duplicates
-		_, err = u.DB.UpdateOne(ctx, filter, update)
-		if err != nil {
-			config.ErrorStatus("failed to update user's pending community requests", http.StatusInternalServerError, w, err)
-			return
+		if user.Details.Communities == nil || len(user.Details.Communities) == 0 {
+			// Initialize communities array
+			update := bson.M{
+				"$set": bson.M{"user.communities": []models.UserCommunity{pendingRequest}},
+			}
+			_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, update)
+			if err != nil {
+				config.ErrorStatus("failed to initialize user's communities", http.StatusInternalServerError, w, err)
+				return
+			}
+		} else {
+			// Add to existing communities array
+			filter := bson.M{"_id": uID}
+			update := bson.M{"$push": bson.M{"user.communities": pendingRequest}}
+			_, err = u.DB.UpdateOne(ctx, filter, update)
+			if err != nil {
+				config.ErrorStatus("failed to add community request", http.StatusInternalServerError, w, err)
+				return
+			}
 		}
 	}
 
