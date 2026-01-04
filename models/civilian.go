@@ -4,6 +4,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+
 // Civilian holds the structure for the civilian collection in mongo
 type Civilian struct {
 	ID      primitive.ObjectID `json:"_id" bson:"_id"`
@@ -21,7 +22,7 @@ type CivilianDetails struct {
 	LicenseStatus        string             `json:"licenseStatus" bson:"licenseStatus"`
 	TicketCount          string             `json:"ticketCount" bson:"ticketCount"` // TODO may need to change the database definition
 	Birthday             string             `json:"birthday" bson:"birthday"`
-	Warrants             []interface{}      `json:"warrants" bson:"warrants"` // TODO replace with a concrete type
+	Warrants             []interface{}      `json:"warrants" bson:"warrants,omitempty"` // TODO: Handle inconsistent data types - some documents may cause decoding errors
 	CriminalHistory      []CriminalHistory  `json:"criminalHistory" bson:"criminalHistory"`
 	Gender               string             `json:"gender" bson:"gender"`
 	Address              string             `json:"address" bson:"address"`

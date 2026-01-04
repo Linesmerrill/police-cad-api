@@ -555,6 +555,50 @@
         .pagination button:disabled:hover {
             transform: none;
         }
+        
+        /* Mobile-responsive table containers - make tables horizontally scrollable */
+        #slowestRoutes,
+        #mostFrequentRoutes,
+        #slowQueries {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin: 0 -28px;
+            padding: 0 28px;
+        }
+        
+        #slowestRoutes table,
+        #mostFrequentRoutes table,
+        #slowQueries table {
+            min-width: 800px; /* Ensure table doesn't shrink below readable width */
+        }
+        
+        /* Mobile-specific adjustments */
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+            
+            .section {
+                padding: 16px;
+                margin-bottom: 16px;
+            }
+            
+            #slowestRoutes,
+            #mostFrequentRoutes,
+            #slowQueries {
+                margin: 0 -16px;
+                padding: 0 16px;
+            }
+            
+            th, td {
+                padding: 10px 12px;
+                font-size: 13px;
+            }
+            
+            .section h2 {
+                font-size: 1.25rem;
+            }
+        }
     </style>
 </head>
 <body>

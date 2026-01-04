@@ -89,8 +89,15 @@ func Middleware(next http.Handler) http.Handler {
 				"email", email,
 				"username", user.UserName())
 			
-			// The user ID should already be in context (set by ValidateUser)
-			// If not, CreateToken will fall back to DB lookup
+			// Extract user ID from the authenticated user and add it to request context
+			// This ensures CreateToken can access it without another DB lookup
+			// The auth.Info interface stores the user ID that was set in ValidateUser
+			userID := user.ID()
+			if userID != "" {
+				ctx := withAuthenticatedUserID(r.Context(), userID)
+				r = r.WithContext(ctx)
+			}
+			
 			next.ServeHTTP(w, r)
 
 		} else {
@@ -235,10 +242,11 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
 	}
 
-	// Store user ID in request context so CreateToken can use it without another DB query
-	// This is safe because the request context is passed through the middleware chain
+	// Store user ID in the request context so CreateToken can use it without another DB query
+	// Note: We need to modify the request's context directly since go-guardian may pass a different context
 	if r != nil {
 		ctx := withAuthenticatedUserID(r.Context(), dbEmailResp.ID)
+		// Update the request's context - this should propagate to the handler
 		*r = *r.WithContext(ctx)
 	}
 

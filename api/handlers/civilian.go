@@ -219,8 +219,24 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 
 	dbResp, err = c.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
 	if err != nil {
-		config.ErrorStatus("failed to get civilian name search", http.StatusNotFound, w, err)
-		return
+		// Check if the error is related to warrants field decoding
+		if strings.Contains(err.Error(), "warrants") || strings.Contains(err.Error(), "SliceDecodeValue") {
+			zap.S().Warnw("decoding error for warrants field, attempting to exclude warrants from projection", "error", err)
+			// Try again with warrants field excluded from projection
+			opts := options.Find().SetLimit(limit64).SetSkip(skip64).SetProjection(bson.M{"civilian.warrants": 0})
+			dbResp, err = c.DB.Find(ctx, filter, opts)
+			if err != nil {
+				config.ErrorStatus("failed to get civilian name search", http.StatusInternalServerError, w, err)
+				return
+			}
+			// Set warrants to empty array for all results to maintain response structure
+			for i := range dbResp {
+				dbResp[i].Details.Warrants = []interface{}{}
+			}
+		} else {
+			config.ErrorStatus("failed to get civilian name search", http.StatusNotFound, w, err)
+			return
+		}
 	}
 
 	// Because the frontend requires that the data elements inside models.Civilians exist, if
