@@ -414,6 +414,7 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	// OPTIMIZATION: Use $text search for name/username (much faster than regex)
 	// For email, use direct field lookup with collation (has index)
 	queryLen := len(query)
+	isEmailQuery := strings.Contains(query, "@") // Detect if query looks like an email
 	var filter bson.M
 	var findOpts *options.FindOptions
 
@@ -423,13 +424,18 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	
 	var err error
 
-	if queryLen >= 3 {
-		// Use $text search for name/username, direct lookup for email
+	if isEmailQuery {
+		// For email queries, use direct lookup only (fastest - uses user_email_idx index)
+		filter = bson.M{"user.email": query} // Direct lookup uses user_email_idx (case-insensitive collation)
+		findOpts = &options.FindOptions{
+			Skip:  &skip,
+			Limit: &limit64,
+			Sort:  bson.M{"user.email": 1},
+		}
+	} else if queryLen >= 3 {
+		// Use $text search for name/username queries
 		filter = bson.M{
-			"$or": []bson.M{
-				{"user.email": query}, // Direct lookup uses user_email_idx (case-insensitive collation)
-				{"$text": bson.M{"$search": query}}, // Uses user_search_text_idx for name/username
-			},
+			"$text": bson.M{"$search": query}, // Uses user_search_text_idx for name/username
 		}
 		findOpts = &options.FindOptions{
 			Skip:  &skip,
@@ -454,24 +460,56 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	
 	// Get total count for pagination metadata (skip for very short queries to avoid slow count)
 	var totalCount int64
-	if queryLen >= 3 {
+	if isEmailQuery || queryLen >= 3 {
 		totalCount, err = h.UDB.CountDocuments(ctx, filter)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+			return
+		}
 	} else {
 		// For short queries, estimate count based on results (faster)
 		totalCount = 0 // Will be estimated from results
-	}
-	if err != nil && queryLen >= 3 {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
-		return
 	}
 	
 	// Use existing user database to search with pagination
 	cursor, err := h.UDB.Find(ctx, filter, findOpts)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
-		return
+		// If text search fails (e.g., index doesn't exist), fallback to regex for queries >= 3 chars (non-email)
+		if !isEmailQuery && queryLen >= 3 {
+			log.Printf("AdminUserSearchHandler: text search failed, falling back to regex: %v", err)
+			// Fallback to regex-based search (no $text search)
+			filter = bson.M{
+				"$or": []bson.M{
+					{"user.email": bson.M{"$regex": query, "$options": "i"}},
+					{"user.name": bson.M{"$regex": query, "$options": "i"}},
+					{"user.username": bson.M{"$regex": query, "$options": "i"}},
+				},
+			}
+			findOpts = &options.FindOptions{
+				Skip:  &skip,
+				Limit: &limit64,
+				Sort:  bson.M{"user.email": 1},
+			}
+			// Retry count with new filter
+			totalCount, err = h.UDB.CountDocuments(ctx, filter)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+				return
+			}
+			// Retry find with new filter
+			cursor, err = h.UDB.Find(ctx, filter, findOpts)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
+			return
+		}
 	}
 	defer cursor.Close(ctx)
 	
