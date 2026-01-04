@@ -604,43 +604,33 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// OPTIMIZATION: Use $text search for queries >=3 chars (uses community_name_text_idx)
-	// For shorter queries, use prefix regex
+	// Use regex search for community names (text index may not be available/configured)
+	// For queries >= 3 chars, use full regex match, otherwise use prefix match
 	queryLen := len(query)
 	var filter bson.M
 	var findOpts *options.FindOptions
 	
 	if queryLen >= 3 {
-		// Use $text search - much faster with text index
-		filter = bson.M{"$text": bson.M{"$search": query}}
-		findOpts = &options.FindOptions{
-			Skip:  &skip,
-			Limit: &limit64,
-			Sort:  bson.M{"score": bson.M{"$meta": "textScore"}, "community.name": 1},
-		}
+		// Use regex search for queries >= 3 chars
+		filter = bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
 	} else {
 		// For short queries, use prefix regex
 		filter = bson.M{"community.name": bson.M{"$regex": "^" + query, "$options": "i"}}
-		findOpts = &options.FindOptions{
-			Skip:  &skip,
-			Limit: &limit64,
-			Sort:  bson.M{"community.name": 1},
-		}
 	}
 	
-	// Get total count for pagination metadata (skip for short queries)
+	findOpts = options.Find().
+		SetSkip(skip).
+		SetLimit(limit64).
+		SetSort(bson.M{"community.name": 1})
+	
+	// Get total count for pagination metadata
 	var totalCount int64
 	var err error
-	if queryLen >= 3 {
-		totalCount, err = h.CDB.CountDocuments(ctx, filter)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
-			return
-		}
-	} else {
-		// Estimate for short queries to avoid slow CountDocuments
-		totalCount = 0
+	totalCount, err = h.CDB.CountDocuments(ctx, filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
+		return
 	}
 	
 	// Use community database to search with pagination
@@ -651,11 +641,6 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer cursor.Close(ctx)
-	
-	// Estimate count for short queries
-	if queryLen < 3 && totalCount == 0 {
-		totalCount = limit64 * int64(page + 1) // Rough estimate
-	}
 
 	var communities []models.Community
 	if err = cursor.All(ctx, &communities); err != nil {
