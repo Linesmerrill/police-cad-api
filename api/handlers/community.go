@@ -5408,7 +5408,10 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 		limit = 50 // Cap at 50
 	}
 
-	ctx := context.Background()
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	
 	now := time.Now()
 
 	// Calculate time ranges based on timeframe
@@ -5561,9 +5564,15 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Fetch all communities (we'll sort and paginate after calculating stats)
-	// For performance, we could limit this but for now we'll fetch all public communities
+	// PERFORMANCE NOTE: This fetches ALL public communities, then does 3-4 CountDocuments per community
+	// This is an N+1 query problem that can be very slow with many communities.
+	// TODO: Optimize using aggregation pipelines to calculate stats in bulk
 	filter := bson.M{"community.visibility": "public"}
-	cursor, err := c.DB.Find(ctx, filter)
+	// Add limit and sort to prevent full collection scan - process top communities only for leaderboard
+	findOpts := options.Find().
+		SetLimit(500). // Process max 500 communities to prevent timeout
+		SetSort(bson.M{"community.membersCount": -1}) // Prioritize larger communities
+	cursor, err := c.DB.Find(ctx, filter, findOpts)
 	if err != nil {
 		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
 		return
