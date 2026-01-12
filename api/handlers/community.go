@@ -1197,6 +1197,17 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if the invite code already exists
+	existingCode, err := c.IDB.FindOne(context.Background(), bson.M{"code": inviteCode.Code})
+	if err != nil && err != mongo.ErrNoDocuments {
+		config.ErrorStatus("Failed to check for existing invite code", http.StatusInternalServerError, w, err)
+		return
+	}
+	if existingCode != nil {
+		config.ErrorStatus("Invite code already exists", http.StatusConflict, w, nil)
+		return
+	}
+
 	// Convert ExpiresAt from *time.Time to *primitive.DateTime if provided (no conversion needed since struct matches)
 	var expiresAt *time.Time
 	if inviteCode.ExpiresAt != nil {
