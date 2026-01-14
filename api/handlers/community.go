@@ -2383,8 +2383,12 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	// Find the community by ID
-	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// First, verify that the community, department, and user exist
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to find community by ID", http.StatusNotFound, w, err)
 		return
@@ -2392,8 +2396,8 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 
 	// Find the department within the community
 	var department *models.Department
-	for i, dept := range community.Details.Departments {
-		if dept.ID == dID {
+	for i := range community.Details.Departments {
+		if community.Details.Departments[i].ID == dID {
 			department = &community.Details.Departments[i]
 			break
 		}
@@ -2403,26 +2407,42 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	// Update the user's join request status in the department
-	updated := false
-	for i, member := range department.Members {
+	// Verify the user exists in the department members
+	userFound := false
+	for _, member := range department.Members {
 		if member.UserID == requestBody.UserID {
-			department.Members[i].Status = requestBody.Status
-			updated = true
+			userFound = true
 			break
 		}
 	}
-
-	if !updated {
+	if !userFound {
 		config.ErrorStatus("user not found in department members", http.StatusNotFound, w, nil)
 		return
 	}
 
-	// Update the community in the database
-	update := bson.M{"$set": bson.M{"community.departments": community.Details.Departments}}
-	err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
+	// Use MongoDB arrayFilters to update the specific member's status within the specific department
+	filter := bson.M{
+		"_id":                      cID,
+		"community.departments._id": dID,
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"community.departments.$[dept].members.$[member].status": requestBody.Status,
+		},
+	}
+
+	// Set up arrayFilters to match the specific department and member
+	arrayFilters := options.Update().SetArrayFilters(options.ArrayFilters{
+		Filters: []interface{}{
+			bson.M{"dept._id": dID},
+			bson.M{"member.userID": requestBody.UserID},
+		},
+	})
+
+	err = c.DB.UpdateOne(ctx, filter, update, arrayFilters)
 	if err != nil {
-		config.ErrorStatus("failed to update community", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to update department join request", http.StatusInternalServerError, w, err)
 		return
 	}
 
