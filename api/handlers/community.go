@@ -40,6 +40,14 @@ var (
 	leaderboardCache   = map[string]leaderboardCacheEntry{}
 )
 
+// getStringOrDefault returns the new value if non-empty, otherwise returns the default
+func getStringOrDefault(newVal, defaultVal string) string {
+	if newVal != "" {
+		return newVal
+	}
+	return defaultVal
+}
+
 // Community struct mostly used for mocking tests
 type Community struct {
 	DB       databases.CommunityDatabase
@@ -2165,11 +2173,15 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 		community.Details.Members = make(map[string]models.MemberDetail)
 	}
 
-	// Update or add the TenCodeID for the user
+	// Update or add the TenCodeID for the user, preserving existing fields
 	members := community.Details.Members
+	existingMember := members[userID]
 	members[userID] = models.MemberDetail{
-		DepartmentID: requestBody.DepartmentID,
-		TenCodeID:    requestBody.TenCodeID,
+		DepartmentID:         requestBody.DepartmentID,
+		TenCodeID:            requestBody.TenCodeID,
+		IsOnline:             existingMember.IsOnline,
+		ActiveDepartmentID:   getStringOrDefault(requestBody.ActiveDepartmentID, existingMember.ActiveDepartmentID),
+		ActiveDepartmentName: getStringOrDefault(requestBody.ActiveDepartmentName, existingMember.ActiveDepartmentName),
 	}
 
 	// Update the community in the database
