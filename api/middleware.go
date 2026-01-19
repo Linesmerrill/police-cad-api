@@ -174,6 +174,19 @@ func (m MiddlewareDB) SetupGoGuardian() {
 	authenticator.EnableStrategy(bearer.CachedStrategyKey, tokenStrategy)
 }
 
+// InvalidateAuthCache removes a user's cached credentials from the auth cache.
+// This should be called when a user's password is changed to ensure they must
+// re-authenticate with the new password.
+func InvalidateAuthCache(email string) error {
+	if cache == nil {
+		return nil
+	}
+	email = strings.ToLower(email)
+	zap.S().Infow("InvalidateAuthCache: clearing cached credentials",
+		"email", email)
+	return cache.Delete(email, nil)
+}
+
 // ValidateUser validates a user
 func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, password string) (auth.Info, error) {
 	usernameHash := sha256.Sum256([]byte(strings.ToLower(email)))
