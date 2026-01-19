@@ -4285,6 +4285,7 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email        string `json:"email"`
 		PasswordHash string `json:"passwordHash"`
+		Password     string `json:"password"` // Plain password (preferred) - will be hashed by API
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -4297,13 +4298,43 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
-	passwordHash := req.PasswordHash
 
-	if email == "" || passwordHash == "" {
+	// Prefer plain password over pre-hashed (to ensure Go bcrypt compatibility)
+	var passwordHash string
+	if req.Password != "" {
+		// Hash the plain password using Go's bcrypt
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			zap.S().Errorf("Failed to hash password: %v", hashErr)
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "Could not process password",
+			})
+			return
+		}
+		passwordHash = string(hash)
+		zap.S().Infow("SyncPassword: using plain password (hashed by API)",
+			"email", email)
+	} else if req.PasswordHash != "" {
+		// Fall back to pre-hashed password (may have bcrypt compatibility issues)
+		passwordHash = req.PasswordHash
+		zap.S().Infow("SyncPassword: using pre-hashed password",
+			"email", email)
+	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"error":   "Email and passwordHash are required",
+			"error":   "Email and password (or passwordHash) are required",
+		})
+		return
+	}
+
+	if email == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Email is required",
 		})
 		return
 	}
