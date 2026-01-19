@@ -181,10 +181,7 @@ func InvalidateAuthCache(email string) error {
 	if cache == nil {
 		return nil
 	}
-	email = strings.ToLower(email)
-	zap.S().Infow("InvalidateAuthCache: clearing cached credentials",
-		"email", email)
-	return cache.Delete(email, nil)
+	return cache.Delete(strings.ToLower(email), nil)
 }
 
 // ValidateUser validates a user

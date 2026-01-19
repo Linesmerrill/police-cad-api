@@ -4314,13 +4314,9 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		passwordHash = string(hash)
-		zap.S().Infow("SyncPassword: using plain password (hashed by API)",
-			"email", email)
 	} else if req.PasswordHash != "" {
 		// Fall back to pre-hashed password (may have bcrypt compatibility issues)
 		passwordHash = req.PasswordHash
-		zap.S().Infow("SyncPassword: using pre-hashed password",
-			"email", email)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -4361,12 +4357,6 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	// Log before update
-	zap.S().Infow("SyncPassword: updating password",
-		"userID", user.ID.Hex(),
-		"email", email,
-		"hashPrefix", passwordHash[:min(20, len(passwordHash))])
 
 	// Update user password
 	result, err := u.DB.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
