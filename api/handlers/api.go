@@ -229,6 +229,8 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/user/create-user", http.HandlerFunc(u.UserCreateHandler)).Methods("POST")
 	apiCreate.Handle("/user/check-user", http.HandlerFunc(u.UserCheckEmailHandler)).Methods("POST")
+	apiCreate.Handle("/user/reset-password", http.HandlerFunc(u.UserResetPasswordHandler)).Methods("POST")
+	apiCreate.Handle("/user/sync-password", http.HandlerFunc(u.SyncPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/user/online-status", api.Middleware(http.HandlerFunc(u.SetOnlineStatusHandler))).Methods("PUT")
 	apiCreate.Handle("/user/block", api.Middleware(http.HandlerFunc(u.BlockUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/unblock", api.Middleware(http.HandlerFunc(u.UnblockUserHandler))).Methods("POST")

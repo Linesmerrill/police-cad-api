@@ -4113,3 +4113,285 @@ func (u User) handleRevenueCatProductChange(webhookData map[string]interface{}) 
 	zap.S().Infof("Updated user %s subscription (product change)", appUserID)
 	return nil
 }
+
+// UserResetPasswordHandler handles password reset for regular users
+// This endpoint verifies the reset token and updates the user's password
+func (u User) UserResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+		return
+	}
+
+	token := strings.TrimSpace(req.Token)
+	password := req.Password
+
+	if token == "" || password == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Token and password are required",
+		})
+		return
+	}
+
+	// Hash the token to compare with stored hash
+	tokenHash := sha256.Sum256([]byte(token))
+	hashedToken := hex.EncodeToString(tokenHash[:])
+
+	// Use request context with timeout
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Find user with matching reset token that hasn't expired
+	var user struct {
+		ID      primitive.ObjectID `bson:"_id"`
+		Details models.UserDetails `bson:"user"`
+	}
+
+	err := u.DB.FindOne(ctx, bson.M{
+		"user.resetPasswordToken": hashedToken,
+	}).Decode(&user)
+
+	if err != nil {
+		zap.S().Warnf("Password reset failed - token not found: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid or expired reset token",
+		})
+		return
+	}
+
+	// Check if token has expired
+	var expiresAt time.Time
+	switch exp := user.Details.ResetPasswordExpires.(type) {
+	case time.Time:
+		expiresAt = exp
+	case primitive.DateTime:
+		expiresAt = exp.Time()
+	case string:
+		parsedTime, parseErr := time.Parse(time.RFC3339, exp)
+		if parseErr != nil {
+			zap.S().Warnf("Failed to parse reset token expiry: %v", parseErr)
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "Invalid reset token",
+			})
+			return
+		}
+		expiresAt = parsedTime
+	default:
+		zap.S().Warnf("Unknown reset token expiry type: %T", exp)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid reset token",
+		})
+		return
+	}
+
+	if time.Now().After(expiresAt) {
+		zap.S().Warnf("Password reset failed - token expired for user %s", user.ID.Hex())
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Reset token has expired",
+		})
+		return
+	}
+
+	// Hash the new password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		zap.S().Errorf("Failed to hash password: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Could not update password",
+		})
+		return
+	}
+
+	// Update user password and clear reset token
+	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$set": bson.M{
+			"user.password":             string(newHash),
+			"user.resetPasswordToken":   "",
+			"user.resetPasswordExpires": nil,
+			"updatedAt":                 primitive.NewDateTimeFromTime(time.Now()),
+		},
+	})
+
+	if err != nil {
+		zap.S().Errorf("Failed to update password for user %s: %v", user.ID.Hex(), err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Could not update password",
+		})
+		return
+	}
+
+	zap.S().Infof("Password reset successful for user %s", user.ID.Hex())
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Password updated successfully",
+	})
+}
+
+// SyncPasswordHandler syncs a user's password from the website to the API database
+// This is called by the website after a password reset to ensure both databases are in sync
+// Protected by server-to-server API token
+func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Verify server-to-server API token
+	authHeader := r.Header.Get("Authorization")
+	expectedToken := os.Getenv("POLICE_CAD_API_TOKEN")
+	if expectedToken == "" {
+		zap.S().Error("POLICE_CAD_API_TOKEN not configured")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Server misconfigured",
+		})
+		return
+	}
+
+	// Check Bearer token
+	if !strings.HasPrefix(authHeader, "Bearer ") || authHeader[7:] != expectedToken {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+		return
+	}
+
+	var req struct {
+		Email        string `json:"email"`
+		PasswordHash string `json:"passwordHash"`
+		Password     string `json:"password"` // Plain password (preferred) - will be hashed by API
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+		return
+	}
+
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+
+	// Prefer plain password over pre-hashed (to ensure Go bcrypt compatibility)
+	var passwordHash string
+	if req.Password != "" {
+		// Hash the plain password using Go's bcrypt
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			zap.S().Errorf("Failed to hash password: %v", hashErr)
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "Could not process password",
+			})
+			return
+		}
+		passwordHash = string(hash)
+	} else if req.PasswordHash != "" {
+		// Fall back to pre-hashed password (may have bcrypt compatibility issues)
+		passwordHash = req.PasswordHash
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Email and password (or passwordHash) are required",
+		})
+		return
+	}
+
+	if email == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Email is required",
+		})
+		return
+	}
+
+	// Use request context with timeout
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Find user by email
+	var user struct {
+		ID primitive.ObjectID `bson:"_id"`
+	}
+
+	err := u.DB.FindOne(ctx, bson.M{
+		"user.email": email,
+	}).Decode(&user)
+
+	if err != nil {
+		zap.S().Warnf("Password sync failed - user not found for email %s: %v", email, err)
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "User not found",
+		})
+		return
+	}
+
+	// Update user password
+	result, err := u.DB.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$set": bson.M{
+			"user.password": passwordHash,
+			"updatedAt":     primitive.NewDateTimeFromTime(time.Now()),
+		},
+	})
+
+	if err != nil {
+		zap.S().Errorf("Failed to sync password for user %s: %v", user.ID.Hex(), err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Could not update password",
+		})
+		return
+	}
+
+	zap.S().Infow("Password synced successfully",
+		"userID", user.ID.Hex(),
+		"email", email,
+		"matchedCount", result.MatchedCount,
+		"modifiedCount", result.ModifiedCount)
+
+	// Invalidate the auth cache for this user so they must re-authenticate with new password
+	if err := api.InvalidateAuthCache(email); err != nil {
+		zap.S().Warnw("Failed to invalidate auth cache (password still updated)",
+			"email", email,
+			"error", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Password synced successfully",
+	})
+}
