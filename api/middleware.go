@@ -64,7 +64,7 @@ func Middleware(next http.Handler) http.Handler {
 				zap.S().Warnw("auth/token: missing basic auth header",
 					"url", r.URL.Path,
 					"method", r.Method)
-				w.Header().Set("WWW-Authenticate", `Basic realm="restricted"`)
+				// Note: Removed WWW-Authenticate header to prevent iOS from hanging on 401 responses
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(`{"error": "unauthorized", "message": "Basic authentication required"}`))
 				return
@@ -80,7 +80,7 @@ func Middleware(next http.Handler) http.Handler {
 					"url", r.URL.Path,
 					"email", email,
 					"error", err)
-				w.Header().Set("WWW-Authenticate", `Basic realm="restricted"`)
+				// Note: Removed WWW-Authenticate header to prevent iOS from hanging on 401 responses
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(fmt.Sprintf(`{"error": "unauthorized", "message": "%s"}`, err.Error())))
 				return

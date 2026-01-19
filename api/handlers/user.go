@@ -191,7 +191,7 @@ func (u User) UserLoginHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
+	// Note: Removed WWW-Authenticate header to prevent iOS from hanging on 401 responses
 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 
 }
