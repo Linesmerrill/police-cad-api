@@ -4331,8 +4331,14 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log before update
+	zap.S().Infow("SyncPassword: updating password",
+		"userID", user.ID.Hex(),
+		"email", email,
+		"hashPrefix", passwordHash[:min(20, len(passwordHash))])
+
 	// Update user password
-	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+	result, err := u.DB.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
 		"$set": bson.M{
 			"user.password": passwordHash,
 			"updatedAt":     primitive.NewDateTimeFromTime(time.Now()),
@@ -4349,7 +4355,11 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	zap.S().Infof("Password synced successfully for user %s (email: %s)", user.ID.Hex(), email)
+	zap.S().Infow("Password synced successfully",
+		"userID", user.ID.Hex(),
+		"email", email,
+		"matchedCount", result.MatchedCount,
+		"modifiedCount", result.ModifiedCount)
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
