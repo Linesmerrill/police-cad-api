@@ -540,8 +540,19 @@ func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Return the created event with its ID
+	response := map[string]interface{}{
+		"message": "Event added successfully",
+		"event":   event,
+	}
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Event added successfully"}`))
+	w.Write(b)
 }
 
 // GetEventByIDHandler returns an event by ID
@@ -646,8 +657,37 @@ func (c Community) UpdateEventByIDHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Fetch the updated event to return it
+	comm, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		// Update succeeded but couldn't fetch - still return success with message only
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "Event updated successfully"}`))
+		return
+	}
+
+	// Find the updated event by ID
+	var returnEvent *models.Event
+	for _, evt := range comm.Details.Events {
+		if evt.ID == eID {
+			returnEvent = &evt
+			break
+		}
+	}
+
+	// Return the updated event
+	response := map[string]interface{}{
+		"message": "Event updated successfully",
+		"event":   returnEvent,
+	}
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Event updated successfully"}`))
+	w.Write(b)
 }
 
 // DeleteEventByIDHandler deletes an event by ID
