@@ -3615,9 +3615,11 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 }
 
 // GetPaginatedDepartmentsHandler returns a paginated list of departments by communityId
+// Supports optional templateFilter query parameter to filter by template type (e.g., "Police", "Civilian", "Dispatch")
 func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	userID := r.URL.Query().Get("userId")
+	templateFilter := r.URL.Query().Get("templateFilter") // Optional filter by template name
 
 	// Parse pagination parameters
 	page, err := strconv.Atoi(r.URL.Query().Get("page"))
@@ -3651,7 +3653,8 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 	// Sort departments based on user preferences first
 	sortedDepartments := c.sortDepartmentsByUserPreferences(ctx, community.Details.Departments, userID, communityID)
 
-	// Filter and paginate departments
+	// Collect all template types (for filter UI) and filter departments
+	templateTypesMap := make(map[string]int) // template name -> count
 	var filteredDepartments []map[string]interface{}
 	for _, department := range sortedDepartments {
 		if department.ApprovalRequired {
@@ -3664,6 +3667,25 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 				}
 			}
 			if !isApproved {
+				continue
+			}
+		}
+
+		// Track template types for filter options (before applying template filter)
+		templateName := department.Template.Name
+		if templateName != "" {
+			templateTypesMap[templateName]++
+		} else {
+			templateTypesMap["Other"]++
+		}
+
+		// Apply template filter if specified
+		if templateFilter != "" {
+			deptTemplateName := department.Template.Name
+			if deptTemplateName == "" {
+				deptTemplateName = "Other"
+			}
+			if !strings.EqualFold(deptTemplateName, templateFilter) {
 				continue
 			}
 		}
@@ -3684,6 +3706,15 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 		filteredDepartments = append(filteredDepartments, departmentData)
 	}
 
+	// Convert template types map to sorted slice
+	var templateTypes []map[string]interface{}
+	for name, count := range templateTypesMap {
+		templateTypes = append(templateTypes, map[string]interface{}{
+			"name":  name,
+			"count": count,
+		})
+	}
+
 	// Apply pagination
 	start := offset
 	end := offset + limit
@@ -3697,10 +3728,11 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 
 	// Return the response
 	response := map[string]interface{}{
-		"page":       page,
-		"limit":      limit,
-		"totalCount": len(filteredDepartments),
-		"data":       paginatedDepartments,
+		"page":          page,
+		"limit":         limit,
+		"totalCount":    len(filteredDepartments),
+		"data":          paginatedDepartments,
+		"templateTypes": templateTypes,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
