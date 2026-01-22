@@ -4687,6 +4687,17 @@ func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Count expired invite codes
+	expiredFilter := bson.M{
+		"communityId": communityID,
+		"expiresAt":   bson.M{"$lt": time.Now(), "$ne": nil},
+	}
+	expiredCount, err := c.IDB.CountDocuments(context.Background(), expiredFilter)
+	if err != nil {
+		// Don't fail the request, just set to 0
+		expiredCount = 0
+	}
+
 	// Fetch invite codes with pagination
 	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.D{{"createdAt", -1}})
 	inviteCodes, err := c.IDB.Find(context.Background(), filter, options)
@@ -4738,7 +4749,8 @@ func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *ht
 
 	// Build response
 	response := map[string]interface{}{
-		"inviteCodes": populatedInviteCodes,
+		"inviteCodes":  populatedInviteCodes,
+		"expiredCount": expiredCount,
 		"pagination": map[string]interface{}{
 			"currentPage": page,
 			"totalPages":  totalPages,
