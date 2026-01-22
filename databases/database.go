@@ -29,6 +29,7 @@ type MongoCollectionHelper interface {
 	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (*MongoCursor, error)
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	DeleteMany(context.Context, interface{}, ...*options.DeleteOptions) (int64, error)
 	UpdateMany(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	FindOneAndUpdate(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) *mongo.SingleResult
 }
@@ -228,6 +229,20 @@ func (mc *MongoCollection) DeleteOne(ctx context.Context, filter interface{}, op
 		DBQueryRecorder(ctx, "DeleteOne", mc.collectionName, duration, err)
 	}
 	return err
+}
+
+// DeleteMany deletes multiple documents from the collection
+func (mc *MongoCollection) DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error) {
+	start := time.Now()
+	result, err := mc.coll.DeleteMany(ctx, filter, opts...)
+	duration := time.Since(start)
+	if DBQueryRecorder != nil {
+		DBQueryRecorder(ctx, "DeleteMany", mc.collectionName, duration, err)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return result.DeletedCount, nil
 }
 
 // FindOneAndUpdate updates a single document and returns the result

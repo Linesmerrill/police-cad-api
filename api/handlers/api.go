@@ -170,6 +170,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/community/{communityId}/invite-codes", api.Middleware(http.HandlerFunc(c.GetCommunityInviteCodesHandlerV2))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/civilians", api.Middleware(http.HandlerFunc(c.GetCommunityCiviliansHandlerV2))).Methods("GET")
 	apiCreate.Handle("/invite-code/{inviteCodeId}", api.Middleware(http.HandlerFunc(c.DeleteInviteCodeHandler))).Methods("DELETE")
+	apiCreate.Handle("/community/{communityId}/invite-codes/expired", api.Middleware(http.HandlerFunc(c.DeleteExpiredInviteCodesHandler))).Methods("DELETE")
 	apiV2.Handle("/community/{communityId}/your-departments", api.Middleware(http.HandlerFunc(c.GetPaginatedAllDepartmentsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/departments/non-member", api.Middleware(http.HandlerFunc(c.GetNonMemberDepartmentsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/all-departments", api.Middleware(http.HandlerFunc(c.GetPaginatedAllDepartmentsHandler))).Methods("GET")

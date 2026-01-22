@@ -4798,6 +4798,69 @@ func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
+// DeleteExpiredInviteCodesHandler bulk deletes all expired invite codes for a community
+func (c Community) DeleteExpiredInviteCodesHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Find all expired invite codes for this community
+	now := time.Now()
+	filter := bson.M{
+		"communityId": communityID,
+		"expiresAt":   bson.M{"$lt": now, "$ne": nil},
+	}
+
+	// Get the IDs of expired invite codes first (for updating community)
+	expiredCodes, err := c.IDB.Find(context.Background(), filter, nil)
+	if err != nil {
+		config.ErrorStatus("failed to find expired invite codes", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if len(expiredCodes) == 0 {
+		response := map[string]interface{}{
+			"success":      true,
+			"deletedCount": 0,
+			"message":      "No expired invite codes found",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Collect the IDs to remove from community
+	var expiredCodeIDs []string
+	for _, code := range expiredCodes {
+		expiredCodeIDs = append(expiredCodeIDs, code.ID.Hex())
+	}
+
+	// Delete all expired invite codes
+	deleteResult, err := c.IDB.DeleteMany(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to delete expired invite codes", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Remove the expired invite code IDs from the community's inviteCodeIds array
+	communityObjID, err := primitive.ObjectIDFromHex(communityID)
+	if err == nil {
+		c.DB.UpdateOne(
+			context.Background(),
+			bson.M{"_id": communityObjID},
+			bson.M{"$pull": bson.M{"community.inviteCodeIds": bson.M{"$in": expiredCodeIDs}}},
+		)
+	}
+
+	// Return success response
+	response := map[string]interface{}{
+		"success":      true,
+		"deletedCount": deleteResult,
+		"message":      "Expired invite codes deleted successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // GetCommunityCiviliansHandlerV2 returns paginated civilians for a community
 func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]

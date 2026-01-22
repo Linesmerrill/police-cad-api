@@ -21,6 +21,7 @@ type InviteCodeDatabase interface {
 	InsertOne(ctx context.Context, inviteCode models.InviteCode, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
+	DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error)
 }
 
 type inviteCodeDatabase struct {
@@ -75,6 +76,10 @@ func (c *inviteCodeDatabase) UpdateOne(ctx context.Context, filter interface{}, 
 
 func (c *inviteCodeDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
 	return c.db.Collection(inviteCodeName).DeleteOne(ctx, filter, opts...)
+}
+
+func (c *inviteCodeDatabase) DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error) {
+	return c.db.Collection(inviteCodeName).DeleteMany(ctx, filter, opts...)
 }
 
 func (c *inviteCodeDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) *mongo.SingleResult {
