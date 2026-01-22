@@ -1397,9 +1397,17 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 			},
 		},
 	}
+	// Filter: code must match AND either remainingUses is -1 (unlimited) OR remainingUses > 0 (has uses left)
+	filter := bson.M{
+		"code": req.InviteCode,
+		"$or": bson.A{
+			bson.M{"remainingUses": -1},         // Unlimited uses
+			bson.M{"remainingUses": bson.M{"$gt": 0}}, // Has uses remaining
+		},
+	}
 	if err := c.IDB.FindOneAndUpdate(
 		ctx,
-		bson.M{"code": req.InviteCode, "remainingUses": bson.M{"$gte": -1}},
+		filter,
 		pipeline, // Pass the pipeline array directly
 	).Decode(&invite); err != nil {
 		if err == mongo.ErrNoDocuments {
