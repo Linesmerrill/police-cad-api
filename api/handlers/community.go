@@ -1379,7 +1379,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Step 1: Validate the invite code with conditional decrement
+	// Step 1: Validate the invite code with conditional decrement and increment uses
 	var invite models.InviteCode
 	pipeline := bson.A{
 		bson.M{
@@ -1390,6 +1390,9 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 						"then": -1,
 						"else": bson.M{"$subtract": []interface{}{"$remainingUses", 1}},
 					},
+				},
+				"uses": bson.M{
+					"$add": []interface{}{bson.M{"$ifNull": []interface{}{"$uses", 0}}, 1},
 				},
 			},
 		},
@@ -4734,6 +4737,7 @@ func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *ht
 			"expiresAt":     inviteCode.ExpiresAt,
 			"maxUses":       inviteCode.MaxUses,
 			"remainingUses": inviteCode.RemainingUses,
+			"uses":          inviteCode.Uses,
 			"createdBy":     inviteCode.CreatedBy,
 			"createdByUser": createdByUser,
 			"createdAt":     inviteCode.CreatedAt,

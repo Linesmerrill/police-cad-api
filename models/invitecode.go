@@ -14,6 +14,7 @@ type InviteCode struct {
 	ExpiresAt     *time.Time         `bson:"expiresAt"`
 	MaxUses       int                `bson:"maxUses"`
 	RemainingUses int                `bson:"remainingUses"`
+	Uses          int                `bson:"uses"`
 	CreatedBy     string             `bson:"createdBy"`
 	CreatedAt     time.Time          `bson:"createdAt"`
 }
