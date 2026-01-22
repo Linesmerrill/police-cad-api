@@ -1397,13 +1397,25 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 			},
 		},
 	}
-	// Filter: code must match AND (remainingUses is -1 OR remainingUses > 0) AND not expired
+	// Filter: code must match AND has uses available AND not expired
+	// For uses check:
+	//   - remainingUses == -1 (unlimited, new codes)
+	//   - remainingUses > 0 (has uses remaining, new codes)
+	//   - maxUses == 0 (unlimited, legacy codes without remainingUses)
+	//   - uses < maxUses (legacy codes where uses is tracked but remainingUses isn't set properly)
 	currentTime := time.Now()
 	filter := bson.M{
 		"code": req.InviteCode,
 		"$or": bson.A{
-			bson.M{"remainingUses": -1},               // Unlimited uses
-			bson.M{"remainingUses": bson.M{"$gt": 0}}, // Has uses remaining
+			bson.M{"remainingUses": -1},               // Unlimited uses (new codes)
+			bson.M{"remainingUses": bson.M{"$gt": 0}}, // Has uses remaining (new codes)
+			bson.M{"maxUses": 0},                      // Unlimited uses (legacy codes)
+			bson.M{"$expr": bson.M{ // Legacy codes: uses < maxUses
+				"$and": bson.A{
+					bson.M{"$gt": bson.A{"$maxUses", 0}},
+					bson.M{"$lt": bson.A{bson.M{"$ifNull": bson.A{"$uses", 0}}, "$maxUses"}},
+				},
+			}},
 		},
 		"$and": bson.A{
 			bson.M{"$or": bson.A{
