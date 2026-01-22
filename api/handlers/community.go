@@ -3716,10 +3716,11 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 
 		// Add department with only required fields
 		departmentData := map[string]interface{}{
-			"_id":         department.ID,
-			"name":        department.Name,
-			"description": department.Description,
-			"image":       department.Image,
+			"_id":              department.ID,
+			"name":             department.Name,
+			"description":      department.Description,
+			"image":            department.Image,
+			"approvalRequired": department.ApprovalRequired,
 		}
 
 		// Add template name if available (legacy template system)
