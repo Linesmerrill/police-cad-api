@@ -1397,12 +1397,19 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 			},
 		},
 	}
-	// Filter: code must match AND either remainingUses is -1 (unlimited) OR remainingUses > 0 (has uses left)
+	// Filter: code must match AND (remainingUses is -1 OR remainingUses > 0) AND not expired
+	currentTime := time.Now()
 	filter := bson.M{
 		"code": req.InviteCode,
 		"$or": bson.A{
-			bson.M{"remainingUses": -1},         // Unlimited uses
+			bson.M{"remainingUses": -1},               // Unlimited uses
 			bson.M{"remainingUses": bson.M{"$gt": 0}}, // Has uses remaining
+		},
+		"$and": bson.A{
+			bson.M{"$or": bson.A{
+				bson.M{"expiresAt": nil},                        // No expiry set
+				bson.M{"expiresAt": bson.M{"$gt": currentTime}}, // Not expired yet
+			}},
 		},
 	}
 	if err := c.IDB.FindOneAndUpdate(
@@ -1415,12 +1422,6 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		} else {
 			config.ErrorStatus("Database error", http.StatusInternalServerError, w, err)
 		}
-		return
-	}
-
-	currentTime := time.Now() // 12:42 PM MST, June 07, 2025
-	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
-		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, nil)
 		return
 	}
 
