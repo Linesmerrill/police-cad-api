@@ -3677,21 +3677,50 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 	// Sort departments based on user preferences first
 	sortedDepartments := c.sortDepartmentsByUserPreferences(ctx, community.Details.Departments, userID, communityID)
 
-	// Collect all template types (for filter UI) and filter departments
+	// Check if user is an administrator
+	isAdmin := false
+	for _, role := range community.Details.Roles {
+		for _, memberID := range role.Members {
+			if memberID == userID {
+				for _, perm := range role.Permissions {
+					if perm.Name == "administrator" && perm.Enabled {
+						isAdmin = true
+						break
+					}
+				}
+			}
+			if isAdmin {
+				break
+			}
+		}
+		if isAdmin {
+			break
+		}
+	}
+
+	// Collect all template types (for filter UI) and process all departments
 	templateTypesMap := make(map[string]int) // template name -> count
 	var filteredDepartments []map[string]interface{}
 	for _, department := range sortedDepartments {
+		// Determine user's access status for this department
+		// accessStatus: "approved" (can access), "pending" (request sent), "locked" (needs to request)
+		accessStatus := "approved" // Default for public departments
 		if department.ApprovalRequired {
-			// Check if user is in the members list with status "approved"
-			isApproved := false
-			for _, member := range department.Members {
-				if member.UserID == userID && member.Status == "approved" {
-					isApproved = true
-					break
+			// Admins always have access
+			if isAdmin {
+				accessStatus = "approved"
+			} else {
+				accessStatus = "locked" // Default for private departments
+				for _, member := range department.Members {
+					if member.UserID == userID {
+						if member.Status == "approved" {
+							accessStatus = "approved"
+						} else if member.Status == "pending" {
+							accessStatus = "pending"
+						}
+						break
+					}
 				}
-			}
-			if !isApproved {
-				continue
 			}
 		}
 
@@ -3721,6 +3750,7 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 			"description":      department.Description,
 			"image":            department.Image,
 			"approvalRequired": department.ApprovalRequired,
+			"accessStatus":     accessStatus,
 		}
 
 		// Add template name if available (legacy template system)
