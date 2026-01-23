@@ -388,6 +388,61 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(response)
 }
 
+// WithdrawApplicationHandler allows a user to withdraw their pending application
+// DELETE /api/v1/content-creator-applications/me
+func (cc ContentCreator) WithdrawApplicationHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	userIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
+
+	// Find the user's pending or under_review application
+	filter := bson.M{
+		"userId": userObjID,
+		"status": bson.M{"$in": []string{"submitted", "under_review"}},
+	}
+
+	application, err := cc.AppDB.FindOne(ctx, filter)
+	if err != nil || application == nil {
+		config.ErrorStatus("no pending application found to withdraw", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Update application status to withdrawn
+	now := primitive.NewDateTimeFromTime(time.Now())
+	update := bson.M{
+		"$set": bson.M{
+			"status":      "withdrawn",
+			"withdrawnAt": now,
+			"updatedAt":   now,
+		},
+	}
+
+	err = cc.AppDB.UpdateOne(ctx, bson.M{"_id": application.ID}, update)
+	if err != nil {
+		config.ErrorStatus("failed to withdraw application", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	zap.S().Infow("content creator application withdrawn",
+		"applicationId", application.ID.Hex(),
+		"userId", userObjID.Hex(),
+		"displayName", application.DisplayName,
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Application withdrawn successfully",
+	})
+}
+
 // RequestRemovalHandler allows a creator to request voluntary removal
 // POST /api/v1/content-creators/me/removal-request
 func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Request) {
