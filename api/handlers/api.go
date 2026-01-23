@@ -448,6 +448,37 @@ func (a *App) New() *mux.Router {
 	// Websocket routes
 	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")
 
+	// Content Creator Program routes
+	contentCreator := ContentCreator{
+		AppDB:  databases.NewContentCreatorApplicationDatabase(a.dbHelper),
+		CCDB:   databases.NewContentCreatorDatabase(a.dbHelper),
+		EntDB:  databases.NewContentCreatorEntitlementDatabase(a.dbHelper),
+		SnapDB: databases.NewContentCreatorSnapshotDatabase(a.dbHelper),
+		UDB:    databases.NewUserDatabase(a.dbHelper),
+		CDB:    databases.NewCommunityDatabase(a.dbHelper),
+	}
+
+	// Public content creator routes (no auth required)
+	apiCreate.Handle("/content-creators", http.HandlerFunc(contentCreator.GetContentCreatorsHandler)).Methods("GET")
+	apiCreate.Handle("/content-creators/{slug}", http.HandlerFunc(contentCreator.GetContentCreatorBySlugHandler)).Methods("GET")
+
+	// Authenticated content creator routes
+	apiCreate.Handle("/content-creator-applications", api.Middleware(http.HandlerFunc(contentCreator.CreateApplicationHandler))).Methods("POST")
+	apiCreate.Handle("/content-creator-applications/me", api.Middleware(http.HandlerFunc(contentCreator.GetMyApplicationHandler))).Methods("GET")
+	apiCreate.Handle("/content-creators/me/removal-request", api.Middleware(http.HandlerFunc(contentCreator.RequestRemovalHandler))).Methods("POST")
+
+	// Admin content creator routes
+	apiCreate.Handle("/admin/content-creator-applications", http.HandlerFunc(contentCreator.AdminGetApplicationsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creator-applications/{id}", http.HandlerFunc(contentCreator.AdminGetApplicationHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creator-applications/{id}/approve", http.HandlerFunc(contentCreator.AdminApproveApplicationHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creator-applications/{id}/reject", http.HandlerFunc(contentCreator.AdminRejectApplicationHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creators", http.HandlerFunc(contentCreator.AdminGetCreatorsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creators/analytics", http.HandlerFunc(contentCreator.AdminGetAnalyticsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
+	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creators/{id}/entitlements", http.HandlerFunc(contentCreator.AdminGrantEntitlementHandler)).Methods("POST")
+
 	// Metrics dashboard
 	r.HandleFunc("/metrics-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./docs/metrics-dashboard.html")
