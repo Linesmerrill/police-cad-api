@@ -2455,6 +2455,20 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 		department.Members = []models.MemberStatus{}
 	}
 
+	// Check if user already exists in the members list
+	for _, existingMember := range department.Members {
+		if existingMember.UserID == userID {
+			// User already has a request or is a member
+			if existingMember.Status == "pending" {
+				config.ErrorStatus("You have already requested to join this department", http.StatusBadRequest, w, nil)
+				return
+			} else if existingMember.Status == "approved" {
+				config.ErrorStatus("You are already a member of this department", http.StatusBadRequest, w, nil)
+				return
+			}
+		}
+	}
+
 	// Add the user to the department's members list with status "pending"
 	member := models.MemberStatus{
 		UserID: userID,
