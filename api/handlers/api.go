@@ -55,9 +55,10 @@ func (a *App) New() *mux.Router {
 	cloudinaryHandler := CloudinaryHandler{}
 	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper)}
 	announcement := Announcement{
-		ADB: databases.NewAnnouncementDatabase(a.dbHelper),
-		UDB: databases.NewUserDatabase(a.dbHelper),
-		CDB: databases.NewCommunityDatabase(a.dbHelper),
+		ADB:  databases.NewAnnouncementDatabase(a.dbHelper),
+		UDB:  databases.NewUserDatabase(a.dbHelper),
+		CDB:  databases.NewCommunityDatabase(a.dbHelper),
+		ARDB: databases.NewAnnouncementReadDatabase(a.dbHelper),
 	}
 	adminHandler := Admin{
 		ADB:  databases.NewAdminDatabase(a.dbHelper),
@@ -209,6 +210,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/announcement/{announcementId}/comments", http.HandlerFunc(announcement.AddCommentHandler)).Methods("POST")
 	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", http.HandlerFunc(announcement.UpdateCommentHandler)).Methods("PUT")
 	apiCreate.Handle("/announcement/{announcementId}/comments/{commentId}", http.HandlerFunc(announcement.DeleteCommentHandler)).Methods("DELETE")
+	apiCreate.Handle("/announcement/{announcementId}/read", http.HandlerFunc(announcement.MarkAsReadHandler)).Methods("POST")
 
 	// Panic Alert routes (must come before generic {community_id}/{owner_id} route)
 	apiCreate.Handle("/community/{communityId}/panic-alerts", api.Middleware(http.HandlerFunc(c.CreatePanicAlertHandler))).Methods("POST")
