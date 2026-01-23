@@ -460,12 +460,15 @@ func (a *App) New() *mux.Router {
 
 	// Public content creator routes (no auth required)
 	apiCreate.Handle("/content-creators", http.HandlerFunc(contentCreator.GetContentCreatorsHandler)).Methods("GET")
-	apiCreate.Handle("/content-creators/{slug}", http.HandlerFunc(contentCreator.GetContentCreatorBySlugHandler)).Methods("GET")
 
-	// Authenticated content creator routes
-	apiCreate.Handle("/content-creator-applications", api.Middleware(http.HandlerFunc(contentCreator.CreateApplicationHandler))).Methods("POST")
-	apiCreate.Handle("/content-creator-applications/me", api.Middleware(http.HandlerFunc(contentCreator.GetMyApplicationHandler))).Methods("GET")
-	apiCreate.Handle("/content-creators/me/removal-request", api.Middleware(http.HandlerFunc(contentCreator.RequestRemovalHandler))).Methods("POST")
+	// Authenticated content creator routes (must be before {slug} route)
+	apiCreate.Handle("/content-creator-applications", http.HandlerFunc(contentCreator.CreateApplicationHandler)).Methods("POST")
+	apiCreate.Handle("/content-creator-applications/me", http.HandlerFunc(contentCreator.GetMyApplicationHandler)).Methods("GET")
+	apiCreate.Handle("/content-creators/me", http.HandlerFunc(contentCreator.UpdateMyProfileHandler)).Methods("PUT")
+	apiCreate.Handle("/content-creators/me/removal-request", http.HandlerFunc(contentCreator.RequestRemovalHandler)).Methods("POST")
+
+	// Public content creator route with slug param (must be after /me routes)
+	apiCreate.Handle("/content-creators/{slug}", http.HandlerFunc(contentCreator.GetContentCreatorBySlugHandler)).Methods("GET")
 
 	// Admin content creator routes
 	apiCreate.Handle("/admin/content-creator-applications", http.HandlerFunc(contentCreator.AdminGetApplicationsHandler)).Methods("GET")

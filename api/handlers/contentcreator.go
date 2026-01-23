@@ -31,6 +31,22 @@ type ContentCreator struct {
 	CDB    databases.CommunityDatabase
 }
 
+// getUserIDFromRequest extracts the user ID from the X-User-ID header (set by Express proxy)
+// or from context (for future direct API access with auth middleware)
+func getUserIDFromRequest(r *http.Request) (string, bool) {
+	// First check X-User-ID header (set by Express server when proxying)
+	if userID := r.Header.Get("X-User-ID"); userID != "" {
+		return userID, true
+	}
+	// Fallback to context value (for direct API access with auth middleware)
+	if userID := r.Context().Value("userID"); userID != nil {
+		if str, ok := userID.(string); ok {
+			return str, true
+		}
+	}
+	return "", false
+}
+
 // --- Public Endpoints ---
 
 // GetContentCreatorsHandler returns a list of active content creators (public)
@@ -176,15 +192,10 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Get user ID from context (set by auth middleware)
-	userID := r.Context().Value("userID")
-	if userID == nil {
-		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
-		return
-	}
-	userIDStr, ok := userID.(string)
+	// Get user ID from header or context
+	userIDStr, ok := getUserIDFromRequest(r)
 	if !ok {
-		config.ErrorStatus("invalid user context", http.StatusInternalServerError, w, nil)
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
 		return
 	}
 
@@ -282,12 +293,11 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	userID := r.Context().Value("userID")
-	if userID == nil {
+	userIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
 		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
 		return
 	}
-	userIDStr, _ := userID.(string)
 	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
 
 	// Check for existing creator profile first
@@ -384,12 +394,11 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	userID := r.Context().Value("userID")
-	if userID == nil {
+	userIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
 		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
 		return
 	}
-	userIDStr, _ := userID.(string)
 	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
 
 	// Find the creator
@@ -443,6 +452,78 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Your creator profile has been removed",
+	})
+}
+
+// UpdateMyProfileHandler allows a creator to update their profile
+// PUT /api/v1/content-creators/me
+func (cc ContentCreator) UpdateMyProfileHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	userIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
+
+	// Find the creator
+	filter := bson.M{
+		"userId": userObjID,
+		"status": bson.M{"$in": []string{"active", "warned"}},
+	}
+
+	creator, err := cc.CCDB.FindOne(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("creator profile not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	var req models.UpdateContentCreatorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// Build update with only provided fields
+	updateFields := bson.M{
+		"updatedAt": now,
+	}
+
+	if req.DisplayName != "" {
+		updateFields["displayName"] = req.DisplayName
+	}
+	if req.Bio != "" {
+		updateFields["bio"] = req.Bio
+	}
+	if req.ProfileImage != "" {
+		updateFields["profileImage"] = req.ProfileImage
+	}
+	if req.Platforms != nil && len(req.Platforms) > 0 {
+		updateFields["platforms"] = req.Platforms
+	}
+
+	update := bson.M{"$set": updateFields}
+
+	err = cc.CCDB.UpdateOne(ctx, bson.M{"_id": creator.ID}, update)
+	if err != nil {
+		config.ErrorStatus("failed to update profile", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	zap.S().Infow("content creator updated profile",
+		"creatorId", creator.ID.Hex(),
+		"userId", userObjID.Hex(),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Profile updated successfully",
 	})
 }
 
@@ -542,12 +623,11 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	adminID := r.Context().Value("userID")
-	if adminID == nil {
+	adminIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
 		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
 		return
 	}
-	adminIDStr, _ := adminID.(string)
 	adminObjID, _ := primitive.ObjectIDFromHex(adminIDStr)
 
 	appID := mux.Vars(r)["id"]
@@ -654,12 +734,11 @@ func (cc ContentCreator) AdminRejectApplicationHandler(w http.ResponseWriter, r 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	adminID := r.Context().Value("userID")
-	if adminID == nil {
+	adminIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
 		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
 		return
 	}
-	adminIDStr, _ := adminID.(string)
 	adminObjID, _ := primitive.ObjectIDFromHex(adminIDStr)
 
 	appID := mux.Vars(r)["id"]
@@ -894,8 +973,11 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	adminID := r.Context().Value("userID")
-	adminIDStr, _ := adminID.(string)
+	adminIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
 	adminObjID, _ := primitive.ObjectIDFromHex(adminIDStr)
 
 	creatorID := mux.Vars(r)["id"]
@@ -1004,8 +1086,11 @@ func (cc ContentCreator) AdminGrantEntitlementHandler(w http.ResponseWriter, r *
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	adminID := r.Context().Value("userID")
-	adminIDStr, _ := adminID.(string)
+	adminIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
 	adminObjID, _ := primitive.ObjectIDFromHex(adminIDStr)
 
 	creatorID := mux.Vars(r)["id"]
