@@ -106,6 +106,7 @@ type AnnouncementResponse struct {
 	Reactions   []ReactionResponse     `json:"reactions" bson:"reactions"`
 	Comments    []CommentResponse      `json:"comments" bson:"comments"`
 	ViewCount   int                    `json:"viewCount" bson:"viewCount"`
+	IsRead      bool                   `json:"isRead" bson:"isRead"`
 	CreatedAt   primitive.DateTime     `json:"createdAt" bson:"createdAt"`
 	UpdatedAt   primitive.DateTime     `json:"updatedAt" bson:"updatedAt"`
 }

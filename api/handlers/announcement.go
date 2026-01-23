@@ -21,9 +21,10 @@ import (
 
 // Announcement struct for handling announcement operations
 type Announcement struct {
-	ADB databases.AnnouncementDatabase
-	UDB databases.UserDatabase
-	CDB databases.CommunityDatabase
+	ADB  databases.AnnouncementDatabase
+	UDB  databases.UserDatabase
+	CDB  databases.CommunityDatabase
+	ARDB databases.AnnouncementReadDatabase
 }
 
 // UserDoc is a minimal struct for decoding user info from the DB
@@ -51,6 +52,7 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	announcementType := r.URL.Query().Get("type")
+	userID := r.URL.Query().Get("userId") // Optional: used to check read status
 
 	// Convert community ID to ObjectID
 	commID, err := primitive.ObjectIDFromHex(communityID)
@@ -143,6 +145,35 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	// Get read status for all announcements if userId is provided
+	readStatusMap := make(map[primitive.ObjectID]bool)
+	if userID != "" {
+		userObjID, err := primitive.ObjectIDFromHex(userID)
+		if err == nil && a.ARDB != nil {
+			// Collect announcement IDs
+			annIDs := make([]primitive.ObjectID, len(announcements))
+			for i, ann := range announcements {
+				annIDs[i] = ann.ID
+			}
+
+			// Query all read records for this user and these announcements
+			readFilter := bson.M{
+				"announcement": bson.M{"$in": annIDs},
+				"user":         userObjID,
+			}
+			readCursor, err := a.ARDB.Find(ctx, readFilter)
+			if err == nil {
+				var readRecords []models.AnnouncementRead
+				if err := readCursor.All(ctx, &readRecords); err == nil {
+					for _, record := range readRecords {
+						readStatusMap[record.Announcement] = true
+					}
+				}
+				readCursor.Close(ctx)
+			}
+		}
+	}
+
 	// Convert to response format
 	var announcementResponses []models.AnnouncementResponse
 	for _, ann := range announcements {
@@ -175,6 +206,7 @@ func (a Announcement) GetAnnouncementsHandler(w http.ResponseWriter, r *http.Req
 			Reactions: []models.ReactionResponse{},
 			Comments:  []models.CommentResponse{},
 			ViewCount: ann.ViewCount,
+			IsRead:    readStatusMap[ann.ID],
 			CreatedAt: ann.CreatedAt,
 			UpdatedAt: ann.UpdatedAt,
 		}
@@ -1153,5 +1185,94 @@ func (a Announcement) DeleteCommentHandler(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Comment deleted successfully",
+	})
+}
+
+// MarkAsReadHandler marks an announcement as read by a user
+func (a Announcement) MarkAsReadHandler(w http.ResponseWriter, r *http.Request) {
+	announcementID := mux.Vars(r)["announcementId"]
+
+	// Parse request body
+	var req models.MarkAsReadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	userID := req.UserID
+
+	// Convert IDs to ObjectID
+	annID, err := primitive.ObjectIDFromHex(announcementID)
+	if err != nil {
+		config.ErrorStatus("Invalid announcement ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Check if already read
+	existingRead, err := a.ARDB.FindOne(ctx, bson.M{
+		"announcement": annID,
+		"user":         userObjID,
+	})
+
+	if existingRead != nil && err == nil {
+		// Already read, return current state
+		announcement, _ := a.ADB.FindOne(ctx, bson.M{"_id": annID})
+		viewCount := 0
+		if announcement != nil {
+			viewCount = announcement.ViewCount
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(models.MarkAsReadResponse{
+			Success:        true,
+			WasAlreadyRead: true,
+			ViewCount:      viewCount,
+		})
+		return
+	}
+
+	// Create new read record
+	readRecord := models.AnnouncementRead{
+		ID:           primitive.NewObjectID(),
+		Announcement: annID,
+		User:         userObjID,
+		ReadAt:       time.Now(),
+	}
+
+	_, err = a.ARDB.InsertOne(ctx, readRecord)
+	if err != nil {
+		config.ErrorStatus("Failed to mark announcement as read", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Increment view count
+	announcement, err := a.ADB.FindOneAndUpdate(
+		ctx,
+		bson.M{"_id": annID},
+		bson.M{"$inc": bson.M{"viewCount": 1}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+
+	viewCount := 0
+	if announcement != nil {
+		viewCount = announcement.ViewCount
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(models.MarkAsReadResponse{
+		Success:        true,
+		WasAlreadyRead: false,
+		ViewCount:      viewCount,
 	})
 }
