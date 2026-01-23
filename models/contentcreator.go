@@ -10,10 +10,12 @@ type ContentCreatorApplication struct {
 	PrimaryPlatform string                          `json:"primaryPlatform" bson:"primaryPlatform"` // twitch, youtube, tiktok, other
 	Platforms       []ContentCreatorPlatform        `json:"platforms" bson:"platforms"`
 	Description     string                          `json:"description" bson:"description"`
-	Status          string                          `json:"status" bson:"status"` // submitted, under_review, approved, rejected
+	Status          string                          `json:"status" bson:"status"` // submitted, under_review, approved, rejected, withdrawn
 	RejectionReason string                          `json:"rejectionReason,omitempty" bson:"rejectionReason,omitempty"`
 	AdminNotes      string                          `json:"adminNotes,omitempty" bson:"adminNotes,omitempty"`
 	Feedback        string                          `json:"feedback,omitempty" bson:"feedback,omitempty"`
+	FirstApprovalBy *primitive.ObjectID             `json:"firstApprovalBy,omitempty" bson:"firstApprovalBy,omitempty"`
+	FirstApprovalAt *primitive.DateTime             `json:"firstApprovalAt,omitempty" bson:"firstApprovalAt,omitempty"`
 	ReviewedBy      *primitive.ObjectID             `json:"reviewedBy,omitempty" bson:"reviewedBy,omitempty"`
 	ReviewedAt      *primitive.DateTime             `json:"reviewedAt,omitempty" bson:"reviewedAt,omitempty"`
 	CreatedAt       primitive.DateTime              `json:"createdAt" bson:"createdAt"`

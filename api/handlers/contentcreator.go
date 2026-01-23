@@ -675,7 +675,7 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(application)
 }
 
-// AdminApproveApplicationHandler approves an application
+// AdminApproveApplicationHandler approves an application (requires 2 approvers)
 // POST /api/v1/admin/content-creator-applications/{id}/approve
 func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -709,7 +709,57 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 
 	now := primitive.NewDateTimeFromTime(time.Now())
 
-	// Update application status
+	// Check if this is first or second approval
+	if application.FirstApprovalBy == nil {
+		// First approval - set to under_review and record first approver
+		appUpdate := bson.M{
+			"$set": bson.M{
+				"status":          "under_review",
+				"firstApprovalBy": adminObjID,
+				"firstApprovalAt": now,
+				"updatedAt":       now,
+			},
+		}
+		err = cc.AppDB.UpdateOne(ctx, bson.M{"_id": appObjID}, appUpdate)
+		if err != nil {
+			config.ErrorStatus("failed to update application", http.StatusInternalServerError, w, err)
+			return
+		}
+
+		// Get admin username for response
+		var adminUserDoc struct {
+			Details struct {
+				Username string `bson:"username"`
+			} `bson:"user"`
+		}
+		adminName := "Unknown"
+		if err := cc.UDB.FindOne(ctx, bson.M{"_id": adminObjID}).Decode(&adminUserDoc); err == nil {
+			adminName = adminUserDoc.Details.Username
+		}
+
+		zap.S().Infow("content creator application first approval",
+			"applicationId", appObjID.Hex(),
+			"firstApprovalBy", adminObjID.Hex(),
+		)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":       true,
+			"message":       "First approval recorded. Awaiting second approval from another admin.",
+			"needsSecond":   true,
+			"firstApprover": adminName,
+		})
+		return
+	}
+
+	// Second approval - check it's a different admin
+	if application.FirstApprovalBy.Hex() == adminObjID.Hex() {
+		config.ErrorStatus("you already approved this application - a different admin must provide the second approval", http.StatusConflict, w, nil)
+		return
+	}
+
+	// Update application status to approved
 	appUpdate := bson.M{
 		"$set": bson.M{
 			"status":     "approved",
@@ -774,7 +824,8 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	zap.S().Infow("content creator application approved",
 		"applicationId", appObjID.Hex(),
 		"creatorId", creator.ID.Hex(),
-		"approvedBy", adminObjID.Hex(),
+		"firstApprovalBy", application.FirstApprovalBy.Hex(),
+		"secondApprovalBy", adminObjID.Hex(),
 	)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -809,6 +860,12 @@ func (cc ContentCreator) AdminRejectApplicationHandler(w http.ResponseWriter, r 
 	var req models.ReviewApplicationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Rejection reason is required
+	if strings.TrimSpace(req.RejectionReason) == "" {
+		config.ErrorStatus("rejection reason is required", http.StatusBadRequest, w, nil)
 		return
 	}
 
