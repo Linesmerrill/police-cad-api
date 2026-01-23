@@ -592,6 +592,7 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 
 	// Parse filters
 	status := r.URL.Query().Get("status")
+	excludeStatus := r.URL.Query().Get("exclude_status")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -604,6 +605,8 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 	filter := bson.M{}
 	if status != "" {
 		filter["status"] = status
+	} else if excludeStatus != "" {
+		filter["status"] = bson.M{"$ne": excludeStatus}
 	}
 
 	totalCount, err := cc.AppDB.CountDocuments(ctx, filter)
