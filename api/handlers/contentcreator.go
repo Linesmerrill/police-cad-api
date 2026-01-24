@@ -538,18 +538,19 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Check if user already has a pending/approved application
+	// Check if user already has a pending application (submitted or under_review)
+	// Note: "approved" applications are allowed to reapply if their creator record was removed
 	existingFilter := bson.M{
 		"userId": userObjID,
-		"status": bson.M{"$in": []string{"submitted", "under_review", "approved"}},
+		"status": bson.M{"$in": []string{"submitted", "under_review"}},
 	}
 	existingApp, _ := cc.AppDB.FindOne(ctx, existingFilter)
 	if existingApp != nil {
-		config.ErrorStatus("you already have an active application", http.StatusConflict, w, nil)
+		config.ErrorStatus("you already have a pending application", http.StatusConflict, w, nil)
 		return
 	}
 
-	// Check if user is already a creator
+	// Check if user is already an active creator (not removed)
 	creatorFilter := bson.M{
 		"userId": userObjID,
 		"status": bson.M{"$ne": "removed"},
