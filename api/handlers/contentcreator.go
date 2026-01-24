@@ -1059,13 +1059,33 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
+	// For approved applications, look up the creator status
+	type ApplicationWithCreatorStatus struct {
+		models.ContentCreatorApplication
+		CreatorStatus string `json:"creatorStatus,omitempty"`
+	}
+
+	enrichedApps := make([]ApplicationWithCreatorStatus, len(applications))
+	for i, app := range applications {
+		enrichedApps[i] = ApplicationWithCreatorStatus{
+			ContentCreatorApplication: app,
+		}
+		// If approved and has a creatorId, look up the creator status
+		if app.Status == "approved" && app.CreatorID != nil {
+			creator, err := cc.CCDB.FindOne(ctx, bson.M{"_id": *app.CreatorID})
+			if err == nil && creator != nil {
+				enrichedApps[i].CreatorStatus = creator.Status
+			}
+		}
+	}
+
 	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":      true,
-		"applications": applications,
+		"applications": enrichedApps,
 		"pagination": models.ContentCreatorPagination{
 			CurrentPage: page,
 			TotalPages:  totalPages,
@@ -1095,9 +1115,25 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Build response with optional creator status
+	response := struct {
+		*models.ContentCreatorApplication
+		CreatorStatus string `json:"creatorStatus,omitempty"`
+	}{
+		ContentCreatorApplication: application,
+	}
+
+	// If approved and has a creatorId, look up the creator status
+	if application.Status == "approved" && application.CreatorID != nil {
+		creator, err := cc.CCDB.FindOne(ctx, bson.M{"_id": *application.CreatorID})
+		if err == nil && creator != nil {
+			response.CreatorStatus = creator.Status
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(application)
+	json.NewEncoder(w).Encode(response)
 }
 
 // AdminApproveApplicationHandler approves an application (requires 2 approvers, unless owner override)
