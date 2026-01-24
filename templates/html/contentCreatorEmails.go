@@ -372,3 +372,241 @@ func RenderApplicationRejectedEmail(displayName, rejectionReason, feedback strin
 </body>
 </html>`, displayName, rejectionReason, feedbackSection)
 }
+
+// RenderLowFollowerWarningEmail generates the HTML for the low follower warning email
+func RenderLowFollowerWarningEmail(displayName string, currentFollowers, threshold, gracePeriodDays int) string {
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>Action Required: Follower Count Below Minimum - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #f59e0b 0%%, #d97706 100%%); padding: 40px 30px; text-align: center; }
+    .header h1 { color: #000; margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 40px 30px; color: #e5e7eb; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .warning-box { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 12px; padding: 25px; margin: 25px 0; }
+    .warning-box h3 { color: #f59e0b; margin-top: 0; font-size: 18px; }
+    .stats-grid { display: table; width: 100%%; margin: 20px 0; }
+    .stats-row { display: table-row; }
+    .stats-label { display: table-cell; padding: 10px 15px 10px 0; color: #9ca3af; font-size: 14px; width: 50%%; }
+    .stats-value { display: table-cell; padding: 10px 0; color: #fff; font-size: 14px; font-weight: 600; }
+    .stats-value.warning { color: #f59e0b; }
+    .action-box { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 20px; margin: 25px 0; }
+    .action-box h4 { color: #fff; margin-top: 0; margin-bottom: 15px; }
+    .action-item { display: flex; margin-bottom: 12px; color: #e5e7eb; font-size: 14px; }
+    .action-item:last-child { margin-bottom: 0; }
+    .action-icon { margin-right: 10px; color: #fbbf24; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 20px; }
+    .footer { padding: 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⚠️ Action Required</h1>
+    </div>
+    <div class="content">
+      <h2>Hi %s,</h2>
+      <p>We noticed that your follower count has dropped below the minimum requirement for the <strong>Lines Police CAD Content Creator Program</strong>.</p>
+
+      <div class="warning-box">
+        <h3>📊 Current Status</h3>
+        <div class="stats-grid">
+          <div class="stats-row">
+            <div class="stats-label">Your highest follower count:</div>
+            <div class="stats-value warning">%d followers</div>
+          </div>
+          <div class="stats-row">
+            <div class="stats-label">Minimum required:</div>
+            <div class="stats-value">%d followers</div>
+          </div>
+          <div class="stats-row">
+            <div class="stats-label">Time to resolve:</div>
+            <div class="stats-value">%d days</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-box">
+        <h4>🎯 What you can do:</h4>
+        <div class="action-item">
+          <span class="action-icon">1.</span>
+          <span>Continue creating great content to grow your audience</span>
+        </div>
+        <div class="action-item">
+          <span class="action-icon">2.</span>
+          <span>Once you're back above %d followers, visit your dashboard and sync your counts</span>
+        </div>
+        <div class="action-item">
+          <span class="action-icon">3.</span>
+          <span>Your account will automatically return to good standing</span>
+        </div>
+      </div>
+
+      <p>Don't worry - we want to help you succeed! You have <strong>%d days</strong> to get your follower count back up. If your count is still below the minimum after this period, your creator account will be removed.</p>
+
+      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">View My Dashboard</a>
+
+      <p style="margin-top: 30px; color: #9ca3af; font-size: 14px;">If you have any questions or need assistance, please don't hesitate to contact our support team.</p>
+    </div>
+    <div class="footer">
+      <p>© Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, currentFollowers, threshold, gracePeriodDays, threshold, gracePeriodDays)
+}
+
+// RenderGracePeriodRecoveryEmail generates the HTML for the grace period recovery email
+func RenderGracePeriodRecoveryEmail(displayName string, currentFollowers int) string {
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>Great News: Account Back in Good Standing! - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #22c55e 0%%, #16a34a 100%%); padding: 40px 30px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 26px; font-weight: 700; }
+    .content { padding: 40px 30px; color: #e5e7eb; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .success-box { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 12px; padding: 25px; margin: 25px 0; text-align: center; }
+    .success-box h3 { color: #22c55e; margin-top: 0; font-size: 20px; }
+    .stats-highlight { font-size: 36px; font-weight: 800; color: #22c55e; margin: 15px 0; }
+    .benefits { margin: 30px 0; }
+    .benefit-item { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 15px; margin-bottom: 10px; display: flex; align-items: center; }
+    .benefit-icon { font-size: 24px; margin-right: 15px; }
+    .benefit-text { color: #e5e7eb; }
+    .benefit-text strong { color: #fff; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 20px; }
+    .footer { padding: 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎉 Congratulations!</h1>
+    </div>
+    <div class="content">
+      <h2>Great news, %s!</h2>
+      <p>Your follower count is now back above the minimum requirement. Your <strong>Lines Police CAD Content Creator</strong> account is in good standing!</p>
+
+      <div class="success-box">
+        <h3>✓ Account Restored</h3>
+        <div class="stats-highlight">%d followers</div>
+        <p style="margin: 0; color: #9ca3af;">Your current follower count</p>
+      </div>
+
+      <h3 style="color: #fff; margin-bottom: 15px;">🎁 Your Benefits Remain Active:</h3>
+      <div class="benefits">
+        <div class="benefit-item">
+          <div class="benefit-icon">👤</div>
+          <div class="benefit-text"><strong>Personal Base Plan</strong> - Still active on your account</div>
+        </div>
+        <div class="benefit-item">
+          <div class="benefit-icon">🏢</div>
+          <div class="benefit-text"><strong>Community Base Plan</strong> - Still available for your community</div>
+        </div>
+        <div class="benefit-item">
+          <div class="benefit-icon">⭐</div>
+          <div class="benefit-text"><strong>Featured Profile</strong> - Visible in our creators directory</div>
+        </div>
+      </div>
+
+      <p>Keep up the amazing work! We're thrilled to have you as part of the Lines Police CAD creator community.</p>
+
+      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">View My Dashboard</a>
+
+      <p style="margin-top: 30px; color: #9ca3af; font-size: 14px;">Thank you for being part of our community. Keep creating awesome content!</p>
+    </div>
+    <div class="footer">
+      <p>© Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, currentFollowers)
+}
+
+// RenderGracePeriodReminderEmail generates the HTML for the final reminder email (1 day before removal)
+func RenderGracePeriodReminderEmail(displayName string, currentFollowers, threshold int) string {
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>Final Reminder: Account Removal Tomorrow - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #ef4444 0%%, #dc2626 100%%); padding: 40px 30px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 40px 30px; color: #e5e7eb; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .urgent-box { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 25px; margin: 25px 0; }
+    .urgent-box h3 { color: #ef4444; margin-top: 0; font-size: 18px; }
+    .countdown { font-size: 48px; font-weight: 800; color: #ef4444; text-align: center; margin: 20px 0; }
+    .countdown-label { text-align: center; color: #9ca3af; font-size: 14px; margin-bottom: 20px; }
+    .stats-grid { display: table; width: 100%%; margin: 20px 0; }
+    .stats-row { display: table-row; }
+    .stats-label { display: table-cell; padding: 10px 15px 10px 0; color: #9ca3af; font-size: 14px; width: 50%%; }
+    .stats-value { display: table-cell; padding: 10px 0; color: #fff; font-size: 14px; font-weight: 600; }
+    .stats-value.danger { color: #ef4444; }
+    .action-box { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 8px; padding: 20px; margin: 25px 0; }
+    .action-box h4 { color: #fbbf24; margin-top: 0; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 20px; }
+    .footer { padding: 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⏰ Final Reminder</h1>
+    </div>
+    <div class="content">
+      <h2>Hi %s,</h2>
+      <p>This is your <strong>final reminder</strong> that your creator account will be removed tomorrow due to low follower count.</p>
+
+      <div class="urgent-box">
+        <h3>⚠️ Account Removal in:</h3>
+        <div class="countdown">24 Hours</div>
+        <div class="countdown-label">Time remaining to resolve</div>
+        <div class="stats-grid">
+          <div class="stats-row">
+            <div class="stats-label">Your current followers:</div>
+            <div class="stats-value danger">%d followers</div>
+          </div>
+          <div class="stats-row">
+            <div class="stats-label">Minimum required:</div>
+            <div class="stats-value">%d followers</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-box">
+        <h4>🚀 Last chance to save your account:</h4>
+        <p style="margin: 0;">If you've recently gained followers and are now above %d, visit your dashboard immediately to sync your updated counts. Your account will automatically return to good standing.</p>
+      </div>
+
+      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Sync My Followers Now</a>
+
+      <p style="margin-top: 30px; color: #9ca3af; font-size: 14px;">If your account is removed, you'll lose access to all creator benefits. However, you're always welcome to reapply in the future.</p>
+    </div>
+    <div class="footer">
+      <p>© Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, currentFollowers, threshold, threshold)
+}

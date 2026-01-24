@@ -6,6 +6,7 @@ package databases
 
 import (
 	"context"
+	"time"
 
 	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -17,6 +18,7 @@ const (
 	contentCreatorCollectionName            = "content_creators"
 	contentCreatorEntitlementCollectionName = "content_creator_entitlements"
 	contentCreatorSnapshotCollectionName    = "content_creator_follower_snapshots"
+	schedulerLockCollectionName             = "scheduler_locks"
 )
 
 // --- Content Creator Application Database ---
@@ -259,4 +261,97 @@ func (c *contentCreatorSnapshotDatabase) FindOne(ctx context.Context, filter int
 		return nil, err
 	}
 	return snapshot, nil
+}
+
+// --- Scheduler Lock Database ---
+
+// SchedulerLockDatabase handles distributed locking for scheduled jobs
+type SchedulerLockDatabase interface {
+	// TryAcquireLock attempts to acquire a lock for a job. Returns true if acquired, false if already locked.
+	TryAcquireLock(ctx context.Context, jobName, instanceID string, ttl time.Duration) (bool, error)
+	// ReleaseLock releases a lock held by this instance
+	ReleaseLock(ctx context.Context, jobName, instanceID string) error
+}
+
+type schedulerLockDatabase struct {
+	db DatabaseHelper
+}
+
+// NewSchedulerLockDatabase initializes a new scheduler lock database
+func NewSchedulerLockDatabase(db DatabaseHelper) SchedulerLockDatabase {
+	return &schedulerLockDatabase{
+		db: db,
+	}
+}
+
+// SchedulerLock represents a distributed lock document
+type SchedulerLock struct {
+	ID        string    `bson:"_id"`       // job name as the ID
+	LockedBy  string    `bson:"lockedBy"`  // pod/instance identifier
+	LockedAt  time.Time `bson:"lockedAt"`  // when the lock was acquired
+	ExpiresAt time.Time `bson:"expiresAt"` // when the lock expires (TTL)
+}
+
+func (s *schedulerLockDatabase) TryAcquireLock(ctx context.Context, jobName, instanceID string, ttl time.Duration) (bool, error) {
+	now := time.Now()
+	expiresAt := now.Add(ttl)
+
+	// Try to insert a new lock OR update an expired one
+	// This uses MongoDB's upsert with a filter that either:
+	// 1. The document doesn't exist, OR
+	// 2. The document exists but is expired
+	filter := map[string]interface{}{
+		"$or": []map[string]interface{}{
+			{"_id": jobName, "expiresAt": map[string]interface{}{"$lt": now}},
+		},
+	}
+
+	update := map[string]interface{}{
+		"$set": map[string]interface{}{
+			"_id":       jobName,
+			"lockedBy":  instanceID,
+			"lockedAt":  now,
+			"expiresAt": expiresAt,
+		},
+	}
+
+	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
+
+	result := s.db.Collection(schedulerLockCollectionName).FindOneAndUpdate(ctx, filter, update, opts)
+
+	// Check if we got the lock
+	var lock SchedulerLock
+	err := result.Decode(&lock)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			// Lock already held by another instance
+			return false, nil
+		}
+		// Try a simple insert for the case where the document doesn't exist
+		_, insertErr := s.db.Collection(schedulerLockCollectionName).InsertOne(ctx, SchedulerLock{
+			ID:        jobName,
+			LockedBy:  instanceID,
+			LockedAt:  now,
+			ExpiresAt: expiresAt,
+		})
+		if insertErr != nil {
+			// Check if it's a duplicate key error (lock already exists)
+			if mongo.IsDuplicateKeyError(insertErr) {
+				return false, nil
+			}
+			return false, insertErr
+		}
+		return true, nil
+	}
+
+	// Check if we are the owner of the lock
+	return lock.LockedBy == instanceID, nil
+}
+
+func (s *schedulerLockDatabase) ReleaseLock(ctx context.Context, jobName, instanceID string) error {
+	filter := map[string]interface{}{
+		"_id":      jobName,
+		"lockedBy": instanceID,
+	}
+	return s.db.Collection(schedulerLockCollectionName).DeleteOne(ctx, filter)
 }

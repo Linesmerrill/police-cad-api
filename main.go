@@ -31,6 +31,12 @@ func main() {
 		return
 	}
 
+	// Start the content creator scheduler for background jobs
+	if a.Scheduler != nil {
+		a.Scheduler.Start()
+		defer a.Scheduler.Stop()
+	}
+
 	// Wrap router with metrics middleware, then CORS
 	handler := api.MetricsMiddleware(a.Router)
 	handler = handlers.CorsMiddleware(handler)

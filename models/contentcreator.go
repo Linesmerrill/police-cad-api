@@ -44,8 +44,13 @@ type ContentCreator struct {
 	RemovalReason   string                          `json:"removalReason,omitempty" bson:"removalReason,omitempty"`
 	JoinedAt        primitive.DateTime              `json:"joinedAt" bson:"joinedAt"`
 	RemovedAt       *primitive.DateTime             `json:"removedAt,omitempty" bson:"removedAt,omitempty"`
-	CreatedAt       primitive.DateTime              `json:"createdAt" bson:"createdAt"`
-	UpdatedAt       primitive.DateTime              `json:"updatedAt" bson:"updatedAt"`
+	// Grace period fields for low follower tracking
+	GracePeriodStartedAt  *primitive.DateTime `json:"gracePeriodStartedAt,omitempty" bson:"gracePeriodStartedAt,omitempty"`
+	GracePeriodEndsAt     *primitive.DateTime `json:"gracePeriodEndsAt,omitempty" bson:"gracePeriodEndsAt,omitempty"`
+	GracePeriodNotifiedAt *primitive.DateTime `json:"gracePeriodNotifiedAt,omitempty" bson:"gracePeriodNotifiedAt,omitempty"` // For reminder email tracking
+	LastSyncedAt          *primitive.DateTime `json:"lastSyncedAt,omitempty" bson:"lastSyncedAt,omitempty"`
+	CreatedAt             primitive.DateTime  `json:"createdAt" bson:"createdAt"`
+	UpdatedAt             primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ContentCreatorPlatform represents a social media platform connection
@@ -144,6 +149,17 @@ type GrantEntitlementRequest struct {
 	Plan       string `json:"plan" validate:"required,oneof=base"`
 }
 
+// SyncFollowersRequest is the request body for syncing follower counts
+type SyncFollowersRequest struct {
+	Platforms []SyncPlatformEntry `json:"platforms" validate:"required,min=1,max=5"`
+}
+
+// SyncPlatformEntry represents a platform entry for syncing
+type SyncPlatformEntry struct {
+	Type          string `json:"type" validate:"required,oneof=twitch youtube tiktok other"`
+	FollowerCount int    `json:"followerCount" validate:"required,min=0"`
+}
+
 // --- Response DTOs ---
 
 // ContentCreatorPublicResponse is the public response for a content creator
@@ -199,20 +215,23 @@ type ContentCreatorMeResponse struct {
 
 // ContentCreatorPrivateResponse is the private response for a content creator (includes entitlements)
 type ContentCreatorPrivateResponse struct {
-	ID              primitive.ObjectID       `json:"_id"`
-	DisplayName     string                   `json:"displayName"`
-	Slug            string                   `json:"slug"`
-	ProfileImage    string                   `json:"profileImage,omitempty"`
-	Bio             string                   `json:"bio"`
-	ThemeColor      string                   `json:"themeColor"`
-	PrimaryPlatform string                   `json:"primaryPlatform"`
-	Platforms       []ContentCreatorPlatform `json:"platforms"`
-	Status          string                   `json:"status"`
-	Featured        bool                     `json:"featured"`
-	WarnedAt        *primitive.DateTime      `json:"warnedAt,omitempty"`
-	WarningMessage  string                   `json:"warningMessage,omitempty"`
-	JoinedAt        primitive.DateTime       `json:"joinedAt"`
-	Entitlements    EntitlementsSummary      `json:"entitlements"`
+	ID                    primitive.ObjectID       `json:"_id"`
+	DisplayName           string                   `json:"displayName"`
+	Slug                  string                   `json:"slug"`
+	ProfileImage          string                   `json:"profileImage,omitempty"`
+	Bio                   string                   `json:"bio"`
+	ThemeColor            string                   `json:"themeColor"`
+	PrimaryPlatform       string                   `json:"primaryPlatform"`
+	Platforms             []ContentCreatorPlatform `json:"platforms"`
+	Status                string                   `json:"status"`
+	Featured              bool                     `json:"featured"`
+	WarnedAt              *primitive.DateTime      `json:"warnedAt,omitempty"`
+	WarningMessage        string                   `json:"warningMessage,omitempty"`
+	JoinedAt              primitive.DateTime       `json:"joinedAt"`
+	Entitlements          EntitlementsSummary      `json:"entitlements"`
+	GracePeriodStartedAt  *primitive.DateTime      `json:"gracePeriodStartedAt,omitempty"`
+	GracePeriodEndsAt     *primitive.DateTime      `json:"gracePeriodEndsAt,omitempty"`
+	LastSyncedAt          *primitive.DateTime      `json:"lastSyncedAt,omitempty"`
 }
 
 // EntitlementsSummary summarizes a creator's entitlements

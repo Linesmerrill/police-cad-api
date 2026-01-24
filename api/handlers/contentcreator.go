@@ -210,6 +210,75 @@ func (cc ContentCreator) sendCreatorRemovedEmail(ctx context.Context, userID pri
 	}()
 }
 
+// sendLowFollowerWarningEmail sends warning email when creator drops below follower threshold
+func (cc ContentCreator) sendLowFollowerWarningEmail(ctx context.Context, userID primitive.ObjectID, displayName string, currentFollowers, threshold, gracePeriodDays int) {
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	err := cc.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
+	if err != nil || user.Details.Email == "" {
+		zap.S().Warnw("could not send low follower warning email", "error", err, "userId", userID.Hex())
+		return
+	}
+
+	subject := "Action Required: Follower Count Below Minimum - Lines Police CAD"
+	htmlContent := templates.RenderLowFollowerWarningEmail(displayName, currentFollowers, threshold, gracePeriodDays)
+	plainText := fmt.Sprintf("Hi %s, Your follower count (%d) has dropped below our minimum requirement of %d. You have %d days to increase your followers or your creator account will be removed. Visit https://www.linespolice-cad.com/content-creators/me to sync your updated counts.", displayName, currentFollowers, threshold, gracePeriodDays)
+
+	if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
+		zap.S().Errorw("failed to send low follower warning email", "error", err, "userId", userID.Hex())
+	}
+}
+
+// sendGracePeriodRecoveryEmail sends congratulations email when creator gets back above threshold
+func (cc ContentCreator) sendGracePeriodRecoveryEmail(ctx context.Context, userID primitive.ObjectID, displayName string, currentFollowers int) {
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	err := cc.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
+	if err != nil || user.Details.Email == "" {
+		zap.S().Warnw("could not send grace period recovery email", "error", err, "userId", userID.Hex())
+		return
+	}
+
+	subject := "Great News: Your Account is Back in Good Standing! - Lines Police CAD"
+	htmlContent := templates.RenderGracePeriodRecoveryEmail(displayName, currentFollowers)
+	plainText := fmt.Sprintf("Congratulations %s! Your follower count (%d) is now above our minimum requirement. Your creator account is back in good standing and all benefits remain active. Keep up the great work!", displayName, currentFollowers)
+
+	if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
+		zap.S().Errorw("failed to send grace period recovery email", "error", err, "userId", userID.Hex())
+	}
+}
+
+// sendGracePeriodReminderEmail sends reminder email 1 day before grace period ends
+func (cc ContentCreator) sendGracePeriodReminderEmail(ctx context.Context, userID primitive.ObjectID, displayName string, currentFollowers, threshold int) {
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	err := cc.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
+	if err != nil || user.Details.Email == "" {
+		zap.S().Warnw("could not send grace period reminder email", "error", err, "userId", userID.Hex())
+		return
+	}
+
+	subject := "Final Reminder: Creator Account Removal Tomorrow - Lines Police CAD"
+	htmlContent := templates.RenderGracePeriodReminderEmail(displayName, currentFollowers, threshold)
+	plainText := fmt.Sprintf("Hi %s, This is a final reminder that your creator account will be removed tomorrow due to low follower count (%d, minimum required: %d). If you've increased your followers, please visit https://www.linespolice-cad.com/content-creators/me to sync your updated counts before the deadline.", displayName, currentFollowers, threshold)
+
+	if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
+		zap.S().Errorw("failed to send grace period reminder email", "error", err, "userId", userID.Hex())
+	}
+}
+
 // --- Public Endpoints ---
 
 // GetContentCreatorsHandler returns a list of active content creators (public)
@@ -606,20 +675,23 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 		entitlements := cc.getCreatorEntitlements(ctx, creator.ID, userObjID)
 
 		creatorResponse := models.ContentCreatorPrivateResponse{
-			ID:              creator.ID,
-			DisplayName:     creator.DisplayName,
-			Slug:            creator.Slug,
-			ProfileImage:    creator.ProfileImage,
-			Bio:             creator.Bio,
-			ThemeColor:      creator.ThemeColor,
-			PrimaryPlatform: creator.PrimaryPlatform,
-			Platforms:       creator.Platforms,
-			Status:          creator.Status,
-			Featured:        creator.Featured,
-			WarnedAt:        creator.WarnedAt,
-			WarningMessage:  creator.WarningMessage,
-			JoinedAt:        creator.JoinedAt,
-			Entitlements:    entitlements,
+			ID:                   creator.ID,
+			DisplayName:          creator.DisplayName,
+			Slug:                 creator.Slug,
+			ProfileImage:         creator.ProfileImage,
+			Bio:                  creator.Bio,
+			ThemeColor:           creator.ThemeColor,
+			PrimaryPlatform:      creator.PrimaryPlatform,
+			Platforms:            creator.Platforms,
+			Status:               creator.Status,
+			Featured:             creator.Featured,
+			WarnedAt:             creator.WarnedAt,
+			WarningMessage:       creator.WarningMessage,
+			JoinedAt:             creator.JoinedAt,
+			Entitlements:         entitlements,
+			GracePeriodStartedAt: creator.GracePeriodStartedAt,
+			GracePeriodEndsAt:    creator.GracePeriodEndsAt,
+			LastSyncedAt:         creator.LastSyncedAt,
 		}
 
 		response := models.ContentCreatorMeResponse{
@@ -1100,6 +1172,177 @@ func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r
 		"message":       fmt.Sprintf("Base Plan promotion applied to %s", community.Details.Name),
 		"communityId":   communityObjID.Hex(),
 		"communityName": community.Details.Name,
+	})
+}
+
+// SyncFollowersHandler allows creators to manually sync their follower counts
+// POST /api/v1/content-creators/me/sync
+func (cc ContentCreator) SyncFollowersHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	userIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
+
+	// Find the creator
+	creatorFilter := bson.M{
+		"userId": userObjID,
+		"status": bson.M{"$in": []string{"active", "warned"}},
+	}
+	creator, err := cc.CCDB.FindOne(ctx, creatorFilter)
+	if err != nil {
+		config.ErrorStatus("creator profile not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Check rate limit: can only sync once per 24 hours
+	if creator.LastSyncedAt != nil {
+		lastSync := creator.LastSyncedAt.Time()
+		if time.Since(lastSync) < 24*time.Hour {
+			nextSyncTime := lastSync.Add(24 * time.Hour)
+			config.ErrorStatus(fmt.Sprintf("you can only sync once per 24 hours - next sync available at %s", nextSyncTime.Format(time.RFC3339)), http.StatusTooManyRequests, w, nil)
+			return
+		}
+	}
+
+	var req models.SyncFollowersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if len(req.Platforms) == 0 {
+		config.ErrorStatus("at least one platform is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Validate platforms match existing platforms
+	existingPlatforms := make(map[string]int) // platform type -> index
+	for i, p := range creator.Platforms {
+		existingPlatforms[p.Type] = i
+	}
+
+	// Update follower counts for existing platforms
+	updatedPlatforms := make([]models.ContentCreatorPlatform, len(creator.Platforms))
+	copy(updatedPlatforms, creator.Platforms)
+
+	var maxFollowers int
+	var totalFollowers int
+
+	for _, syncPlatform := range req.Platforms {
+		if idx, exists := existingPlatforms[syncPlatform.Type]; exists {
+			updatedPlatforms[idx].FollowerCount = syncPlatform.FollowerCount
+		}
+	}
+
+	// Calculate max and total followers
+	for _, p := range updatedPlatforms {
+		totalFollowers += p.FollowerCount
+		if p.FollowerCount > maxFollowers {
+			maxFollowers = p.FollowerCount
+		}
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// Create a snapshot for history
+	snapshot := models.ContentCreatorFollowerSnapshot{
+		ID:               primitive.NewObjectID(),
+		ContentCreatorID: creator.ID,
+		Platforms:        updatedPlatforms,
+		TotalFollowers:   totalFollowers,
+		MaxFollowers:     maxFollowers,
+		Source:           "manual",
+		RecordedAt:       now,
+		RecordedBy:       &userObjID,
+	}
+	_, err = cc.SnapDB.InsertOne(ctx, snapshot)
+	if err != nil {
+		zap.S().Warnw("failed to create follower snapshot", "error", err, "creatorId", creator.ID.Hex())
+		// Don't fail the request if snapshot creation fails
+	}
+
+	// Build update
+	updateFields := bson.M{
+		"platforms":    updatedPlatforms,
+		"lastSyncedAt": now,
+		"updatedAt":    now,
+	}
+
+	// Check if below threshold and handle grace period
+	followerThreshold := 500
+	statusChanged := false
+	var responseMessage string
+
+	if maxFollowers < followerThreshold {
+		// Below threshold
+		if creator.GracePeriodStartedAt == nil {
+			// Start grace period
+			gracePeriodEnd := primitive.NewDateTimeFromTime(time.Now().Add(30 * 24 * time.Hour))
+			updateFields["gracePeriodStartedAt"] = now
+			updateFields["gracePeriodEndsAt"] = gracePeriodEnd
+			updateFields["status"] = "warned"
+			updateFields["warningReason"] = "low_followers"
+			updateFields["warningMessage"] = fmt.Sprintf("Your highest follower count (%d) is below our minimum requirement of %d. You have 30 days to increase your followers or your creator account will be removed.", maxFollowers, followerThreshold)
+			statusChanged = true
+			responseMessage = fmt.Sprintf("Warning: Your follower count (%d) is below the minimum requirement of %d. You have 30 days to resolve this.", maxFollowers, followerThreshold)
+
+			// Send low follower warning email
+			go cc.sendLowFollowerWarningEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers, followerThreshold, 30)
+		} else {
+			responseMessage = fmt.Sprintf("Followers updated. Note: Your follower count (%d) is still below the minimum requirement of %d.", maxFollowers, followerThreshold)
+		}
+	} else {
+		// Above threshold
+		if creator.GracePeriodStartedAt != nil {
+			// Clear grace period - they've recovered
+			updateFields["gracePeriodStartedAt"] = nil
+			updateFields["gracePeriodEndsAt"] = nil
+			updateFields["gracePeriodNotifiedAt"] = nil
+			if creator.Status == "warned" && creator.WarningReason == "low_followers" {
+				updateFields["status"] = "active"
+				updateFields["warningReason"] = ""
+				updateFields["warningMessage"] = ""
+				updateFields["warnedAt"] = nil
+				statusChanged = true
+			}
+			responseMessage = "Congratulations! Your follower count is now above the minimum requirement. Your account is in good standing."
+
+			// Send recovery email
+			go cc.sendGracePeriodRecoveryEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers)
+		} else {
+			responseMessage = "Followers updated successfully."
+		}
+	}
+
+	// Apply update
+	err = cc.CCDB.UpdateOne(ctx, bson.M{"_id": creator.ID}, bson.M{"$set": updateFields})
+	if err != nil {
+		config.ErrorStatus("failed to update follower counts", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	zap.S().Infow("content creator synced followers",
+		"creatorId", creator.ID.Hex(),
+		"userId", userObjID.Hex(),
+		"maxFollowers", maxFollowers,
+		"totalFollowers", totalFollowers,
+		"statusChanged", statusChanged,
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":        true,
+		"message":        responseMessage,
+		"maxFollowers":   maxFollowers,
+		"totalFollowers": totalFollowers,
+		"platforms":      updatedPlatforms,
+		"lastSyncedAt":   now.Time().Format(time.RFC3339),
 	})
 }
 
@@ -2063,4 +2306,234 @@ func generateSlug(displayName string) string {
 	slug = strings.Trim(slug, "-")
 
 	return slug
+}
+
+// AdminGetGracePeriodCreatorsHandler returns all creators currently in grace period
+// GET /api/v1/admin/content-creators/grace-period
+func (cc ContentCreator) AdminGetGracePeriodCreatorsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	// Find creators with active grace periods (status = warned and gracePeriodEndsAt is set)
+	filter := bson.M{
+		"status":            "warned",
+		"gracePeriodEndsAt": bson.M{"$ne": nil},
+	}
+
+	totalCount, err := cc.CCDB.CountDocuments(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to count creators in grace period", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	skip := int64((page - 1) * limit)
+	findOptions := options.Find().
+		SetSkip(skip).
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "gracePeriodEndsAt", Value: 1}}) // Sort by expiration date (soonest first)
+
+	cursor, err := cc.CCDB.Find(ctx, filter, findOptions)
+	if err != nil {
+		config.ErrorStatus("failed to fetch creators in grace period", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var creators []models.ContentCreator
+	if err := cursor.All(ctx, &creators); err != nil {
+		config.ErrorStatus("failed to decode creators", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Build response with grace period details
+	type GracePeriodCreatorResponse struct {
+		ID                   primitive.ObjectID              `json:"_id"`
+		DisplayName          string                          `json:"displayName"`
+		Slug                 string                          `json:"slug"`
+		Status               string                          `json:"status"`
+		Platforms            []models.ContentCreatorPlatform `json:"platforms"`
+		MaxFollowers         int                             `json:"maxFollowers"`
+		GracePeriodStartedAt *primitive.DateTime             `json:"gracePeriodStartedAt"`
+		GracePeriodEndsAt    *primitive.DateTime             `json:"gracePeriodEndsAt"`
+		DaysRemaining        int                             `json:"daysRemaining"`
+		LastSyncedAt         *primitive.DateTime             `json:"lastSyncedAt,omitempty"`
+	}
+
+	var responseCreators []GracePeriodCreatorResponse
+	for _, creator := range creators {
+		// Calculate max followers
+		maxFollowers := 0
+		for _, p := range creator.Platforms {
+			if p.FollowerCount > maxFollowers {
+				maxFollowers = p.FollowerCount
+			}
+		}
+
+		// Calculate days remaining
+		daysRemaining := 0
+		if creator.GracePeriodEndsAt != nil {
+			remaining := creator.GracePeriodEndsAt.Time().Sub(time.Now())
+			daysRemaining = int(remaining.Hours() / 24)
+			if daysRemaining < 0 {
+				daysRemaining = 0
+			}
+		}
+
+		responseCreators = append(responseCreators, GracePeriodCreatorResponse{
+			ID:                   creator.ID,
+			DisplayName:          creator.DisplayName,
+			Slug:                 creator.Slug,
+			Status:               creator.Status,
+			Platforms:            creator.Platforms,
+			MaxFollowers:         maxFollowers,
+			GracePeriodStartedAt: creator.GracePeriodStartedAt,
+			GracePeriodEndsAt:    creator.GracePeriodEndsAt,
+			DaysRemaining:        daysRemaining,
+			LastSyncedAt:         creator.LastSyncedAt,
+		})
+	}
+
+	totalPages := (int(totalCount) + limit - 1) / limit
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"creators": responseCreators,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalItems":  totalCount,
+			"hasNextPage": page < totalPages,
+			"hasPrevPage": page > 1,
+		},
+	})
+}
+
+// AdminTriggerSyncAllHandler triggers a manual sync check for all creators
+// POST /api/v1/admin/content-creators/sync-all
+func (cc ContentCreator) AdminTriggerSyncAllHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	zap.S().Info("Admin triggered manual sync-all for content creators")
+
+	// Find all active creators
+	filter := bson.M{
+		"status": bson.M{"$in": []string{"active", "warned"}},
+	}
+
+	cursor, err := cc.CCDB.Find(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to fetch creators", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var creators []models.ContentCreator
+	if err := cursor.All(ctx, &creators); err != nil {
+		config.ErrorStatus("failed to decode creators", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	processedCount := 0
+	lowFollowerCount := 0
+	recoveredCount := 0
+	followerThreshold := 500
+
+	for _, creator := range creators {
+		// Calculate max followers
+		maxFollowers := 0
+		for _, p := range creator.Platforms {
+			if p.FollowerCount > maxFollowers {
+				maxFollowers = p.FollowerCount
+			}
+		}
+
+		now := primitive.NewDateTimeFromTime(time.Now())
+
+		if maxFollowers < followerThreshold {
+			// Below threshold
+			if creator.GracePeriodStartedAt == nil {
+				// Start grace period
+				gracePeriodEnd := primitive.NewDateTimeFromTime(time.Now().Add(30 * 24 * time.Hour))
+				update := bson.M{
+					"$set": bson.M{
+						"status":               "warned",
+						"gracePeriodStartedAt": now,
+						"gracePeriodEndsAt":    gracePeriodEnd,
+						"warningReason":        "low_followers",
+						"warningMessage":       fmt.Sprintf("Your highest follower count (%d) is below our minimum requirement of %d. You have 30 days to increase your followers.", maxFollowers, followerThreshold),
+						"warnedAt":             now,
+						"updatedAt":            now,
+					},
+				}
+				err := cc.CCDB.UpdateOne(ctx, bson.M{"_id": creator.ID}, update)
+				if err != nil {
+					zap.S().Warnw("failed to start grace period", "error", err, "creatorId", creator.ID.Hex())
+					continue
+				}
+
+				// Send warning email
+				if creator.UserID != nil {
+					go cc.sendLowFollowerWarningEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers, followerThreshold, 30)
+				}
+				lowFollowerCount++
+			}
+		} else {
+			// Above threshold - check if they were in grace period
+			if creator.GracePeriodStartedAt != nil && creator.Status == "warned" {
+				// Clear grace period - they've recovered
+				update := bson.M{
+					"$set": bson.M{
+						"status":                "active",
+						"gracePeriodStartedAt":  nil,
+						"gracePeriodEndsAt":     nil,
+						"gracePeriodNotifiedAt": nil,
+						"warningReason":         "",
+						"warningMessage":        "",
+						"warnedAt":              nil,
+						"updatedAt":             now,
+					},
+				}
+				err := cc.CCDB.UpdateOne(ctx, bson.M{"_id": creator.ID}, update)
+				if err != nil {
+					zap.S().Warnw("failed to clear grace period", "error", err, "creatorId", creator.ID.Hex())
+					continue
+				}
+
+				// Send recovery email
+				if creator.UserID != nil {
+					go cc.sendGracePeriodRecoveryEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers)
+				}
+				recoveredCount++
+			}
+		}
+		processedCount++
+	}
+
+	zap.S().Infow("Admin sync-all complete",
+		"processedCount", processedCount,
+		"lowFollowerCount", lowFollowerCount,
+		"recoveredCount", recoveredCount,
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":          true,
+		"message":          "Sync completed",
+		"processedCount":   processedCount,
+		"lowFollowerCount": lowFollowerCount,
+		"recoveredCount":   recoveredCount,
+	})
 }
