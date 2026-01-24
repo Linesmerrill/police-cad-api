@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,6 +16,9 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
+	"github.com/linesmerrill/police-cad-api/templates"
+	"github.com/sendgrid/sendgrid-go"
+	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -23,12 +28,13 @@ import (
 
 // ContentCreator handler struct for content creator endpoints
 type ContentCreator struct {
-	AppDB  databases.ContentCreatorApplicationDatabase
-	CCDB   databases.ContentCreatorDatabase
-	EntDB  databases.ContentCreatorEntitlementDatabase
-	SnapDB databases.ContentCreatorSnapshotDatabase
-	UDB    databases.UserDatabase
-	CDB    databases.CommunityDatabase
+	AppDB   databases.ContentCreatorApplicationDatabase
+	CCDB    databases.ContentCreatorDatabase
+	EntDB   databases.ContentCreatorEntitlementDatabase
+	SnapDB  databases.ContentCreatorSnapshotDatabase
+	UDB     databases.UserDatabase
+	CDB     databases.CommunityDatabase
+	AdminDB databases.AdminDatabase
 }
 
 // getUserIDFromRequest extracts the user ID from the X-User-ID header (set by Express proxy)
@@ -45,6 +51,132 @@ func getUserIDFromRequest(r *http.Request) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// --- Email Helper Functions ---
+
+// sendContentCreatorEmail sends an email using SendGrid
+func sendContentCreatorEmail(toEmail, toName, subject, htmlContent, plainText string) error {
+	from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
+	to := mail.NewEmail(toName, toEmail)
+	message := mail.NewSingleEmail(from, subject, to, plainText, htmlContent)
+	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
+	response, err := client.Send(message)
+	if err != nil {
+		zap.S().Errorw("failed to send email", "error", err, "to", toEmail)
+		return err
+	}
+	if response.StatusCode >= 400 {
+		zap.S().Errorw("sendgrid returned error status", "status", response.StatusCode, "body", response.Body, "to", toEmail)
+		return fmt.Errorf("sendgrid error: status %d", response.StatusCode)
+	}
+	zap.S().Infow("email sent successfully", "to", toEmail, "subject", subject)
+	return nil
+}
+
+// sendApplicationSubmittedEmail sends confirmation email to the applicant
+func (cc ContentCreator) sendApplicationSubmittedEmail(ctx context.Context, userID primitive.ObjectID, displayName string) {
+	// Get user email
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	err := cc.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		zap.S().Errorw("failed to get user email for application confirmation", "error", err, "userId", userID.Hex())
+		return
+	}
+	if user.Details.Email == "" {
+		zap.S().Warnw("user has no email, skipping application confirmation", "userId", userID.Hex())
+		return
+	}
+
+	subject := "Application Received - Lines Police CAD Creator Program"
+	htmlContent := templates.RenderApplicationSubmittedEmail(displayName)
+	plainText := fmt.Sprintf("Hi %s, Thank you for applying to the Lines Police CAD Content Creator Program! Our team will review your application within 5-7 business days. You can check your status at https://www.linespolice-cad.com/content-creators/me", displayName)
+
+	go func() {
+		if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
+			zap.S().Errorw("failed to send application submitted email", "error", err, "userId", userID.Hex())
+		}
+	}()
+}
+
+// sendAdminNewApplicationEmail sends notification to all active admins
+func (cc ContentCreator) sendAdminNewApplicationEmail(ctx context.Context, applicantUsername, displayName, primaryPlatform string, totalFollowers int) {
+	// Get all active admins
+	cursor, err := cc.AdminDB.Find(ctx, bson.M{"active": true})
+	if err != nil {
+		zap.S().Errorw("failed to get admins for new application notification", "error", err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var admins []models.AdminUser
+	if err := cursor.All(ctx, &admins); err != nil {
+		zap.S().Errorw("failed to decode admins", "error", err)
+		return
+	}
+
+	subject := "New Creator Application Submitted - Lines Police CAD"
+	followersStr := fmt.Sprintf("%d", totalFollowers)
+	if totalFollowers >= 1000000 {
+		followersStr = fmt.Sprintf("%.1fM", float64(totalFollowers)/1000000)
+	} else if totalFollowers >= 1000 {
+		followersStr = fmt.Sprintf("%.1fK", float64(totalFollowers)/1000)
+	}
+
+	htmlContent := templates.RenderAdminNewApplicationEmail(applicantUsername, displayName, primaryPlatform, followersStr)
+	plainText := fmt.Sprintf("New Creator Application: %s (%s) - Platform: %s, Followers: %s. Please review within 5-7 business days at https://www.linespolice-cad.com/lpc-admin", applicantUsername, displayName, primaryPlatform, followersStr)
+
+	go func() {
+		for _, admin := range admins {
+			if admin.Email != "" {
+				if err := sendContentCreatorEmail(admin.Email, "Admin", subject, htmlContent, plainText); err != nil {
+					zap.S().Errorw("failed to send admin notification email", "error", err, "adminEmail", admin.Email)
+				}
+			}
+		}
+	}()
+}
+
+// sendApplicationDecisionEmail sends approval/rejection email to the applicant
+func (cc ContentCreator) sendApplicationDecisionEmail(ctx context.Context, userID primitive.ObjectID, displayName, status, rejectionReason, feedback string) {
+	// Get user email
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	err := cc.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		zap.S().Errorw("failed to get user email for decision notification", "error", err, "userId", userID.Hex())
+		return
+	}
+	if user.Details.Email == "" {
+		zap.S().Warnw("user has no email, skipping decision notification", "userId", userID.Hex())
+		return
+	}
+
+	var subject, htmlContent, plainText string
+	if status == "approved" {
+		subject = "Welcome to the Creator Program! - Lines Police CAD"
+		htmlContent = templates.RenderApplicationApprovedEmail(displayName)
+		plainText = fmt.Sprintf("Congratulations %s! Your application to the Lines Police CAD Content Creator Program has been approved! Visit https://www.linespolice-cad.com/content-creators/me to view your benefits.", displayName)
+	} else {
+		subject = "Application Update - Lines Police CAD Creator Program"
+		htmlContent = templates.RenderApplicationRejectedEmail(displayName, rejectionReason, feedback)
+		plainText = fmt.Sprintf("Hi %s, Your application to the Lines Police CAD Content Creator Program was not approved. Reason: %s. You can apply again in the future. Visit https://www.linespolice-cad.com/content-creators/me for more details.", displayName, rejectionReason)
+	}
+
+	go func() {
+		if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
+			zap.S().Errorw("failed to send decision email", "error", err, "userId", userID.Hex(), "status", status)
+		}
+	}()
 }
 
 // --- Public Endpoints ---
@@ -271,6 +403,26 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		config.ErrorStatus("failed to create application", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Get user details for email notifications
+	var user struct {
+		Details struct {
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	cc.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user)
+
+	// Calculate total followers for admin notification
+	totalFollowers := 0
+	for _, p := range req.Platforms {
+		totalFollowers += p.FollowerCount
+	}
+
+	// Send confirmation email to applicant
+	cc.sendApplicationSubmittedEmail(ctx, userObjID, req.DisplayName)
+
+	// Send notification to all admins
+	cc.sendAdminNewApplicationEmail(ctx, user.Details.Username, req.DisplayName, req.PrimaryPlatform, totalFollowers)
 
 	zap.S().Infow("content creator application submitted",
 		"applicationId", application.ID.Hex(),
@@ -582,6 +734,225 @@ func (cc ContentCreator) UpdateMyProfileHandler(w http.ResponseWriter, r *http.R
 	})
 }
 
+// GetOwnedCommunitiesHandler returns communities owned by the current user that are eligible for promotion
+// GET /api/v1/content-creators/me/owned-communities
+func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	userIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
+
+	// Verify user is an active creator
+	creatorFilter := bson.M{
+		"userId": userObjID,
+		"status": bson.M{"$in": []string{"active", "warned"}},
+	}
+	creator, err := cc.CCDB.FindOne(ctx, creatorFilter)
+	if err != nil {
+		config.ErrorStatus("you must be an active creator to access this", http.StatusForbidden, w, err)
+		return
+	}
+
+	// Check if creator already has a community entitlement
+	existingEntitlement, _ := cc.EntDB.FindOne(ctx, bson.M{
+		"contentCreatorId": creator.ID,
+		"targetType":       "community",
+		"active":           true,
+	})
+
+	var appliedCommunityID string
+	if existingEntitlement != nil {
+		appliedCommunityID = existingEntitlement.TargetID.Hex()
+	}
+
+	// Find communities where user is owner
+	communityFilter := bson.M{
+		"community.ownerID": userIDStr,
+	}
+
+	cursor, err := cc.CDB.Find(ctx, communityFilter, nil)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	type CommunityResponse struct {
+		ID               string `json:"_id"`
+		Name             string `json:"name"`
+		HasPromotion     bool   `json:"hasPromotion"`
+		CurrentPlan      string `json:"currentPlan,omitempty"`
+		IsPromotionApplied bool `json:"isPromotionApplied"`
+	}
+
+	var communities []CommunityResponse
+	for cursor.Next(ctx) {
+		var comm struct {
+			ID      primitive.ObjectID `bson:"_id"`
+			Details struct {
+				Name         string `bson:"name"`
+				Subscription struct {
+					Plan   string `bson:"plan"`
+					Active bool   `bson:"active"`
+				} `bson:"subscription"`
+			} `bson:"community"`
+		}
+		if err := cursor.Decode(&comm); err != nil {
+			continue
+		}
+
+		isApplied := appliedCommunityID == comm.ID.Hex()
+		communities = append(communities, CommunityResponse{
+			ID:                 comm.ID.Hex(),
+			Name:               comm.Details.Name,
+			HasPromotion:       comm.Details.Subscription.Active,
+			CurrentPlan:        comm.Details.Subscription.Plan,
+			IsPromotionApplied: isApplied,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":              true,
+		"communities":          communities,
+		"hasAppliedPromotion":  appliedCommunityID != "",
+		"appliedCommunityId":   appliedCommunityID,
+	})
+}
+
+// ApplyCommunityPromotionHandler applies the creator's community promotion to a community they own
+// POST /api/v1/content-creators/me/community-promotion
+func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	userIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
+
+	// Parse request
+	var req struct {
+		CommunityID string `json:"communityId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if req.CommunityID == "" {
+		config.ErrorStatus("communityId is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	communityObjID, err := primitive.ObjectIDFromHex(req.CommunityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Verify user is an active creator
+	creatorFilter := bson.M{
+		"userId": userObjID,
+		"status": bson.M{"$in": []string{"active", "warned"}},
+	}
+	creator, err := cc.CCDB.FindOne(ctx, creatorFilter)
+	if err != nil {
+		config.ErrorStatus("you must be an active creator to use this benefit", http.StatusForbidden, w, err)
+		return
+	}
+
+	// Check if creator already has a community entitlement
+	existingEntitlement, _ := cc.EntDB.FindOne(ctx, bson.M{
+		"contentCreatorId": creator.ID,
+		"targetType":       "community",
+		"active":           true,
+	})
+	if existingEntitlement != nil {
+		config.ErrorStatus("you have already applied your community promotion - you can only apply it to one community", http.StatusConflict, w, nil)
+		return
+	}
+
+	// Verify user owns the community
+	community, err := cc.CDB.FindOne(ctx, bson.M{"_id": communityObjID})
+	if err != nil || community == nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	if community.Details.OwnerID != userIDStr {
+		config.ErrorStatus("you must be the owner of this community to apply the promotion", http.StatusForbidden, w, nil)
+		return
+	}
+
+	// Check if community already has an active paid subscription
+	if community.Details.Subscription.Active && community.Details.Subscription.Plan != "" && community.Details.Subscription.Plan != "base" {
+		config.ErrorStatus("this community already has an active subscription", http.StatusConflict, w, nil)
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// Create the community entitlement
+	entitlement := models.ContentCreatorEntitlement{
+		ID:               primitive.NewObjectID(),
+		ContentCreatorID: creator.ID,
+		TargetType:       "community",
+		TargetID:         communityObjID,
+		Plan:             "base",
+		Source:           "content_creator_program",
+		Active:           true,
+		GrantedAt:        now,
+		GrantedBy:        userObjID, // Self-granted by creator
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	_, err = cc.EntDB.InsertOne(ctx, entitlement)
+	if err != nil {
+		config.ErrorStatus("failed to create entitlement", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Update the community subscription
+	subscriptionUpdate := bson.M{
+		"$set": bson.M{
+			"community.subscription.plan":      "base",
+			"community.subscription.active":    true,
+			"community.subscription.id":        "cc_program_" + creator.ID.Hex(),
+			"community.subscription.createdAt": now,
+			"community.subscription.updatedAt": now,
+		},
+	}
+	err = cc.CDB.UpdateOne(ctx, bson.M{"_id": communityObjID}, subscriptionUpdate)
+	if err != nil {
+		config.ErrorStatus("failed to update community subscription", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	zap.S().Infow("content creator applied community promotion",
+		"creatorId", creator.ID.Hex(),
+		"communityId", communityObjID.Hex(),
+		"communityName", community.Details.Name,
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"message":       fmt.Sprintf("Base Plan promotion applied to %s", community.Details.Name),
+		"communityId":   communityObjID.Hex(),
+		"communityName": community.Details.Name,
+	})
+}
+
 // --- Admin Endpoints ---
 
 // AdminGetApplicationsHandler returns all applications for admin review
@@ -821,6 +1192,21 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	}
 	cc.EntDB.InsertOne(ctx, personalEntitlement)
 
+	// Grant Base subscription to user's account
+	subscriptionUpdate := bson.M{
+		"$set": bson.M{
+			"user.subscription.plan":      "base",
+			"user.subscription.active":    true,
+			"user.subscription.id":        "cc_program_" + creator.ID.Hex(),
+			"user.subscription.createdAt": now,
+			"user.subscription.updatedAt": now,
+		},
+	}
+	cc.UDB.UpdateOne(ctx, bson.M{"_id": application.UserID}, subscriptionUpdate)
+
+	// Send approval email to the applicant
+	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "approved", "", "")
+
 	zap.S().Infow("content creator application approved",
 		"applicationId", appObjID.Hex(),
 		"creatorId", creator.ID.Hex(),
@@ -899,6 +1285,9 @@ func (cc ContentCreator) AdminRejectApplicationHandler(w http.ResponseWriter, r 
 		config.ErrorStatus("failed to reject application", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Send rejection email to the applicant
+	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "rejected", req.RejectionReason, req.Feedback)
 
 	zap.S().Infow("content creator application rejected",
 		"applicationId", appObjID.Hex(),

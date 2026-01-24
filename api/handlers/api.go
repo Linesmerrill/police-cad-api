@@ -450,12 +450,13 @@ func (a *App) New() *mux.Router {
 
 	// Content Creator Program routes
 	contentCreator := ContentCreator{
-		AppDB:  databases.NewContentCreatorApplicationDatabase(a.dbHelper),
-		CCDB:   databases.NewContentCreatorDatabase(a.dbHelper),
-		EntDB:  databases.NewContentCreatorEntitlementDatabase(a.dbHelper),
-		SnapDB: databases.NewContentCreatorSnapshotDatabase(a.dbHelper),
-		UDB:    databases.NewUserDatabase(a.dbHelper),
-		CDB:    databases.NewCommunityDatabase(a.dbHelper),
+		AppDB:   databases.NewContentCreatorApplicationDatabase(a.dbHelper),
+		CCDB:    databases.NewContentCreatorDatabase(a.dbHelper),
+		EntDB:   databases.NewContentCreatorEntitlementDatabase(a.dbHelper),
+		SnapDB:  databases.NewContentCreatorSnapshotDatabase(a.dbHelper),
+		UDB:     databases.NewUserDatabase(a.dbHelper),
+		CDB:     databases.NewCommunityDatabase(a.dbHelper),
+		AdminDB: databases.NewAdminDatabase(a.dbHelper),
 	}
 
 	// Public content creator routes (no auth required)
@@ -467,6 +468,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/content-creator-applications/me", http.HandlerFunc(contentCreator.WithdrawApplicationHandler)).Methods("DELETE")
 	apiCreate.Handle("/content-creators/me", http.HandlerFunc(contentCreator.UpdateMyProfileHandler)).Methods("PUT")
 	apiCreate.Handle("/content-creators/me/removal-request", http.HandlerFunc(contentCreator.RequestRemovalHandler)).Methods("POST")
+	apiCreate.Handle("/content-creators/me/owned-communities", http.HandlerFunc(contentCreator.GetOwnedCommunitiesHandler)).Methods("GET")
+	apiCreate.Handle("/content-creators/me/community-promotion", http.HandlerFunc(contentCreator.ApplyCommunityPromotionHandler)).Methods("POST")
 
 	// Public content creator route with slug param (must be after /me routes)
 	apiCreate.Handle("/content-creators/{slug}", http.HandlerFunc(contentCreator.GetContentCreatorBySlugHandler)).Methods("GET")
