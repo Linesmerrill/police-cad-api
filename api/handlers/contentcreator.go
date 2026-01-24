@@ -455,15 +455,14 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 	}
 	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
 
-	// Check for existing creator profile first
+	// Check for existing creator profile first (include removed so frontend can show proper state)
 	creatorFilter := bson.M{
 		"userId": userObjID,
-		"status": bson.M{"$ne": "removed"},
 	}
 	creator, _ := cc.CCDB.FindOne(ctx, creatorFilter)
 
 	if creator != nil {
-		// User is an active creator, return their profile with entitlements
+		// User has a creator profile (active, warned, or removed), return their profile with entitlements
 		entitlements := cc.getCreatorEntitlements(ctx, creator.ID, userObjID)
 
 		creatorResponse := models.ContentCreatorPrivateResponse{
