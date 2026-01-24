@@ -671,6 +671,37 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 	}
 	creator, _ := cc.CCDB.FindOne(ctx, creatorFilter)
 
+	// If creator exists but is removed, check if they have a new pending application
+	// If so, return the application instead of the removed creator profile
+	if creator != nil && creator.Status == "removed" {
+		pendingAppFilter := bson.M{
+			"userId": userObjID,
+			"status": bson.M{"$in": []string{"submitted", "under_review"}},
+		}
+		pendingApp, _ := cc.AppDB.FindOne(ctx, pendingAppFilter)
+		if pendingApp != nil {
+			// Return the pending application instead of the removed creator
+			appResponse := models.ContentCreatorApplicationResponse{
+				ID:              pendingApp.ID,
+				DisplayName:     pendingApp.DisplayName,
+				PrimaryPlatform: pendingApp.PrimaryPlatform,
+				Platforms:       pendingApp.Platforms,
+				Description:     pendingApp.Description,
+				Bio:             pendingApp.Bio,
+				Status:          pendingApp.Status,
+				CreatedAt:       pendingApp.CreatedAt,
+			}
+			response := models.ContentCreatorMeResponse{
+				Success:     true,
+				Application: &appResponse,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+	}
+
 	if creator != nil {
 		// User has a creator profile (active, warned, or removed), return their profile with entitlements
 		entitlements := cc.getCreatorEntitlements(ctx, creator.ID, userObjID)
