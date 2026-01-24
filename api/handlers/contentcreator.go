@@ -913,6 +913,8 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 	cc.EntDB.UpdateMany(ctx, bson.M{"contentCreatorId": creator.ID, "active": true}, entitlementUpdate)
 
 	// Deactivate subscriptions for revoked entitlements
+	// Only deactivate if the subscription is "base" or "free" (from the program)
+	// Don't touch higher-tier paid subscriptions
 	subscriptionDeactivate := bson.M{
 		"$set": bson.M{
 			"community.subscription.active":    false,
@@ -927,9 +929,17 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 	}
 	for _, ent := range entitlements {
 		if ent.TargetType == "community" {
-			cc.CDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, subscriptionDeactivate)
+			// Only deactivate if plan is "base" or "free" (from program)
+			cc.CDB.UpdateOne(ctx, bson.M{
+				"_id": ent.TargetID,
+				"community.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
+			}, subscriptionDeactivate)
 		} else if ent.TargetType == "user" {
-			cc.UDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, userSubscriptionDeactivate)
+			// Only deactivate if plan is "base" or "free" (from program)
+			cc.UDB.UpdateOne(ctx, bson.M{
+				"_id": ent.TargetID,
+				"user.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
+			}, userSubscriptionDeactivate)
 		}
 	}
 
@@ -2110,6 +2120,8 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 	cc.EntDB.UpdateMany(ctx, bson.M{"contentCreatorId": creatorObjID, "active": true}, entitlementUpdate)
 
 	// Deactivate subscriptions for revoked entitlements
+	// Only deactivate if the subscription is "base" or "free" (from the program)
+	// Don't touch higher-tier paid subscriptions
 	subscriptionDeactivate := bson.M{
 		"$set": bson.M{
 			"community.subscription.active":    false,
@@ -2124,9 +2136,17 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 	}
 	for _, ent := range entitlements {
 		if ent.TargetType == "community" {
-			cc.CDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, subscriptionDeactivate)
+			// Only deactivate if plan is "base" or "free" (from program)
+			cc.CDB.UpdateOne(ctx, bson.M{
+				"_id": ent.TargetID,
+				"community.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
+			}, subscriptionDeactivate)
 		} else if ent.TargetType == "user" {
-			cc.UDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, userSubscriptionDeactivate)
+			// Only deactivate if plan is "base" or "free" (from program)
+			cc.UDB.UpdateOne(ctx, bson.M{
+				"_id": ent.TargetID,
+				"user.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
+			}, userSubscriptionDeactivate)
 		}
 	}
 
