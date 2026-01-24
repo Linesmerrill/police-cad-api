@@ -665,13 +665,23 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 	}
 	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
 
-	// Check for existing creator profile first (include removed so frontend can show proper state)
-	creatorFilter := bson.M{
+	// First, check for an active/warned creator profile (prioritize non-removed)
+	activeCreatorFilter := bson.M{
 		"userId": userObjID,
+		"status": bson.M{"$in": []string{"active", "warned"}},
 	}
-	creator, _ := cc.CCDB.FindOne(ctx, creatorFilter)
+	creator, _ := cc.CCDB.FindOne(ctx, activeCreatorFilter)
 
-	// If creator exists but is removed, check if they have a new pending application
+	// If no active creator, check for a removed one
+	if creator == nil {
+		removedCreatorFilter := bson.M{
+			"userId": userObjID,
+			"status": "removed",
+		}
+		creator, _ = cc.CCDB.FindOne(ctx, removedCreatorFilter)
+	}
+
+	// If creator is removed, check if they have a new pending application
 	// If so, return the application instead of the removed creator profile
 	if creator != nil && creator.Status == "removed" {
 		pendingAppFilter := bson.M{
