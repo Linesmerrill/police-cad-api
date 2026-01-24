@@ -9,8 +9,9 @@ type ContentCreatorApplication struct {
 	DisplayName     string                          `json:"displayName" bson:"displayName"`
 	PrimaryPlatform string                          `json:"primaryPlatform" bson:"primaryPlatform"` // twitch, youtube, tiktok, other
 	Platforms       []ContentCreatorPlatform        `json:"platforms" bson:"platforms"`
-	Description     string                          `json:"description" bson:"description"`
-	Status          string                          `json:"status" bson:"status"` // submitted, under_review, approved, rejected, withdrawn
+	Description     string                          `json:"description" bson:"description"` // for admin evaluation
+	Bio             string                          `json:"bio" bson:"bio"`                 // for public profile (max 500 chars)
+	Status          string                          `json:"status" bson:"status"`           // submitted, under_review, approved, rejected, withdrawn
 	RejectionReason string                          `json:"rejectionReason,omitempty" bson:"rejectionReason,omitempty"`
 	AdminNotes      string                          `json:"adminNotes,omitempty" bson:"adminNotes,omitempty"`
 	Feedback        string                          `json:"feedback,omitempty" bson:"feedback,omitempty"`
@@ -102,7 +103,8 @@ type CreateContentCreatorApplicationRequest struct {
 	DisplayName     string                   `json:"displayName" validate:"required,min=2,max=50"`
 	PrimaryPlatform string                   `json:"primaryPlatform" validate:"required,oneof=twitch youtube tiktok other"`
 	Platforms       []ContentCreatorPlatform `json:"platforms" validate:"required,min=1,max=5"`
-	Description     string                   `json:"description" validate:"required,min=50,max=1000"`
+	Description     string                   `json:"description" validate:"required,min=50,max=1000"` // for admin evaluation
+	Bio             string                   `json:"bio" validate:"required,min=20,max=500"`          // for public profile
 }
 
 // ReviewApplicationRequest is the request body for approving/rejecting an application
@@ -178,6 +180,7 @@ type ContentCreatorApplicationResponse struct {
 	PrimaryPlatform string                   `json:"primaryPlatform"`
 	Platforms       []ContentCreatorPlatform `json:"platforms"`
 	Description     string                   `json:"description"`
+	Bio             string                   `json:"bio"`
 	Status          string                   `json:"status"`
 	Feedback        string                   `json:"feedback,omitempty"`
 	CreatedAt       primitive.DateTime       `json:"createdAt"`

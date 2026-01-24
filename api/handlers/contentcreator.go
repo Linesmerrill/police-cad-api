@@ -417,6 +417,16 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Validate bio length
+	if len(req.Bio) < 20 {
+		config.ErrorStatus("bio must be at least 20 characters", http.StatusBadRequest, w, nil)
+		return
+	}
+	if len(req.Bio) > 500 {
+		config.ErrorStatus("bio must be at most 500 characters", http.StatusBadRequest, w, nil)
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 
 	application := models.ContentCreatorApplication{
@@ -426,6 +436,7 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		PrimaryPlatform: req.PrimaryPlatform,
 		Platforms:       req.Platforms,
 		Description:     req.Description,
+		Bio:             req.Bio,
 		Status:          "submitted",
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -556,6 +567,7 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 		PrimaryPlatform: app.PrimaryPlatform,
 		Platforms:       app.Platforms,
 		Description:     app.Description,
+		Bio:             app.Bio,
 		Status:          app.Status,
 		Feedback:        app.Feedback,
 		CreatedAt:       app.CreatedAt,
@@ -1216,7 +1228,7 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		ApplicationID:   application.ID,
 		DisplayName:     application.DisplayName,
 		Slug:            slug,
-		Bio:             application.Description,
+		Bio:             application.Bio,
 		PrimaryPlatform: application.PrimaryPlatform,
 		Platforms:       application.Platforms,
 		Status:          "active",
