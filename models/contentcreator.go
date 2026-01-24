@@ -18,6 +18,7 @@ type ContentCreatorApplication struct {
 	FirstApprovalAt *primitive.DateTime             `json:"firstApprovalAt,omitempty" bson:"firstApprovalAt,omitempty"`
 	ReviewedBy      *primitive.ObjectID             `json:"reviewedBy,omitempty" bson:"reviewedBy,omitempty"`
 	ReviewedAt      *primitive.DateTime             `json:"reviewedAt,omitempty" bson:"reviewedAt,omitempty"`
+	CreatorID       *primitive.ObjectID             `json:"creatorId,omitempty" bson:"creatorId,omitempty"` // set when approved
 	CreatedAt       primitive.DateTime              `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       primitive.DateTime              `json:"updatedAt" bson:"updatedAt"`
 }

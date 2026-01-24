@@ -1232,6 +1232,9 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		return
 	}
 
+	// Update application with the creatorId for easy lookup
+	cc.AppDB.UpdateOne(ctx, bson.M{"_id": appObjID}, bson.M{"$set": bson.M{"creatorId": creator.ID}})
+
 	// Grant personal entitlement automatically
 	personalEntitlement := models.ContentCreatorEntitlement{
 		ID:               primitive.NewObjectID(),
