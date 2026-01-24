@@ -778,8 +778,6 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 		"community.ownerID": userIDStr,
 	}
 
-	zap.S().Infof("[GetOwnedCommunities] Looking for communities with ownerID: %s", userIDStr)
-
 	cursor, err := cc.CDB.Find(ctx, communityFilter, nil)
 	if err != nil {
 		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
@@ -796,23 +794,15 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 	}
 
 	communities := make([]CommunityResponse, 0)
-	for cursor.Next(ctx) {
-		var comm struct {
-			ID      primitive.ObjectID `bson:"_id"`
-			Details struct {
-				Name         string `bson:"name"`
-				Subscription struct {
-					Plan   string `bson:"plan"`
-					Active bool   `bson:"active"`
-				} `bson:"subscription"`
-			} `bson:"community"`
-		}
-		if err := cursor.Decode(&comm); err != nil {
-			continue
-		}
 
+	var allCommunities []models.Community
+	if err := cursor.All(ctx, &allCommunities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	for _, comm := range allCommunities {
 		isApplied := appliedCommunityID == comm.ID.Hex()
-		zap.S().Infof("[GetOwnedCommunities] Found community: %s (%s)", comm.Details.Name, comm.ID.Hex())
 		communities = append(communities, CommunityResponse{
 			ID:                 comm.ID.Hex(),
 			Name:               comm.Details.Name,
@@ -821,8 +811,6 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 			IsPromotionApplied: isApplied,
 		})
 	}
-
-	zap.S().Infof("[GetOwnedCommunities] Total communities found: %d", len(communities))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
