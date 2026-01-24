@@ -461,6 +461,7 @@ func (a *App) New() *mux.Router {
 
 	// Public content creator routes (no auth required)
 	apiCreate.Handle("/content-creators", http.HandlerFunc(contentCreator.GetContentCreatorsHandler)).Methods("GET")
+	apiCreate.Handle("/content-creators/check-slug", http.HandlerFunc(contentCreator.CheckSlugAvailabilityHandler)).Methods("GET")
 
 	// Authenticated content creator routes (must be before {slug} route)
 	apiCreate.Handle("/content-creator-applications", http.HandlerFunc(contentCreator.CreateApplicationHandler)).Methods("POST")

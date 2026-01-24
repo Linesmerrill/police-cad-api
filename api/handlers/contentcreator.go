@@ -352,6 +352,53 @@ func (cc ContentCreator) GetContentCreatorBySlugHandler(w http.ResponseWriter, r
 	})
 }
 
+// CheckSlugAvailabilityHandler checks if a display name would create a conflicting slug
+// GET /api/v1/content-creators/check-slug?displayName=xxx
+func (cc ContentCreator) CheckSlugAvailabilityHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	displayName := r.URL.Query().Get("displayName")
+	if displayName == "" {
+		config.ErrorStatus("displayName query parameter is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Generate what the slug would be
+	slug := generateSlug(displayName)
+
+	if slug == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":   true,
+			"available": false,
+			"slug":      "",
+			"message":   "Display name must contain at least one letter or number",
+		})
+		return
+	}
+
+	// Check if slug already exists (for any status - active, removed, etc.)
+	existingCreator, _ := cc.CCDB.FindOne(ctx, bson.M{"slug": slug})
+
+	available := existingCreator == nil
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"available": available,
+		"slug":      slug,
+		"message": func() string {
+			if available {
+				return ""
+			}
+			return "This display name would create a URL that's already taken. Your profile URL will include a unique suffix."
+		}(),
+	})
+}
+
 // --- Authenticated User Endpoints ---
 
 // CreateApplicationHandler submits a new creator application
