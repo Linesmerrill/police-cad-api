@@ -35,8 +35,9 @@ import (
 
 // User exported for testing purposes
 type User struct {
-	DB  databases.UserDatabase
-	CDB databases.CommunityDatabase
+	DB    databases.UserDatabase
+	CDB   databases.CommunityDatabase
+	EntDB databases.ContentCreatorEntitlementDatabase
 }
 
 // UserHandler returns a user given a userID
@@ -3123,22 +3124,56 @@ func (u User) handleSubscriptionDeleted(event stripe.Event) error {
 		return fmt.Errorf("failed to parse subscription: %v", err)
 	}
 
-	// Find user by subscription ID and mark as inactive
-	filter := bson.M{"user.subscription.id": sub.ID}
+	ctx := context.Background()
+
+	// Find user by subscription ID first to get their user ID
+	var user models.User
+	err = u.DB.FindOne(ctx, bson.M{"user.subscription.id": sub.ID}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			zap.S().Warnf("No user found with subscription %s", sub.ID)
+			return nil
+		}
+		return fmt.Errorf("failed to find user: %v", err)
+	}
+
+	// Default to "free" plan
+	newPlan := "free"
+
+	// Check if user has an active content creator entitlement for their personal plan
+	if u.EntDB != nil {
+		userObjID, convErr := primitive.ObjectIDFromHex(user.ID)
+		if convErr == nil {
+			entitlement, entErr := u.EntDB.FindOne(ctx, bson.M{
+				"targetType": "user",
+				"targetId":   userObjID,
+				"active":     true,
+			})
+			if entErr == nil && entitlement != nil {
+				// User has an active content creator personal plan entitlement
+				// Fall back to "base" instead of "free"
+				newPlan = entitlement.Plan
+				zap.S().Infof("User %s has content creator entitlement, falling back to %s plan", user.ID, newPlan)
+			}
+		}
+	}
+
+	// Update user subscription
+	filter := bson.M{"_id": user.ID}
 	update := bson.M{
 		"$set": bson.M{
-			"user.subscription.active":    false,
-			"user.subscription.plan":      "free",
+			"user.subscription.active":    newPlan != "free", // active if they have entitlement
+			"user.subscription.plan":      newPlan,
 			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 
-	_, err = u.DB.UpdateOne(context.Background(), filter, update)
+	_, err = u.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
 
-	zap.S().Infof("Successfully deactivated subscription %s", sub.ID)
+	zap.S().Infof("Successfully deactivated subscription %s, user plan set to %s", sub.ID, newPlan)
 	return nil
 }
 

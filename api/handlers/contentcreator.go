@@ -461,7 +461,7 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 
 	if creator != nil {
 		// User is an active creator, return their profile with entitlements
-		entitlements := cc.getCreatorEntitlements(ctx, creator.ID)
+		entitlements := cc.getCreatorEntitlements(ctx, creator.ID, userObjID)
 
 		creatorResponse := models.ContentCreatorPrivateResponse{
 			ID:              creator.ID,
@@ -1669,12 +1669,19 @@ func (cc ContentCreator) AdminGrantEntitlementHandler(w http.ResponseWriter, r *
 
 // --- Helper Functions ---
 
-func (cc ContentCreator) getCreatorEntitlements(ctx context.Context, creatorID primitive.ObjectID) models.EntitlementsSummary {
+func (cc ContentCreator) getCreatorEntitlements(ctx context.Context, creatorID primitive.ObjectID, userID primitive.ObjectID) models.EntitlementsSummary {
 	summary := models.EntitlementsSummary{
-		PersonalPlan: false,
+		PersonalPlan:         false,
+		PersonalPlanFallback: false,
 		CommunityPlan: models.CommunityPlanSummary{
 			Active: false,
 		},
+	}
+
+	// Fetch user's current subscription plan
+	var user models.User
+	if err := cc.UDB.FindOne(ctx, bson.M{"_id": userID.Hex()}).Decode(&user); err == nil {
+		summary.CurrentUserPlan = user.Details.Subscription.Plan
 	}
 
 	cursor, err := cc.EntDB.Find(ctx, bson.M{
@@ -1694,10 +1701,21 @@ func (cc ContentCreator) getCreatorEntitlements(ctx context.Context, creatorID p
 	for _, ent := range entitlements {
 		if ent.TargetType == "user" {
 			summary.PersonalPlan = true
+			// Check if user has a higher plan than base - if so, entitlement is a fallback
+			currentPlan := summary.CurrentUserPlan
+			if currentPlan != "" && currentPlan != "free" && currentPlan != "base" {
+				summary.PersonalPlanFallback = true
+			}
 		} else if ent.TargetType == "community" {
 			summary.CommunityPlan.Active = true
 			summary.CommunityPlan.CommunityID = ent.TargetID.Hex()
-			// TODO: Fetch community name from CDB if needed
+			// Fetch community name
+			if cc.CDB != nil {
+				community, commErr := cc.CDB.FindOne(ctx, bson.M{"_id": ent.TargetID})
+				if commErr == nil && community != nil {
+					summary.CommunityPlan.CommunityName = community.Details.Name
+				}
+			}
 		}
 	}
 

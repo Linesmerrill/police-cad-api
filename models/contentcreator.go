@@ -209,8 +209,10 @@ type ContentCreatorPrivateResponse struct {
 
 // EntitlementsSummary summarizes a creator's entitlements
 type EntitlementsSummary struct {
-	PersonalPlan  bool                    `json:"personalPlan"`
-	CommunityPlan CommunityPlanSummary    `json:"communityPlan"`
+	PersonalPlan         bool                 `json:"personalPlan"`
+	PersonalPlanFallback bool                 `json:"personalPlanFallback"` // true if user has higher plan, entitlement acts as fallback
+	CurrentUserPlan      string               `json:"currentUserPlan,omitempty"` // user's current subscription plan
+	CommunityPlan        CommunityPlanSummary `json:"communityPlan"`
 }
 
 // CommunityPlanSummary summarizes community plan entitlement
