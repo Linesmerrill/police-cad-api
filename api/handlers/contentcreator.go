@@ -399,6 +399,55 @@ func (cc ContentCreator) CheckSlugAvailabilityHandler(w http.ResponseWriter, r *
 	})
 }
 
+// GetContentCreatorStatsHandler returns public stats about the creator program
+// GET /api/v1/content-creators/stats
+func (cc ContentCreator) GetContentCreatorStatsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Count active creators
+	activeCount, err := cc.CCDB.CountDocuments(ctx, bson.M{"status": "active"})
+	if err != nil {
+		config.ErrorStatus("failed to count creators", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Calculate combined reach (total followers across all active creators)
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"status": "active"}}},
+		{{Key: "$unwind", Value: "$platforms"}},
+		{{Key: "$group", Value: bson.M{
+			"_id":            nil,
+			"totalFollowers": bson.M{"$sum": "$platforms.followerCount"},
+		}}},
+	}
+
+	cursor, err := cc.CCDB.Aggregate(ctx, pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to calculate reach", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var combinedReach int64 = 0
+	if cursor.Next(ctx) {
+		var result struct {
+			TotalFollowers int64 `bson:"totalFollowers"`
+		}
+		if err := cursor.Decode(&result); err == nil {
+			combinedReach = result.TotalFollowers
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"activeCount":   activeCount,
+		"combinedReach": combinedReach,
+	})
+}
+
 // --- Authenticated User Endpoints ---
 
 // CreateApplicationHandler submits a new creator application
