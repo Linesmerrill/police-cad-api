@@ -896,6 +896,11 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Find all active entitlements before revoking (to update subscriptions)
+	entitlementsCursor, _ := cc.EntDB.Find(ctx, bson.M{"contentCreatorId": creator.ID, "active": true}, nil)
+	var entitlements []models.ContentCreatorEntitlement
+	entitlementsCursor.All(ctx, &entitlements)
+
 	// Revoke all entitlements
 	entitlementUpdate := bson.M{
 		"$set": bson.M{
@@ -906,6 +911,27 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 		},
 	}
 	cc.EntDB.UpdateMany(ctx, bson.M{"contentCreatorId": creator.ID, "active": true}, entitlementUpdate)
+
+	// Deactivate subscriptions for revoked entitlements
+	subscriptionDeactivate := bson.M{
+		"$set": bson.M{
+			"community.subscription.active":    false,
+			"community.subscription.updatedAt": now,
+		},
+	}
+	userSubscriptionDeactivate := bson.M{
+		"$set": bson.M{
+			"user.subscription.active":    false,
+			"user.subscription.updatedAt": now,
+		},
+	}
+	for _, ent := range entitlements {
+		if ent.TargetType == "community" {
+			cc.CDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, subscriptionDeactivate)
+		} else if ent.TargetType == "user" {
+			cc.UDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, userSubscriptionDeactivate)
+		}
+	}
 
 	zap.S().Infow("content creator requested removal",
 		"creatorId", creator.ID.Hex(),
@@ -1157,8 +1183,8 @@ func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r
 		return
 	}
 
-	// Check if community already has an active paid subscription
-	if community.Details.Subscription.Active && community.Details.Subscription.Plan != "" && community.Details.Subscription.Plan != "base" {
+	// Check if community already has an active paid subscription (not free or base)
+	if community.Details.Subscription.Active && community.Details.Subscription.Plan != "" && community.Details.Subscription.Plan != "base" && community.Details.Subscription.Plan != "free" {
 		config.ErrorStatus("this community already has an active subscription", http.StatusConflict, w, nil)
 		return
 	}
@@ -2066,6 +2092,11 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Find all active entitlements before revoking (to update subscriptions)
+	entitlementsCursor, _ := cc.EntDB.Find(ctx, bson.M{"contentCreatorId": creatorObjID, "active": true}, nil)
+	var entitlements []models.ContentCreatorEntitlement
+	entitlementsCursor.All(ctx, &entitlements)
+
 	// Revoke all entitlements
 	entitlementUpdate := bson.M{
 		"$set": bson.M{
@@ -2077,6 +2108,27 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 		},
 	}
 	cc.EntDB.UpdateMany(ctx, bson.M{"contentCreatorId": creatorObjID, "active": true}, entitlementUpdate)
+
+	// Deactivate subscriptions for revoked entitlements
+	subscriptionDeactivate := bson.M{
+		"$set": bson.M{
+			"community.subscription.active":    false,
+			"community.subscription.updatedAt": now,
+		},
+	}
+	userSubscriptionDeactivate := bson.M{
+		"$set": bson.M{
+			"user.subscription.active":    false,
+			"user.subscription.updatedAt": now,
+		},
+	}
+	for _, ent := range entitlements {
+		if ent.TargetType == "community" {
+			cc.CDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, subscriptionDeactivate)
+		} else if ent.TargetType == "user" {
+			cc.UDB.UpdateOne(ctx, bson.M{"_id": ent.TargetID}, userSubscriptionDeactivate)
+		}
+	}
 
 	// Send removal notification email to the creator
 	if creator.UserID != nil {
