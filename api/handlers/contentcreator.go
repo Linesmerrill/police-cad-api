@@ -1046,7 +1046,7 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(application)
 }
 
-// AdminApproveApplicationHandler approves an application (requires 2 approvers)
+// AdminApproveApplicationHandler approves an application (requires 2 approvers, unless owner override)
 // POST /api/v1/admin/content-creator-applications/{id}/approve
 func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -1058,6 +1058,13 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		return
 	}
 	adminObjID, _ := primitive.ObjectIDFromHex(adminIDStr)
+
+	// Parse optional request body for owner override
+	var req struct {
+		OwnerOverride bool `json:"ownerOverride"`
+	}
+	// Attempt to decode body, but don't fail if empty (for backward compatibility)
+	json.NewDecoder(r.Body).Decode(&req)
 
 	appID := mux.Vars(r)["id"]
 	appObjID, err := primitive.ObjectIDFromHex(appID)
@@ -1080,8 +1087,32 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 
 	now := primitive.NewDateTimeFromTime(time.Now())
 
-	// Check if this is first or second approval
-	if application.FirstApprovalBy == nil {
+	// Check if owner is using override to bypass dual-approval
+	isOwnerOverride := false
+	if req.OwnerOverride {
+		// Verify the admin is actually an owner
+		admin, adminErr := cc.AdminDB.FindOne(ctx, bson.M{"_id": adminObjID})
+		if adminErr != nil {
+			config.ErrorStatus("failed to verify admin role", http.StatusInternalServerError, w, adminErr)
+			return
+		}
+		// Check if admin has owner role (either in Role field or Roles array)
+		hasOwnerRole := admin.Role == "owner"
+		for _, role := range admin.Roles {
+			if role == "owner" {
+				hasOwnerRole = true
+				break
+			}
+		}
+		if !hasOwnerRole {
+			config.ErrorStatus("only owners can use the override option", http.StatusForbidden, w, nil)
+			return
+		}
+		isOwnerOverride = true
+	}
+
+	// Check if this is first or second approval (or owner override)
+	if application.FirstApprovalBy == nil && !isOwnerOverride {
 		// First approval - set to under_review and record first approver
 		appUpdate := bson.M{
 			"$set": bson.M{
@@ -1124,8 +1155,8 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		return
 	}
 
-	// Second approval - check it's a different admin
-	if application.FirstApprovalBy.Hex() == adminObjID.Hex() {
+	// Second approval - check it's a different admin (unless owner override)
+	if !isOwnerOverride && application.FirstApprovalBy != nil && application.FirstApprovalBy.Hex() == adminObjID.Hex() {
 		config.ErrorStatus("you already approved this application - a different admin must provide the second approval", http.StatusConflict, w, nil)
 		return
 	}
@@ -1207,19 +1238,39 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	// Send approval email to the applicant
 	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "approved", "", "")
 
-	zap.S().Infow("content creator application approved",
-		"applicationId", appObjID.Hex(),
-		"creatorId", creator.ID.Hex(),
-		"firstApprovalBy", application.FirstApprovalBy.Hex(),
-		"secondApprovalBy", adminObjID.Hex(),
-	)
+	// Log the approval with appropriate context
+	if isOwnerOverride {
+		zap.S().Infow("content creator application approved via owner override",
+			"applicationId", appObjID.Hex(),
+			"creatorId", creator.ID.Hex(),
+			"approvedBy", adminObjID.Hex(),
+			"ownerOverride", true,
+		)
+	} else {
+		firstApproverID := ""
+		if application.FirstApprovalBy != nil {
+			firstApproverID = application.FirstApprovalBy.Hex()
+		}
+		zap.S().Infow("content creator application approved",
+			"applicationId", appObjID.Hex(),
+			"creatorId", creator.ID.Hex(),
+			"firstApprovalBy", firstApproverID,
+			"secondApprovalBy", adminObjID.Hex(),
+		)
+	}
+
+	responseMessage := "Application approved"
+	if isOwnerOverride {
+		responseMessage = "Application approved via owner override"
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Application approved",
-		"creator": creator,
+		"success":       true,
+		"message":       responseMessage,
+		"creator":       creator,
+		"ownerOverride": isOwnerOverride,
 	})
 }
 
