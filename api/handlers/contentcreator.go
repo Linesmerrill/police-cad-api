@@ -1263,17 +1263,35 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	}
 	cc.EntDB.InsertOne(ctx, personalEntitlement)
 
-	// Grant Base subscription to user's account
-	subscriptionUpdate := bson.M{
-		"$set": bson.M{
-			"user.subscription.plan":      "base",
-			"user.subscription.active":    true,
-			"user.subscription.id":        "cc_program_" + creator.ID.Hex(),
-			"user.subscription.createdAt": now,
-			"user.subscription.updatedAt": now,
-		},
+	// Only grant Base subscription if user doesn't already have a higher-tier plan
+	// Check user's current subscription first
+	var currentUser models.User
+	shouldUpdateSubscription := true
+	if err := cc.UDB.FindOne(ctx, bson.M{"_id": application.UserID}).Decode(&currentUser); err == nil {
+		currentPlan := currentUser.Details.Subscription.Plan
+		// Don't overwrite if user has a higher-tier plan (premium, premium_plus, etc.)
+		higherTierPlans := map[string]bool{"premium": true, "premium_plus": true, "enterprise": true}
+		if higherTierPlans[currentPlan] {
+			shouldUpdateSubscription = false
+			zap.S().Infow("skipping subscription update - user already has higher tier plan",
+				"userId", application.UserID.Hex(),
+				"currentPlan", currentPlan,
+			)
+		}
 	}
-	cc.UDB.UpdateOne(ctx, bson.M{"_id": application.UserID}, subscriptionUpdate)
+
+	if shouldUpdateSubscription {
+		subscriptionUpdate := bson.M{
+			"$set": bson.M{
+				"user.subscription.plan":      "base",
+				"user.subscription.active":    true,
+				"user.subscription.id":        "cc_program_" + creator.ID.Hex(),
+				"user.subscription.createdAt": now,
+				"user.subscription.updatedAt": now,
+			},
+		}
+		cc.UDB.UpdateOne(ctx, bson.M{"_id": application.UserID}, subscriptionUpdate)
+	}
 
 	// Send approval email to the applicant
 	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "approved", "", "")
