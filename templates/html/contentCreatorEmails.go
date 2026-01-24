@@ -230,6 +230,83 @@ func RenderApplicationApprovedEmail(displayName string) string {
 </html>`, displayName)
 }
 
+// RenderCreatorRemovedEmail generates the HTML for the creator removal notification email
+func RenderCreatorRemovedEmail(displayName, reason string) string {
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>Creator Program Removal Notice - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #ef4444 0%%, #dc2626 100%%); padding: 40px 30px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 40px 30px; color: #e5e7eb; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .reason-box { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 20px; margin: 20px 0; }
+    .reason-box h4 { color: #ef4444; margin-top: 0; margin-bottom: 10px; }
+    .reason-box p { margin: 0; color: #e5e7eb; }
+    .revoked-box { background: rgba(107, 114, 128, 0.1); border: 1px solid rgba(107, 114, 128, 0.3); border-radius: 12px; padding: 20px; margin: 25px 0; }
+    .revoked-box h4 { color: #9ca3af; margin-top: 0; margin-bottom: 15px; }
+    .revoked-item { display: flex; align-items: center; margin-bottom: 10px; color: #9ca3af; font-size: 14px; }
+    .revoked-item:last-child { margin-bottom: 0; }
+    .revoked-icon { margin-right: 10px; }
+    .reapply-box { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 8px; padding: 15px; margin: 25px 0; }
+    .reapply-box p { margin: 0; color: #fbbf24; font-size: 14px; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 20px; }
+    .footer { padding: 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Creator Program Removal Notice</h1>
+    </div>
+    <div class="content">
+      <h2>Hi %s,</h2>
+      <p>We regret to inform you that you have been <strong>removed from the Lines Police CAD Content Creator Program</strong>.</p>
+
+      <div class="reason-box">
+        <h4>📋 Reason for Removal:</h4>
+        <p>%s</p>
+      </div>
+
+      <div class="revoked-box">
+        <h4>Benefits Revoked:</h4>
+        <div class="revoked-item">
+          <span class="revoked-icon">✕</span>
+          <span>Personal Base Plan - No longer active on your account</span>
+        </div>
+        <div class="revoked-item">
+          <span class="revoked-icon">✕</span>
+          <span>Community Base Plan - Removed from your community (if applied)</span>
+        </div>
+        <div class="revoked-item">
+          <span class="revoked-icon">✕</span>
+          <span>Featured Profile - Removed from creators directory</span>
+        </div>
+      </div>
+
+      <div class="reapply-box">
+        <p>🔄 If you believe this removal was made in error, or if you'd like to rejoin the program in the future, you are welcome to submit a new application.</p>
+      </div>
+
+      <a href="https://www.linespolice-cad.com/content-creators/apply" class="cta-button">Apply to Rejoin</a>
+
+      <p style="margin-top: 30px; color: #9ca3af; font-size: 14px;">If you have any questions about this decision, please contact our support team.</p>
+    </div>
+    <div class="footer">
+      <p>© Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, reason)
+}
+
 // RenderApplicationRejectedEmail generates the HTML for the rejection notification email
 func RenderApplicationRejectedEmail(displayName, rejectionReason, feedback string) string {
 	feedbackSection := ""

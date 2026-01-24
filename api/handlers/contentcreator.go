@@ -179,6 +179,36 @@ func (cc ContentCreator) sendApplicationDecisionEmail(ctx context.Context, userI
 	}()
 }
 
+// sendCreatorRemovedEmail sends removal notification email to a creator removed by admin
+func (cc ContentCreator) sendCreatorRemovedEmail(ctx context.Context, userID primitive.ObjectID, displayName, reason string) {
+	// Get user email
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	err := cc.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		zap.S().Errorw("failed to get user email for removal notification", "error", err, "userId", userID.Hex())
+		return
+	}
+	if user.Details.Email == "" {
+		zap.S().Warnw("user has no email, skipping removal notification", "userId", userID.Hex())
+		return
+	}
+
+	subject := "Creator Program Removal Notice - Lines Police CAD"
+	htmlContent := templates.RenderCreatorRemovedEmail(displayName, reason)
+	plainText := fmt.Sprintf("Hi %s, Your membership in the Lines Police CAD Content Creator Program has been terminated. Reason: %s. All benefits have been revoked. If you believe this was in error or wish to rejoin, you may submit a new application at https://www.linespolice-cad.com/content-creators/apply", displayName, reason)
+
+	go func() {
+		if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
+			zap.S().Errorw("failed to send removal email", "error", err, "userId", userID.Hex())
+		}
+	}()
+}
+
 // --- Public Endpoints ---
 
 // GetContentCreatorsHandler returns a list of active content creators (public)
@@ -1543,6 +1573,13 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Fetch the creator to get their details for the email
+	creator, err := cc.CCDB.FindOne(ctx, bson.M{"_id": creatorObjID})
+	if err != nil {
+		config.ErrorStatus("creator not found", http.StatusNotFound, w, err)
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 
 	// Update creator status
@@ -1572,6 +1609,11 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 		},
 	}
 	cc.EntDB.UpdateMany(ctx, bson.M{"contentCreatorId": creatorObjID, "active": true}, entitlementUpdate)
+
+	// Send removal notification email to the creator
+	if creator.UserID != nil {
+		cc.sendCreatorRemovedEmail(ctx, *creator.UserID, creator.DisplayName, req.Reason)
+	}
 
 	zap.S().Infow("content creator removed",
 		"creatorId", creatorObjID.Hex(),
