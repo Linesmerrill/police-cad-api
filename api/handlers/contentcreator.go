@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"regexp"
@@ -276,6 +277,7 @@ func (cc ContentCreator) GetContentCreatorsHandler(w http.ResponseWriter, r *htt
 			Slug:            c.Slug,
 			ProfileImage:    c.ProfileImage,
 			Bio:             c.Bio,
+			ThemeColor:      c.ThemeColor,
 			PrimaryPlatform: c.PrimaryPlatform,
 			Platforms:       c.Platforms,
 			Featured:        c.Featured,
@@ -335,6 +337,7 @@ func (cc ContentCreator) GetContentCreatorBySlugHandler(w http.ResponseWriter, r
 		Slug:            creator.Slug,
 		ProfileImage:    creator.ProfileImage,
 		Bio:             creator.Bio,
+		ThemeColor:      creator.ThemeColor,
 		PrimaryPlatform: creator.PrimaryPlatform,
 		Platforms:       creator.Platforms,
 		Featured:        creator.Featured,
@@ -512,6 +515,7 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 			Slug:            creator.Slug,
 			ProfileImage:    creator.ProfileImage,
 			Bio:             creator.Bio,
+			ThemeColor:      creator.ThemeColor,
 			PrimaryPlatform: creator.PrimaryPlatform,
 			Platforms:       creator.Platforms,
 			Status:          creator.Status,
@@ -748,7 +752,20 @@ func (cc ContentCreator) UpdateMyProfileHandler(w http.ResponseWriter, r *http.R
 		updateFields["displayName"] = req.DisplayName
 	}
 	if req.Bio != "" {
+		if len(req.Bio) > 500 {
+			config.ErrorStatus("bio must be at most 500 characters", http.StatusBadRequest, w, nil)
+			return
+		}
 		updateFields["bio"] = req.Bio
+	}
+	if req.ThemeColor != "" {
+		// Normalize to lowercase
+		themeColor := strings.ToLower(req.ThemeColor)
+		if !isValidThemeColor(themeColor) {
+			config.ErrorStatus("invalid theme color - must be a valid hex color (not too dark or too light)", http.StatusBadRequest, w, nil)
+			return
+		}
+		updateFields["themeColor"] = themeColor
 	}
 	if req.ProfileImage != "" {
 		updateFields["profileImage"] = req.ProfileImage
@@ -1229,6 +1246,7 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		DisplayName:     application.DisplayName,
 		Slug:            slug,
 		Bio:             application.Bio,
+		ThemeColor:      generateRandomThemeColor(),
 		PrimaryPlatform: application.PrimaryPlatform,
 		Platforms:       application.Platforms,
 		Status:          "active",
@@ -1841,6 +1859,56 @@ func (cc ContentCreator) getCreatorEntitlements(ctx context.Context, creatorID p
 	}
 
 	return summary
+}
+
+// generateRandomThemeColor returns a random hex color for a creator's profile theme
+// Excludes very light colors (too close to white) and very dark colors (too close to black)
+func generateRandomThemeColor() string {
+	// Predefined set of vibrant colors that work well on dark backgrounds
+	colors := []string{
+		"#fbbf24", // amber
+		"#f59e0b", // orange
+		"#ef4444", // red
+		"#ec4899", // pink
+		"#a855f7", // purple
+		"#8b5cf6", // violet
+		"#6366f1", // indigo
+		"#3b82f6", // blue
+		"#0ea5e9", // sky
+		"#06b6d4", // cyan
+		"#14b8a6", // teal
+		"#10b981", // emerald
+		"#22c55e", // green
+		"#84cc16", // lime
+	}
+	return colors[rand.Intn(len(colors))]
+}
+
+// isValidThemeColor checks if a hex color is valid and not too close to black or white
+func isValidThemeColor(hex string) bool {
+	// Must start with # and be 7 chars total
+	if len(hex) != 7 || hex[0] != '#' {
+		return false
+	}
+
+	// Parse RGB values
+	r, err1 := strconv.ParseInt(hex[1:3], 16, 64)
+	g, err2 := strconv.ParseInt(hex[3:5], 16, 64)
+	b, err3 := strconv.ParseInt(hex[5:7], 16, 64)
+
+	if err1 != nil || err2 != nil || err3 != nil {
+		return false
+	}
+
+	// Calculate luminance (simplified)
+	luminance := (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 255.0
+
+	// Reject colors that are too dark (< 0.15) or too light (> 0.85)
+	if luminance < 0.15 || luminance > 0.85 {
+		return false
+	}
+
+	return true
 }
 
 // generateSlug creates a URL-friendly slug from a display name

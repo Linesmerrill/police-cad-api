@@ -33,6 +33,7 @@ type ContentCreator struct {
 	Slug            string                          `json:"slug" bson:"slug"` // unique URL-friendly identifier
 	ProfileImage    string                          `json:"profileImage,omitempty" bson:"profileImage,omitempty"`
 	Bio             string                          `json:"bio" bson:"bio"`
+	ThemeColor      string                          `json:"themeColor" bson:"themeColor"` // hex color for profile (e.g. #fbbf24)
 	PrimaryPlatform string                          `json:"primaryPlatform" bson:"primaryPlatform"`
 	Platforms       []ContentCreatorPlatform        `json:"platforms" bson:"platforms"`
 	Status          string                          `json:"status" bson:"status"` // active, warned, pending_removal, removed
@@ -119,6 +120,7 @@ type ReviewApplicationRequest struct {
 type UpdateContentCreatorRequest struct {
 	DisplayName   string                   `json:"displayName,omitempty"`
 	Bio           string                   `json:"bio,omitempty"`
+	ThemeColor    string                   `json:"themeColor,omitempty"`
 	ProfileImage  string                   `json:"profileImage,omitempty"`
 	Platforms     []ContentCreatorPlatform `json:"platforms,omitempty"`
 	Featured      *bool                    `json:"featured,omitempty"`
@@ -151,6 +153,7 @@ type ContentCreatorPublicResponse struct {
 	Slug            string                   `json:"slug"`
 	ProfileImage    string                   `json:"profileImage,omitempty"`
 	Bio             string                   `json:"bio"`
+	ThemeColor      string                   `json:"themeColor"`
 	PrimaryPlatform string                   `json:"primaryPlatform"`
 	Platforms       []ContentCreatorPlatform `json:"platforms"`
 	Featured        bool                     `json:"featured"`
@@ -201,6 +204,7 @@ type ContentCreatorPrivateResponse struct {
 	Slug            string                   `json:"slug"`
 	ProfileImage    string                   `json:"profileImage,omitempty"`
 	Bio             string                   `json:"bio"`
+	ThemeColor      string                   `json:"themeColor"`
 	PrimaryPlatform string                   `json:"primaryPlatform"`
 	Platforms       []ContentCreatorPlatform `json:"platforms"`
 	Status          string                   `json:"status"`
