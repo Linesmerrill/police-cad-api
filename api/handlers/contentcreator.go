@@ -16,7 +16,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
-	"github.com/linesmerrill/police-cad-api/templates"
+	templates "github.com/linesmerrill/police-cad-api/templates/html"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"go.mongodb.org/mongo-driver/bson"
