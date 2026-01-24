@@ -750,10 +750,10 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 	}
 	userObjID, _ := primitive.ObjectIDFromHex(userIDStr)
 
-	// Verify user is an active creator
+	// Verify user is an active/approved creator
 	creatorFilter := bson.M{
 		"userId": userObjID,
-		"status": bson.M{"$in": []string{"active", "warned"}},
+		"status": bson.M{"$in": []string{"active", "approved", "warned"}},
 	}
 	creator, err := cc.CCDB.FindOne(ctx, creatorFilter)
 	if err != nil {
@@ -778,6 +778,8 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 		"community.ownerID": userIDStr,
 	}
 
+	zap.S().Infof("[GetOwnedCommunities] Looking for communities with ownerID: %s", userIDStr)
+
 	cursor, err := cc.CDB.Find(ctx, communityFilter, nil)
 	if err != nil {
 		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
@@ -793,7 +795,7 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 		IsPromotionApplied bool `json:"isPromotionApplied"`
 	}
 
-	var communities []CommunityResponse
+	communities := make([]CommunityResponse, 0)
 	for cursor.Next(ctx) {
 		var comm struct {
 			ID      primitive.ObjectID `bson:"_id"`
@@ -810,6 +812,7 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 		}
 
 		isApplied := appliedCommunityID == comm.ID.Hex()
+		zap.S().Infof("[GetOwnedCommunities] Found community: %s (%s)", comm.Details.Name, comm.ID.Hex())
 		communities = append(communities, CommunityResponse{
 			ID:                 comm.ID.Hex(),
 			Name:               comm.Details.Name,
@@ -818,6 +821,8 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 			IsPromotionApplied: isApplied,
 		})
 	}
+
+	zap.S().Infof("[GetOwnedCommunities] Total communities found: %d", len(communities))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -862,10 +867,10 @@ func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r
 		return
 	}
 
-	// Verify user is an active creator
+	// Verify user is an active/approved creator
 	creatorFilter := bson.M{
 		"userId": userObjID,
-		"status": bson.M{"$in": []string{"active", "warned"}},
+		"status": bson.M{"$in": []string{"active", "approved", "warned"}},
 	}
 	creator, err := cc.CCDB.FindOne(ctx, creatorFilter)
 	if err != nil {
