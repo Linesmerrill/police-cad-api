@@ -1476,16 +1476,42 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	// For approved applications, look up the creator status
-	type ApplicationWithCreatorStatus struct {
+	// For approved applications, look up the creator status and admin names
+	type ApplicationWithExtras struct {
 		models.ContentCreatorApplication
-		CreatorStatus string `json:"creatorStatus,omitempty"`
+		CreatorStatus       string `json:"creatorStatus,omitempty"`
+		FirstApprovalByName string `json:"firstApprovalByName,omitempty"`
+		ReviewedByName      string `json:"reviewedByName,omitempty"`
 	}
 
-	enrichedApps := make([]ApplicationWithCreatorStatus, len(applications))
+	// Helper to get admin username
+	getAdminUsername := func(adminID *primitive.ObjectID) string {
+		if adminID == nil {
+			return ""
+		}
+		var adminUserDoc struct {
+			Details struct {
+				Username string `bson:"username"`
+			} `bson:"user"`
+		}
+		if err := cc.UDB.FindOne(ctx, bson.M{"_id": *adminID}).Decode(&adminUserDoc); err == nil {
+			return adminUserDoc.Details.Username
+		}
+		return ""
+	}
+
+	enrichedApps := make([]ApplicationWithExtras, len(applications))
 	for i, app := range applications {
-		enrichedApps[i] = ApplicationWithCreatorStatus{
+		enrichedApps[i] = ApplicationWithExtras{
 			ContentCreatorApplication: app,
+		}
+		// Look up first approval admin name
+		if app.FirstApprovalBy != nil {
+			enrichedApps[i].FirstApprovalByName = getAdminUsername(app.FirstApprovalBy)
+		}
+		// Look up second approval (reviewedBy) admin name
+		if app.ReviewedBy != nil {
+			enrichedApps[i].ReviewedByName = getAdminUsername(app.ReviewedBy)
 		}
 		// If approved and has a creatorId, look up the creator status
 		if app.Status == "approved" && app.CreatorID != nil {
@@ -1532,12 +1558,38 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Build response with optional creator status
+	// Build response with optional creator status and admin names
 	response := struct {
 		*models.ContentCreatorApplication
-		CreatorStatus string `json:"creatorStatus,omitempty"`
+		CreatorStatus       string `json:"creatorStatus,omitempty"`
+		FirstApprovalByName string `json:"firstApprovalByName,omitempty"`
+		ReviewedByName      string `json:"reviewedByName,omitempty"`
 	}{
 		ContentCreatorApplication: application,
+	}
+
+	// Helper to get admin username
+	getAdminUsername := func(adminID *primitive.ObjectID) string {
+		if adminID == nil {
+			return ""
+		}
+		var adminUserDoc struct {
+			Details struct {
+				Username string `bson:"username"`
+			} `bson:"user"`
+		}
+		if err := cc.UDB.FindOne(ctx, bson.M{"_id": *adminID}).Decode(&adminUserDoc); err == nil {
+			return adminUserDoc.Details.Username
+		}
+		return ""
+	}
+
+	// Look up admin names
+	if application.FirstApprovalBy != nil {
+		response.FirstApprovalByName = getAdminUsername(application.FirstApprovalBy)
+	}
+	if application.ReviewedBy != nil {
+		response.ReviewedByName = getAdminUsername(application.ReviewedBy)
 	}
 
 	// If approved and has a creatorId, look up the creator status
