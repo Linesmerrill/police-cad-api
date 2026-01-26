@@ -14,16 +14,18 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/api"
+	"github.com/linesmerrill/police-cad-api/api/scheduler"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 )
 
 // App stores the router and db connection, so it can be reused
 type App struct {
-	Router   *mux.Router
-	DB       databases.CollectionHelper
-	Config   config.Config
-	dbHelper databases.DatabaseHelper
+	Router    *mux.Router
+	DB        databases.CollectionHelper
+	Config    config.Config
+	dbHelper  databases.DatabaseHelper
+	Scheduler *scheduler.Scheduler
 }
 
 // New creates a new mux router and all the routes
@@ -34,7 +36,7 @@ func (a *App) New() *mux.Router {
 
 	r := mux.NewRouter()
 
-	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
+	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), DBHelper: a.dbHelper}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
@@ -123,6 +125,7 @@ func (a *App) New() *mux.Router {
 
 	// Admin management routes (specific before general)
 	apiCreate.Handle("/admin/admins/{id}/activity", http.HandlerFunc(adminHandler.AdminGetActivityHandler)).Methods("POST")
+	apiCreate.Handle("/admin/admins/{id}/profile", http.HandlerFunc(adminHandler.AdminUpdateProfileHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/admins/{id}/roles", http.HandlerFunc(adminHandler.AdminChangeRolesHandler)).Methods("PUT")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminUpdateLastLoginHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminGetAdminDetailsHandler)).Methods("GET")
@@ -448,6 +451,59 @@ func (a *App) New() *mux.Router {
 	// Websocket routes
 	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")
 
+	// Content Creator Program routes
+	contentCreator := ContentCreator{
+		AppDB:   databases.NewContentCreatorApplicationDatabase(a.dbHelper),
+		CCDB:    databases.NewContentCreatorDatabase(a.dbHelper),
+		EntDB:   databases.NewContentCreatorEntitlementDatabase(a.dbHelper),
+		SnapDB:  databases.NewContentCreatorSnapshotDatabase(a.dbHelper),
+		UDB:     databases.NewUserDatabase(a.dbHelper),
+		CDB:     databases.NewCommunityDatabase(a.dbHelper),
+		AdminDB: databases.NewAdminDatabase(a.dbHelper),
+	}
+
+	// Public content creator routes (no auth required)
+	apiCreate.Handle("/content-creators", http.HandlerFunc(contentCreator.GetContentCreatorsHandler)).Methods("GET")
+	apiCreate.Handle("/content-creators/check-slug", http.HandlerFunc(contentCreator.CheckSlugAvailabilityHandler)).Methods("GET")
+	apiCreate.Handle("/content-creators/stats", http.HandlerFunc(contentCreator.GetContentCreatorStatsHandler)).Methods("GET")
+
+	// Authenticated content creator routes (must be before {slug} route)
+	apiCreate.Handle("/content-creator-applications", http.HandlerFunc(contentCreator.CreateApplicationHandler)).Methods("POST")
+	apiCreate.Handle("/content-creator-applications/me", http.HandlerFunc(contentCreator.GetMyApplicationHandler)).Methods("GET")
+	apiCreate.Handle("/content-creator-applications/me", http.HandlerFunc(contentCreator.WithdrawApplicationHandler)).Methods("DELETE")
+	apiCreate.Handle("/content-creators/me", http.HandlerFunc(contentCreator.UpdateMyProfileHandler)).Methods("PUT")
+	apiCreate.Handle("/content-creators/me/removal-request", http.HandlerFunc(contentCreator.RequestRemovalHandler)).Methods("POST")
+	apiCreate.Handle("/content-creators/me/owned-communities", http.HandlerFunc(contentCreator.GetOwnedCommunitiesHandler)).Methods("GET")
+	apiCreate.Handle("/content-creators/me/community-promotion", http.HandlerFunc(contentCreator.ApplyCommunityPromotionHandler)).Methods("POST")
+	apiCreate.Handle("/content-creators/me/sync", http.HandlerFunc(contentCreator.SyncFollowersHandler)).Methods("POST")
+
+	// Public content creator route with slug param (must be after /me routes)
+	apiCreate.Handle("/content-creators/{slug}", http.HandlerFunc(contentCreator.GetContentCreatorBySlugHandler)).Methods("GET")
+
+	// Admin content creator routes
+	apiCreate.Handle("/admin/content-creator-applications", http.HandlerFunc(contentCreator.AdminGetApplicationsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creator-applications/{id}", http.HandlerFunc(contentCreator.AdminGetApplicationHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creator-applications/{id}/approve", http.HandlerFunc(contentCreator.AdminApproveApplicationHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creator-applications/{id}/reject", http.HandlerFunc(contentCreator.AdminRejectApplicationHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creators", http.HandlerFunc(contentCreator.AdminGetCreatorsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creators/analytics", http.HandlerFunc(contentCreator.AdminGetAnalyticsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creators/grace-period", http.HandlerFunc(contentCreator.AdminGetGracePeriodCreatorsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/content-creators/sync-all", http.HandlerFunc(contentCreator.AdminTriggerSyncAllHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
+	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creators/{id}/entitlements", http.HandlerFunc(contentCreator.AdminGrantEntitlementHandler)).Methods("POST")
+
+	// Initialize and store the content creator scheduler
+	a.Scheduler = scheduler.NewScheduler(
+		contentCreator.CCDB,
+		contentCreator.SnapDB,
+		contentCreator.EntDB,
+		contentCreator.UDB,
+		contentCreator.CDB,
+		databases.NewSchedulerLockDatabase(a.dbHelper),
+	)
+
 	// Metrics dashboard
 	r.HandleFunc("/metrics-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./docs/metrics-dashboard.html")
@@ -520,7 +576,7 @@ func CorsMiddleware(next http.Handler) http.Handler {
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		// Handle preflight requests
