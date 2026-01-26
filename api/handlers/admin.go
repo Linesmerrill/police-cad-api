@@ -2046,6 +2046,173 @@ func (h Admin) AdminUpdateLastLoginHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// AdminUpdateProfileHandler updates an admin's profile (firstName, lastName, email, profilePicture)
+// PATCH /api/v1/admin/admins/{id}/profile
+func (h Admin) AdminUpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract admin ID from URL path
+	vars := mux.Vars(r)
+	adminID, ok := vars["id"]
+	if !ok || adminID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Validate ObjectID
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid admin ID format",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Parse request body
+	var req models.UpdateAdminProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request data",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Security: Verify the currentUser's ID matches the profile being updated OR is an owner
+	currentUserID, _ := req.CurrentUser["id"].(string)
+	currentUserRoles, _ := req.CurrentUser["roles"].([]interface{})
+
+	isOwner := false
+	for _, role := range currentUserRoles {
+		if roleStr, ok := role.(string); ok && roleStr == "owner" {
+			isOwner = true
+			break
+		}
+	}
+
+	if currentUserID != adminID && !isOwner {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "You can only update your own profile",
+			Code:    "FORBIDDEN",
+		})
+		return
+	}
+
+	// Check if admin exists
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Admin not found",
+				Code:    "NOT_FOUND",
+			})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Failed to fetch admin",
+				Code:    "DATABASE_ERROR",
+			})
+		}
+		return
+	}
+
+	// Build update document with only provided fields
+	updateFields := bson.M{}
+	if req.FirstName != "" {
+		updateFields["firstName"] = strings.TrimSpace(req.FirstName)
+	}
+	if req.LastName != "" {
+		updateFields["lastName"] = strings.TrimSpace(req.LastName)
+	}
+	if req.Email != "" {
+		newEmail := strings.ToLower(strings.TrimSpace(req.Email))
+		// Check if email is being changed and if it's unique
+		if newEmail != admin.Email {
+			existingAdmin, _ := h.ADB.FindOne(r.Context(), bson.M{"email": newEmail})
+			if existingAdmin != nil {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+					Success: false,
+					Error:   "Email already in use by another admin",
+					Code:    "DUPLICATE_EMAIL",
+				})
+				return
+			}
+		}
+		updateFields["email"] = newEmail
+	}
+	if req.ProfilePicture != "" {
+		updateFields["profilePicture"] = req.ProfilePicture
+	}
+
+	// If no fields to update
+	if len(updateFields) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "No fields to update",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Update admin document
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{"$set": updateFields})
+	if err != nil {
+		log.Printf("Failed to update admin profile: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to update admin profile",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Fetch updated admin
+	updatedAdmin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		// Return success with a note that fetch failed
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(models.UpdateAdminProfileResponse{
+			Success: true,
+			Message: "Profile updated successfully",
+			Admin:   *admin,
+		})
+		return
+	}
+
+	// Ensure role field is populated for backward compatibility
+	if updatedAdmin.Role == "" && len(updatedAdmin.Roles) > 0 {
+		updatedAdmin.Role = updatedAdmin.Roles[0]
+	} else if updatedAdmin.Role != "" && len(updatedAdmin.Roles) == 0 {
+		updatedAdmin.Roles = []string{updatedAdmin.Role}
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.UpdateAdminProfileResponse{
+		Success: true,
+		Message: "Profile updated successfully",
+		Admin:   *updatedAdmin,
+	})
+}
+
 // AdminChangeRoleHandler changes an admin's role
 func (h Admin) AdminChangeRoleHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

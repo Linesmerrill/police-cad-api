@@ -1484,18 +1484,24 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 		ReviewedByName      string `json:"reviewedByName,omitempty"`
 	}
 
-	// Helper to get admin username
-	getAdminUsername := func(adminID *primitive.ObjectID) string {
+	// Helper to get admin name (firstName + lastName from admin_users collection)
+	getAdminName := func(adminID *primitive.ObjectID) string {
 		if adminID == nil {
 			return ""
 		}
-		var adminUserDoc struct {
-			Details struct {
-				Username string `bson:"username"`
-			} `bson:"user"`
-		}
-		if err := cc.UDB.FindOne(ctx, bson.M{"_id": *adminID}).Decode(&adminUserDoc); err == nil {
-			return adminUserDoc.Details.Username
+		// Look up from admin_users collection
+		admin, err := cc.AdminDB.FindOne(ctx, bson.M{"_id": *adminID})
+		if err == nil && admin != nil {
+			if admin.FirstName != "" || admin.LastName != "" {
+				name := strings.TrimSpace(admin.FirstName + " " + admin.LastName)
+				if name != "" {
+					return name
+				}
+			}
+			// Fallback to email prefix
+			if admin.Email != "" {
+				return strings.Split(admin.Email, "@")[0]
+			}
 		}
 		return ""
 	}
@@ -1507,11 +1513,11 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 		}
 		// Look up first approval admin name
 		if app.FirstApprovalBy != nil {
-			enrichedApps[i].FirstApprovalByName = getAdminUsername(app.FirstApprovalBy)
+			enrichedApps[i].FirstApprovalByName = getAdminName(app.FirstApprovalBy)
 		}
 		// Look up second approval (reviewedBy) admin name
 		if app.ReviewedBy != nil {
-			enrichedApps[i].ReviewedByName = getAdminUsername(app.ReviewedBy)
+			enrichedApps[i].ReviewedByName = getAdminName(app.ReviewedBy)
 		}
 		// If approved and has a creatorId, look up the creator status
 		if app.Status == "approved" && app.CreatorID != nil {
@@ -1568,28 +1574,34 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 		ContentCreatorApplication: application,
 	}
 
-	// Helper to get admin username
-	getAdminUsername := func(adminID *primitive.ObjectID) string {
+	// Helper to get admin name (firstName + lastName from admin_users collection)
+	getAdminName := func(adminID *primitive.ObjectID) string {
 		if adminID == nil {
 			return ""
 		}
-		var adminUserDoc struct {
-			Details struct {
-				Username string `bson:"username"`
-			} `bson:"user"`
-		}
-		if err := cc.UDB.FindOne(ctx, bson.M{"_id": *adminID}).Decode(&adminUserDoc); err == nil {
-			return adminUserDoc.Details.Username
+		// Look up from admin_users collection
+		admin, err := cc.AdminDB.FindOne(ctx, bson.M{"_id": *adminID})
+		if err == nil && admin != nil {
+			if admin.FirstName != "" || admin.LastName != "" {
+				name := strings.TrimSpace(admin.FirstName + " " + admin.LastName)
+				if name != "" {
+					return name
+				}
+			}
+			// Fallback to email prefix
+			if admin.Email != "" {
+				return strings.Split(admin.Email, "@")[0]
+			}
 		}
 		return ""
 	}
 
 	// Look up admin names
 	if application.FirstApprovalBy != nil {
-		response.FirstApprovalByName = getAdminUsername(application.FirstApprovalBy)
+		response.FirstApprovalByName = getAdminName(application.FirstApprovalBy)
 	}
 	if application.ReviewedBy != nil {
-		response.ReviewedByName = getAdminUsername(application.ReviewedBy)
+		response.ReviewedByName = getAdminName(application.ReviewedBy)
 	}
 
 	// If approved and has a creatorId, look up the creator status

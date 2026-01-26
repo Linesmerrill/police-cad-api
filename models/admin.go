@@ -8,15 +8,18 @@ import (
 
 // AdminUser represents an admin user in the system
 type AdminUser struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Email     string             `bson:"email" json:"email"`
-	Password  string             `bson:"password" json:"-"`
-	Role      string             `bson:"role" json:"role"` // Legacy field for backward compatibility
-	Roles     []string           `bson:"roles" json:"roles"` // New array-based roles
-	Active    bool               `bson:"active" json:"active"`
-	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
-	CreatedBy string             `bson:"createdBy" json:"createdBy"`
-	LastLoginAt *time.Time       `bson:"lastLoginAt,omitempty" json:"lastLoginAt,omitempty"`
+	ID             primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Email          string             `bson:"email" json:"email"`
+	Password       string             `bson:"password" json:"-"`
+	FirstName      string             `bson:"firstName,omitempty" json:"firstName,omitempty"`
+	LastName       string             `bson:"lastName,omitempty" json:"lastName,omitempty"`
+	ProfilePicture string             `bson:"profilePicture,omitempty" json:"profilePicture,omitempty"`
+	Role           string             `bson:"role" json:"role"`   // Legacy field for backward compatibility
+	Roles          []string           `bson:"roles" json:"roles"` // New array-based roles
+	Active         bool               `bson:"active" json:"active"`
+	CreatedAt      time.Time          `bson:"createdAt" json:"createdAt"`
+	CreatedBy      string             `bson:"createdBy" json:"createdBy"`
+	LastLoginAt    *time.Time         `bson:"lastLoginAt,omitempty" json:"lastLoginAt,omitempty"`
 }
 
 // CreateAdminUserRequest represents the request to create a new admin user
@@ -83,6 +86,22 @@ type ChangeRolesRequest struct {
 // UpdateAdminLastLoginRequest represents a request to update admin's last login time
 type UpdateAdminLastLoginRequest struct {
 	LastLoginAt time.Time `json:"lastLoginAt"`
+}
+
+// UpdateAdminProfileRequest represents a request to update admin profile
+type UpdateAdminProfileRequest struct {
+	FirstName      string                 `json:"firstName,omitempty"`
+	LastName       string                 `json:"lastName,omitempty"`
+	Email          string                 `json:"email,omitempty"`
+	ProfilePicture string                 `json:"profilePicture,omitempty"`
+	CurrentUser    map[string]interface{} `json:"currentUser,omitempty"`
+}
+
+// UpdateAdminProfileResponse represents the response when updating admin profile
+type UpdateAdminProfileResponse struct {
+	Success bool      `json:"success"`
+	Message string    `json:"message"`
+	Admin   AdminUser `json:"admin"`
 }
 
 // ChangeRoleResponse represents the response when changing an admin's role
