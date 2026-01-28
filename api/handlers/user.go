@@ -2811,7 +2811,7 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 			Key:          "premium_plus",
 			MonthlyPrice: 19.99,
 			AnnualPrice:  209,
-			Features:     []string{"Unlimited communities", "Custom departments", "No ads", "Verified badge"},
+			Features:     []string{"Unlimited communities", "No ads", "Verified badge"},
 			Color:        "#fbbf24",
 		},
 	}
