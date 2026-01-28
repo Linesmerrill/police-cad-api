@@ -451,6 +451,15 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/webhook-subscription-deleted", http.HandlerFunc(u.HandleRevenueCatWebhook)).Methods("POST")
 	apiCreate.Handle("/webhook/stripe", http.HandlerFunc(u.HandleStripeWebhook)).Methods("POST")
 
+	// Subscription tier routes (public - no auth required)
+	apiCreate.Handle("/subscription/tiers", http.HandlerFunc(u.GetSubscriptionTiersHandler)).Methods("GET")
+	apiCreate.Handle("/subscription/community-tiers", http.HandlerFunc(u.GetCommunityTiersHandler)).Methods("GET")
+
+	// Additional subscription management routes
+	apiCreate.Handle("/user/check-subscription-source", api.Middleware(http.HandlerFunc(u.CheckSubscriptionSourceHandler))).Methods("POST")
+	apiCreate.Handle("/user/create-portal-session", api.Middleware(http.HandlerFunc(u.CreatePortalSessionHandler))).Methods("POST")
+	apiCreate.Handle("/community/create-checkout-session", api.Middleware(http.HandlerFunc(c.CreateCommunityCheckoutSessionHandler))).Methods("POST")
+
 	// Websocket routes
 	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")
 

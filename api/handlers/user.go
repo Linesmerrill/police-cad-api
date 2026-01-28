@@ -22,8 +22,8 @@ import (
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/stripe/stripe-go/v82"
+	portalsession "github.com/stripe/stripe-go/v82/billingportal/session"
 	"github.com/stripe/stripe-go/v82/checkout/session"
-
 	"github.com/stripe/stripe-go/v82/subscription"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -2512,11 +2512,32 @@ func (u User) CreateCheckoutSessionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// userID, err := primitive.ObjectIDFromHex(requestBody.UserID)
-	// if err != nil {
-	// 	config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
-	// 	return
-	// }
+	userID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Check for existing app store subscription before creating checkout
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{"_id": userID}
+	var user models.User
+	err = u.DB.FindOne(ctx, filter).Decode(&user)
+	if err != nil && err != mongo.ErrNoDocuments {
+		config.ErrorStatus("failed to find user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Block if user has active app store subscription
+	if user.Details.Subscription.Active {
+		source := user.Details.Subscription.Source
+		if source == "app_store" || source == "revenuecat" {
+			config.ErrorStatus("You have an active subscription through the App Store. Please manage it in your app or device settings.", http.StatusBadRequest, w, nil)
+			return
+		}
+	}
 
 	bInterval := "monthly"
 	if requestBody.IsAnnual {
@@ -2535,22 +2556,6 @@ func (u User) CreateCheckoutSessionHandler(w http.ResponseWriter, r *http.Reques
 		config.ErrorStatus("failed to create checkout session", http.StatusInternalServerError, w, err)
 		return
 	}
-
-	// filter := bson.M{"_id": userID}
-	// update := bson.M{
-	// 	"$set": bson.M{
-	// 		"user.subscription.plan":      requestBody.Tier,
-	// 		"user.subscription.isAnnual":  requestBody.IsAnnual,
-	// 		"user.subscription.active":    true,
-	// 		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-	// 	},
-	// }
-	//
-	// _, err = u.DB.UpdateOne(context.Background(), filter, update)
-	// if err != nil {
-	// 	config.ErrorStatus("failed to subscribe user", http.StatusInternalServerError, w, err)
-	// 	return
-	// }
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2616,16 +2621,16 @@ func createCheckoutSession(c *CheckoutRequest) (*stripe.CheckoutSession, error) 
 	}
 
 	if priceID == "" {
-		// http.Error(w, fmt.Sprintf("Price ID for tier %s and billing interval %s is not set", req.Tier, req.BillingInterval), http.StatusInternalServerError)
 		return nil, fmt.Errorf("price ID for tier %s and billing interval %s is not set", c.Tier, c.BillingInterval)
 	}
 
-	successURL := fmt.Sprintf("%v/api/v1/success?session_id={CHECKOUT_SESSION_ID}", os.Getenv("BASE_URL"))
-	cancelURL := fmt.Sprintf("%v/api/v1/cancel", os.Getenv("BASE_URL"))
-	if os.Getenv("URL_MODE") == "testing" {
-		successURL = fmt.Sprintf("http://%v/api/v1/success?session_id={CHECKOUT_SESSION_ID}", os.Getenv("BASE_URL"))
-		cancelURL = fmt.Sprintf("http://%v/api/v1/cancel", os.Getenv("BASE_URL"))
+	// Use frontend URLs for web subscriptions
+	frontendURL := os.Getenv("PUBLIC_WEB_BASE_URL")
+	if frontendURL == "" {
+		frontendURL = "https://www.linespolice-cad.com"
 	}
+	successURL := fmt.Sprintf("%s/subscription/success?session_id={CHECKOUT_SESSION_ID}", frontendURL)
+	cancelURL := fmt.Sprintf("%s/subscription/cancel", frontendURL)
 
 	// Create a Stripe Checkout Session
 	params := &stripe.CheckoutSessionParams{
@@ -2641,6 +2646,7 @@ func createCheckoutSession(c *CheckoutRequest) (*stripe.CheckoutSession, error) 
 			"userId":          c.UserID,
 			"tier":            tier,
 			"billingInterval": billingInterval,
+			"source":          "stripe",
 		},
 		SuccessURL: stripe.String(successURL),
 		CancelURL:  stripe.String(cancelURL),
@@ -2749,6 +2755,249 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 	// Respond with the verification result
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// SubscriptionTier represents a subscription tier for the pricing page
+type SubscriptionTier struct {
+	Name         string   `json:"name"`
+	Key          string   `json:"key"`
+	MonthlyPrice float64  `json:"monthlyPrice"`
+	AnnualPrice  float64  `json:"annualPrice"`
+	Features     []string `json:"features"`
+	Color        string   `json:"color"`
+	Popular      bool     `json:"popular,omitempty"`
+}
+
+// CommunityTier represents a community promotional tier
+type CommunityTier struct {
+	Name         string   `json:"name"`
+	Key          string   `json:"key"`
+	MonthlyPrice float64  `json:"monthlyPrice"`
+	Features     []string `json:"features"`
+	Color        string   `json:"color"`
+	Popular      bool     `json:"popular,omitempty"`
+}
+
+// GetSubscriptionTiersHandler returns the available subscription tiers (public endpoint)
+func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request) {
+	tiers := []SubscriptionTier{
+		{
+			Name:         "Free",
+			Key:          "free",
+			MonthlyPrice: 0,
+			AnnualPrice:  0,
+			Features:     []string{"1 community", "Default departments", "Full ads"},
+			Color:        "#718096",
+		},
+		{
+			Name:         "Base",
+			Key:          "base",
+			MonthlyPrice: 3,
+			AnnualPrice:  32,
+			Features:     []string{"5 communities", "Default departments", "Full ads"},
+			Color:        "#3b82f6",
+		},
+		{
+			Name:         "Premium",
+			Key:          "premium",
+			MonthlyPrice: 8,
+			AnnualPrice:  85,
+			Features:     []string{"10 communities", "Verified badge", "50% fewer ads"},
+			Color:        "#667eea",
+		},
+		{
+			Name:         "Premium Plus",
+			Key:          "premium_plus",
+			MonthlyPrice: 19.99,
+			AnnualPrice:  209,
+			Features:     []string{"Unlimited communities", "Custom departments", "No ads", "Verified badge"},
+			Color:        "#fbbf24",
+			Popular:      true,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tiers": tiers,
+	})
+}
+
+// GetCommunityTiersHandler returns the available community promotional tiers (public endpoint)
+func (u User) GetCommunityTiersHandler(w http.ResponseWriter, r *http.Request) {
+	tiers := []CommunityTier{
+		{
+			Name:         "Basic",
+			Key:          "basic",
+			MonthlyPrice: 5,
+			Features:     []string{"Promotional text in search"},
+			Color:        "#3b82f6",
+		},
+		{
+			Name:         "Standard",
+			Key:          "standard",
+			MonthlyPrice: 10,
+			Features:     []string{"Promotional text in search", "Verified community badge", "Short description (100 chars)"},
+			Color:        "#10b981",
+		},
+		{
+			Name:         "Premium",
+			Key:          "premium",
+			MonthlyPrice: 20,
+			Features:     []string{"Promotional text in search", "Verified community badge", "Boost on Discover page"},
+			Color:        "#667eea",
+		},
+		{
+			Name:         "Elite",
+			Key:          "elite",
+			MonthlyPrice: 50,
+			Features:     []string{"Promotional text in search", "Verified community badge", "Boost on Discover page", "Featured on Home Page", "Long description (200 chars)"},
+			Color:        "#fbbf24",
+			Popular:      true,
+		},
+	}
+
+	durations := []int{1, 3, 6}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tiers":     tiers,
+		"durations": durations,
+	})
+}
+
+// CheckSubscriptionSourceResponse represents the response for checking subscription source
+type CheckSubscriptionSourceResponse struct {
+	HasActiveSubscription bool   `json:"hasActiveSubscription"`
+	Source                string `json:"source"`
+	Plan                  string `json:"plan"`
+	CanPurchaseWeb        bool   `json:"canPurchaseWeb"`
+	Message               string `json:"message,omitempty"`
+}
+
+// CheckSubscriptionSourceHandler checks if a user has an app store subscription
+func (u User) CheckSubscriptionSourceHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID string `json:"userId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if requestBody.UserID == "" {
+		config.ErrorStatus("user ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{"_id": userID}
+	var user models.User
+	err = u.DB.FindOne(ctx, filter).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to find user", http.StatusNotFound, w, err)
+		return
+	}
+
+	resp := CheckSubscriptionSourceResponse{
+		HasActiveSubscription: false,
+		Source:                "",
+		Plan:                  "",
+		CanPurchaseWeb:        true,
+		Message:               "",
+	}
+
+	if user.Details.Subscription.Active {
+		resp.HasActiveSubscription = true
+		resp.Source = user.Details.Subscription.Source
+		resp.Plan = user.Details.Subscription.Plan
+
+		// Block web purchase if subscription is from app store
+		if resp.Source == "app_store" || resp.Source == "revenuecat" {
+			resp.CanPurchaseWeb = false
+			resp.Message = "You have an active subscription through the App Store. Please manage it in your app or device settings."
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// CreatePortalSessionHandler creates a Stripe customer portal session for subscription management
+func (u User) CreatePortalSessionHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID string `json:"userId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if requestBody.UserID == "" {
+		config.ErrorStatus("user ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(requestBody.UserID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{"_id": userID}
+	var user models.User
+	err = u.DB.FindOne(ctx, filter).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to find user", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Check if user has a Stripe customer ID
+	if user.Details.Subscription.StripeCustomerID == "" {
+		config.ErrorStatus("No Stripe subscription found. Please subscribe via the web first.", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Check if subscription is from Stripe
+	if user.Details.Subscription.Source != "stripe" && user.Details.Subscription.Source != "" {
+		config.ErrorStatus("Your subscription is managed through the App Store. Please manage it there.", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Create a Stripe customer portal session
+	returnURL := os.Getenv("PUBLIC_WEB_BASE_URL")
+	if returnURL == "" {
+		returnURL = "https://www.linespolice-cad.com"
+	}
+	returnURL = returnURL + "/manage-subscription"
+
+	params := &stripe.BillingPortalSessionParams{
+		Customer:  stripe.String(user.Details.Subscription.StripeCustomerID),
+		ReturnURL: stripe.String(returnURL),
+	}
+
+	portalSession, err := portalsession.New(params)
+	if err != nil {
+		config.ErrorStatus("failed to create portal session", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"url": portalSession.URL,
+	})
 }
 
 // SubscribeUserHandler subscribes a user to a specific tier
@@ -2923,24 +3172,29 @@ func min(a, b int) int {
 
 // handleCheckoutSessionCompleted handles successful checkout sessions
 func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
-	var session stripe.CheckoutSession
-	err := json.Unmarshal(event.Data.Raw, &session)
+	var checkoutSession stripe.CheckoutSession
+	err := json.Unmarshal(event.Data.Raw, &checkoutSession)
 	if err != nil {
 		return fmt.Errorf("failed to parse checkout session: %v", err)
 	}
 
+	// Check if this is a community promotion (one-time payment)
+	if checkoutSession.Metadata["type"] == "community_promotion" {
+		return u.handleCommunityPromotionCompleted(checkoutSession)
+	}
+
 	// Extract metadata
-	userID := session.Metadata["userId"]
-	billingInterval := session.Metadata["billingInterval"]
+	userID := checkoutSession.Metadata["userId"]
+	billingInterval := checkoutSession.Metadata["billingInterval"]
 
 	// For test events or sessions without metadata, log and skip processing
 	if userID == "" {
-		zap.S().Infof("Skipping checkout session %s: missing userId in metadata (likely a test event)", session.ID)
+		zap.S().Infof("Skipping checkout session %s: missing userId in metadata (likely a test event)", checkoutSession.ID)
 		return nil
 	}
 
 	// Get subscription details
-	sub, err := subscription.Get(session.Subscription.ID, nil)
+	sub, err := subscription.Get(checkoutSession.Subscription.ID, nil)
 	if err != nil {
 		return fmt.Errorf("failed to get subscription: %v", err)
 	}
@@ -2967,18 +3221,6 @@ func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
 	case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
 		plan = "premium_plus"
 		isAnnual = true
-	case os.Getenv("STRIPE_BASIC_PROMOTION_MONTHLY_PRICE_ID"):
-		plan = "basic"
-		isAnnual = false
-	case os.Getenv("STRIPE_STANDARD_PROMOTION_MONTHLY_PRICE_ID"):
-		plan = "standard"
-		isAnnual = false
-	case os.Getenv("STRIPE_PREMIUM_PROMOTION_MONTHLY_PRICE_ID"):
-		plan = "premium"
-		isAnnual = false
-	case os.Getenv("STRIPE_ELITE_PROMOTION_MONTHLY_PRICE_ID"):
-		plan = "elite"
-		isAnnual = false
 	}
 
 	// Update user subscription in database
@@ -2987,15 +3229,23 @@ func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
 		return fmt.Errorf("invalid user ID: %v", err)
 	}
 
+	// Get customer ID from the checkout session
+	customerID := ""
+	if checkoutSession.Customer != nil {
+		customerID = checkoutSession.Customer.ID
+	}
+
 	filter := bson.M{"_id": userObjID}
 	update := bson.M{
 		"$set": bson.M{
-			"user.subscription.id":        sub.ID,
-			"user.subscription.plan":      plan,
-			"user.subscription.isAnnual":  isAnnual,
-			"user.subscription.active":    sub.Status == "active",
-			"user.subscription.createdAt": primitive.NewDateTimeFromTime(time.Now()),
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+			"user.subscription.id":               sub.ID,
+			"user.subscription.plan":             plan,
+			"user.subscription.isAnnual":         isAnnual,
+			"user.subscription.active":           sub.Status == "active",
+			"user.subscription.source":           "stripe",
+			"user.subscription.stripeCustomerId": customerID,
+			"user.subscription.createdAt":        primitive.NewDateTimeFromTime(time.Now()),
+			"user.subscription.updatedAt":        primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
 
@@ -3004,7 +3254,67 @@ func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
 
-	zap.S().Infof("Successfully updated subscription for user %s: %s (%s)", userID, plan, billingInterval)
+	zap.S().Infof("Successfully updated subscription for user %s: %s (%s) via stripe", userID, plan, billingInterval)
+	return nil
+}
+
+// handleCommunityPromotionCompleted handles successful community promotion payments
+func (u User) handleCommunityPromotionCompleted(checkoutSession stripe.CheckoutSession) error {
+	// Extract metadata
+	userID := checkoutSession.Metadata["userId"]
+	communityID := checkoutSession.Metadata["communityId"]
+	tier := checkoutSession.Metadata["tier"]
+	durationMonthsStr := checkoutSession.Metadata["durationMonths"]
+	promotionalText := checkoutSession.Metadata["promotionalText"]
+	promotionalDescription := checkoutSession.Metadata["promotionalDescription"]
+	expirationDateStr := checkoutSession.Metadata["expirationDate"]
+
+	if communityID == "" {
+		return fmt.Errorf("missing communityId in metadata")
+	}
+
+	durationMonths, _ := strconv.Atoi(durationMonthsStr)
+	if durationMonths == 0 {
+		durationMonths = 1
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return fmt.Errorf("invalid community ID: %v", err)
+	}
+
+	// Use expirationDate from metadata or calculate it
+	expirationDate := expirationDateStr
+	if expirationDate == "" {
+		expirationDate = time.Now().AddDate(0, durationMonths, 0).Format(time.RFC3339)
+	}
+
+	purchaseDate := time.Now().Format(time.RFC3339)
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.subscriptionCreatedBy":       userID,
+			"community.promotionalText":             promotionalText,
+			"community.promotionalDescription":      promotionalDescription,
+			"community.subscription.id":             checkoutSession.PaymentIntent.ID,
+			"community.subscription.plan":           tier,
+			"community.subscription.active":         true,
+			"community.subscription.source":         "stripe",
+			"community.subscription.purchaseDate":   purchaseDate,
+			"community.subscription.expirationDate": expirationDate,
+			"community.subscription.durationMonths": durationMonths,
+			"community.subscription.createdAt":      primitive.NewDateTimeFromTime(time.Now()),
+			"community.subscription.updatedAt":      primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = u.CDB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update community promotion: %v", err)
+	}
+
+	zap.S().Infof("Successfully updated community promotion for community %s: %s (%d months) via stripe", communityID, tier, durationMonths)
 	return nil
 }
 
@@ -3970,11 +4280,12 @@ func (u User) handleRevenueCatInitialPurchase(webhookData map[string]interface{}
 		return fmt.Errorf("missing app_user_id")
 	}
 
-	// Update user subscription status
+	// Update user subscription status with app_store source
 	filter := bson.M{"user.id": appUserID}
 	update := bson.M{
 		"$set": bson.M{
-			"user.subscription.active": true,
+			"user.subscription.active":    true,
+			"user.subscription.source":    "app_store",
 			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
@@ -3984,7 +4295,7 @@ func (u User) handleRevenueCatInitialPurchase(webhookData map[string]interface{}
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
 
-	zap.S().Infof("Updated user %s subscription to active (initial purchase)", appUserID)
+	zap.S().Infof("Updated user %s subscription to active (initial purchase via app store)", appUserID)
 	return nil
 }
 
@@ -3995,11 +4306,12 @@ func (u User) handleRevenueCatRenewal(webhookData map[string]interface{}) error 
 		return fmt.Errorf("missing app_user_id")
 	}
 
-	// Update user subscription status
+	// Update user subscription status with app_store source
 	filter := bson.M{"user.id": appUserID}
 	update := bson.M{
 		"$set": bson.M{
-			"user.subscription.active": true,
+			"user.subscription.active":    true,
+			"user.subscription.source":    "app_store",
 			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
@@ -4009,7 +4321,7 @@ func (u User) handleRevenueCatRenewal(webhookData map[string]interface{}) error 
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
 
-	zap.S().Infof("Updated user %s subscription to active (renewal)", appUserID)
+	zap.S().Infof("Updated user %s subscription to active (renewal via app store)", appUserID)
 	return nil
 }
 

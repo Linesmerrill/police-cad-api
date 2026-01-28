@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/subscription"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -2974,6 +2976,114 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// CreateCommunityCheckoutSessionHandler creates a Stripe checkout session for community promotions
+// Community promotions are one-time payments (not recurring subscriptions)
+func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID                 string `json:"userId"`
+		CommunityID            string `json:"communityId"`
+		Tier                   string `json:"tier"`           // basic, standard, premium, elite
+		DurationMonths         int    `json:"durationMonths"` // 1, 3, or 6
+		PromotionalText        string `json:"promotionalText"`
+		PromotionalDescription string `json:"promotionalDescription"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if requestBody.UserID == "" {
+		config.ErrorStatus("user ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	if requestBody.CommunityID == "" {
+		config.ErrorStatus("community ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	if requestBody.Tier == "" {
+		config.ErrorStatus("tier is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Validate duration
+	if requestBody.DurationMonths != 1 && requestBody.DurationMonths != 3 && requestBody.DurationMonths != 6 {
+		config.ErrorStatus("duration must be 1, 3, or 6 months", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Get the price ID based on tier
+	var priceID string
+	tier := strings.ToLower(requestBody.Tier)
+	switch tier {
+	case "basic":
+		priceID = os.Getenv("STRIPE_BASIC_PROMOTION_MONTHLY_PRICE_ID")
+	case "standard":
+		priceID = os.Getenv("STRIPE_STANDARD_PROMOTION_MONTHLY_PRICE_ID")
+	case "premium":
+		priceID = os.Getenv("STRIPE_PREMIUM_PROMOTION_MONTHLY_PRICE_ID")
+	case "elite":
+		priceID = os.Getenv("STRIPE_ELITE_PROMOTION_MONTHLY_PRICE_ID")
+	default:
+		config.ErrorStatus("invalid tier. Must be one of: basic, standard, premium, elite", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	if priceID == "" {
+		config.ErrorStatus("price ID for tier is not configured", http.StatusInternalServerError, w, nil)
+		return
+	}
+
+	// Calculate expiration date
+	expirationDate := time.Now().AddDate(0, requestBody.DurationMonths, 0)
+
+	// Build success/cancel URLs pointing to frontend
+	frontendURL := os.Getenv("PUBLIC_WEB_BASE_URL")
+	if frontendURL == "" {
+		frontendURL = "https://www.linespolice-cad.com"
+	}
+	successURL := fmt.Sprintf("%s/community-promotion/success?session_id={CHECKOUT_SESSION_ID}", frontendURL)
+	cancelURL := fmt.Sprintf("%s/community-promotion/cancel", frontendURL)
+
+	// Create a Stripe Checkout Session (one-time payment, not subscription)
+	params := &stripe.CheckoutSessionParams{
+		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+		Mode:               stripe.String("payment"), // One-time payment
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Price:    stripe.String(priceID),
+				Quantity: stripe.Int64(int64(requestBody.DurationMonths)), // Multiply by duration
+			},
+		},
+		Metadata: map[string]string{
+			"type":                   "community_promotion",
+			"userId":                 requestBody.UserID,
+			"communityId":            requestBody.CommunityID,
+			"tier":                   tier,
+			"durationMonths":         strconv.Itoa(requestBody.DurationMonths),
+			"promotionalText":        requestBody.PromotionalText,
+			"promotionalDescription": requestBody.PromotionalDescription,
+			"expirationDate":         expirationDate.Format(time.RFC3339),
+			"source":                 "stripe",
+		},
+		SuccessURL: stripe.String(successURL),
+		CancelURL:  stripe.String(cancelURL),
+	}
+
+	checkoutSession, err := session.New(params)
+	if err != nil {
+		config.ErrorStatus("failed to create checkout session", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"checkoutSession": checkoutSession,
+	})
 }
 
 // SubscribeCommunityHandler subscribes a community to a specific tier
