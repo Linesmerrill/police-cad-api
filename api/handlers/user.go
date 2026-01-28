@@ -3411,10 +3411,23 @@ func (u User) handleSubscriptionUpdated(event stripe.Event) error {
 		},
 	}
 
-	// Add cancelAt if subscription is set to cancel at period end
+	// Map the Price ID to plan name and billing interval if items are present
+	if len(sub.Items.Data) > 0 {
+		priceID := sub.Items.Data[0].Price.ID
+		plan, isAnnual := mapStripePriceIDToPlan(priceID)
+		if plan != "unknown" {
+			update["$set"].(bson.M)["user.subscription.plan"] = plan
+			update["$set"].(bson.M)["user.subscription.isAnnual"] = isAnnual
+			zap.S().Infof("Subscription %s plan changed to %s (annual: %v)", sub.ID, plan, isAnnual)
+		}
+	}
+
+	// Handle cancelAt: set if subscription is scheduled to cancel, clear if reactivated
 	if sub.CancelAt > 0 {
 		cancelAtTime := time.Unix(sub.CancelAt, 0)
 		update["$set"].(bson.M)["user.subscription.cancelAt"] = primitive.NewDateTimeFromTime(cancelAtTime)
+	} else {
+		update["$set"].(bson.M)["user.subscription.cancelAt"] = nil
 	}
 
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)
@@ -3424,6 +3437,26 @@ func (u User) handleSubscriptionUpdated(event stripe.Event) error {
 
 	zap.S().Infof("Successfully updated subscription %s", sub.ID)
 	return nil
+}
+
+// mapStripePriceIDToPlan maps a Stripe price ID to the plan name and whether it's annual billing
+func mapStripePriceIDToPlan(priceID string) (string, bool) {
+	switch priceID {
+	case os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID"):
+		return "base", false
+	case os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID"):
+		return "base", true
+	case os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID"):
+		return "premium", false
+	case os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID"):
+		return "premium", true
+	case os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID"):
+		return "premium_plus", false
+	case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
+		return "premium_plus", true
+	default:
+		return "unknown", false
+	}
 }
 
 // handleSubscriptionDeleted handles subscription deletions
