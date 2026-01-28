@@ -2982,12 +2982,10 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 // Community promotions are one-time payments (not recurring subscriptions)
 func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
-		UserID                 string `json:"userId"`
-		CommunityID            string `json:"communityId"`
-		Tier                   string `json:"tier"`           // basic, standard, premium, elite
-		DurationMonths         int    `json:"durationMonths"` // 1, 3, or 6
-		PromotionalText        string `json:"promotionalText"`
-		PromotionalDescription string `json:"promotionalDescription"`
+		UserID         string `json:"userId"`
+		CommunityID    string `json:"communityId"`
+		Tier           string `json:"tier"`           // basic, standard, premium, elite
+		DurationMonths int    `json:"durationMonths"` // 1, 3, or 6
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -3016,21 +3014,27 @@ func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, 
 		return
 	}
 
-	// Get the price ID based on tier
+	// Get the price ID based on tier and duration
 	var priceID string
+	var quantity int64 = 1
 	tier := strings.ToLower(requestBody.Tier)
-	switch tier {
-	case "basic":
-		priceID = os.Getenv("STRIPE_BASIC_PROMOTION_MONTHLY_PRICE_ID")
-	case "standard":
-		priceID = os.Getenv("STRIPE_STANDARD_PROMOTION_MONTHLY_PRICE_ID")
-	case "premium":
-		priceID = os.Getenv("STRIPE_PREMIUM_PROMOTION_MONTHLY_PRICE_ID")
-	case "elite":
-		priceID = os.Getenv("STRIPE_ELITE_PROMOTION_MONTHLY_PRICE_ID")
-	default:
+
+	// Validate tier
+	if tier != "basic" && tier != "standard" && tier != "premium" && tier != "elite" {
 		config.ErrorStatus("invalid tier. Must be one of: basic, standard, premium, elite", http.StatusBadRequest, w, nil)
 		return
+	}
+
+	// Try per-duration price first (for discounted bundles)
+	// Format: STRIPE_{TIER}_PROMOTION_{DURATION}MONTH_PRICE_ID
+	durationEnvKey := fmt.Sprintf("STRIPE_%s_PROMOTION_%dMONTH_PRICE_ID", strings.ToUpper(tier), requestBody.DurationMonths)
+	priceID = os.Getenv(durationEnvKey)
+
+	// Fall back to monthly price × quantity if per-duration price not configured
+	if priceID == "" {
+		monthlyEnvKey := fmt.Sprintf("STRIPE_%s_PROMOTION_MONTHLY_PRICE_ID", strings.ToUpper(tier))
+		priceID = os.Getenv(monthlyEnvKey)
+		quantity = int64(requestBody.DurationMonths)
 	}
 
 	if priceID == "" {
@@ -3056,19 +3060,17 @@ func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, 
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				Price:    stripe.String(priceID),
-				Quantity: stripe.Int64(int64(requestBody.DurationMonths)), // Multiply by duration
+				Quantity: stripe.Int64(quantity),
 			},
 		},
 		Metadata: map[string]string{
-			"type":                   "community_promotion",
-			"userId":                 requestBody.UserID,
-			"communityId":            requestBody.CommunityID,
-			"tier":                   tier,
-			"durationMonths":         strconv.Itoa(requestBody.DurationMonths),
-			"promotionalText":        requestBody.PromotionalText,
-			"promotionalDescription": requestBody.PromotionalDescription,
-			"expirationDate":         expirationDate.Format(time.RFC3339),
-			"source":                 "stripe",
+			"type":           "community_promotion",
+			"userId":         requestBody.UserID,
+			"communityId":    requestBody.CommunityID,
+			"tier":           tier,
+			"durationMonths": strconv.Itoa(requestBody.DurationMonths),
+			"expirationDate": expirationDate.Format(time.RFC3339),
+			"source":         "stripe",
 		},
 		SuccessURL: stripe.String(successURL),
 		CancelURL:  stripe.String(cancelURL),

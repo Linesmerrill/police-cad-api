@@ -3265,8 +3265,6 @@ func (u User) handleCommunityPromotionCompleted(checkoutSession stripe.CheckoutS
 	communityID := checkoutSession.Metadata["communityId"]
 	tier := checkoutSession.Metadata["tier"]
 	durationMonthsStr := checkoutSession.Metadata["durationMonths"]
-	promotionalText := checkoutSession.Metadata["promotionalText"]
-	promotionalDescription := checkoutSession.Metadata["promotionalDescription"]
 	expirationDateStr := checkoutSession.Metadata["expirationDate"]
 
 	if communityID == "" {
@@ -3294,9 +3292,7 @@ func (u User) handleCommunityPromotionCompleted(checkoutSession stripe.CheckoutS
 	filter := bson.M{"_id": cID}
 	update := bson.M{
 		"$set": bson.M{
-			"community.subscriptionCreatedBy":       userID,
-			"community.promotionalText":             promotionalText,
-			"community.promotionalDescription":      promotionalDescription,
+			"community.subscriptionCreatedBy": userID,
 			"community.subscription.id":             checkoutSession.PaymentIntent.ID,
 			"community.subscription.plan":           tier,
 			"community.subscription.active":         true,
