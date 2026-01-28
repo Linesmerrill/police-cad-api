@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/coupon"
 	"github.com/stripe/stripe-go/v82/subscription"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -41,6 +42,61 @@ var (
 	leaderboardCacheMu sync.RWMutex
 	leaderboardCache   = map[string]leaderboardCacheEntry{}
 )
+
+// communityPromotionPricing maps tier -> durationMonths -> total price in dollars.
+// Must match the frontend PRICING constant in community-pricing/page.tsx.
+var communityPromotionPricing = map[string]map[int]float64{
+	"basic":    {1: 3, 3: 7, 6: 12},
+	"standard": {1: 5, 3: 12, 6: 20},
+	"premium":  {1: 8, 3: 19, 6: 32},
+	"elite":    {1: 15, 3: 36, 6: 60},
+}
+
+// calculateProrationCredit computes the unused-value credit in cents for a boost upgrade.
+// Returns 0 if proration cannot be calculated (missing dates, expired, etc.).
+func calculateProrationCredit(sub models.Subscription) int64 {
+	if sub.PurchaseDate == "" || sub.ExpirationDate == "" || sub.DurationMonths <= 0 || sub.Plan == "" {
+		return 0
+	}
+
+	purchaseTime, err := time.Parse(time.RFC3339, sub.PurchaseDate)
+	if err != nil {
+		return 0
+	}
+	expirationTime, err := time.Parse(time.RFC3339, sub.ExpirationDate)
+	if err != nil {
+		return 0
+	}
+
+	now := time.Now()
+	if now.After(expirationTime) || now.Before(purchaseTime) {
+		return 0
+	}
+
+	totalDuration := expirationTime.Sub(purchaseTime).Seconds()
+	if totalDuration <= 0 {
+		return 0
+	}
+
+	remainingDuration := expirationTime.Sub(now).Seconds()
+	unusedFraction := remainingDuration / totalDuration
+
+	plan := strings.ToLower(sub.Plan)
+	durations, ok := communityPromotionPricing[plan]
+	if !ok {
+		return 0
+	}
+	originalPrice, ok := durations[sub.DurationMonths]
+	if !ok || originalPrice <= 0 {
+		return 0
+	}
+
+	creditCents := int64(math.Floor(originalPrice * unusedFraction * 100))
+	if creditCents < 0 {
+		creditCents = 0
+	}
+	return creditCents
+}
 
 // getStringOrDefault returns the new value if non-empty, otherwise returns the default
 func getStringOrDefault(newVal, defaultVal string) string {
@@ -3037,11 +3093,18 @@ func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, 
 		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
 		return
 	}
+	var prorationCreditCents int64
 	if community.Details.Subscription.Active {
 		currentPlan := strings.ToLower(community.Details.Subscription.Plan)
 		if tierRank[tier] < tierRank[currentPlan] {
 			config.ErrorStatus(fmt.Sprintf("cannot downgrade from %s to %s. Choose %s or higher.", currentPlan, tier, currentPlan), http.StatusBadRequest, w, nil)
 			return
+		}
+		// Calculate proration credit for upgrades (not same-tier extensions)
+		if tierRank[tier] > tierRank[currentPlan] {
+			prorationCreditCents = calculateProrationCredit(community.Details.Subscription)
+			zap.S().Infof("Proration credit for community %s upgrading from %s to %s: %d cents",
+				requestBody.CommunityID, currentPlan, tier, prorationCreditCents)
 		}
 	}
 
@@ -3094,6 +3157,42 @@ func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, 
 		},
 		SuccessURL: stripe.String(successURL),
 		CancelURL:  stripe.String(cancelURL),
+	}
+
+	// Apply proration coupon for upgrades
+	if prorationCreditCents > 0 {
+		// Cap credit so minimum charge is $0.50 (50 cents)
+		newPriceDollars, _ := communityPromotionPricing[tier][requestBody.DurationMonths]
+		newPriceCents := int64(newPriceDollars * 100)
+		maxCredit := newPriceCents - 50
+		if maxCredit < 0 {
+			maxCredit = 0
+		}
+		if prorationCreditCents > maxCredit {
+			prorationCreditCents = maxCredit
+		}
+
+		if prorationCreditCents > 0 {
+			couponParams := &stripe.CouponParams{
+				AmountOff:      stripe.Int64(prorationCreditCents),
+				Currency:       stripe.String("usd"),
+				Duration:       stripe.String(string(stripe.CouponDurationOnce)),
+				MaxRedemptions: stripe.Int64(1),
+				Name:           stripe.String(fmt.Sprintf("Upgrade credit: %s to %s", community.Details.Subscription.Plan, tier)),
+			}
+			couponParams.RedeemBy = stripe.Int64(time.Now().Add(1 * time.Hour).Unix())
+
+			createdCoupon, couponErr := coupon.New(couponParams)
+			if couponErr != nil {
+				zap.S().Errorf("Failed to create proration coupon for community %s: %v", requestBody.CommunityID, couponErr)
+			} else {
+				params.Discounts = []*stripe.CheckoutSessionDiscountParams{
+					{Coupon: stripe.String(createdCoupon.ID)},
+				}
+				params.Metadata["prorationCreditCents"] = strconv.FormatInt(prorationCreditCents, 10)
+				params.Metadata["previousPlan"] = community.Details.Subscription.Plan
+			}
+		}
 	}
 
 	checkoutSession, err := session.New(params)
