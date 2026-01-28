@@ -3281,13 +3281,29 @@ func (u User) handleCommunityPromotionCompleted(checkoutSession stripe.CheckoutS
 		return fmt.Errorf("invalid community ID: %v", err)
 	}
 
-	// Use expirationDate from metadata or calculate it
-	expirationDate := expirationDateStr
-	if expirationDate == "" {
-		expirationDate = time.Now().AddDate(0, durationMonths, 0).Format(time.RFC3339)
-	}
-
 	purchaseDate := time.Now().Format(time.RFC3339)
+
+	// Determine expiration date based on whether this is a same-tier extension
+	var expirationDate string
+	community, fetchErr := u.CDB.FindOne(context.Background(), bson.M{"_id": cID})
+	if fetchErr == nil && community.Details.Subscription.Active &&
+		strings.EqualFold(community.Details.Subscription.Plan, tier) {
+		// Same tier: extend from current expiration date (or now if already expired)
+		baseTime := time.Now()
+		if community.Details.Subscription.ExpirationDate != "" {
+			if parsed, parseErr := time.Parse(time.RFC3339, community.Details.Subscription.ExpirationDate); parseErr == nil && parsed.After(baseTime) {
+				baseTime = parsed
+			}
+		}
+		expirationDate = baseTime.AddDate(0, durationMonths, 0).Format(time.RFC3339)
+		zap.S().Infof("Extending same-tier boost (%s) for community %s: new expiration %s", tier, communityID, expirationDate)
+	} else {
+		// New or upgrade: use metadata expiration or calculate from now
+		expirationDate = expirationDateStr
+		if expirationDate == "" {
+			expirationDate = time.Now().AddDate(0, durationMonths, 0).Format(time.RFC3339)
+		}
+	}
 
 	filter := bson.M{"_id": cID}
 	update := bson.M{

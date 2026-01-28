@@ -3025,6 +3025,26 @@ func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, 
 		return
 	}
 
+	// Block downgrades: fetch community and compare tier ranks
+	tierRank := map[string]int{"basic": 1, "standard": 2, "premium": 3, "elite": 4}
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if community.Details.Subscription.Active {
+		currentPlan := strings.ToLower(community.Details.Subscription.Plan)
+		if tierRank[tier] < tierRank[currentPlan] {
+			config.ErrorStatus(fmt.Sprintf("cannot downgrade from %s to %s. Choose %s or higher.", currentPlan, tier, currentPlan), http.StatusBadRequest, w, nil)
+			return
+		}
+	}
+
 	// Try per-duration price first (for discounted bundles)
 	// Format: STRIPE_{TIER}_PROMOTION_{DURATION}MONTH_PRICE_ID
 	durationEnvKey := fmt.Sprintf("STRIPE_%s_PROMOTION_%dMONTH_PRICE_ID", strings.ToUpper(tier), requestBody.DurationMonths)
