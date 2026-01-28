@@ -2804,6 +2804,7 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 			AnnualPrice:  85,
 			Features:     []string{"10 communities", "Verified badge", "50% fewer ads"},
 			Color:        "#667eea",
+			Popular:      true,
 		},
 		{
 			Name:         "Premium Plus",
@@ -2812,7 +2813,6 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 			AnnualPrice:  209,
 			Features:     []string{"Unlimited communities", "Custom departments", "No ads", "Verified badge"},
 			Color:        "#fbbf24",
-			Popular:      true,
 		},
 	}
 
