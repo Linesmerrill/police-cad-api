@@ -455,6 +455,7 @@ func (f Firearm) DeleteFirearmHandler(w http.ResponseWriter, r *http.Request) {
 func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	serialNumber := r.URL.Query().Get("serialNumber")
+	weaponType := r.URL.Query().Get("weaponType")
 	communityID := r.URL.Query().Get("communityId")
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || Limit <= 0 {
@@ -480,6 +481,9 @@ func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if serialNumber != "" {
 		orConditions = append(orConditions, bson.M{"firearm.serialNumber": bson.M{"$regex": "^" + serialNumber, "$options": "i"}}) // Prefix match is faster
+	}
+	if weaponType != "" {
+		orConditions = append(orConditions, bson.M{"firearm.weaponType": bson.M{"$regex": "^" + weaponType, "$options": "i"}}) // Prefix match is faster
 	}
 	
 	if len(orConditions) > 0 {
