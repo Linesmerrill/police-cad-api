@@ -4255,6 +4255,119 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(response)
 }
 
+// BoostCommunitiesHandler returns a user's communities with subscription data for the boost pricing page.
+// Supports search by name and pagination. This is a dedicated endpoint that does not affect
+// FetchUserCommunitiesHandler or CommunitiesByOwnerIDHandler.
+func (u User) BoostCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+	search := r.URL.Query().Get("search")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 20
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Fetch user document to get their community memberships
+	var user models.User
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Collect approved community IDs
+	var communityIDs []primitive.ObjectID
+	for _, c := range user.Details.Communities {
+		if strings.EqualFold(c.Status, "approved") {
+			cID, parseErr := primitive.ObjectIDFromHex(c.CommunityID)
+			if parseErr == nil {
+				communityIDs = append(communityIDs, cID)
+			}
+		}
+	}
+
+	if len(communityIDs) == 0 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("[]"))
+		return
+	}
+
+	// Build filter: must be in user's communities, optionally filter by name
+	filter := bson.M{"_id": bson.M{"$in": communityIDs}}
+	if search != "" {
+		filter["community.name"] = bson.M{"$regex": search, "$options": "i"}
+	}
+
+	// Only fetch the fields the boost page needs
+	projection := bson.M{
+		"community.name":                       1,
+		"community.subscription.active":        1,
+		"community.subscription.plan":          1,
+		"community.subscription.purchaseDate":  1,
+		"community.subscription.expirationDate": 1,
+		"community.subscription.durationMonths": 1,
+	}
+
+	opts := options.Find().SetLimit(int64(limit)).SetProjection(projection)
+	cursor, err := u.CDB.Find(ctx, filter, opts)
+	if err != nil {
+		config.ErrorStatus("failed to fetch communities", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	// Decode into lightweight struct matching frontend Community interface
+	var results []struct {
+		ID        primitive.ObjectID `json:"_id" bson:"_id"`
+		Community struct {
+			Name         string `json:"name" bson:"name"`
+			Subscription struct {
+				Active         bool   `json:"active" bson:"active"`
+				Plan           string `json:"plan" bson:"plan"`
+				PurchaseDate   string `json:"purchaseDate" bson:"purchaseDate"`
+				ExpirationDate string `json:"expirationDate" bson:"expirationDate"`
+				DurationMonths int    `json:"durationMonths" bson:"durationMonths"`
+			} `json:"subscription" bson:"subscription"`
+		} `json:"community" bson:"community"`
+	}
+	if err = cursor.All(ctx, &results); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if results == nil {
+		results = make([]struct {
+			ID        primitive.ObjectID `json:"_id" bson:"_id"`
+			Community struct {
+				Name         string `json:"name" bson:"name"`
+				Subscription struct {
+					Active         bool   `json:"active" bson:"active"`
+					Plan           string `json:"plan" bson:"plan"`
+					PurchaseDate   string `json:"purchaseDate" bson:"purchaseDate"`
+					ExpirationDate string `json:"expirationDate" bson:"expirationDate"`
+					DurationMonths int    `json:"durationMonths" bson:"durationMonths"`
+				} `json:"subscription" bson:"subscription"`
+			} `json:"community" bson:"community"`
+		}, 0)
+	}
+
+	b, err := json.Marshal(results)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
 // HandleRevenueCatWebhook handles RevenueCat webhook events for subscription management
 func (u User) HandleRevenueCatWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := ioutil.ReadAll(r.Body)
