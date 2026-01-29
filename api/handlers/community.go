@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/coupon"
 	"github.com/stripe/stripe-go/v82/subscription"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -39,6 +42,61 @@ var (
 	leaderboardCacheMu sync.RWMutex
 	leaderboardCache   = map[string]leaderboardCacheEntry{}
 )
+
+// communityPromotionPricing maps tier -> durationMonths -> total price in dollars.
+// Must match the frontend PRICING constant in community-pricing/page.tsx.
+var communityPromotionPricing = map[string]map[int]float64{
+	"basic":    {1: 3, 3: 7, 6: 12},
+	"standard": {1: 5, 3: 12, 6: 20},
+	"premium":  {1: 8, 3: 19, 6: 32},
+	"elite":    {1: 15, 3: 36, 6: 60},
+}
+
+// calculateProrationCredit computes the unused-value credit in cents for a boost upgrade.
+// Returns 0 if proration cannot be calculated (missing dates, expired, etc.).
+func calculateProrationCredit(sub models.Subscription) int64 {
+	if sub.PurchaseDate == "" || sub.ExpirationDate == "" || sub.DurationMonths <= 0 || sub.Plan == "" {
+		return 0
+	}
+
+	purchaseTime, err := time.Parse(time.RFC3339, sub.PurchaseDate)
+	if err != nil {
+		return 0
+	}
+	expirationTime, err := time.Parse(time.RFC3339, sub.ExpirationDate)
+	if err != nil {
+		return 0
+	}
+
+	now := time.Now()
+	if now.After(expirationTime) || now.Before(purchaseTime) {
+		return 0
+	}
+
+	totalDuration := expirationTime.Sub(purchaseTime).Seconds()
+	if totalDuration <= 0 {
+		return 0
+	}
+
+	remainingDuration := expirationTime.Sub(now).Seconds()
+	unusedFraction := remainingDuration / totalDuration
+
+	plan := strings.ToLower(sub.Plan)
+	durations, ok := communityPromotionPricing[plan]
+	if !ok {
+		return 0
+	}
+	originalPrice, ok := durations[sub.DurationMonths]
+	if !ok || originalPrice <= 0 {
+		return 0
+	}
+
+	creditCents := int64(math.Floor(originalPrice * unusedFraction * 100))
+	if creditCents < 0 {
+		creditCents = 0
+	}
+	return creditCents
+}
 
 // getStringOrDefault returns the new value if non-empty, otherwise returns the default
 func getStringOrDefault(newVal, defaultVal string) string {
@@ -2974,6 +3032,179 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// CreateCommunityCheckoutSessionHandler creates a Stripe checkout session for community promotions
+// Community promotions are one-time payments (not recurring subscriptions)
+func (c Community) CreateCommunityCheckoutSessionHandler(w http.ResponseWriter, r *http.Request) {
+	var requestBody struct {
+		UserID         string `json:"userId"`
+		CommunityID    string `json:"communityId"`
+		Tier           string `json:"tier"`           // basic, standard, premium, elite
+		DurationMonths int    `json:"durationMonths"` // 1, 3, or 6
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if requestBody.UserID == "" {
+		config.ErrorStatus("user ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	if requestBody.CommunityID == "" {
+		config.ErrorStatus("community ID is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	if requestBody.Tier == "" {
+		config.ErrorStatus("tier is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Validate duration
+	if requestBody.DurationMonths != 1 && requestBody.DurationMonths != 3 && requestBody.DurationMonths != 6 {
+		config.ErrorStatus("duration must be 1, 3, or 6 months", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Get the price ID based on tier and duration
+	var priceID string
+	var quantity int64 = 1
+	tier := strings.ToLower(requestBody.Tier)
+
+	// Validate tier
+	if tier != "basic" && tier != "standard" && tier != "premium" && tier != "elite" {
+		config.ErrorStatus("invalid tier. Must be one of: basic, standard, premium, elite", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Block downgrades: fetch community and compare tier ranks
+	tierRank := map[string]int{"basic": 1, "standard": 2, "premium": 3, "elite": 4}
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	var prorationCreditCents int64
+	if community.Details.Subscription.Active {
+		currentPlan := strings.ToLower(community.Details.Subscription.Plan)
+		if tierRank[tier] < tierRank[currentPlan] {
+			config.ErrorStatus(fmt.Sprintf("cannot downgrade from %s to %s. Choose %s or higher.", currentPlan, tier, currentPlan), http.StatusBadRequest, w, nil)
+			return
+		}
+		// Calculate proration credit for upgrades (not same-tier extensions)
+		if tierRank[tier] > tierRank[currentPlan] {
+			prorationCreditCents = calculateProrationCredit(community.Details.Subscription)
+			zap.S().Infof("Proration credit for community %s upgrading from %s to %s: %d cents",
+				requestBody.CommunityID, currentPlan, tier, prorationCreditCents)
+		}
+	}
+
+	// Try per-duration price first (for discounted bundles)
+	// Format: STRIPE_{TIER}_PROMOTION_{DURATION}MONTH_PRICE_ID
+	durationEnvKey := fmt.Sprintf("STRIPE_%s_PROMOTION_%dMONTH_PRICE_ID", strings.ToUpper(tier), requestBody.DurationMonths)
+	priceID = os.Getenv(durationEnvKey)
+
+	// Fall back to monthly price × quantity if per-duration price not configured
+	if priceID == "" {
+		monthlyEnvKey := fmt.Sprintf("STRIPE_%s_PROMOTION_MONTHLY_PRICE_ID", strings.ToUpper(tier))
+		priceID = os.Getenv(monthlyEnvKey)
+		quantity = int64(requestBody.DurationMonths)
+	}
+
+	if priceID == "" {
+		config.ErrorStatus("price ID for tier is not configured", http.StatusInternalServerError, w, nil)
+		return
+	}
+
+	// Calculate expiration date
+	expirationDate := time.Now().AddDate(0, requestBody.DurationMonths, 0)
+
+	// Build success/cancel URLs pointing to frontend
+	frontendURL := os.Getenv("PUBLIC_WEB_BASE_URL")
+	if frontendURL == "" {
+		frontendURL = "https://www.linespolice-cad.com"
+	}
+	successURL := fmt.Sprintf("%s/community-promotion/success?session_id={CHECKOUT_SESSION_ID}", frontendURL)
+	cancelURL := fmt.Sprintf("%s/community-promotion/cancel", frontendURL)
+
+	// Create a Stripe Checkout Session (one-time payment, not subscription)
+	params := &stripe.CheckoutSessionParams{
+		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+		Mode:               stripe.String("payment"), // One-time payment
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Price:    stripe.String(priceID),
+				Quantity: stripe.Int64(quantity),
+			},
+		},
+		Metadata: map[string]string{
+			"type":           "community_promotion",
+			"userId":         requestBody.UserID,
+			"communityId":    requestBody.CommunityID,
+			"tier":           tier,
+			"durationMonths": strconv.Itoa(requestBody.DurationMonths),
+			"expirationDate": expirationDate.Format(time.RFC3339),
+			"source":         "stripe",
+		},
+		SuccessURL: stripe.String(successURL),
+		CancelURL:  stripe.String(cancelURL),
+	}
+
+	// Apply proration coupon for upgrades
+	if prorationCreditCents > 0 {
+		// Cap credit so minimum charge is $0.50 (50 cents)
+		newPriceDollars, _ := communityPromotionPricing[tier][requestBody.DurationMonths]
+		newPriceCents := int64(newPriceDollars * 100)
+		maxCredit := newPriceCents - 50
+		if maxCredit < 0 {
+			maxCredit = 0
+		}
+		if prorationCreditCents > maxCredit {
+			prorationCreditCents = maxCredit
+		}
+
+		if prorationCreditCents > 0 {
+			couponParams := &stripe.CouponParams{
+				AmountOff:      stripe.Int64(prorationCreditCents),
+				Currency:       stripe.String("usd"),
+				Duration:       stripe.String(string(stripe.CouponDurationOnce)),
+				MaxRedemptions: stripe.Int64(1),
+				Name:           stripe.String(fmt.Sprintf("Upgrade credit: %s to %s", community.Details.Subscription.Plan, tier)),
+			}
+			couponParams.RedeemBy = stripe.Int64(time.Now().Add(1 * time.Hour).Unix())
+
+			createdCoupon, couponErr := coupon.New(couponParams)
+			if couponErr != nil {
+				zap.S().Errorf("Failed to create proration coupon for community %s: %v", requestBody.CommunityID, couponErr)
+			} else {
+				params.Discounts = []*stripe.CheckoutSessionDiscountParams{
+					{Coupon: stripe.String(createdCoupon.ID)},
+				}
+				params.Metadata["prorationCreditCents"] = strconv.FormatInt(prorationCreditCents, 10)
+				params.Metadata["previousPlan"] = community.Details.Subscription.Plan
+			}
+		}
+	}
+
+	checkoutSession, err := session.New(params)
+	if err != nil {
+		config.ErrorStatus("failed to create checkout session", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"checkoutSession": checkoutSession,
+	})
 }
 
 // SubscribeCommunityHandler subscribes a community to a specific tier

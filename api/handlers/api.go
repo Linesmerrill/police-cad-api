@@ -252,6 +252,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{user_id}/update-status", api.Middleware(http.HandlerFunc(u.UpdateFriendStatusHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.GetUserCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.FetchUserCommunitiesHandler))).Methods("GET")
+	apiV2.Handle("/user/{userId}/boost-communities", api.Middleware(http.HandlerFunc(u.BoostCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.AddCommunityToUserHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/random-communities", api.Middleware(http.HandlerFunc(u.GetRandomCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/prioritized-communities", api.Middleware(http.HandlerFunc(u.GetPrioritizedCommunitiesHandler))).Methods("GET")
@@ -306,6 +307,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/civilians/user/{user_id}", api.Middleware(http.HandlerFunc(civ.CiviliansByUserIDHandler))).Methods("GET")
 	apiCreate.Handle("/civilians/search", api.Middleware(http.HandlerFunc(civ.CiviliansByNameSearchHandler))).Methods("GET")
 	apiV2.Handle("/civilians/search", api.Middleware(http.HandlerFunc(civ.CiviliansSearchHandlerV2))).Methods("POST")
+	apiV2.Handle("/civilians/user/{user_id}", api.Middleware(http.HandlerFunc(civ.CiviliansByUserIDHandlerV2))).Methods("GET")
+	apiV2.Handle("/vehicles/user/{user_id}", api.Middleware(http.HandlerFunc(v.VehiclesByUserIDHandlerV2))).Methods("GET")
+	apiV2.Handle("/firearms/user/{user_id}", api.Middleware(http.HandlerFunc(f.FirearmsByUserIDHandlerV2))).Methods("GET")
 
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.VehicleByIDHandler))).Methods("GET")
 	apiCreate.Handle("/vehicle/{vehicle_id}", api.Middleware(http.HandlerFunc(v.UpdateVehicleHandler))).Methods("PUT")
@@ -447,6 +451,15 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/cancel", http.HandlerFunc(u.handleCancelRedirect)).Methods("GET")
 	apiCreate.Handle("/webhook-subscription-deleted", http.HandlerFunc(u.HandleRevenueCatWebhook)).Methods("POST")
 	apiCreate.Handle("/webhook/stripe", http.HandlerFunc(u.HandleStripeWebhook)).Methods("POST")
+
+	// Subscription tier routes (public - no auth required)
+	apiCreate.Handle("/subscription/tiers", http.HandlerFunc(u.GetSubscriptionTiersHandler)).Methods("GET")
+	apiCreate.Handle("/subscription/community-tiers", http.HandlerFunc(u.GetCommunityTiersHandler)).Methods("GET")
+
+	// Additional subscription management routes
+	apiCreate.Handle("/user/check-subscription-source", api.Middleware(http.HandlerFunc(u.CheckSubscriptionSourceHandler))).Methods("POST")
+	apiCreate.Handle("/user/create-portal-session", api.Middleware(http.HandlerFunc(u.CreatePortalSessionHandler))).Methods("POST")
+	apiCreate.Handle("/community/create-checkout-session", api.Middleware(http.HandlerFunc(c.CreateCommunityCheckoutSessionHandler))).Methods("POST")
 
 	// Websocket routes
 	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")

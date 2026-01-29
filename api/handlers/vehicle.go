@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -151,6 +152,98 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 		dbResp = []models.Vehicle{}
 	}
 	b, err := json.Marshal(dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// VehiclesByUserIDHandlerV2 returns paginated vehicles with totalCount metadata
+func (v Vehicle) VehiclesByUserIDHandlerV2(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+	activeCommunityID := r.URL.Query().Get("active_community_id")
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page * Limit)
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	var filter bson.M
+	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
+		filter = bson.M{
+			"vehicle.userID":            userID,
+			"vehicle.activeCommunityID": activeCommunityID,
+		}
+	} else {
+		filter = bson.M{
+			"vehicle.userID": userID,
+			"$or": []bson.M{
+				{"vehicle.activeCommunityID": nil},
+				{"vehicle.activeCommunityID": ""},
+			},
+		}
+	}
+
+	type findResult struct {
+		vehicles []models.Vehicle
+		err      error
+	}
+	type countResult struct {
+		count int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	go func() {
+		vehicles, err := v.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+		findChan <- findResult{vehicles: vehicles, err: err}
+	}()
+
+	go func() {
+		count, err := v.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{count: count, err: err}
+	}()
+
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get vehicles", http.StatusNotFound, w, findRes.err)
+		return
+	}
+
+	dbResp := findRes.vehicles
+	var totalCount int64
+	if countRes.err != nil {
+		totalCount = int64(len(dbResp))
+	} else {
+		totalCount = countRes.count
+	}
+
+	if len(dbResp) == 0 {
+		dbResp = []models.Vehicle{}
+	}
+
+	totalPages := int(math.Ceil(float64(totalCount) / float64(Limit)))
+
+	response := map[string]interface{}{
+		"data":       dbResp,
+		"page":       Page,
+		"limit":      Limit,
+		"totalCount": totalCount,
+		"totalPages": totalPages,
+	}
+
+	b, err := json.Marshal(response)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -155,6 +156,98 @@ func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 		dbResp = []models.Firearm{}
 	}
 	b, err := json.Marshal(dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// FirearmsByUserIDHandlerV2 returns paginated firearms with totalCount metadata
+func (f Firearm) FirearmsByUserIDHandlerV2(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+	activeCommunityID := r.URL.Query().Get("active_community_id")
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page * Limit)
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	var filter bson.M
+	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
+		filter = bson.M{
+			"firearm.userID":            userID,
+			"firearm.activeCommunityID": activeCommunityID,
+		}
+	} else {
+		filter = bson.M{
+			"firearm.userID": userID,
+			"$or": []bson.M{
+				{"firearm.activeCommunityID": nil},
+				{"firearm.activeCommunityID": ""},
+			},
+		}
+	}
+
+	type findResult struct {
+		firearms []models.Firearm
+		err      error
+	}
+	type countResult struct {
+		count int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	go func() {
+		firearms, err := f.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+		findChan <- findResult{firearms: firearms, err: err}
+	}()
+
+	go func() {
+		count, err := f.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{count: count, err: err}
+	}()
+
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get firearms", http.StatusNotFound, w, findRes.err)
+		return
+	}
+
+	dbResp := findRes.firearms
+	var totalCount int64
+	if countRes.err != nil {
+		totalCount = int64(len(dbResp))
+	} else {
+		totalCount = countRes.count
+	}
+
+	if len(dbResp) == 0 {
+		dbResp = []models.Firearm{}
+	}
+
+	totalPages := int(math.Ceil(float64(totalCount) / float64(Limit)))
+
+	response := map[string]interface{}{
+		"data":       dbResp,
+		"page":       Page,
+		"limit":      Limit,
+		"totalCount": totalCount,
+		"totalPages": totalPages,
+	}
+
+	b, err := json.Marshal(response)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return

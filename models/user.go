@@ -52,6 +52,8 @@ type Subscription struct {
 	ID                 string      `json:"id" bson:"id"`
 	Plan               string      `json:"plan" bson:"plan"`
 	Active             bool        `json:"active" bson:"active"`
+	Source             string      `json:"source" bson:"source"`                     // "stripe" | "app_store" | "" (empty for legacy)
+	StripeCustomerID   string      `json:"stripeCustomerId" bson:"stripeCustomerId"` // Stripe customer ID for portal access
 	CancelAt           interface{} `json:"cancelAt" bson:"cancelAt"`
 	CurrentPeriodStart interface{} `json:"currentPeriodStart" bson:"currentPeriodStart"`
 	CurrentPeriodEnd   interface{} `json:"currentPeriodEnd" bson:"currentPeriodEnd"`
@@ -61,11 +63,6 @@ type Subscription struct {
 	IsAnnual           bool        `json:"isAnnual" bson:"isAnnual"`
 	CreatedAt          interface{} `json:"createdAt" bson:"createdAt"`
 	UpdatedAt          interface{} `json:"updatedAt" bson:"updatedAt"`
-	// Ads               string             `json:"ads" bson:"ads"`
-	// CustomDepartments bool               `json:"customDepartments" bson:"customDepartments"`
-	// Verified          bool               `json:"verified" bson:"verified"`
-	// CommunitiesLimit  int                `json:"communitiesLimit" bson:"communitiesLimit"`
-	// ExpiresAt         primitive.DateTime `json:"expiresAt" bson:"expiresAt"`
 }
 
 // Friend holds the structure for a friend

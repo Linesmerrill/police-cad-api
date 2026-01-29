@@ -167,6 +167,98 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 	w.Write(b)
 }
 
+// CiviliansByUserIDHandlerV2 returns paginated civilians with totalCount metadata
+func (c Civilian) CiviliansByUserIDHandlerV2(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+	activeCommunityID := r.URL.Query().Get("active_community_id")
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
+	}
+	limit64 := int64(Limit)
+	Page = getPage(Page, r)
+	skip64 := int64(Page * Limit)
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	var filter bson.M
+	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
+		filter = bson.M{
+			"civilian.userID":            userID,
+			"civilian.activeCommunityID": activeCommunityID,
+		}
+	} else {
+		filter = bson.M{
+			"civilian.userID": userID,
+			"$or": []bson.M{
+				{"civilian.activeCommunityID": nil},
+				{"civilian.activeCommunityID": ""},
+			},
+		}
+	}
+
+	type findResult struct {
+		civilians []models.Civilian
+		err       error
+	}
+	type countResult struct {
+		count int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	go func() {
+		civilians, err := c.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+		findChan <- findResult{civilians: civilians, err: err}
+	}()
+
+	go func() {
+		count, err := c.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{count: count, err: err}
+	}()
+
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to get civilians", http.StatusNotFound, w, findRes.err)
+		return
+	}
+
+	dbResp := findRes.civilians
+	var totalCount int64
+	if countRes.err != nil {
+		totalCount = int64(len(dbResp))
+	} else {
+		totalCount = countRes.count
+	}
+
+	if len(dbResp) == 0 {
+		dbResp = []models.Civilian{}
+	}
+
+	totalPages := int(math.Ceil(float64(totalCount) / float64(Limit)))
+
+	response := map[string]interface{}{
+		"data":       dbResp,
+		"page":       Page,
+		"limit":      Limit,
+		"totalCount": totalCount,
+		"totalPages": totalPages,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
 // CiviliansByNameSearchHandler returns paginated list of civilians that match the given name
 func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Request) {
 	firstName := r.URL.Query().Get("first_name")
