@@ -114,6 +114,8 @@ type Community struct {
 	IDB      databases.InviteCodeDatabase
 	UPDB     databases.UserPreferencesDatabase
 	CDB      databases.CivilianDatabase
+	VDB      databases.VehicleDatabase
+	FDB      databases.FirearmDatabase
 	DBHelper databases.DatabaseHelper
 }
 
@@ -5241,6 +5243,170 @@ func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http
 			"currentPage": page,
 			"totalPages":  totalPages,
 			"totalCount":  totalCivilians,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+			"limit":       limit,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetCommunityVehiclesHandlerV2 returns paginated vehicles for a community
+func (c Community) GetCommunityVehiclesHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	offset := (page - 1) * limit
+
+	filter := bson.M{"vehicle.activeCommunityID": communityID}
+
+	totalVehicles, err := c.VDB.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count vehicles", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	opts := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.D{{"vehicle.createdAt", -1}})
+	vehicles, err := c.VDB.Find(context.Background(), filter, opts)
+	if err != nil {
+		config.ErrorStatus("failed to get vehicles", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Populate user details for each vehicle
+	var populatedVehicles []map[string]interface{}
+	for _, vehicle := range vehicles {
+		var userDetails map[string]interface{}
+		if vehicle.Details.UserID != "" {
+			userObjID, err := primitive.ObjectIDFromHex(vehicle.Details.UserID)
+			if err == nil {
+				var user models.User
+				err = c.UDB.FindOne(context.Background(), bson.M{"_id": userObjID}).Decode(&user)
+				if err == nil {
+					userDetails = map[string]interface{}{
+						"id":       user.ID,
+						"username": user.Details.Username,
+						"email":    user.Details.Email,
+					}
+				}
+			}
+		}
+
+		populatedVehicle := map[string]interface{}{
+			"_id":     vehicle.ID,
+			"vehicle": vehicle.Details,
+			"user":    userDetails,
+			"__v":     vehicle.Version,
+		}
+		populatedVehicles = append(populatedVehicles, populatedVehicle)
+	}
+
+	totalPages := int((totalVehicles + int64(limit) - 1) / int64(limit))
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	response := map[string]interface{}{
+		"vehicles": populatedVehicles,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalVehicles,
+			"hasNextPage": hasNextPage,
+			"hasPrevPage": hasPrevPage,
+			"limit":       limit,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetCommunityFirearmsHandlerV2 returns paginated firearms for a community
+func (c Community) GetCommunityFirearmsHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	offset := (page - 1) * limit
+
+	filter := bson.M{"firearm.activeCommunityID": communityID}
+
+	totalFirearms, err := c.FDB.CountDocuments(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to count firearms", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	opts := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.D{{"firearm.createdAt", -1}})
+	firearms, err := c.FDB.Find(context.Background(), filter, opts)
+	if err != nil {
+		config.ErrorStatus("failed to get firearms", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Populate user details for each firearm
+	var populatedFirearms []map[string]interface{}
+	for _, firearm := range firearms {
+		var userDetails map[string]interface{}
+		if firearm.Details.UserID != "" {
+			userObjID, err := primitive.ObjectIDFromHex(firearm.Details.UserID)
+			if err == nil {
+				var user models.User
+				err = c.UDB.FindOne(context.Background(), bson.M{"_id": userObjID}).Decode(&user)
+				if err == nil {
+					userDetails = map[string]interface{}{
+						"id":       user.ID,
+						"username": user.Details.Username,
+						"email":    user.Details.Email,
+					}
+				}
+			}
+		}
+
+		populatedFirearm := map[string]interface{}{
+			"_id":     firearm.ID,
+			"firearm": firearm.Details,
+			"user":    userDetails,
+			"__v":     firearm.Version,
+		}
+		populatedFirearms = append(populatedFirearms, populatedFirearm)
+	}
+
+	totalPages := int((totalFirearms + int64(limit) - 1) / int64(limit))
+	hasNextPage := page < totalPages
+	hasPrevPage := page > 1
+
+	response := map[string]interface{}{
+		"firearms": populatedFirearms,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  totalFirearms,
 			"hasNextPage": hasNextPage,
 			"hasPrevPage": hasPrevPage,
 			"limit":       limit,
