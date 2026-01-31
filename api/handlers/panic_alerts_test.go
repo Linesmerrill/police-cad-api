@@ -13,6 +13,8 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestCreatePanicAlertHandler(t *testing.T) {
@@ -276,6 +278,16 @@ func TestClearPanicAlertHandler(t *testing.T) {
 			},
 			expectedStatus: http.StatusOK,
 			mockSetup: func(mockDB *mocks.CommunityDatabase) {
+				cID, _ := primitive.ObjectIDFromHex("507f1f77bcf86cd799439011")
+				community := &models.Community{
+					ID: cID,
+					Details: models.CommunityDetails{
+						ActivePanicAlerts: []models.PanicAlert{
+							{AlertID: "alert123", UserID: "user456"},
+						},
+					},
+				}
+				mockDB.On("FindOne", mock.Anything, bson.M{"_id": cID, "community.activePanicAlerts.alertId": "alert123"}).Return(community, nil)
 				mockDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			},
 		},
@@ -307,6 +319,16 @@ func TestClearPanicAlertHandler(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "failed to clear panic alert",
 			mockSetup: func(mockDB *mocks.CommunityDatabase) {
+				cID, _ := primitive.ObjectIDFromHex("507f1f77bcf86cd799439011")
+				community := &models.Community{
+					ID: cID,
+					Details: models.CommunityDetails{
+						ActivePanicAlerts: []models.PanicAlert{
+							{AlertID: "alert123", UserID: "user456"},
+						},
+					},
+				}
+				mockDB.On("FindOne", mock.Anything, mock.Anything).Return(community, nil)
 				mockDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("database error"))
 			},
 		},

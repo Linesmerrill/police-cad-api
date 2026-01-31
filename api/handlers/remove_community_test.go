@@ -1,7 +1,6 @@
 package handlers_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -70,13 +69,13 @@ func TestUser_RemoveCommunityFromUserHandler_Success(t *testing.T) {
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *mockUser
 	}).Return(nil)
-	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update (removing community from user's communities array)
-	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
 	// Mock successful community membersCount decrement
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
 	
 	// Mock community find for role removal
 	mockCommunity := &models.Community{
@@ -96,10 +95,10 @@ func TestUser_RemoveCommunityFromUserHandler_Success(t *testing.T) {
 			},
 		},
 	}
-	mockCommunityDB.On("FindOne", context.Background(), bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
 	
 	// Mock role member removal for each role
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(nil).Times(2)
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(nil).Times(2)
 	
 	// Create handler
 	u := handlers.User{
@@ -291,10 +290,10 @@ func TestUser_RemoveCommunityFromUserHandler_UserUpdateFailure(t *testing.T) {
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *mockUser
 	}).Return(nil)
-	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock failed user update
-	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(nil, errors.New("database error"))
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(nil, errors.New("database error"))
 	
 	// Create handler
 	u := handlers.User{
@@ -367,13 +366,13 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityUpdateFailure(t *testing.T
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *mockUser
 	}).Return(nil)
-	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
-	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
 	// Mock failed community update
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(errors.New("database error"))
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(errors.New("database error"))
 	
 	// Create handler
 	u := handlers.User{
@@ -447,13 +446,13 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) 
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *mockUser
 	}).Return(nil)
-	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
-	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
 	// Mock successful community update
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
 	
 	// Mock failed community find - return a valid community but with an error to avoid nil pointer dereference
 	mockCommunity := &models.Community{
@@ -462,7 +461,7 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) 
 			Roles: []models.Role{},
 		},
 	}
-	mockCommunityDB.On("FindOne", context.Background(), bson.M{"_id": communityObjectID}).Return(mockCommunity, errors.New("database error"))
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).Return(mockCommunity, errors.New("database error"))
 	
 	// Create handler
 	u := handlers.User{
@@ -537,13 +536,13 @@ func TestUser_RemoveCommunityFromUserHandler_RoleUpdateFailure(t *testing.T) {
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *mockUser
 	}).Return(nil)
-	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
-	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
 	// Mock successful community update
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
 	
 	// Mock successful community find
 	mockCommunity := &models.Community{
@@ -558,10 +557,10 @@ func TestUser_RemoveCommunityFromUserHandler_RoleUpdateFailure(t *testing.T) {
 			},
 		},
 	}
-	mockCommunityDB.On("FindOne", context.Background(), bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
 	
 	// Mock failed role update
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(errors.New("database error"))
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(errors.New("database error"))
 	
 	// Create handler
 	u := handlers.User{
@@ -635,13 +634,13 @@ func TestUser_RemoveCommunityFromUserHandler_NoRoles(t *testing.T) {
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *mockUser
 	}).Return(nil)
-	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
-	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
 	// Mock successful community update
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
 	
 	// Mock community find with no roles
 	mockCommunity := &models.Community{
@@ -650,7 +649,7 @@ func TestUser_RemoveCommunityFromUserHandler_NoRoles(t *testing.T) {
 			Roles: []models.Role{},
 		},
 	}
-	mockCommunityDB.On("FindOne", context.Background(), bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
 	
 	// No role removal calls expected since there are no roles
 	
@@ -726,13 +725,13 @@ func TestUser_RemoveCommunityFromUserHandler_UserNotInRoles(t *testing.T) {
 		userPtr := args.Get(0).(*models.User)
 		*userPtr = *mockUser
 	}).Return(nil)
-	mockUserDB.On("FindOne", context.Background(), bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock successful user update
-	mockUserDB.On("UpdateOne", context.Background(), bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
 	// Mock successful community update
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
 	
 	// Mock community find with roles that don't contain the user
 	mockCommunity := &models.Community{
@@ -752,11 +751,11 @@ func TestUser_RemoveCommunityFromUserHandler_UserNotInRoles(t *testing.T) {
 			},
 		},
 	}
-	mockCommunityDB.On("FindOne", context.Background(), bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
 	
 	// Mock role member removal calls - even though user is not in roles, the handler will try to remove them
 	// This reveals that the handler doesn't check if the user is actually in the roles before attempting removal
-	mockCommunityDB.On("UpdateOne", context.Background(), bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(nil).Times(2)
+	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(nil).Times(2)
 	
 	// Create handler
 	u := handlers.User{

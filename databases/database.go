@@ -100,6 +100,15 @@ type MongoCursor struct {
 	cr *mongo.Cursor
 }
 
+// NewMongoCursorFromDocuments creates a MongoCursor from a slice of documents, useful for testing.
+func NewMongoCursorFromDocuments(docs []interface{}) (MongoCursor, error) {
+	cursor, err := mongo.NewCursorFromDocuments(docs, nil, nil)
+	if err != nil {
+		return MongoCursor{}, err
+	}
+	return MongoCursor{cr: cursor}, nil
+}
+
 // mongoSession contains the session to be used to access the methods
 type mongoSession struct {
 	mongo.Session

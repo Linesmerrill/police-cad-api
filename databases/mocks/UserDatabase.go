@@ -118,17 +118,24 @@ func (_m *UserDatabase) Find(ctx context.Context, filter interface{}, opts ...*o
 	return r0, r1
 }
 
-// FindOne provides a mock function with given fields: ctx, filter
-func (_m *UserDatabase) FindOne(ctx context.Context, filter interface{}) databases.SingleResultHelper {
-	ret := _m.Called(ctx, filter)
+// FindOne provides a mock function with given fields: ctx, filter, opts
+func (_m *UserDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) databases.SingleResultHelper {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindOne")
 	}
 
 	var r0 databases.SingleResultHelper
-	if rf, ok := ret.Get(0).(func(context.Context, interface{}) databases.SingleResultHelper); ok {
-		r0 = rf(ctx, filter)
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOneOptions) databases.SingleResultHelper); ok {
+		r0 = rf(ctx, filter, opts...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(databases.SingleResultHelper)

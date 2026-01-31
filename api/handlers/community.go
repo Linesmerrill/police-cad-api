@@ -117,6 +117,7 @@ type Community struct {
 	VDB      databases.VehicleDatabase
 	FDB      databases.FirearmDatabase
 	DBHelper databases.DatabaseHelper
+	PTDB     databases.PushTokenDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -5598,9 +5599,9 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Validate required fields
-	if request.UserID == "" || request.Username == "" || request.CallSign == "" || request.DepartmentType == "" {
-		config.ErrorStatus("userId, username, callSign, and departmentType are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
+	// Validate required fields (callSign is optional — not all users set one)
+	if request.UserID == "" || request.Username == "" || request.DepartmentType == "" {
+		config.ErrorStatus("userId, username, and departmentType are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
 		return
 	}
 
@@ -5666,6 +5667,9 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		"triggeredAt":    panicAlert.TriggeredAt,
 	})
 	zap.S().Infof("PANIC ALERT CREATED - Socket events broadcast completed for alertId: %s", alertID)
+
+	// Send push notifications to non-civilian community members (async to avoid blocking response)
+	go c.sendPanicPushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "created", alertID)
 
 	// Response
 	response := map[string]interface{}{
@@ -5801,6 +5805,9 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 	})
 	zap.S().Infof("PANIC ALERT CLEARED - Socket events broadcast completed for alertId: %s", alertID)
 
+	// Send push notifications for panic cleared (async)
+	go c.sendPanicPushNotifications(cID, communityID, alertUserId, "", "", "cleared", alertID)
+
 	// Response
 	response := map[string]interface{}{
 		"success": true,
@@ -5891,6 +5898,9 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 		"clearedBy":   request.ClearedBy,
 	})
 	zap.S().Infof("USER PANIC ALERTS CLEARED - Socket events broadcast completed for userId: %s", userID)
+
+	// Send push notifications for panic cleared (async)
+	go c.sendPanicPushNotifications(cID, communityID, userID, "", "", "cleared", "")
 
 	// Response
 	response := map[string]interface{}{
@@ -6447,4 +6457,341 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// sendPanicPushNotifications sends Expo push notifications to non-civilian community members.
+// This is designed to run in a goroutine to avoid blocking the HTTP response.
+func (c Community) sendPanicPushNotifications(cID primitive.ObjectID, communityID, triggeringUserID, username, callSign, action, alertID string) {
+	if c.PTDB == nil {
+		zap.S().Warn("PushTokenDatabase not configured, skipping push notifications")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Fetch the community to get its members
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		zap.S().Errorf("sendPanicPushNotifications: failed to fetch community %s: %v", communityID, err)
+		return
+	}
+
+	// Collect non-civilian member user IDs (those with an active department)
+	var targetUserIDs []string
+	for userID, member := range community.Details.Members {
+		// Skip the user who triggered the panic
+		if userID == triggeringUserID {
+			continue
+		}
+		// Non-civilian = has an active department assignment
+		if member.ActiveDepartmentID != "" {
+			targetUserIDs = append(targetUserIDs, userID)
+		}
+	}
+
+	if len(targetUserIDs) == 0 {
+		zap.S().Infof("sendPanicPushNotifications: no eligible members to notify in community %s", communityID)
+		return
+	}
+
+	// Fetch push tokens for these users
+	tokens, err := c.PTDB.Find(ctx, bson.M{"userId": bson.M{"$in": targetUserIDs}})
+	if err != nil {
+		zap.S().Errorf("sendPanicPushNotifications: failed to fetch push tokens: %v", err)
+		return
+	}
+
+	if len(tokens) == 0 {
+		zap.S().Infof("sendPanicPushNotifications: no push tokens found for %d eligible members", len(targetUserIDs))
+		return
+	}
+
+	// Collect token strings
+	var pushTokens []string
+	for _, pt := range tokens {
+		pushTokens = append(pushTokens, pt.Token)
+	}
+
+	// Build notification content
+	var title, body string
+	data := map[string]interface{}{
+		"type":        "panic_alert",
+		"action":      action,
+		"communityId": communityID,
+		"alertId":     alertID,
+	}
+
+	if action == "created" {
+		title = "PANIC ALERT"
+		body = fmt.Sprintf("%s (%s) triggered a panic!", username, callSign)
+		data["userId"] = triggeringUserID
+		data["username"] = username
+		data["callSign"] = callSign
+	} else {
+		title = "Panic Cleared"
+		body = "A panic alert has been cleared."
+	}
+
+	// Send push notifications
+	zap.S().Infof("sendPanicPushNotifications: sending %s notification to %d tokens for community %s", action, len(pushTokens), communityID)
+	if err := SendExpoPushNotifications(pushTokens, title, body, data); err != nil {
+		zap.S().Errorf("sendPanicPushNotifications: failed to send push notifications: %v", err)
+	}
+}
+
+// GetSignal100Handler retrieves the current Signal 100 status for a community
+func (c Community) GetSignal100Handler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	filter := bson.M{"_id": cID}
+	community, err := c.DB.FindOne(context.Background(), filter)
+	if err != nil {
+		config.ErrorStatus("failed to get community", http.StatusNotFound, w, err)
+		return
+	}
+
+	// If the new signal100 struct hasn't been populated yet but the old boolean is set,
+	// construct a response from the boolean for backward compat
+	signal100 := community.Details.Signal100
+	if !signal100.Active && community.Details.ActiveSignal100 {
+		signal100.Active = true
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(signal100)
+}
+
+// ActivateSignal100Handler activates Signal 100 for a community
+func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var request struct {
+		UserID         string `json:"userId"`
+		Username       string `json:"username"`
+		CallSign       string `json:"callSign"`
+		DepartmentName string `json:"departmentName"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if request.UserID == "" || request.Username == "" {
+		config.ErrorStatus("userId and username are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	signal100 := models.Signal100Data{
+		Active:                true,
+		ActivatedByUserId:     request.UserID,
+		ActivatedByUsername:   request.Username,
+		ActivatedByCallSign:   request.CallSign,
+		ActivatedByDepartment: request.DepartmentName,
+		ActivatedAt:           now,
+		// Clear the cleared-by fields when activating
+		ClearedByUserId:   "",
+		ClearedByUsername: "",
+		ClearedByCallSign: "",
+		ClearedAt:         "",
+	}
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.signal100":        signal100,
+			"community.activeSignal100":  true,
+			"community.updatedAt":        primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to activate Signal 100", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Broadcast via WebSocket
+	broadcastData := map[string]interface{}{
+		"type":                  "signal_100",
+		"action":                "activated",
+		"communityId":           communityID,
+		"activatedByUserId":     request.UserID,
+		"activatedByUsername":   request.Username,
+		"activatedByCallSign":   request.CallSign,
+		"activatedByDepartment": request.DepartmentName,
+		"activatedAt":           now,
+	}
+	broadcastPanicAlertEvent("signal_100_activated", broadcastData)
+
+	zap.S().Infof("SIGNAL 100 ACTIVATED - community: %s, by: %s (%s)", communityID, request.Username, request.CallSign)
+
+	// Send push notifications (async)
+	go c.sendSignal100PushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "activated")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(signal100)
+}
+
+// ClearSignal100Handler clears Signal 100 for a community
+func (c Community) ClearSignal100Handler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	communityID := vars["communityId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var request struct {
+		ClearedByUserId   string `json:"clearedByUserId"`
+		ClearedByUsername string `json:"clearedByUsername"`
+		ClearedByCallSign string `json:"clearedByCallSign"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if request.ClearedByUserId == "" || request.ClearedByUsername == "" {
+		config.ErrorStatus("clearedByUserId and clearedByUsername are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Fetch current signal100 data to preserve activation info
+	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community", http.StatusNotFound, w, err)
+		return
+	}
+
+	signal100 := community.Details.Signal100
+	signal100.Active = false
+	signal100.ClearedByUserId = request.ClearedByUserId
+	signal100.ClearedByUsername = request.ClearedByUsername
+	signal100.ClearedByCallSign = request.ClearedByCallSign
+	signal100.ClearedAt = now
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.signal100":        signal100,
+			"community.activeSignal100":  false,
+			"community.updatedAt":        primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	err = c.DB.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to clear Signal 100", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Broadcast via WebSocket
+	broadcastData := map[string]interface{}{
+		"type":              "signal_100",
+		"action":            "cleared",
+		"communityId":       communityID,
+		"clearedByUserId":   request.ClearedByUserId,
+		"clearedByUsername": request.ClearedByUsername,
+		"clearedByCallSign": request.ClearedByCallSign,
+		"clearedAt":         now,
+	}
+	broadcastPanicAlertEvent("signal_100_cleared", broadcastData)
+
+	zap.S().Infof("SIGNAL 100 CLEARED - community: %s, by: %s (%s)", communityID, request.ClearedByUsername, request.ClearedByCallSign)
+
+	// Send push notifications (async)
+	go c.sendSignal100PushNotifications(cID, communityID, request.ClearedByUserId, request.ClearedByUsername, request.ClearedByCallSign, "cleared")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(signal100)
+}
+
+// sendSignal100PushNotifications sends push notifications for Signal 100 events
+func (c Community) sendSignal100PushNotifications(cID primitive.ObjectID, communityID, userId, username, callSign, action string) {
+	if c.PTDB == nil {
+		zap.S().Warn("PushTokenDatabase not configured, skipping Signal 100 push notifications")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		zap.S().Errorf("sendSignal100PushNotifications: failed to fetch community %s: %v", communityID, err)
+		return
+	}
+
+	// Collect non-civilian member user IDs (exclude the triggering user)
+	var targetUserIDs []string
+	for userID, member := range community.Details.Members {
+		if userID == userId {
+			continue
+		}
+		if member.ActiveDepartmentID != "" {
+			targetUserIDs = append(targetUserIDs, userID)
+		}
+	}
+
+	if len(targetUserIDs) == 0 {
+		return
+	}
+
+	tokens, err := c.PTDB.Find(ctx, bson.M{"userId": bson.M{"$in": targetUserIDs}})
+	if err != nil {
+		zap.S().Errorf("sendSignal100PushNotifications: failed to fetch push tokens: %v", err)
+		return
+	}
+
+	if len(tokens) == 0 {
+		return
+	}
+
+	var pushTokens []string
+	for _, pt := range tokens {
+		pushTokens = append(pushTokens, pt.Token)
+	}
+
+	var title, body string
+	data := map[string]interface{}{
+		"type":        "signal_100",
+		"action":      action,
+		"communityId": communityID,
+	}
+
+	if action == "activated" {
+		title = "SIGNAL 100"
+		body = fmt.Sprintf("Signal 100 activated by %s (%s) — Hold all but emergency traffic", callSign, username)
+	} else {
+		title = "Signal 100 Cleared"
+		body = fmt.Sprintf("Signal 100 cleared by %s (%s)", callSign, username)
+	}
+
+	zap.S().Infof("sendSignal100PushNotifications: sending %s notification to %d tokens for community %s", action, len(pushTokens), communityID)
+	if err := SendExpoPushNotifications(pushTokens, title, body, data); err != nil {
+		zap.S().Errorf("sendSignal100PushNotifications: failed to send push notifications: %v", err)
+	}
 }
