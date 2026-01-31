@@ -225,6 +225,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/panic-alerts/user/{userId}", api.Middleware(http.HandlerFunc(c.ClearUserPanicAlertsHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/panic-alerts/test-socket", api.Middleware(http.HandlerFunc(c.TestPanicSocketHandler))).Methods("POST")
 
+	// Signal 100 routes
+	apiCreate.Handle("/community/{communityId}/signal-100", api.Middleware(http.HandlerFunc(c.GetSignal100Handler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/signal-100", api.Middleware(http.HandlerFunc(c.ActivateSignal100Handler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/signal-100", api.Middleware(http.HandlerFunc(c.ClearSignal100Handler))).Methods("DELETE")
+
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
 	apiV2.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")

@@ -18,6 +18,7 @@ type CommunityDetails struct {
 	Code                   string                  `json:"code" bson:"code"`
 	ActivePanics           map[string]interface{}  `json:"activePanics" bson:"activePanics"`
 	ActiveSignal100        bool                    `json:"activeSignal100" bson:"activeSignal100"`
+	Signal100              Signal100Data           `json:"signal100" bson:"signal100"`
 	ImageLink              string                  `json:"imageLink" bson:"imageLink"`
 	MapLink                string                  `json:"mapLink" bson:"mapLink"`
 	Visibility             string                  `json:"visibility" bson:"visibility"`
@@ -166,6 +167,20 @@ type Permission struct {
 	Name        string             `json:"name" bson:"name"`
 	Description string             `json:"description" bson:"description"`
 	Enabled     bool               `json:"enabled" bson:"enabled"`
+}
+
+// Signal100Data holds the structure for Signal 100 state on a community
+type Signal100Data struct {
+	Active                bool   `json:"active" bson:"active"`
+	ActivatedByUserId     string `json:"activatedByUserId,omitempty" bson:"activatedByUserId,omitempty"`
+	ActivatedByUsername   string `json:"activatedByUsername,omitempty" bson:"activatedByUsername,omitempty"`
+	ActivatedByCallSign   string `json:"activatedByCallSign,omitempty" bson:"activatedByCallSign,omitempty"`
+	ActivatedByDepartment string `json:"activatedByDepartment,omitempty" bson:"activatedByDepartment,omitempty"`
+	ActivatedAt           string `json:"activatedAt,omitempty" bson:"activatedAt,omitempty"`
+	ClearedByUserId       string `json:"clearedByUserId,omitempty" bson:"clearedByUserId,omitempty"`
+	ClearedByUsername     string `json:"clearedByUsername,omitempty" bson:"clearedByUsername,omitempty"`
+	ClearedByCallSign     string `json:"clearedByCallSign,omitempty" bson:"clearedByCallSign,omitempty"`
+	ClearedAt             string `json:"clearedAt,omitempty" bson:"clearedAt,omitempty"`
 }
 
 // PanicAlert holds the structure for a panic alert
