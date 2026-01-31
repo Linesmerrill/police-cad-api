@@ -5599,9 +5599,9 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Validate required fields
-	if request.UserID == "" || request.Username == "" || request.CallSign == "" || request.DepartmentType == "" {
-		config.ErrorStatus("userId, username, callSign, and departmentType are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
+	// Validate required fields (callSign is optional — not all users set one)
+	if request.UserID == "" || request.Username == "" || request.DepartmentType == "" {
+		config.ErrorStatus("userId, username, and departmentType are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
 		return
 	}
 
