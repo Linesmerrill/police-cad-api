@@ -38,6 +38,7 @@ type User struct {
 	DB    databases.UserDatabase
 	CDB   databases.CommunityDatabase
 	EntDB databases.ContentCreatorEntitlementDatabase
+	PTDB  databases.PushTokenDatabase
 }
 
 // UserHandler returns a user given a userID
@@ -4912,5 +4913,106 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Password synced successfully",
+	})
+}
+
+// RegisterPushTokenHandler registers or updates an Expo push token for a user
+func (u User) RegisterPushTokenHandler(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		UserID   string `json:"userId"`
+		Token    string `json:"token"`
+		Platform string `json:"platform"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if request.Token == "" || request.UserID == "" {
+		config.ErrorStatus("token and userId are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// Upsert: if this token already exists for this user, update it; otherwise insert
+	filter := bson.M{"userId": request.UserID, "token": request.Token}
+	update := bson.M{
+		"$set": bson.M{
+			"userId":    request.UserID,
+			"token":     request.Token,
+			"platform":  request.Platform,
+			"updatedAt": now,
+		},
+		"$setOnInsert": bson.M{
+			"createdAt": now,
+		},
+	}
+
+	opts := options.Update().SetUpsert(true)
+	_, err := u.PTDB.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		config.ErrorStatus("failed to register push token", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	zap.S().Infof("Push token registered for user %s (platform: %s)", request.UserID, request.Platform)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Push token registered successfully",
+	})
+}
+
+// RemovePushTokenHandler removes an Expo push token for a user (e.g., on logout)
+func (u User) RemovePushTokenHandler(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		UserID string `json:"userId"`
+		Token  string `json:"token"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if request.UserID == "" {
+		config.ErrorStatus("userId is required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	var filter bson.M
+	if request.Token != "" {
+		// Remove specific token
+		filter = bson.M{"userId": request.UserID, "token": request.Token}
+		err := u.PTDB.DeleteOne(ctx, filter)
+		if err != nil {
+			config.ErrorStatus("failed to remove push token", http.StatusInternalServerError, w, err)
+			return
+		}
+	} else {
+		// Remove all tokens for user
+		filter = bson.M{"userId": request.UserID}
+		_, err := u.PTDB.DeleteMany(ctx, filter)
+		if err != nil {
+			config.ErrorStatus("failed to remove push tokens", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
+	zap.S().Infof("Push token(s) removed for user %s", request.UserID)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Push token(s) removed successfully",
 	})
 }

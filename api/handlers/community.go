@@ -117,6 +117,7 @@ type Community struct {
 	VDB      databases.VehicleDatabase
 	FDB      databases.FirearmDatabase
 	DBHelper databases.DatabaseHelper
+	PTDB     databases.PushTokenDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -5667,6 +5668,9 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 	})
 	zap.S().Infof("PANIC ALERT CREATED - Socket events broadcast completed for alertId: %s", alertID)
 
+	// Send push notifications to non-civilian community members (async to avoid blocking response)
+	go c.sendPanicPushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "created", alertID)
+
 	// Response
 	response := map[string]interface{}{
 		"success": true,
@@ -5801,6 +5805,9 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 	})
 	zap.S().Infof("PANIC ALERT CLEARED - Socket events broadcast completed for alertId: %s", alertID)
 
+	// Send push notifications for panic cleared (async)
+	go c.sendPanicPushNotifications(cID, communityID, alertUserId, "", "", "cleared", alertID)
+
 	// Response
 	response := map[string]interface{}{
 		"success": true,
@@ -5891,6 +5898,9 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 		"clearedBy":   request.ClearedBy,
 	})
 	zap.S().Infof("USER PANIC ALERTS CLEARED - Socket events broadcast completed for userId: %s", userID)
+
+	// Send push notifications for panic cleared (async)
+	go c.sendPanicPushNotifications(cID, communityID, userID, "", "", "cleared", "")
 
 	// Response
 	response := map[string]interface{}{
@@ -6447,4 +6457,85 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// sendPanicPushNotifications sends Expo push notifications to non-civilian community members.
+// This is designed to run in a goroutine to avoid blocking the HTTP response.
+func (c Community) sendPanicPushNotifications(cID primitive.ObjectID, communityID, triggeringUserID, username, callSign, action, alertID string) {
+	if c.PTDB == nil {
+		zap.S().Warn("PushTokenDatabase not configured, skipping push notifications")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Fetch the community to get its members
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		zap.S().Errorf("sendPanicPushNotifications: failed to fetch community %s: %v", communityID, err)
+		return
+	}
+
+	// Collect non-civilian member user IDs (those with an active department)
+	var targetUserIDs []string
+	for userID, member := range community.Details.Members {
+		// Skip the user who triggered the panic
+		if userID == triggeringUserID {
+			continue
+		}
+		// Non-civilian = has an active department assignment
+		if member.ActiveDepartmentID != "" {
+			targetUserIDs = append(targetUserIDs, userID)
+		}
+	}
+
+	if len(targetUserIDs) == 0 {
+		zap.S().Infof("sendPanicPushNotifications: no eligible members to notify in community %s", communityID)
+		return
+	}
+
+	// Fetch push tokens for these users
+	tokens, err := c.PTDB.Find(ctx, bson.M{"userId": bson.M{"$in": targetUserIDs}})
+	if err != nil {
+		zap.S().Errorf("sendPanicPushNotifications: failed to fetch push tokens: %v", err)
+		return
+	}
+
+	if len(tokens) == 0 {
+		zap.S().Infof("sendPanicPushNotifications: no push tokens found for %d eligible members", len(targetUserIDs))
+		return
+	}
+
+	// Collect token strings
+	var pushTokens []string
+	for _, pt := range tokens {
+		pushTokens = append(pushTokens, pt.Token)
+	}
+
+	// Build notification content
+	var title, body string
+	data := map[string]interface{}{
+		"type":        "panic_alert",
+		"action":      action,
+		"communityId": communityID,
+		"alertId":     alertID,
+	}
+
+	if action == "created" {
+		title = "PANIC ALERT"
+		body = fmt.Sprintf("%s (%s) triggered a panic!", username, callSign)
+		data["userId"] = triggeringUserID
+		data["username"] = username
+		data["callSign"] = callSign
+	} else {
+		title = "Panic Cleared"
+		body = "A panic alert has been cleared."
+	}
+
+	// Send push notifications
+	zap.S().Infof("sendPanicPushNotifications: sending %s notification to %d tokens for community %s", action, len(pushTokens), communityID)
+	if err := SendExpoPushNotifications(pushTokens, title, body, data); err != nil {
+		zap.S().Errorf("sendPanicPushNotifications: failed to send push notifications: %v", err)
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
+	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/linesmerrill/police-cad-api/models"
 )
@@ -51,57 +52,32 @@ func TestCommunity_FetchCommunityMembersByRoleIDHandlerV2_Success(t *testing.T) 
 		},
 	}
 
-	// Mock users
-	user1 := &models.User{
-		ID: userID1,
-		Details: models.UserDetails{
-			Username:       "user1",
-			ProfilePicture: "pic1.jpg",
-			CallSign:       "CS1",
-			Subscription: models.Subscription{
-				Active: true,
-				Plan:   "premium",
-			},
-		},
-	}
-
-	user2 := &models.User{
-		ID: userID2,
-		Details: models.UserDetails{
-			Username:       "user2",
-			ProfilePicture: "pic2.jpg",
-			CallSign:       "CS2",
-			Subscription: models.Subscription{
-				Active: true,
-				Plan:   "basic",
-			},
-		},
-	}
-
 	// Setup mocks
 	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": cID}).Return(community, nil)
-	
-	// Create mock SingleResultHelper for user1
-	mockUser1Result := &mocks.SingleResultHelper{}
-	mockUser1Result.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
-		userPtr := args.Get(0).(*models.User)
-		*userPtr = *user1
-	}).Return(nil)
-	
-	// Convert userID1 to ObjectID for the mock
-	user1ObjectID, _ := primitive.ObjectIDFromHex(userID1)
-	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": user1ObjectID}).Return(mockUser1Result)
-	
-	// Create mock SingleResultHelper for user2
-	mockUser2Result := &mocks.SingleResultHelper{}
-	mockUser2Result.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
-		userPtr := args.Get(0).(*models.User)
-		*userPtr = *user2
-	}).Return(nil)
-	
-	// Convert userID2 to ObjectID for the mock
-	user2ObjectID, _ := primitive.ObjectIDFromHex(userID2)
-	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": user2ObjectID}).Return(mockUser2Result)
+
+	// Create a test cursor with both users for the batch Find call
+	userDocs := []interface{}{
+		bson.M{
+			"_id": userID1,
+			"user": bson.M{
+				"username":       "user1",
+				"profilePicture": "pic1.jpg",
+				"callSign":       "CS1",
+				"subscription":   bson.M{"active": true, "plan": "premium"},
+			},
+		},
+		bson.M{
+			"_id": userID2,
+			"user": bson.M{
+				"username":       "user2",
+				"profilePicture": "pic2.jpg",
+				"callSign":       "CS2",
+				"subscription":   bson.M{"active": true, "plan": "basic"},
+			},
+		},
+	}
+	testCursor, _ := databases.NewMongoCursorFromDocuments(userDocs)
+	mockUserDB.On("Find", mock.Anything, mock.Anything).Return(testCursor, nil)
 
 	// Create request
 	req, err := http.NewRequest("GET", "/api/v2/community/"+communityID+"/roles/"+roleID+"/members?page=1&limit=10", nil)
@@ -161,8 +137,6 @@ func TestCommunity_FetchCommunityMembersByRoleIDHandlerV2_Success(t *testing.T) 
 	// Verify all mocks were called
 	mockCommunityDB.AssertExpectations(t)
 	mockUserDB.AssertExpectations(t)
-	mockUser1Result.AssertExpectations(t)
-	mockUser2Result.AssertExpectations(t)
 }
 
 func TestCommunity_FetchCommunityMembersByRoleIDHandlerV2_Pagination(t *testing.T) {
@@ -204,34 +178,24 @@ func TestCommunity_FetchCommunityMembersByRoleIDHandlerV2_Pagination(t *testing.
 
 	// Setup mocks
 	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": cID}).Return(community, nil)
-	
-	// Mock user lookups for the paginated results (page 2, limit 10 means members 10-19)
-	// Since we're testing pagination, we don't need to mock all 25 users, just the ones that will be returned
-	startIndex := 10 // (page-1) * limit = (2-1) * 10 = 10
-	endIndex := 20   // startIndex + limit = 10 + 10 = 20
-	
+
+	// Create test cursor with user documents for paginated page (page 2, limit 10 = members 10-19)
+	startIndex := 10
+	endIndex := 20
+	var userDocs []interface{}
 	for i := startIndex; i < endIndex && i < len(memberIDs); i++ {
-		mockUserResult := &mocks.SingleResultHelper{}
-		mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
-			userPtr := args.Get(0).(*models.User)
-			*userPtr = models.User{
-				ID: memberIDs[i],
-				Details: models.UserDetails{
-					Username:       "user" + memberIDs[i][:8],
-					ProfilePicture: "pic" + memberIDs[i][:8] + ".jpg",
-					CallSign:       "CS" + memberIDs[i][:8],
-					Subscription: models.Subscription{
-						Active: true,
-						Plan:   "basic",
-					},
-				},
-			}
-		}).Return(nil)
-		
-		// Convert memberID string to ObjectID for the mock
-		memberObjectID, _ := primitive.ObjectIDFromHex(memberIDs[i])
-		mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": memberObjectID}).Return(mockUserResult)
+		userDocs = append(userDocs, bson.M{
+			"_id": memberIDs[i],
+			"user": bson.M{
+				"username":       "user" + memberIDs[i][:8],
+				"profilePicture": "pic" + memberIDs[i][:8] + ".jpg",
+				"callSign":       "CS" + memberIDs[i][:8],
+				"subscription":   bson.M{"active": true, "plan": "basic"},
+			},
+		})
 	}
+	testCursor, _ := databases.NewMongoCursorFromDocuments(userDocs)
+	mockUserDB.On("Find", mock.Anything, mock.Anything).Return(testCursor, nil)
 
 	// Create request with page 2, limit 10
 	req, err := http.NewRequest("GET", "/api/v2/community/"+communityID+"/roles/"+roleID+"/members?page=2&limit=10", nil)
