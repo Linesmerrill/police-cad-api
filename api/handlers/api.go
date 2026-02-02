@@ -36,9 +36,10 @@ func (a *App) New() *mux.Router {
 
 	r := mux.NewRouter()
 
-	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper)}
+	ptDB := databases.NewPushTokenDatabase(a.dbHelper)
+	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
-	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper}
+	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
@@ -224,6 +225,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/panic-alerts/user/{userId}", api.Middleware(http.HandlerFunc(c.ClearUserPanicAlertsHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/panic-alerts/test-socket", api.Middleware(http.HandlerFunc(c.TestPanicSocketHandler))).Methods("POST")
 
+	// Signal 100 routes
+	apiCreate.Handle("/community/{communityId}/signal-100", api.Middleware(http.HandlerFunc(c.GetSignal100Handler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/signal-100", api.Middleware(http.HandlerFunc(c.ActivateSignal100Handler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/signal-100", api.Middleware(http.HandlerFunc(c.ClearSignal100Handler))).Methods("DELETE")
+
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
 	apiV2.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
@@ -240,6 +246,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/reset-password", http.HandlerFunc(u.UserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/user/sync-password", http.HandlerFunc(u.SyncPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/user/online-status", api.Middleware(http.HandlerFunc(u.SetOnlineStatusHandler))).Methods("PUT")
+	apiCreate.Handle("/user/push-token", api.Middleware(http.HandlerFunc(u.RegisterPushTokenHandler))).Methods("POST")
+	apiCreate.Handle("/user/push-token", api.Middleware(http.HandlerFunc(u.RemovePushTokenHandler))).Methods("DELETE")
 	apiCreate.Handle("/user/block", api.Middleware(http.HandlerFunc(u.BlockUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/unblock", api.Middleware(http.HandlerFunc(u.UnblockUserHandler))).Methods("POST")
 	apiCreate.Handle("/user/unfriend", api.Middleware(http.HandlerFunc(u.UnfriendUserHandler))).Methods("POST")
