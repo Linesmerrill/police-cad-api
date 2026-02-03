@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -5676,6 +5677,9 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 	// Send push notifications to non-civilian community members (async to avoid blocking response)
 	go c.sendPanicPushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "created", alertID)
 
+	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+	go c.notifyNodeServerPanic("panic_created", panicData)
+
 	// Response
 	response := map[string]interface{}{
 		"success": true,
@@ -5813,6 +5817,10 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 	// Send push notifications for panic cleared (async)
 	go c.sendPanicPushNotifications(cID, communityID, alertUserId, "", "", "cleared", alertID)
 
+	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+	clearData["alertId"] = alertID
+	go c.notifyNodeServerPanic("panic_cleared", clearData)
+
 	// Response
 	response := map[string]interface{}{
 		"success": true,
@@ -5906,6 +5914,9 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 
 	// Send push notifications for panic cleared (async)
 	go c.sendPanicPushNotifications(cID, communityID, userID, "", "", "cleared", "")
+
+	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+	go c.notifyNodeServerPanic("panic_cleared", clearData)
 
 	// Response
 	response := map[string]interface{}{
@@ -6464,6 +6475,52 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(response)
 }
 
+// notifyNodeServerPanic sends a webhook to the Node.js server to broadcast panic/signal100 events via Socket.IO.
+// This enables real-time updates on web dashboards when events are triggered from mobile.
+// Runs in a goroutine to avoid blocking the HTTP response.
+func (c Community) notifyNodeServerPanic(eventType string, data map[string]interface{}) {
+	nodeServerURL := os.Getenv("NODE_SERVER_WEBHOOK_URL")
+	apiKey := os.Getenv("NODE_SERVER_API_KEY")
+
+	if nodeServerURL == "" {
+		// Not configured, skip silently
+		return
+	}
+
+	communityId, _ := data["communityId"].(string)
+	payload := map[string]interface{}{
+		"event":       eventType,
+		"communityId": communityId,
+		"data":        data,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		zap.S().Errorf("Failed to marshal Node server webhook payload: %v", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", nodeServerURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		zap.S().Errorf("Failed to create Node server webhook request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-API-Key", apiKey)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		zap.S().Errorf("Failed to send webhook to Node server: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		zap.S().Warnf("Node server webhook returned status %d for event %s", resp.StatusCode, eventType)
+	}
+}
+
 // sendPanicPushNotifications sends Expo push notifications to non-civilian community members.
 // This is designed to run in a goroutine to avoid blocking the HTTP response.
 func (c Community) sendPanicPushNotifications(cID primitive.ObjectID, communityID, triggeringUserID, username, callSign, action, alertID string) {
@@ -6651,6 +6708,15 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 	// Send push notifications (async)
 	go c.sendSignal100PushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "activated")
 
+	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+	go c.notifyNodeServerPanic("signal_100_activated", map[string]interface{}{
+		"communityId":    communityID,
+		"userId":         request.UserID,
+		"username":       request.Username,
+		"callSign":       request.CallSign,
+		"departmentType": request.DepartmentName,
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(signal100)
 }
@@ -6729,6 +6795,14 @@ func (c Community) ClearSignal100Handler(w http.ResponseWriter, r *http.Request)
 
 	// Send push notifications (async)
 	go c.sendSignal100PushNotifications(cID, communityID, request.ClearedByUserId, request.ClearedByUsername, request.ClearedByCallSign, "cleared")
+
+	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+	go c.notifyNodeServerPanic("signal_100_cleared", map[string]interface{}{
+		"communityId": communityID,
+		"userId":      request.ClearedByUserId,
+		"username":    request.ClearedByUsername,
+		"callSign":    request.ClearedByCallSign,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(signal100)
