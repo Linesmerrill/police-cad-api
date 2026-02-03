@@ -5622,6 +5622,11 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		ClearedAt:      nil,
 	}
 
+	// Ensure activePanicAlerts is initialized as an array (not null) for new communities
+	initFilter := bson.M{"_id": cID, "community.activePanicAlerts": nil}
+	initUpdate := bson.M{"$set": bson.M{"community.activePanicAlerts": bson.A{}}}
+	_ = c.DB.UpdateOne(context.Background(), initFilter, initUpdate)
+
 	// Add panic alert to community
 	filter := bson.M{"_id": cID}
 	update := bson.M{
