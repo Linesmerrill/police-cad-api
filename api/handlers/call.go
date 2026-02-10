@@ -160,12 +160,15 @@ func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // CallsByCommunityIDHandlerV2 returns all calls that contain the given communityID with pagination support
+// Query params: status (true/false), departmentId (filter by department), limit, page
 // Returns: { data: []Call, totalCount: int, page: int, limit: int }
 func (c Call) CallsByCommunityIDHandlerV2(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["community_id"]
 	status := r.URL.Query().Get("status")
+	departmentID := r.URL.Query().Get("departmentId")
 	zap.S().Debugf("community_id: '%v'", communityID)
 	zap.S().Debugf("status: '%v'", status)
+	zap.S().Debugf("departmentId: '%v'", departmentID)
 
 	// Validate communityID is provided
 	if communityID == "" || communityID == "null" || communityID == "undefined" {
@@ -188,6 +191,10 @@ func (c Call) CallsByCommunityIDHandlerV2(w http.ResponseWriter, r *http.Request
 			return
 		}
 		filter["call.status"] = statusB
+	}
+	// Filter by department if provided (for EMS/Police dashboards)
+	if departmentID != "" && departmentID != "null" && departmentID != "undefined" {
+		filter["call.departments"] = departmentID
 	}
 
 	// Add pagination/limit to prevent loading all calls at once
