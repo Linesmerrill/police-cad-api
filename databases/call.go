@@ -18,6 +18,7 @@ type CallDatabase interface {
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*models.Call, error)
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	CountDocuments(context.Context, interface{}) (int64, error)
 }
 
 type callDatabase struct {
@@ -74,5 +75,8 @@ func (c *callDatabase) UpdateOne(ctx context.Context, filter interface{}, update
 
 func (c *callDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
 	return c.db.Collection(callName).DeleteOne(ctx, filter, opts...)
+}
 
+func (c *callDatabase) CountDocuments(ctx context.Context, filter interface{}) (int64, error) {
+	return c.db.Collection(callName).CountDocuments(ctx, filter)
 }

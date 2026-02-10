@@ -95,6 +95,7 @@ func (c Call) CallByIDHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // CallsByCommunityIDHandler returns all calls that contain the given communityID
+// Deprecated: Use CallsByCommunityIDHandlerV2 instead which supports proper pagination with totalCount
 func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["community_id"]
 	status := r.URL.Query().Get("status")
@@ -150,6 +151,97 @@ func (c Call) CallsByCommunityIDHandler(w http.ResponseWriter, r *http.Request) 
 		dbResp = []models.Call{}
 	}
 	b, err := json.Marshal(dbResp)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// CallsByCommunityIDHandlerV2 returns all calls that contain the given communityID with pagination support
+// Returns: { data: []Call, totalCount: int, page: int, limit: int }
+func (c Call) CallsByCommunityIDHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	status := r.URL.Query().Get("status")
+	zap.S().Debugf("community_id: '%v'", communityID)
+	zap.S().Debugf("status: '%v'", status)
+
+	// Validate communityID is provided
+	if communityID == "" || communityID == "null" || communityID == "undefined" {
+		config.ErrorStatus("community_id is required", http.StatusBadRequest, w, fmt.Errorf("community_id is required"))
+		return
+	}
+
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Build filter - always require communityID to prevent full collection scans
+	filter := bson.M{
+		"call.communityID": communityID,
+	}
+	if status != "" {
+		statusB, err := strconv.ParseBool(status)
+		if err != nil {
+			config.ErrorStatus("invalid status value", http.StatusBadRequest, w, err)
+			return
+		}
+		filter["call.status"] = statusB
+	}
+
+	// Add pagination/limit to prevent loading all calls at once
+	limitParam := r.URL.Query().Get("limit")
+	limit := int64(100) // Default limit
+	if limitParam != "" {
+		if l, err := strconv.ParseInt(limitParam, 10, 64); err == nil && l > 0 && l <= 1000 {
+			limit = l
+		}
+	}
+
+	// Page parameter (1-based)
+	pageParam := r.URL.Query().Get("page")
+	page := int64(1) // Default to first page
+	if pageParam != "" {
+		if p, err := strconv.ParseInt(pageParam, 10, 64); err == nil && p > 0 {
+			page = p
+		}
+	}
+	skip := (page - 1) * limit
+
+	// Get total count for pagination
+	totalCount, err := c.DB.CountDocuments(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to count calls", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Sort by most recent first (by _id which is ObjectID and includes timestamp)
+	findOptions := options.Find().
+		SetLimit(limit).
+		SetSkip(skip).
+		SetSort(bson.M{"_id": -1}) // Most recent first (ObjectID includes timestamp)
+
+	dbResp, err := c.DB.Find(ctx, filter, findOptions)
+	if err != nil {
+		config.ErrorStatus("failed to get calls with community id", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Because the frontend requires that the data elements inside models.Calls exist, if
+	// len == 0 then we will just return an empty data object
+	if len(dbResp) == 0 {
+		dbResp = []models.Call{}
+	}
+
+	// Return paginated response with totalCount
+	response := map[string]interface{}{
+		"data":       dbResp,
+		"totalCount": totalCount,
+		"page":       page,
+		"limit":      limit,
+	}
+	b, err := json.Marshal(response)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
