@@ -370,7 +370,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/call/{call_id}/note", api.Middleware(http.HandlerFunc(call.AddCallNoteHandler))).Methods("POST")
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CreateCallHandler))).Methods("POST")
-	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET")
+	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET") // Deprecated: use /api/v2/calls/community/{community_id}
+	apiV2.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandlerV2))).Methods("GET")        // v2 with pagination support
 
 	apiCreate.Handle("/bolo/{bolo_id}", api.Middleware(http.HandlerFunc(bolo.GetBoloByIDHandler))).Methods("GET")
 	apiCreate.Handle("/bolo/{bolo_id}", api.Middleware(http.HandlerFunc(bolo.UpdateBoloHandler))).Methods("PUT")
