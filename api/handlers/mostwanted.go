@@ -154,6 +154,7 @@ type createMostWantedRequest struct {
 	Description   string            `json:"description"`
 	AddedByUserID string            `json:"addedByUserID"`
 	CustomFields  map[string]string `json:"customFields"`
+	Stars         int               `json:"stars"`
 }
 
 // CreateMostWantedHandler adds a civilian to the most wanted list
@@ -210,6 +211,11 @@ func (mw MostWanted) CreateMostWantedHandler(w http.ResponseWriter, r *http.Requ
 		count = 0
 	}
 
+	stars := req.Stars
+	if stars < 1 || stars > 5 {
+		stars = 5
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 	entry := models.MostWantedEntry{
 		ID: primitive.NewObjectID(),
@@ -217,6 +223,7 @@ func (mw MostWanted) CreateMostWantedHandler(w http.ResponseWriter, r *http.Requ
 			CommunityID:      req.CommunityID,
 			CivilianID:       req.CivilianID,
 			ListOrder:        int(count) + 1,
+			Stars:            stars,
 			Charges:          req.Charges,
 			Description:      req.Description,
 			Status:           "active",

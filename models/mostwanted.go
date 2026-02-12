@@ -14,6 +14,7 @@ type MostWantedEntryDetails struct {
 	CommunityID      string                 `json:"communityID" bson:"communityID"`
 	CivilianID       string                 `json:"civilianID" bson:"civilianID"`
 	ListOrder        int                    `json:"listOrder" bson:"listOrder"`
+	Stars            int                    `json:"stars" bson:"stars"`
 	Charges          []string               `json:"charges" bson:"charges"`
 	Description      string                 `json:"description" bson:"description"`
 	Status           string                 `json:"status" bson:"status"` // "active", "captured", "removed"
