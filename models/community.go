@@ -58,8 +58,9 @@ type CommunityDetails struct {
 
 // MostWantedCustomField holds the structure for a custom field on the most wanted list
 type MostWantedCustomField struct {
-	ID   primitive.ObjectID `json:"_id" bson:"_id"`
-	Name string             `json:"name" bson:"name"`
+	ID       primitive.ObjectID `json:"_id" bson:"_id"`
+	Name     string             `json:"name" bson:"name"`
+	Required bool               `json:"required" bson:"required"`
 }
 
 // CommunityAnalytics holds the structure for community analytics
