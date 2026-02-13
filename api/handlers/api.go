@@ -379,6 +379,15 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/bolo", api.Middleware(http.HandlerFunc(bolo.CreateBoloHandler))).Methods("POST")
 	apiCreate.Handle("/bolos", api.Middleware(http.HandlerFunc(bolo.FetchDepartmentBolosHandler))).Methods("GET")
 
+	// Most Wanted routes
+	mostWanted := MostWanted{DB: databases.NewMostWantedDatabase(a.dbHelper), CivDB: databases.NewCivilianDatabase(a.dbHelper)}
+	apiV2.Handle("/community/{communityId}/most-wanted", api.Middleware(http.HandlerFunc(mostWanted.FetchMostWantedHandler))).Methods("GET")
+	apiCreate.Handle("/most-wanted/reorder", api.Middleware(http.HandlerFunc(mostWanted.ReorderMostWantedHandler))).Methods("PUT")
+	apiCreate.Handle("/most-wanted/{entry_id}", api.Middleware(http.HandlerFunc(mostWanted.GetMostWantedByIDHandler))).Methods("GET")
+	apiCreate.Handle("/most-wanted", api.Middleware(http.HandlerFunc(mostWanted.CreateMostWantedHandler))).Methods("POST")
+	apiCreate.Handle("/most-wanted/{entry_id}", api.Middleware(http.HandlerFunc(mostWanted.UpdateMostWantedHandler))).Methods("PUT")
+	apiCreate.Handle("/most-wanted/{entry_id}", api.Middleware(http.HandlerFunc(mostWanted.DeleteMostWantedHandler))).Methods("DELETE")
+
 	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.GetArrestReportByIDHandler))).Methods("GET")
 	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.UpdateArrestReportHandler))).Methods("PUT")
 	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.DeleteArrestReportHandler))).Methods("DELETE")

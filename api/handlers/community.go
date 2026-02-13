@@ -53,6 +53,45 @@ var communityPromotionPricing = map[string]map[int]float64{
 	"elite":    {1: 15, 3: 36, 6: 60},
 }
 
+// defaultPermissionDefs defines the canonical list of permissions every role should have.
+// When new permissions are added here, they will be automatically backfilled on existing
+// roles when fetched via GetRolesByCommunityIDHandler.
+var defaultPermissionDefs = []struct {
+	Name        string
+	Description string
+}{
+	{"manage community settings", "Allows managing community settings"},
+	{"manage community events", "Allows managing community events"},
+	{"manage departments", "Allows managing departments"},
+	{"manage roles", "Allows managing roles"},
+	{"manage members", "Allows managing members"},
+	{"manage bans", "Allows managing bans"},
+	{"manage most wanted", "Allows managing the most wanted list (add, edit, delete, reorder entries)"},
+	{"administrator", "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant."},
+}
+
+// backfillPermissions adds any missing default permissions to a role's permission list.
+// Missing permissions are added with Enabled: false.
+func backfillPermissions(roles []models.Role) []models.Role {
+	for i := range roles {
+		existing := make(map[string]bool, len(roles[i].Permissions))
+		for _, p := range roles[i].Permissions {
+			existing[p.Name] = true
+		}
+		for _, def := range defaultPermissionDefs {
+			if !existing[def.Name] {
+				roles[i].Permissions = append(roles[i].Permissions, models.Permission{
+					ID:          primitive.NewObjectID(),
+					Name:        def.Name,
+					Description: def.Description,
+					Enabled:     false,
+				})
+			}
+		}
+	}
+	return roles
+}
+
 // calculateProrationCredit computes the unused-value credit in cents for a boost upgrade.
 // Returns 0 if proration cannot be calculated (missing dates, expired, etc.).
 func calculateProrationCredit(sub models.Subscription) int64 {
@@ -865,8 +904,11 @@ func (c Community) GetRolesByCommunityIDHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Backfill any missing default permissions on existing roles
+	roles := backfillPermissions(community.Details.Roles)
+
 	// Marshal the roles to JSON
-	b, err := json.Marshal(community.Details.Roles)
+	b, err := json.Marshal(roles)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
 		return
@@ -928,6 +970,12 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 			ID:          primitive.NewObjectID(),
 			Name:        "manage bans",
 			Description: "Allows managing bans",
+			Enabled:     false,
+		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "manage most wanted",
+			Description: "Allows managing the most wanted list (add, edit, delete, reorder entries)",
 			Enabled:     false,
 		},
 		{

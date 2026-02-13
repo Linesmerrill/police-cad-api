@@ -48,8 +48,19 @@ type CommunityDetails struct {
 	FirearmCreationLimit  int                      `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
 	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
 	ActivePanicAlerts       []PanicAlert          `json:"activePanicAlerts" bson:"activePanicAlerts"`
+	MostWantedEnabled       bool                   `json:"mostWantedEnabled" bson:"mostWantedEnabled"`
+	MostWantedSidebarName   string                 `json:"mostWantedSidebarName" bson:"mostWantedSidebarName"`
+	MostWantedVisibleFields []string               `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
+	MostWantedCustomFields  []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
 	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
+}
+
+// MostWantedCustomField holds the structure for a custom field on the most wanted list
+type MostWantedCustomField struct {
+	ID       primitive.ObjectID `json:"_id" bson:"_id"`
+	Name     string             `json:"name" bson:"name"`
+	Required bool               `json:"required" bson:"required"`
 }
 
 // CommunityAnalytics holds the structure for community analytics
