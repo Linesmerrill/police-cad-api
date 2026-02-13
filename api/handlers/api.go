@@ -135,6 +135,7 @@ func (a *App) New() *mux.Router {
 
 	// Other admin routes
 	apiCreate.Handle("/admin/send-reset-email", http.HandlerFunc(adminHandler.SendAdminResetEmailHandler)).Methods("POST")
+	apiCreate.Handle("/admin/send-email", http.HandlerFunc(adminHandler.AdminSendEmailHandler)).Methods("POST")
 
 	// Admin activity tracking routes
 	apiCreate.Handle("/admin/activity/log", http.HandlerFunc(adminHandler.AdminActivityLogHandler)).Methods("POST")

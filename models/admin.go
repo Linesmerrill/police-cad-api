@@ -55,6 +55,20 @@ type ErrorResponse struct {
 	Code    string `json:"code"`
 }
 
+// AdminSendEmailRequest represents the request to send a generic email from the admin console
+type AdminSendEmailRequest struct {
+	ToEmail     string                 `json:"toEmail"`
+	Subject     string                 `json:"subject"`
+	Body        string                 `json:"body"`
+	CurrentUser map[string]interface{} `json:"currentUser"`
+}
+
+// AdminSendEmailResponse represents the response after sending an email
+type AdminSendEmailResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
 // AdminSearchRequest represents the request to search for admins
 type AdminSearchRequest struct {
 	Query string `json:"query" validate:"required"`
