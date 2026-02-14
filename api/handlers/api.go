@@ -135,6 +135,7 @@ func (a *App) New() *mux.Router {
 
 	// Other admin routes
 	apiCreate.Handle("/admin/send-reset-email", http.HandlerFunc(adminHandler.SendAdminResetEmailHandler)).Methods("POST")
+	apiCreate.Handle("/admin/send-email", http.HandlerFunc(adminHandler.AdminSendEmailHandler)).Methods("POST")
 
 	// Admin activity tracking routes
 	apiCreate.Handle("/admin/activity/log", http.HandlerFunc(adminHandler.AdminActivityLogHandler)).Methods("POST")
@@ -178,6 +179,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/community/{communityId}/firearms", api.Middleware(http.HandlerFunc(c.GetCommunityFirearmsHandlerV2))).Methods("GET")
 	apiCreate.Handle("/invite-code/{inviteCodeId}", api.Middleware(http.HandlerFunc(c.DeleteInviteCodeHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/invite-codes/expired", api.Middleware(http.HandlerFunc(c.DeleteExpiredInviteCodesHandler))).Methods("DELETE")
+	apiV2.Handle("/community/{communityId}/my-departments", api.Middleware(http.HandlerFunc(c.GetUserMemberDepartmentsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/your-departments", api.Middleware(http.HandlerFunc(c.GetPaginatedAllDepartmentsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/departments/non-member", api.Middleware(http.HandlerFunc(c.GetNonMemberDepartmentsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/all-departments", api.Middleware(http.HandlerFunc(c.GetPaginatedAllDepartmentsHandler))).Methods("GET")

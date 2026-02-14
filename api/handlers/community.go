@@ -4076,6 +4076,122 @@ func (c Community) GetPaginatedDepartmentsHandler(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetUserMemberDepartmentsHandler returns a paginated list of departments that the user belongs to.
+// This includes public departments (approvalRequired=false) and private departments where user has "approved" status.
+func (c Community) GetUserMemberDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	userID := r.URL.Query().Get("userId")
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	// Convert communityID to ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Fetch the community
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Sort departments based on user preferences
+	sortedDepartments := c.sortDepartmentsByUserPreferences(ctx, community.Details.Departments, userID, communityID)
+
+	// Check if user is an administrator
+	isAdmin := false
+	for _, role := range community.Details.Roles {
+		for _, memberID := range role.Members {
+			if memberID == userID {
+				for _, perm := range role.Permissions {
+					if perm.Name == "administrator" && perm.Enabled {
+						isAdmin = true
+						break
+					}
+				}
+			}
+			if isAdmin {
+				break
+			}
+		}
+		if isAdmin {
+			break
+		}
+	}
+
+	// Filter to only departments the user is a member of
+	var memberDepartments []map[string]interface{}
+	for _, department := range sortedDepartments {
+		isMember := false
+
+		if !department.ApprovalRequired || isAdmin {
+			// Public departments: all community members have access
+			// Admins: always have access
+			isMember = true
+		} else {
+			// Private departments: check membership
+			for _, member := range department.Members {
+				if member.UserID == userID && member.Status == "approved" {
+					isMember = true
+					break
+				}
+			}
+		}
+
+		if !isMember {
+			continue
+		}
+
+		departmentData := map[string]interface{}{
+			"_id":         department.ID,
+			"name":        department.Name,
+			"description": department.Description,
+			"image":       department.Image,
+		}
+
+		if department.Template.Name != "" {
+			departmentData["templateName"] = department.Template.Name
+		}
+
+		memberDepartments = append(memberDepartments, departmentData)
+	}
+
+	// Apply pagination
+	start := offset
+	end := offset + limit
+	if start > len(memberDepartments) {
+		start = len(memberDepartments)
+	}
+	if end > len(memberDepartments) {
+		end = len(memberDepartments)
+	}
+	paginatedDepartments := memberDepartments[start:end]
+
+	response := map[string]interface{}{
+		"page":       page,
+		"limit":      limit,
+		"totalCount": len(memberDepartments),
+		"data":       paginatedDepartments,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // GetNonMemberDepartmentsHandler returns a paginated list of departments that the user is not a member of
 func (c Community) GetNonMemberDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]

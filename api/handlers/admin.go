@@ -3320,4 +3320,94 @@ func (h Admin) AdminActivityLogHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AdminSendEmailHandler sends a generic email via SendGrid. Owner-only.
+func (h Admin) AdminSendEmailHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 
+	var req models.AdminSendEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "INVALID_REQUEST",
+		})
+		return
+	}
+
+	// Validate required fields
+	toEmail := strings.TrimSpace(req.ToEmail)
+	subject := strings.TrimSpace(req.Subject)
+	body := strings.TrimSpace(req.Body)
+
+	if toEmail == "" || subject == "" || body == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Email address, subject, and body are all required",
+			Code:    "MISSING_FIELDS",
+		})
+		return
+	}
+
+	if len(body) > 10000 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Email body must be under 10,000 characters",
+			Code:    "BODY_TOO_LONG",
+		})
+		return
+	}
+
+	// Authorize: owner-only
+	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Insufficient permissions: owner role required",
+			Code:    "FORBIDDEN",
+		})
+		return
+	}
+
+	// Build and send email
+	plainText := body
+	htmlContent := templates.RenderGenericEmail(subject, body)
+
+	from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
+	to := mail.NewEmail("", toEmail)
+	message := mail.NewSingleEmail(from, subject, to, plainText, htmlContent)
+	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
+
+	response, err := client.Send(message)
+	if err != nil {
+		log.Printf("Failed to send email to %s: %v", toEmail, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to send email",
+			Code:    "SENDGRID_ERROR",
+		})
+		return
+	}
+
+	if response.StatusCode >= 400 {
+		log.Printf("SendGrid returned status %d for email to %s: %s", response.StatusCode, toEmail, response.Body)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Email service returned an error",
+			Code:    "SENDGRID_ERROR",
+		})
+		return
+	}
+
+	log.Printf("Email sent successfully to %s (subject: %s)", toEmail, subject)
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.AdminSendEmailResponse{
+		Success: true,
+		Message: "Email sent successfully",
+	})
+}
