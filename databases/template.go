@@ -222,15 +222,17 @@ func (t *TemplateDatabase) CreateDefaultTemplates(ctx context.Context, component
 			"createVehicles",
 			"createFirearms",
 			"call911",
+			"notepad",
 		}, false), // Most civilian components are disabled by default
 		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
 		UpdatedAt: primitive.NewDateTimeFromTime(time.Now()),
 		CreatedBy: "system",
 	}
 
-	// Override call911 to be enabled for civilian template
+	// Override call911 and notepad to be enabled for civilian template
 	for i := range civilianTemplate.Components {
-		if civilianTemplate.Components[i].ComponentID == componentMap["call911"] {
+		compID := civilianTemplate.Components[i].ComponentID
+		if compID == componentMap["call911"] || compID == componentMap["notepad"] {
 			civilianTemplate.Components[i].Enabled = true
 		}
 	}
