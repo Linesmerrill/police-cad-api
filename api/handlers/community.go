@@ -2351,8 +2351,8 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	members := community.Details.Members
 	existingMember := members[userID]
 	members[userID] = models.MemberDetail{
-		DepartmentID:         requestBody.DepartmentID,
-		TenCodeID:            requestBody.TenCodeID,
+		DepartmentID:         getStringOrDefault(requestBody.DepartmentID, existingMember.DepartmentID),
+		TenCodeID:            getStringOrDefault(requestBody.TenCodeID, existingMember.TenCodeID),
 		IsOnline:             existingMember.IsOnline,
 		ActiveDepartmentID:   getStringOrDefault(requestBody.ActiveDepartmentID, existingMember.ActiveDepartmentID),
 		ActiveDepartmentName: getStringOrDefault(requestBody.ActiveDepartmentName, existingMember.ActiveDepartmentName),
