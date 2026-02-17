@@ -15,6 +15,10 @@ const warrantName = "warrants"
 type WarrantDatabase interface {
 	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Warrant, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Warrant, error)
+	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
+	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
 }
 
 type warrantDatabase struct {
@@ -43,10 +47,28 @@ func (c *warrantDatabase) Find(ctx context.Context, filter interface{}, opts ...
 	if err != nil {
 		return nil, err
 	}
-	defer curr.Close(ctx) // Ensure cursor is closed
-	err = curr.All(ctx, &warrants) // Use All() instead of Decode() for multiple documents
+	defer curr.Close(ctx)
+	err = curr.All(ctx, &warrants)
 	if err != nil {
 		return nil, err
 	}
 	return warrants, nil
+}
+
+func (c *warrantDatabase) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	res, err := c.db.Collection(warrantName).InsertOne(ctx, document, opts...)
+	return res, err
+}
+
+func (c *warrantDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
+	return c.db.Collection(warrantName).DeleteOne(ctx, filter, opts...)
+}
+
+func (c *warrantDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := c.db.Collection(warrantName).UpdateOne(ctx, filter, update, opts...)
+	return err
+}
+
+func (c *warrantDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	return c.db.Collection(warrantName).CountDocuments(ctx, filter, opts...)
 }

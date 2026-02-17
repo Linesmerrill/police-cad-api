@@ -326,6 +326,22 @@ func (c *ComponentDatabase) CreateDefaultComponents(ctx context.Context) error {
 			UpdatedAt:   primitive.NewDateTimeFromTime(time.Now()),
 			CreatedBy:   "system",
 		},
+
+		// Judicial Components
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "reviewWarrants",
+			DisplayName: "Review Warrants",
+			Description: "Review and approve or deny warrant requests submitted by officers",
+			Category:    "judicial",
+			Type:        "feature",
+			Version:     "1.0.0",
+			IsActive:    true,
+			IsRequired:  false,
+			CreatedAt:   primitive.NewDateTimeFromTime(time.Now()),
+			UpdatedAt:   primitive.NewDateTimeFromTime(time.Now()),
+			CreatedBy:   "system",
+		},
 	}
 
 	// Insert all components
