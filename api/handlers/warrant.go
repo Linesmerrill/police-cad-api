@@ -156,6 +156,7 @@ func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Determine initial status based on community warrant approval mode
 	approvalMode := "auto-approve" // default
+	approvalRate := 0.7           // default 70% for random mode
 	if warrant.Details.ActiveCommunityID != "" && v.CDB != nil {
 		cID, err := primitive.ObjectIDFromHex(warrant.Details.ActiveCommunityID)
 		if err == nil {
@@ -164,6 +165,9 @@ func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 			community, err := v.CDB.FindOne(ctx, bson.M{"_id": cID})
 			if err == nil && community.Details.WarrantApprovalMode != "" {
 				approvalMode = community.Details.WarrantApprovalMode
+				if community.Details.WarrantRandomApprovalRate > 0 {
+					approvalRate = float64(community.Details.WarrantRandomApprovalRate) / 100.0
+				}
 			}
 		}
 	}
@@ -175,7 +179,7 @@ func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 		warrant.Details.ReviewedAt = now
 		randomJudgeNames := []string{"Smith", "Carter", "Patel", "Nguyen", "Brown", "Lopez", "Williams", "Johnson", "Davis", "Martinez"}
 		warrant.Details.JudgeName = "Judge " + randomJudgeNames[rand.Intn(len(randomJudgeNames))]
-		if rand.Float64() < 0.7 {
+		if rand.Float64() < approvalRate {
 			warrant.Details.Status = "approved"
 			warrant.Details.JudgeNotes = "Warrant approved based on submitted probable cause."
 		} else {

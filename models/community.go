@@ -48,7 +48,8 @@ type CommunityDetails struct {
 	FirearmCreationLimit  int                      `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
 	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
 	ActivePanicAlerts       []PanicAlert          `json:"activePanicAlerts" bson:"activePanicAlerts"`
-	WarrantApprovalMode     string                 `json:"warrantApprovalMode" bson:"warrantApprovalMode"` // "auto-approve", "random", "require-judge"
+	WarrantApprovalMode        string              `json:"warrantApprovalMode" bson:"warrantApprovalMode"`               // "auto-approve", "random", "require-judge"
+	WarrantRandomApprovalRate  int                 `json:"warrantRandomApprovalRate" bson:"warrantRandomApprovalRate"`   // 0-100 percentage, default 70
 	MostWantedEnabled       bool                   `json:"mostWantedEnabled" bson:"mostWantedEnabled"`
 	MostWantedSidebarName   string                 `json:"mostWantedSidebarName" bson:"mostWantedSidebarName"`
 	MostWantedVisibleFields []string               `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
