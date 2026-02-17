@@ -201,6 +201,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/tenCodes/{codeId}", api.Middleware(http.HandlerFunc(c.DeleteTenCodeHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/tenCodes", api.Middleware(http.HandlerFunc(c.AddTenCodeHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/members/{userId}/tenCode", api.Middleware(http.HandlerFunc(c.SetMemberTenCodeHandler))).Methods("PUT")
+	apiCreate.Handle("/community/{communityId}/members/{userId}/department-callsigns", api.Middleware(http.HandlerFunc(c.GetDepartmentCallSignsHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/members/{userId}/department-callsigns", api.Middleware(http.HandlerFunc(c.SetDepartmentCallSignHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/events", api.Middleware(http.HandlerFunc(c.GetEventsByCommunityIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/events", api.Middleware(http.HandlerFunc(c.AddEventToCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/events/{eventId}", api.Middleware(http.HandlerFunc(c.GetEventByIDHandler))).Methods("GET")

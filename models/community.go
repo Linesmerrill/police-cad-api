@@ -89,11 +89,12 @@ type FineDetails struct {
 
 // MemberDetail holds the structure for a member detail
 type MemberDetail struct {
-	DepartmentID         string `json:"departmentID" bson:"departmentID"`
-	TenCodeID            string `json:"tenCodeID" bson:"tenCodeID"`
-	IsOnline             bool   `json:"isOnline" bson:"isOnline"`
-	ActiveDepartmentID   string `json:"activeDepartmentId" bson:"activeDepartmentId"`
-	ActiveDepartmentName string `json:"activeDepartmentName" bson:"activeDepartmentName"`
+	DepartmentID         string            `json:"departmentID" bson:"departmentID"`
+	TenCodeID            string            `json:"tenCodeID" bson:"tenCodeID"`
+	IsOnline             bool              `json:"isOnline" bson:"isOnline"`
+	ActiveDepartmentID   string            `json:"activeDepartmentId" bson:"activeDepartmentId"`
+	ActiveDepartmentName string            `json:"activeDepartmentName" bson:"activeDepartmentName"`
+	DepartmentCallSigns  map[string]string `json:"departmentCallSigns,omitempty" bson:"departmentCallSigns,omitempty"`
 }
 
 // Department holds the structure for a department

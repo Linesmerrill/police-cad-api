@@ -2351,11 +2351,12 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	members := community.Details.Members
 	existingMember := members[userID]
 	members[userID] = models.MemberDetail{
-		DepartmentID:         requestBody.DepartmentID,
-		TenCodeID:            requestBody.TenCodeID,
+		DepartmentID:         getStringOrDefault(requestBody.DepartmentID, existingMember.DepartmentID),
+		TenCodeID:            getStringOrDefault(requestBody.TenCodeID, existingMember.TenCodeID),
 		IsOnline:             existingMember.IsOnline,
 		ActiveDepartmentID:   getStringOrDefault(requestBody.ActiveDepartmentID, existingMember.ActiveDepartmentID),
 		ActiveDepartmentName: getStringOrDefault(requestBody.ActiveDepartmentName, existingMember.ActiveDepartmentName),
+		DepartmentCallSigns:  existingMember.DepartmentCallSigns,
 	}
 
 	// Update the community in the database
@@ -2369,6 +2370,110 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Ten-Code set successfully"}`))
+}
+
+// GetDepartmentCallSignsHandler returns the department callsigns for a member in a community
+func (c Community) GetDepartmentCallSignsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	userID := mux.Vars(r)["userId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	memberDetail := community.Details.Members[userID]
+	callSigns := memberDetail.DepartmentCallSigns
+	if callSigns == nil {
+		callSigns = map[string]string{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"departmentCallSigns": callSigns,
+	})
+}
+
+// SetDepartmentCallSignHandler sets a department-specific callsign for a member in a community
+func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	userID := mux.Vars(r)["userId"]
+
+	var request struct {
+		DepartmentID string `json:"departmentId"`
+		CallSign     string `json:"callSign"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if request.DepartmentID == "" {
+		config.ErrorStatus("departmentId is required", http.StatusBadRequest, w, fmt.Errorf("missing departmentId"))
+		return
+	}
+
+	// Validate callsign max length (matching existing 10-char constraint)
+	if len(request.CallSign) > 10 {
+		config.ErrorStatus("callSign must be 10 characters or fewer", http.StatusBadRequest, w, fmt.Errorf("callSign too long"))
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+
+	if community.Details.Members == nil {
+		community.Details.Members = make(map[string]models.MemberDetail)
+	}
+
+	member := community.Details.Members[userID]
+	if member.DepartmentCallSigns == nil {
+		member.DepartmentCallSigns = make(map[string]string)
+	}
+
+	if request.CallSign == "" {
+		// Empty callsign removes the override, falling back to global callsign
+		delete(member.DepartmentCallSigns, request.DepartmentID)
+	} else {
+		member.DepartmentCallSigns[request.DepartmentID] = request.CallSign
+	}
+	community.Details.Members[userID] = member
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$set": bson.M{"community.members." + userID + ".departmentCallSigns": member.DepartmentCallSigns}}
+	err = c.DB.UpdateOne(ctx, filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to update department callsign", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":             "Department callsign updated successfully",
+		"departmentCallSigns": member.DepartmentCallSigns,
+	})
 }
 
 // FetchDepartmentByIDHandler returns a department by ID
