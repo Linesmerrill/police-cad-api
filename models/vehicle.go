@@ -28,6 +28,7 @@ type VehicleDetails struct {
 	RegisteredOwner   string             `json:"registeredOwner" bson:"registeredOwner"`     // Deprecated, use linkedCivilianID
 	RegisteredOwnerID string             `json:"registeredOwnerID" bson:"registeredOwnerID"` // Deprecated, use linkedCivilianID
 	IsStolen          string             `json:"isStolen" bson:"isStolen"`
+	IsExempt          string             `json:"isExempt" bson:"isExempt"`
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	UserID            string             `json:"userID" bson:"userID"`
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
