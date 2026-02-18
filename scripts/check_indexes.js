@@ -57,6 +57,18 @@ db.civilians.getIndexes().forEach(idx => {
   print(`  ✓ ${idx.name}: ${JSON.stringify(idx.key)}`);
 });
 
+print("\n📁 MEDICAL REPORTS COLLECTION:");
+print("Indexes:");
+db.medicalreports.getIndexes().forEach(idx => {
+  print(`  ✓ ${idx.name}: ${JSON.stringify(idx.key)}`);
+});
+
+print("\n📁 WARRANTS COLLECTION:");
+print("Indexes:");
+db.warrants.getIndexes().forEach(idx => {
+  print(`  ✓ ${idx.name}: ${JSON.stringify(idx.key)}`);
+});
+
 print("\n=== CHECKING FOR MISSING CRITICAL INDEXES ===\n");
 
 // Check for critical indexes
@@ -86,6 +98,13 @@ const criticalIndexes = {
   ],
   civilians: [
     { name: "civilian_user_community_idx", key: { "civilian.userID": 1, "civilian.activeCommunityID": 1 } }
+  ],
+  medicalreports: [
+    { name: "medical_civilian_community_idx", key: { "report.civilianID": 1, "report.activeCommunityID": 1 } }
+  ],
+  warrants: [
+    { name: "warrant_accused_id_status_idx", key: { "warrant.accusedID": 1, "warrant.status": 1 } },
+    { name: "warrant_community_status_idx", key: { "warrant.activeCommunityID": 1, "warrant.status": 1 } }
   ]
 };
 

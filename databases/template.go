@@ -237,6 +237,24 @@ func (t *TemplateDatabase) CreateDefaultTemplates(ctx context.Context, component
 		}
 	}
 
+	// Create default Judicial template
+	judicialTemplate := models.GlobalTemplate{
+		ID:          primitive.NewObjectID(),
+		Name:        "Judicial",
+		Description: "Default template for judicial departments (judges, magistrates)",
+		Category:    "judicial",
+		IsDefault:   true,
+		IsActive:    true,
+		Components: createComponentRefs([]string{
+			"reviewWarrants",
+			"10CodesInterface",
+			"notepad",
+		}, true),
+		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+		UpdatedAt: primitive.NewDateTimeFromTime(time.Now()),
+		CreatedBy: "system",
+	}
+
 	// Insert all default templates
 	_, err = t.Collection.InsertOne(ctx, policeTemplate)
 	if err != nil {
@@ -255,5 +273,9 @@ func (t *TemplateDatabase) CreateDefaultTemplates(ctx context.Context, component
 		return err
 	}
 	_, err = t.Collection.InsertOne(ctx, civilianTemplate)
+	if err != nil {
+		return err
+	}
+	_, err = t.Collection.InsertOne(ctx, judicialTemplate)
 	return err
 }

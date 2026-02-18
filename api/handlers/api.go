@@ -48,7 +48,7 @@ func (a *App) New() *mux.Router {
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
 
 	pv := PendingVerification{PVDB: databases.NewPendingVerificationDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
-	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper)}
+	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
 	bolo := Bolo{DB: databases.NewBoloDatabase(a.dbHelper)}
 	arrestReport := ArrestReport{DB: databases.NewArrestReportDatabase(a.dbHelper)}
@@ -349,9 +349,17 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/license", api.Middleware(http.HandlerFunc(l.CreateLicenseHandler))).Methods("POST")
 	apiCreate.Handle("/licenses/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(l.LicensesByCivilianIDHandler))).Methods("GET")
 
+	apiCreate.Handle("/warrant/{warrant_id}/review", api.Middleware(http.HandlerFunc(w.ReviewWarrantHandler))).Methods("PUT")
+	apiCreate.Handle("/warrant/{warrant_id}/execute", api.Middleware(http.HandlerFunc(w.ExecuteWarrantHandler))).Methods("PUT")
 	apiCreate.Handle("/warrant/{warrant_id}", api.Middleware(http.HandlerFunc(w.WarrantByIDHandler))).Methods("GET")
+	apiCreate.Handle("/warrant/{warrant_id}", api.Middleware(http.HandlerFunc(w.UpdateWarrantHandler))).Methods("PUT")
+	apiCreate.Handle("/warrant/{warrant_id}", api.Middleware(http.HandlerFunc(w.DeleteWarrantHandler))).Methods("DELETE")
+	apiCreate.Handle("/warrant", api.Middleware(http.HandlerFunc(w.CreateWarrantHandler))).Methods("POST")
 	apiCreate.Handle("/warrants", api.Middleware(http.HandlerFunc(w.WarrantHandler))).Methods("GET")
 	apiCreate.Handle("/warrants/user/{user_id}", api.Middleware(http.HandlerFunc(w.WarrantsByUserIDHandler))).Methods("GET")
+	apiCreate.Handle("/warrants/search", api.Middleware(http.HandlerFunc(w.WarrantsSearchHandler))).Methods("GET")
+	apiCreate.Handle("/warrants/pending/community/{community_id}", api.Middleware(http.HandlerFunc(w.PendingWarrantsByCommunityHandler))).Methods("GET")
+	apiV2.Handle("/warrants/community/{community_id}", api.Middleware(http.HandlerFunc(w.WarrantsByCommunityHandlerV2))).Methods("GET")
 
 	// EMS Medical Component routes (focused testing) - MUST come before generic /ems/{ems_id} route
 	apiCreate.Handle("/ems/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSMedicalComponentHandler))).Methods("GET")
