@@ -9,6 +9,15 @@ type Warrant struct {
 	Version int32              `json:"__v" bson:"__v"`
 }
 
+// WarrantHistoryEntry records a single event in the warrant lifecycle
+type WarrantHistoryEntry struct {
+	Action    string             `json:"action" bson:"action"`       // "created", "approved", "denied", "edited", "resubmitted", "executed", "withdrawn"
+	UserID    string             `json:"userID" bson:"userID"`
+	UserName  string             `json:"userName" bson:"userName"`
+	Notes     string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	Timestamp primitive.DateTime `json:"timestamp" bson:"timestamp"`
+}
+
 // WarrantDetails holds the structure for the inner warrant structure as
 // defined in the warrant collection in mongo
 type WarrantDetails struct {
@@ -42,6 +51,9 @@ type WarrantDetails struct {
 	ExecutingOfficerID   string             `json:"executingOfficerID" bson:"executingOfficerID"`
 	ExecutingOfficerName string             `json:"executingOfficerName" bson:"executingOfficerName"`
 	ExecutedAt           primitive.DateTime `json:"executedAt" bson:"executedAt"`
+
+	// History
+	History []WarrantHistoryEntry `json:"history" bson:"history"`
 
 	// Metadata
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`

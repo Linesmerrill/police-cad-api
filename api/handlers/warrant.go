@@ -172,6 +172,16 @@ func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Initialize history with creation entry
+	warrant.Details.History = []models.WarrantHistoryEntry{
+		{
+			Action:    "created",
+			UserID:    warrant.Details.RequestingOfficerID,
+			UserName:  warrant.Details.RequestingOfficerName,
+			Timestamp: now,
+		},
+	}
+
 	switch approvalMode {
 	case "require-judge":
 		warrant.Details.Status = "pending"
@@ -186,10 +196,21 @@ func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 			warrant.Details.Status = "denied"
 			warrant.Details.JudgeNotes = "Insufficient probable cause to issue warrant."
 		}
+		warrant.Details.History = append(warrant.Details.History, models.WarrantHistoryEntry{
+			Action:    warrant.Details.Status,
+			UserName:  warrant.Details.JudgeName,
+			Notes:     warrant.Details.JudgeNotes,
+			Timestamp: now,
+		})
 	default: // "auto-approve"
 		warrant.Details.Status = "approved"
 		warrant.Details.JudgeName = "Auto-Approved"
 		warrant.Details.ReviewedAt = now
+		warrant.Details.History = append(warrant.Details.History, models.WarrantHistoryEntry{
+			Action:    "approved",
+			UserName:  "Auto-Approved",
+			Timestamp: now,
+		})
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -241,13 +262,30 @@ func (v Warrant) UpdateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for key, value := range updateData {
+		// Don't allow clients to overwrite history directly
+		if key == "history" {
+			continue
+		}
 		existingDetailsMap[key] = value
 	}
-	existingDetailsMap["updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+	now := primitive.NewDateTimeFromTime(time.Now())
+	existingDetailsMap["updatedAt"] = now
 
 	updatedDetails := models.WarrantDetails{}
 	data, _ = json.Marshal(existingDetailsMap)
 	json.Unmarshal(data, &updatedDetails)
+
+	// Determine history action: "resubmitted" if status changed to pending from denied, else "edited"
+	action := "edited"
+	if updatedDetails.Status == "pending" && existingWarrant.Details.Status == "denied" {
+		action = "resubmitted"
+	}
+	updatedDetails.History = append(updatedDetails.History, models.WarrantHistoryEntry{
+		Action:    action,
+		UserID:    updatedDetails.RequestingOfficerID,
+		UserName:  updatedDetails.RequestingOfficerName,
+		Timestamp: now,
+	})
 
 	err = v.DB.UpdateOne(ctx, bson.M{"_id": wID}, bson.M{"$set": bson.M{"warrant": updatedDetails}})
 	if err != nil {
@@ -337,6 +375,15 @@ func (v Warrant) ReviewWarrantHandler(w http.ResponseWriter, r *http.Request) {
 			"warrant.reviewedAt": now,
 			"warrant.updatedAt":  now,
 		},
+		"$push": bson.M{
+			"warrant.history": models.WarrantHistoryEntry{
+				Action:    status,
+				UserID:    reviewData.JudgeID,
+				UserName:  reviewData.JudgeName,
+				Notes:     reviewData.JudgeNotes,
+				Timestamp: now,
+			},
+		},
 	}
 
 	err = v.DB.UpdateOne(ctx, bson.M{"_id": wID}, update)
@@ -394,6 +441,14 @@ func (v Warrant) ExecuteWarrantHandler(w http.ResponseWriter, r *http.Request) {
 			"warrant.executingOfficerName": execData.ExecutingOfficerName,
 			"warrant.executedAt":           now,
 			"warrant.updatedAt":            now,
+		},
+		"$push": bson.M{
+			"warrant.history": models.WarrantHistoryEntry{
+				Action:    "executed",
+				UserID:    execData.ExecutingOfficerID,
+				UserName:  execData.ExecutingOfficerName,
+				Timestamp: now,
+			},
 		},
 	}
 
