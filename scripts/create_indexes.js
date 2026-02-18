@@ -335,6 +335,30 @@ createIndexSafe(
   }
 );
 
+// HIGH PRIORITY: Medical Report Civilian + Community Index (for /medical-reports/civilian/{id})
+// 14.5K docs with COLLSCAN — every medical report lookup scans entire collection
+// Triggers MongoDB >1000 object scan alert
+createIndexSafe(
+  db.medicalreports,
+  { "report.civilianID": 1, "report.activeCommunityID": 1 },
+  {
+    name: "medical_civilian_community_idx",
+    background: true
+  }
+);
+
+// HIGH PRIORITY: Warrant Community + Status Index (for warrant stats + search)
+// Judicial dashboard fires 4 count queries on every load filtering by activeCommunityID + status
+// Also used by WarrantsSearchHandler and PendingWarrantsHandler
+createIndexSafe(
+  db.warrants,
+  { "warrant.activeCommunityID": 1, "warrant.status": 1 },
+  {
+    name: "warrant_community_status_idx",
+    background: true
+  }
+);
+
 // CRITICAL: User IsOnline Index (for /community/{id}/online-users)
 // Large collection (804K docs) - COLLSCAN found: 804,288 scanned, 12,854 returned (62.57:1 ratio, 33.4s)
 createIndexSafe(
