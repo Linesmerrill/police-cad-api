@@ -1,6 +1,12 @@
 package models
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -93,6 +99,7 @@ type FineDetails struct {
 // CommunityPenalCode holds the structure for community penal codes
 type CommunityPenalCode struct {
 	Categories []PenalCodeCategory `json:"categories" bson:"categories"`
+	Currency   string              `json:"currency" bson:"currency"` // USD, EUR, etc.
 }
 
 // PenalCodeCategory holds the structure for a category of penal code violations
@@ -110,8 +117,51 @@ type PenalCodeCategory struct {
 type PenalCodeViolation struct {
 	Name        string `json:"name" bson:"name"`
 	JailTime    string `json:"jailTime" bson:"jailTime"`
-	Fine        string `json:"fine,omitempty" bson:"fine,omitempty"`
+	Fine        int    `json:"fine" bson:"fine"`
 	Explanation string `json:"explanation,omitempty" bson:"explanation,omitempty"`
+}
+
+// UnmarshalBSONValue handles backward compatibility for the Fine field,
+// which was previously stored as a string like "$500" and is now an int.
+func (v *PenalCodeViolation) UnmarshalBSONValue(t bsontype.Type, data []byte) error {
+	// Decode into a raw document so we can handle the fine field specially
+	if t != bsontype.EmbeddedDocument {
+		return fmt.Errorf("expected embedded document, got %v", t)
+	}
+
+	raw := bson.Raw(data)
+
+	v.Name = raw.Lookup("name").StringValue()
+
+	if jt, ok := raw.Lookup("jailTime").StringValueOK(); ok {
+		v.JailTime = jt
+	}
+
+	if exp, ok := raw.Lookup("explanation").StringValueOK(); ok {
+		v.Explanation = exp
+	}
+
+	// Handle fine: could be string ("$500") or int32/int64 (500) or missing
+	fineVal := raw.Lookup("fine")
+	switch fineVal.Type {
+	case bsontype.String:
+		s := fineVal.StringValue()
+		s = strings.TrimPrefix(s, "$")
+		s = strings.TrimSpace(s)
+		if s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				v.Fine = n
+			}
+		}
+	case bsontype.Int32:
+		v.Fine = int(fineVal.Int32())
+	case bsontype.Int64:
+		v.Fine = int(fineVal.AsInt64())
+	case bsontype.Double:
+		v.Fine = int(fineVal.Double())
+	}
+
+	return nil
 }
 
 // MemberDetail holds the structure for a member detail
