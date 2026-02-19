@@ -34,8 +34,8 @@ func (v Warrant) WarrantHandler(w http.ResponseWriter, r *http.Request) {
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
 	}
 	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	page := getPage(0, r)
+	skip64 := int64(page * Limit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -102,8 +102,8 @@ func (v Warrant) WarrantsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
 	}
 	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	page := getPage(0, r)
+	skip64 := int64(page * Limit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 
@@ -475,7 +475,7 @@ func (v Warrant) WarrantsSearchHandler(w http.ResponseWriter, r *http.Request) {
 		Limit = 10
 	}
 	limit64 := int64(Limit)
-	Page := getPage(Page, r)
+	Page := getPage(0, r)
 	skip64 := int64(Page * Limit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -573,7 +573,7 @@ func (v Warrant) PendingWarrantsByCommunityHandler(w http.ResponseWriter, r *htt
 		Limit = 20
 	}
 	limit64 := int64(Limit)
-	Page := getPage(Page, r)
+	Page := getPage(0, r)
 	skip64 := int64(Page * Limit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -659,7 +659,7 @@ func (v Warrant) WarrantsByCommunityHandlerV2(w http.ResponseWriter, r *http.Req
 		Limit = 10
 	}
 	limit64 := int64(Limit)
-	Page := getPage(Page, r)
+	Page := getPage(0, r)
 	skip64 := int64(Page * Limit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
