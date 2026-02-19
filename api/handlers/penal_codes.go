@@ -121,6 +121,13 @@ func (c Community) ResetCommunityPenalCodesHandler(w http.ResponseWriter, r *htt
 func defaultCommunityPenalCodes() models.CommunityPenalCode {
 	return models.CommunityPenalCode{
 		Currency: "USD",
+		Currencies: []models.CurrencyOption{
+			{Code: "USD", Symbol: "$", Builtin: true},
+			{Code: "EUR", Symbol: "\u20AC", Builtin: true},
+			{Code: "GBP", Symbol: "\u00A3", Builtin: true},
+			{Code: "CAD", Symbol: "C$", Builtin: true},
+			{Code: "AUD", Symbol: "A$", Builtin: true},
+		},
 		Categories: []models.PenalCodeCategory{
 			{
 				ID:       "traffic-violations",

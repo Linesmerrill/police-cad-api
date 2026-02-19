@@ -96,10 +96,18 @@ type FineDetails struct {
 	Amount int    `json:"amount" bson:"amount"` // 50, 100, etc.
 }
 
+// CurrencyOption holds a currency code and its display symbol
+type CurrencyOption struct {
+	Code    string `json:"code" bson:"code"`
+	Symbol  string `json:"symbol" bson:"symbol"`
+	Builtin bool   `json:"builtin" bson:"builtin"`
+}
+
 // CommunityPenalCode holds the structure for community penal codes
 type CommunityPenalCode struct {
 	Categories []PenalCodeCategory `json:"categories" bson:"categories"`
-	Currency   string              `json:"currency" bson:"currency"` // USD, EUR, etc.
+	Currency   string              `json:"currency" bson:"currency"`     // active currency code
+	Currencies []CurrencyOption    `json:"currencies" bson:"currencies"` // available currencies
 }
 
 // PenalCodeCategory holds the structure for a category of penal code violations
