@@ -654,6 +654,7 @@ func (v Warrant) WarrantsByCommunityHandlerV2(w http.ResponseWriter, r *http.Req
 	communityID := mux.Vars(r)["community_id"]
 	status := r.URL.Query().Get("status")
 	warrantType := r.URL.Query().Get("warrantType")
+	name := r.URL.Query().Get("name")
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || Limit <= 0 {
 		Limit = 10
@@ -673,6 +674,12 @@ func (v Warrant) WarrantsByCommunityHandlerV2(w http.ResponseWriter, r *http.Req
 	}
 	if warrantType != "" {
 		filter["warrant.warrantType"] = warrantType
+	}
+	if name != "" {
+		filter["$or"] = []bson.M{
+			{"warrant.accusedFirstName": bson.M{"$regex": "^" + name, "$options": "i"}},
+			{"warrant.accusedLastName": bson.M{"$regex": "^" + name, "$options": "i"}},
+		}
 	}
 
 	type findResult struct {
