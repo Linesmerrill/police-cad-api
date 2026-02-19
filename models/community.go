@@ -35,6 +35,7 @@ type CommunityDetails struct {
 	Departments            []Department            `json:"departments" bson:"departments"`
 	TenCodes               []TenCodes              `json:"tenCodes" bson:"tenCodes"`
 	Fines                  CommunityFine           `json:"fines" bson:"fines"`
+	PenalCodes             CommunityPenalCode      `json:"penalCodes" bson:"penalCodes"`
 	Templates              []Template              `json:"templates" bson:"templates"`
 	Subscription           Subscription            `json:"subscription" bson:"subscription"`
 	SubscriptionCreatedBy  string                  `json:"subscriptionCreatedBy" bson:"subscriptionCreatedBy"`
@@ -87,6 +88,30 @@ type Category struct {
 type FineDetails struct {
 	Name   string `json:"name" bson:"name"`     // Speeding, Public Intoxication, etc.
 	Amount int    `json:"amount" bson:"amount"` // 50, 100, etc.
+}
+
+// CommunityPenalCode holds the structure for community penal codes
+type CommunityPenalCode struct {
+	Categories []PenalCodeCategory `json:"categories" bson:"categories"`
+}
+
+// PenalCodeCategory holds the structure for a category of penal code violations
+type PenalCodeCategory struct {
+	ID         string               `json:"id" bson:"id"`
+	Name       string               `json:"name" bson:"name"`
+	Subtitle   string               `json:"subtitle" bson:"subtitle"`
+	Icon       string               `json:"icon" bson:"icon"`
+	Color      string               `json:"color" bson:"color"`
+	Columns    []string             `json:"columns" bson:"columns"`
+	Violations []PenalCodeViolation `json:"violations" bson:"violations"`
+}
+
+// PenalCodeViolation holds the structure for a single penal code violation
+type PenalCodeViolation struct {
+	Name        string `json:"name" bson:"name"`
+	JailTime    string `json:"jailTime" bson:"jailTime"`
+	Fine        string `json:"fine,omitempty" bson:"fine,omitempty"`
+	Explanation string `json:"explanation,omitempty" bson:"explanation,omitempty"`
 }
 
 // MemberDetail holds the structure for a member detail
