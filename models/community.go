@@ -1,6 +1,12 @@
 package models
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -35,6 +41,7 @@ type CommunityDetails struct {
 	Departments            []Department            `json:"departments" bson:"departments"`
 	TenCodes               []TenCodes              `json:"tenCodes" bson:"tenCodes"`
 	Fines                  CommunityFine           `json:"fines" bson:"fines"`
+	PenalCodes             CommunityPenalCode      `json:"penalCodes" bson:"penalCodes"`
 	Templates              []Template              `json:"templates" bson:"templates"`
 	Subscription           Subscription            `json:"subscription" bson:"subscription"`
 	SubscriptionCreatedBy  string                  `json:"subscriptionCreatedBy" bson:"subscriptionCreatedBy"`
@@ -87,6 +94,82 @@ type Category struct {
 type FineDetails struct {
 	Name   string `json:"name" bson:"name"`     // Speeding, Public Intoxication, etc.
 	Amount int    `json:"amount" bson:"amount"` // 50, 100, etc.
+}
+
+// CurrencyOption holds a currency code and its display symbol
+type CurrencyOption struct {
+	Code    string `json:"code" bson:"code"`
+	Symbol  string `json:"symbol" bson:"symbol"`
+	Builtin bool   `json:"builtin" bson:"builtin"`
+}
+
+// CommunityPenalCode holds the structure for community penal codes
+type CommunityPenalCode struct {
+	Categories []PenalCodeCategory `json:"categories" bson:"categories"`
+	Currency   string              `json:"currency" bson:"currency"`     // active currency code
+	Currencies []CurrencyOption    `json:"currencies" bson:"currencies"` // available currencies
+}
+
+// PenalCodeCategory holds the structure for a category of penal code violations
+type PenalCodeCategory struct {
+	ID         string               `json:"id" bson:"id"`
+	Name       string               `json:"name" bson:"name"`
+	Subtitle   string               `json:"subtitle" bson:"subtitle"`
+	Icon       string               `json:"icon" bson:"icon"`
+	Color      string               `json:"color" bson:"color"`
+	Columns    []string             `json:"columns" bson:"columns"`
+	Violations []PenalCodeViolation `json:"violations" bson:"violations"`
+}
+
+// PenalCodeViolation holds the structure for a single penal code violation
+type PenalCodeViolation struct {
+	Name        string `json:"name" bson:"name"`
+	JailTime    string `json:"jailTime" bson:"jailTime"`
+	Fine        int    `json:"fine" bson:"fine"`
+	Explanation string `json:"explanation,omitempty" bson:"explanation,omitempty"`
+}
+
+// UnmarshalBSONValue handles backward compatibility for the Fine field,
+// which was previously stored as a string like "$500" and is now an int.
+func (v *PenalCodeViolation) UnmarshalBSONValue(t bsontype.Type, data []byte) error {
+	// Decode into a raw document so we can handle the fine field specially
+	if t != bsontype.EmbeddedDocument {
+		return fmt.Errorf("expected embedded document, got %v", t)
+	}
+
+	raw := bson.Raw(data)
+
+	v.Name = raw.Lookup("name").StringValue()
+
+	if jt, ok := raw.Lookup("jailTime").StringValueOK(); ok {
+		v.JailTime = jt
+	}
+
+	if exp, ok := raw.Lookup("explanation").StringValueOK(); ok {
+		v.Explanation = exp
+	}
+
+	// Handle fine: could be string ("$500") or int32/int64 (500) or missing
+	fineVal := raw.Lookup("fine")
+	switch fineVal.Type {
+	case bsontype.String:
+		s := fineVal.StringValue()
+		s = strings.TrimPrefix(s, "$")
+		s = strings.TrimSpace(s)
+		if s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				v.Fine = n
+			}
+		}
+	case bsontype.Int32:
+		v.Fine = int(fineVal.Int32())
+	case bsontype.Int64:
+		v.Fine = int(fineVal.AsInt64())
+	case bsontype.Double:
+		v.Fine = int(fineVal.Double())
+	}
+
+	return nil
 }
 
 // MemberDetail holds the structure for a member detail
