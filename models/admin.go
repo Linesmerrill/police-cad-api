@@ -20,6 +20,7 @@ type AdminUser struct {
 	CreatedAt      time.Time          `bson:"createdAt" json:"createdAt"`
 	CreatedBy      string             `bson:"createdBy" json:"createdBy"`
 	LastLoginAt    *time.Time         `bson:"lastLoginAt,omitempty" json:"lastLoginAt,omitempty"`
+	LastAccessedAt *time.Time         `bson:"lastAccessedAt,omitempty" json:"lastAccessedAt,omitempty"`
 }
 
 // CreateAdminUserRequest represents the request to create a new admin user
