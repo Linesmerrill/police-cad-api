@@ -5781,7 +5781,7 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 		findOptions = options.Find().
 			SetSkip(skip).
 			SetLimit(int64(limit)).
-			SetSort(bson.M{"score": bson.M{"$meta": "textScore"}, "user.name": 1})
+			SetSort(bson.D{{Key: "score", Value: bson.M{"$meta": "textScore"}}, {Key: "user.name", Value: 1}})
 	} else {
 		// For regex search, sort by name
 		findOptions = options.Find().
