@@ -134,6 +134,39 @@ func (h Admin) AdminLogoutHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AdminHeartbeatHandler updates the admin's lastAccessedAt timestamp.
+// Called by the frontend on page load so we can track when an admin was last active.
+func (h Admin) AdminHeartbeatHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		AdminID string `json:"adminId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AdminID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "adminId is required"})
+		return
+	}
+
+	objectID, err := primitive.ObjectIDFromHex(req.AdminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid admin ID format"})
+		return
+	}
+
+	now := time.Now()
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": objectID}, bson.M{"$set": bson.M{"lastAccessedAt": now}})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to update"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
 // AdminLoginHandler handles admin login via email/password and returns a JWT
 func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -202,6 +235,10 @@ func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Track admin login activity
 	h.trackAdminLogin(admin.ID, r)
+
+	// Update lastAccessedAt timestamp
+	now := time.Now()
+	_, _ = h.ADB.UpdateOne(r.Context(), bson.M{"_id": admin.ID}, bson.M{"$set": bson.M{"lastAccessedAt": now}})
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
