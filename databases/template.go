@@ -248,7 +248,6 @@ func (t *TemplateDatabase) CreateDefaultTemplates(ctx context.Context, component
 		Components: createComponentRefs([]string{
 			"reviewWarrants",
 			"allWarrants",
-			"10CodesInterface",
 			"penalCodes",
 			"notepad",
 		}, true),
