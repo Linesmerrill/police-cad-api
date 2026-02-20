@@ -5731,20 +5731,15 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	// We need to find users who:
 	// 1. Have the community in their communities array with status "approved"
 	// 2. Match the search query in their callSign or username
-	queryLen := len(query)
-	var searchCondition bson.M
-	
-	// OPTIMIZATION: Use $text search for queries >=3 chars (uses user_search_text_idx)
-	// For shorter queries, use prefix regex
-	if queryLen >= 3 {
-		searchCondition = bson.M{"$text": bson.M{"$search": query}} // Uses user_search_text_idx
-	} else {
-		searchCondition = bson.M{
-			"$or": []bson.M{
-				{"user.callSign": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match
-				{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
-			},
-		}
+	//
+	// NOTE: We use regex for all query lengths. $text search was previously used for
+	// queries >=3 chars, but it does whole-word tokenized matching which doesn't work
+	// for partial username searches (e.g. "side" wouldn't match "SideWayzBuddha").
+	searchCondition := bson.M{
+		"$or": []bson.M{
+			{"user.callSign": bson.M{"$regex": "^" + query, "$options": "i"}},
+			{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
+		},
 	}
 	
 	filter := bson.M{
@@ -5775,20 +5770,10 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))
 
 	// Fetch paginated results
-	var findOptions *options.FindOptions
-	if queryLen >= 3 {
-		// For $text search, sort by text score for relevance
-		findOptions = options.Find().
-			SetSkip(skip).
-			SetLimit(int64(limit)).
-			SetSort(bson.D{{Key: "score", Value: bson.M{"$meta": "textScore"}}, {Key: "user.name", Value: 1}})
-	} else {
-		// For regex search, sort by name
-		findOptions = options.Find().
-			SetSkip(skip).
-			SetLimit(int64(limit)).
-			SetSort(bson.M{"user.name": 1})
-	}
+	findOptions := options.Find().
+		SetSkip(skip).
+		SetLimit(int64(limit)).
+		SetSort(bson.M{"user.name": 1})
 
 	cursor, err := c.UDB.Find(ctx, filter, findOptions)
 	if err != nil {
