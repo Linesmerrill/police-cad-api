@@ -2608,6 +2608,28 @@ func (h Admin) AdminGetAllAdminsHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// AdminGetAdminCountHandler returns the count of admin users
+func (h Admin) AdminGetAdminCountHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	count, err := h.ADB.CountDocuments(r.Context(), bson.M{})
+	if err != nil {
+		log.Printf("Admin count error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to count admin users",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"count":   count,
+	})
+}
+
 // AdminGetActivityRequest represents the request to get admin activity with permission check
 type AdminGetActivityRequest struct {
 	CurrentUser map[string]interface{} `json:"currentUser"`
