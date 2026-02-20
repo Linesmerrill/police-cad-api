@@ -40,6 +40,26 @@ func New() *Config {
 
 }
 
+// InfoStatus logs at info level and writes an HTTP error response.
+// Use this for expected conditions that are not actual errors (e.g., resource not found).
+func InfoStatus(message string, httpStatusCode int, w http.ResponseWriter, err error) {
+	if err != nil {
+		zap.S().Infow(message, "info", err)
+	} else {
+		zap.S().Info(message)
+	}
+	w.WriteHeader(httpStatusCode)
+	var errorMsg string
+	if err != nil {
+		errorMsg = err.Error()
+	} else {
+		errorMsg = message
+	}
+	b, _ := json.Marshal(models.ErrorMessageResponse{Response: models.MessageError{Message: message, Error: errorMsg}})
+	w.Write(b)
+	return
+}
+
 // ErrorStatus is a useful function that will log, write http headers and body for a
 // give message, status code and err
 func ErrorStatus(message string, httpStatusCode int, w http.ResponseWriter, err error) {

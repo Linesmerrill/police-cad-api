@@ -3992,7 +3992,7 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 
 	// Check if tenCodeID is empty
 	if tenCodeID == "" {
-		config.ErrorStatus("User does not have an active ten code", http.StatusNotFound, w, fmt.Errorf("tenCodeID is empty for user"))
+		config.InfoStatus("User does not have an active ten code", http.StatusNotFound, w, fmt.Errorf("tenCodeID is empty for user"))
 		return
 	}
 
