@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -81,6 +82,7 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	// OPTIMIZATION: Use $text search instead of regex for much better performance
 	// The user_search_text_idx index exists for user.username, user.callSign, user.name
 	queryLen := len(query)
+	escapedQuery := regexp.QuoteMeta(query)
 	var userFilter bson.M
 	var userOptions *options.FindOptions
 
@@ -103,8 +105,8 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 		userFilter = bson.M{
 			"$and": []bson.M{
 				{"$or": []bson.M{
-					{"user.name": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match is faster
-					{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
+					{"user.name": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}}, // Prefix match is faster
+					{"user.username": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
 				}},
 				{"_id": bson.M{"$ne": currentUserObjectID}},
 			},
@@ -120,8 +122,8 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 			userFilter = bson.M{
 				"$and": []bson.M{
 					{"$or": []bson.M{
-						{"user.name": bson.M{"$regex": query, "$options": "i"}},
-						{"user.username": bson.M{"$regex": query, "$options": "i"}},
+						{"user.name": bson.M{"$regex": escapedQuery, "$options": "i"}},
+						{"user.username": bson.M{"$regex": escapedQuery, "$options": "i"}},
 					}},
 					{"_id": bson.M{"$ne": currentUserObjectID}},
 				},
@@ -154,7 +156,7 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	// Search for communities with visibility set to "public"
 	communityFilter := bson.M{
 		"$and": []bson.M{
-			{"community.name": bson.M{"$regex": query, "$options": "i"}},
+			{"community.name": bson.M{"$regex": escapedQuery, "$options": "i"}},
 			{"community.visibility": "public"},
 		},
 	}
@@ -223,6 +225,7 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	// For queries 3+ chars, use $text search with text index for much better performance
 	// Always filter by visibility to use the visibility index
 	queryLen := len(strings.TrimSpace(query))
+	escapedQuery := regexp.QuoteMeta(query)
 	var communityFilter bson.M
 	var communityOptions *options.FindOptions
 	
@@ -244,7 +247,7 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		// The visibility index will help reduce the scan set
 		communityFilter = bson.M{
 			"$and": []bson.M{
-				{"community.name": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match is slightly faster than full regex
+				{"community.name": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}}, // Prefix match is slightly faster than full regex
 				{"community.visibility": "public"},
 			},
 		}
@@ -258,7 +261,7 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 			zap.S().Warnw("text search failed, falling back to regex", "query", query, "error", err)
 			communityFilter = bson.M{
 				"$and": []bson.M{
-					{"community.name": bson.M{"$regex": query, "$options": "i"}},
+					{"community.name": bson.M{"$regex": escapedQuery, "$options": "i"}},
 					{"community.visibility": "public"},
 				},
 			}

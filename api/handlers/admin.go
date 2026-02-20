@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -451,6 +452,7 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	// OPTIMIZATION: Use $text search for name/username (much faster than regex)
 	// For email, use direct field lookup with collation (has index)
 	queryLen := len(query)
+	escapedQuery := regexp.QuoteMeta(query)
 	isEmailQuery := strings.Contains(query, "@") // Detect if query looks like an email
 	var filter bson.M
 	var findOpts *options.FindOptions
@@ -483,9 +485,9 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		// For very short queries, use regex but limit aggressively
 		filter = bson.M{
 			"$or": []bson.M{
-				{"user.email": bson.M{"$regex": "^" + query, "$options": "i"}}, // Prefix match
-				{"user.name": bson.M{"$regex": "^" + query, "$options": "i"}},
-				{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
+				{"user.email": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}}, // Prefix match
+				{"user.name": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
+				{"user.username": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
 			},
 		}
 		findOpts = &options.FindOptions{
@@ -518,9 +520,9 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 			// Fallback to regex-based search (no $text search)
 			filter = bson.M{
 				"$or": []bson.M{
-					{"user.email": bson.M{"$regex": query, "$options": "i"}},
-					{"user.name": bson.M{"$regex": query, "$options": "i"}},
-					{"user.username": bson.M{"$regex": query, "$options": "i"}},
+					{"user.email": bson.M{"$regex": escapedQuery, "$options": "i"}},
+					{"user.name": bson.M{"$regex": escapedQuery, "$options": "i"}},
+					{"user.username": bson.M{"$regex": escapedQuery, "$options": "i"}},
 				},
 			}
 			findOpts = &options.FindOptions{
@@ -644,15 +646,16 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	// Use regex search for community names (text index may not be available/configured)
 	// For queries >= 3 chars, use full regex match, otherwise use prefix match
 	queryLen := len(query)
+	escapedQuery := regexp.QuoteMeta(query)
 	var filter bson.M
 	var findOpts *options.FindOptions
-	
+
 	if queryLen >= 3 {
 		// Use regex search for queries >= 3 chars
-		filter = bson.M{"community.name": bson.M{"$regex": query, "$options": "i"}}
+		filter = bson.M{"community.name": bson.M{"$regex": escapedQuery, "$options": "i"}}
 	} else {
 		// For short queries, use prefix regex
-		filter = bson.M{"community.name": bson.M{"$regex": "^" + query, "$options": "i"}}
+		filter = bson.M{"community.name": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}}
 	}
 	
 	findOpts = options.Find().
@@ -794,8 +797,9 @@ func (h Admin) AdminPendingVerificationSearchHandler(w http.ResponseWriter, r *h
 	limit64 := int64(limit)
 
 	// Search by email (case-insensitive)
+	escapedQuery := regexp.QuoteMeta(query)
 	filter := bson.M{
-		"email": bson.M{"$regex": query, "$options": "i"},
+		"email": bson.M{"$regex": escapedQuery, "$options": "i"},
 	}
 	
 	// Get total count for pagination metadata

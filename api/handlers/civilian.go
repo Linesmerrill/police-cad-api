@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -928,10 +929,11 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 
 	// Search by name (case-insensitive) within the specified community
+	escapedQuery := regexp.QuoteMeta(query)
 	filter := bson.M{
 		"$and": []bson.M{
 			{
-				"civilian.name": bson.M{"$regex": query, "$options": "i"},
+				"civilian.name": bson.M{"$regex": escapedQuery, "$options": "i"},
 			},
 			{
 				"civilian.activeCommunityID": req.CommunityID,

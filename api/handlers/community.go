@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -5735,10 +5736,11 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	// NOTE: We use regex for all query lengths. $text search was previously used for
 	// queries >=3 chars, but it does whole-word tokenized matching which doesn't work
 	// for partial username searches (e.g. "side" wouldn't match "SideWayzBuddha").
+	escapedQuery := regexp.QuoteMeta(query)
 	searchCondition := bson.M{
 		"$or": []bson.M{
-			{"user.callSign": bson.M{"$regex": "^" + query, "$options": "i"}},
-			{"user.username": bson.M{"$regex": "^" + query, "$options": "i"}},
+			{"user.callSign": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
+			{"user.username": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
 		},
 	}
 	
