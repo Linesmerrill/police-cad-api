@@ -249,6 +249,7 @@ func (t *TemplateDatabase) CreateDefaultTemplates(ctx context.Context, component
 			"reviewWarrants",
 			"allWarrants",
 			"10CodesInterface",
+			"penalCodes",
 			"notepad",
 		}, true),
 		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),

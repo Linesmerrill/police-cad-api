@@ -356,6 +356,20 @@ func (c *ComponentDatabase) CreateDefaultComponents(ctx context.Context) error {
 			UpdatedAt:   primitive.NewDateTimeFromTime(time.Now()),
 			CreatedBy:   "system",
 		},
+		{
+			ID:          primitive.NewObjectID(),
+			Name:        "penalCodes",
+			DisplayName: "Penal Codes",
+			Description: "View and reference penal codes for charges and sentencing",
+			Category:    "judicial",
+			Type:        "feature",
+			Version:     "1.0.0",
+			IsActive:    true,
+			IsRequired:  false,
+			CreatedAt:   primitive.NewDateTimeFromTime(time.Now()),
+			UpdatedAt:   primitive.NewDateTimeFromTime(time.Now()),
+			CreatedBy:   "system",
+		},
 	}
 
 	// Insert all components
