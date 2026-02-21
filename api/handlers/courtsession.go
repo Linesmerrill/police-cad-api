@@ -42,6 +42,9 @@ func (cs CourtSession) CreateCourtSessionHandler(w http.ResponseWriter, r *http.
 	if session.Details.Status == "" {
 		session.Details.Status = "scheduled"
 	}
+	if session.Details.Participants == nil {
+		session.Details.Participants = []models.SessionParticipant{}
+	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -525,6 +528,13 @@ func (cs CourtSession) JoinCourtSessionHandler(w http.ResponseWriter, r *http.Re
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Remove any existing entry for this user first (prevents duplicates on refresh)
+	_ = cs.DB.UpdateOne(ctx, bson.M{"_id": bID}, bson.M{
+		"$pull": bson.M{
+			"courtSession.participants": bson.M{"userID": participant.UserID},
+		},
+	})
 
 	now := primitive.NewDateTimeFromTime(time.Now())
 	update := bson.M{
