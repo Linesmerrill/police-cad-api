@@ -529,24 +529,33 @@ func (cs CourtSession) JoinCourtSessionHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Remove any existing entry for this user first (prevents duplicates on refresh)
-	_ = cs.DB.UpdateOne(ctx, bson.M{"_id": bID}, bson.M{
-		"$pull": bson.M{
-			"courtSession.participants": bson.M{"userID": participant.UserID},
-		},
-	})
-
-	now := primitive.NewDateTimeFromTime(time.Now())
-	update := bson.M{
-		"$push": bson.M{
-			"courtSession.participants": participant,
-		},
-		"$set": bson.M{
-			"courtSession.updatedAt": now,
-		},
+	// Read-modify-write to handle legacy sessions where participants may be null
+	existing, err := cs.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to find court session", http.StatusNotFound, w, err)
+		return
 	}
 
-	err = cs.DB.UpdateOne(ctx, bson.M{"_id": bID}, update)
+	// Build new participants list: remove existing entry for this user, then append
+	participants := existing.Details.Participants
+	if participants == nil {
+		participants = []models.SessionParticipant{}
+	}
+	filtered := make([]models.SessionParticipant, 0, len(participants))
+	for _, p := range participants {
+		if p.UserID != participant.UserID {
+			filtered = append(filtered, p)
+		}
+	}
+	filtered = append(filtered, participant)
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	err = cs.DB.UpdateOne(ctx, bson.M{"_id": bID}, bson.M{
+		"$set": bson.M{
+			"courtSession.participants": filtered,
+			"courtSession.updatedAt":    now,
+		},
+	})
 	if err != nil {
 		config.ErrorStatus("failed to join court session", http.StatusInternalServerError, w, err)
 		return
@@ -572,17 +581,27 @@ func (cs CourtSession) LeaveCourtSessionHandler(w http.ResponseWriter, r *http.R
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	now := primitive.NewDateTimeFromTime(time.Now())
-	update := bson.M{
-		"$pull": bson.M{
-			"courtSession.participants": bson.M{"userID": userID},
-		},
-		"$set": bson.M{
-			"courtSession.updatedAt": now,
-		},
+	// Read-modify-write to handle legacy sessions where participants may be null
+	existing, err := cs.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to find court session", http.StatusNotFound, w, err)
+		return
 	}
 
-	err = cs.DB.UpdateOne(ctx, bson.M{"_id": bID}, update)
+	filtered := make([]models.SessionParticipant, 0)
+	for _, p := range existing.Details.Participants {
+		if p.UserID != userID {
+			filtered = append(filtered, p)
+		}
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	err = cs.DB.UpdateOne(ctx, bson.M{"_id": bID}, bson.M{
+		"$set": bson.M{
+			"courtSession.participants": filtered,
+			"courtSession.updatedAt":    now,
+		},
+	})
 	if err != nil {
 		config.ErrorStatus("failed to leave court session", http.StatusInternalServerError, w, err)
 		return
