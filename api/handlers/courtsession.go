@@ -298,6 +298,162 @@ func (cs CourtSession) EndCourtSessionHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// UpdateCourtSessionHandler updates a court session's details (title, times, docket)
+func (cs CourtSession) UpdateCourtSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := mux.Vars(r)["session_id"]
+
+	bID, err := primitive.ObjectIDFromHex(sessionID)
+	if err != nil {
+		config.ErrorStatus("invalid court session ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var details models.CourtSessionDetails
+	if err := json.NewDecoder(r.Body).Decode(&details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	existing, err := cs.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to find court session", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Only allow editing scheduled sessions
+	if existing.Details.Status != "scheduled" {
+		config.ErrorStatus("can only edit sessions in scheduled status", http.StatusBadRequest, w, fmt.Errorf("session status is '%s'", existing.Details.Status))
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	setFields := bson.M{
+		"courtSession.updatedAt": now,
+	}
+
+	if details.Title != "" {
+		setFields["courtSession.title"] = details.Title
+	}
+	if details.ScheduledStart != 0 {
+		setFields["courtSession.scheduledStart"] = details.ScheduledStart
+	}
+	if details.ScheduledEnd != 0 {
+		setFields["courtSession.scheduledEnd"] = details.ScheduledEnd
+	}
+
+	// If docket was provided, enrich and replace
+	if details.Docket != nil {
+		for i := range details.Docket {
+			if details.Docket[i].Status == "" {
+				details.Docket[i].Status = "pending"
+			}
+			caseID, err := primitive.ObjectIDFromHex(details.Docket[i].CourtCaseID)
+			if err == nil {
+				courtCase, err := cs.CCDB.FindOne(ctx, bson.M{"_id": caseID})
+				if err == nil && courtCase != nil {
+					details.Docket[i].CivilianName = courtCase.Details.CivilianName
+					details.Docket[i].UserID = courtCase.Details.UserID
+				}
+			}
+		}
+		setFields["courtSession.docket"] = details.Docket
+
+		// Unlink old cases that are no longer in the docket
+		newCaseIDs := make(map[string]bool)
+		for _, entry := range details.Docket {
+			newCaseIDs[entry.CourtCaseID] = true
+		}
+		for _, entry := range existing.Details.Docket {
+			if !newCaseIDs[entry.CourtCaseID] {
+				caseID, err := primitive.ObjectIDFromHex(entry.CourtCaseID)
+				if err == nil {
+					_ = cs.CCDB.UpdateOne(ctx,
+						bson.M{"_id": caseID},
+						bson.M{"$unset": bson.M{"courtCase.courtSessionID": ""}, "$set": bson.M{"courtCase.updatedAt": now}},
+					)
+				}
+			}
+		}
+
+		// Link new cases
+		for _, entry := range details.Docket {
+			caseID, err := primitive.ObjectIDFromHex(entry.CourtCaseID)
+			if err == nil {
+				_ = cs.CCDB.UpdateOne(ctx,
+					bson.M{"_id": caseID},
+					bson.M{"$set": bson.M{
+						"courtCase.courtSessionID": sessionID,
+						"courtCase.updatedAt":      now,
+					}},
+				)
+			}
+		}
+	}
+
+	err = cs.DB.UpdateOne(ctx, bson.M{"_id": bID}, bson.M{"$set": setFields})
+	if err != nil {
+		config.ErrorStatus("failed to update court session", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Court session updated",
+	})
+}
+
+// DeleteCourtSessionHandler deletes a court session
+func (cs CourtSession) DeleteCourtSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := mux.Vars(r)["session_id"]
+
+	bID, err := primitive.ObjectIDFromHex(sessionID)
+	if err != nil {
+		config.ErrorStatus("invalid court session ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	existing, err := cs.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to find court session", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Only allow deleting scheduled sessions
+	if existing.Details.Status != "scheduled" {
+		config.ErrorStatus("can only delete sessions in scheduled status", http.StatusBadRequest, w, fmt.Errorf("session status is '%s'", existing.Details.Status))
+		return
+	}
+
+	// Unlink court cases from this session
+	now := primitive.NewDateTimeFromTime(time.Now())
+	for _, entry := range existing.Details.Docket {
+		caseID, err := primitive.ObjectIDFromHex(entry.CourtCaseID)
+		if err == nil {
+			_ = cs.CCDB.UpdateOne(ctx,
+				bson.M{"_id": caseID},
+				bson.M{"$unset": bson.M{"courtCase.courtSessionID": ""}, "$set": bson.M{"courtCase.updatedAt": now}},
+			)
+		}
+	}
+
+	err = cs.DB.DeleteOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to delete court session", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Court session deleted",
+	})
+}
+
 // ActivateDocketEntryHandler activates a specific case in the docket
 func (cs CourtSession) ActivateDocketEntryHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := mux.Vars(r)["session_id"]

@@ -397,6 +397,8 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/court-sessions/{session_id}/chat", api.Middleware(http.HandlerFunc(courtSessionHandler.GetCourtChatHandler))).Methods("GET")
 	apiV2.Handle("/court-sessions/{session_id}/chat", api.Middleware(http.HandlerFunc(courtSessionHandler.PostCourtChatHandler))).Methods("POST")
 	apiV2.Handle("/court-sessions/{session_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.GetCourtSessionByIDHandler))).Methods("GET")
+	apiV2.Handle("/court-sessions/{session_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.UpdateCourtSessionHandler))).Methods("PUT")
+	apiV2.Handle("/court-sessions/{session_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.DeleteCourtSessionHandler))).Methods("DELETE")
 	apiV2.Handle("/court-sessions", api.Middleware(http.HandlerFunc(courtSessionHandler.CreateCourtSessionHandler))).Methods("POST")
 	apiV2.Handle("/court-sessions/community/{community_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.GetCourtSessionsByCommunityHandler))).Methods("GET")
 
