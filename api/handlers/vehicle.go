@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -363,13 +364,13 @@ func (v Vehicle) VehicleSearchHandler(w http.ResponseWriter, r *http.Request) {
 	zap.S().Debugf("model: '%v'", model)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
-	// Build the query
+	// Build the query (escape regex metacharacters in user input)
 	query := bson.M{
 		"$or": []bson.M{
-			{"vehicle.plate": bson.M{"$regex": plate, "$options": "i"}},
-			{"vehicle.vin": bson.M{"$regex": vin, "$options": "i"}},
-			{"vehicle.make": bson.M{"$regex": vehMake, "$options": "i"}},
-			{"vehicle.model": bson.M{"$regex": model, "$options": "i"}},
+			{"vehicle.plate": bson.M{"$regex": regexp.QuoteMeta(plate), "$options": "i"}},
+			{"vehicle.vin": bson.M{"$regex": regexp.QuoteMeta(vin), "$options": "i"}},
+			{"vehicle.make": bson.M{"$regex": regexp.QuoteMeta(vehMake), "$options": "i"}},
+			{"vehicle.model": bson.M{"$regex": regexp.QuoteMeta(model), "$options": "i"}},
 		},
 	}
 	if activeCommunityID != "" {

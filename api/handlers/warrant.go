@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -485,8 +486,8 @@ func (v Warrant) WarrantsSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	if name != "" {
 		query["$or"] = []bson.M{
-			{"warrant.accusedFirstName": bson.M{"$regex": "^" + name, "$options": "i"}},
-			{"warrant.accusedLastName": bson.M{"$regex": "^" + name, "$options": "i"}},
+			{"warrant.accusedFirstName": bson.M{"$regex": "^" + regexp.QuoteMeta(name), "$options": "i"}},
+			{"warrant.accusedLastName": bson.M{"$regex": "^" + regexp.QuoteMeta(name), "$options": "i"}},
 		}
 	}
 	if warrantType != "" {
@@ -677,8 +678,8 @@ func (v Warrant) WarrantsByCommunityHandlerV2(w http.ResponseWriter, r *http.Req
 	}
 	if name != "" {
 		filter["$or"] = []bson.M{
-			{"warrant.accusedFirstName": bson.M{"$regex": "^" + name, "$options": "i"}},
-			{"warrant.accusedLastName": bson.M{"$regex": "^" + name, "$options": "i"}},
+			{"warrant.accusedFirstName": bson.M{"$regex": "^" + regexp.QuoteMeta(name), "$options": "i"}},
+			{"warrant.accusedLastName": bson.M{"$regex": "^" + regexp.QuoteMeta(name), "$options": "i"}},
 		}
 	}
 

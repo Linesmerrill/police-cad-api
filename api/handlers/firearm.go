@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -477,13 +478,13 @@ func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 	var orConditions []bson.M
 	
 	if name != "" {
-		orConditions = append(orConditions, bson.M{"firearm.name": bson.M{"$regex": "^" + name, "$options": "i"}}) // Prefix match is faster
+		orConditions = append(orConditions, bson.M{"firearm.name": bson.M{"$regex": "^" + regexp.QuoteMeta(name), "$options": "i"}}) // Prefix match is faster
 	}
 	if serialNumber != "" {
-		orConditions = append(orConditions, bson.M{"firearm.serialNumber": bson.M{"$regex": "^" + serialNumber, "$options": "i"}}) // Prefix match is faster
+		orConditions = append(orConditions, bson.M{"firearm.serialNumber": bson.M{"$regex": "^" + regexp.QuoteMeta(serialNumber), "$options": "i"}}) // Prefix match is faster
 	}
 	if weaponType != "" {
-		orConditions = append(orConditions, bson.M{"firearm.weaponType": bson.M{"$regex": "^" + weaponType, "$options": "i"}}) // Prefix match is faster
+		orConditions = append(orConditions, bson.M{"firearm.weaponType": bson.M{"$regex": "^" + regexp.QuoteMeta(weaponType), "$options": "i"}}) // Prefix match is faster
 	}
 	
 	if len(orConditions) > 0 {

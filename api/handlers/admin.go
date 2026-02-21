@@ -1866,10 +1866,11 @@ func (h Admin) AdminSearchAdminsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Build search filter
+	escapedAdminQuery := regexp.QuoteMeta(req.Query)
 	filter := bson.M{
 		"$or": []bson.M{
-			{"email": bson.M{"$regex": req.Query, "$options": "i"}},
-			{"roles": bson.M{"$regex": req.Query, "$options": "i"}},
+			{"email": bson.M{"$regex": escapedAdminQuery, "$options": "i"}},
+			{"roles": bson.M{"$regex": escapedAdminQuery, "$options": "i"}},
 		},
 	}
 

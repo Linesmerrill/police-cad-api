@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -4304,7 +4305,7 @@ func (u User) BoostCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
 	// Build filter: must be in user's communities, optionally filter by name
 	filter := bson.M{"_id": bson.M{"$in": communityIDs}}
 	if search != "" {
-		filter["community.name"] = bson.M{"$regex": search, "$options": "i"}
+		filter["community.name"] = bson.M{"$regex": regexp.QuoteMeta(search), "$options": "i"}
 	}
 
 	// Only fetch the fields the boost page needs

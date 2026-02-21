@@ -289,13 +289,13 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	var orConditions []bson.M
 
 	if firstName != "" {
-		orConditions = append(orConditions, bson.M{"civilian.firstName": bson.M{"$regex": firstName, "$options": "i"}})
+		orConditions = append(orConditions, bson.M{"civilian.firstName": bson.M{"$regex": regexp.QuoteMeta(firstName), "$options": "i"}})
 	}
 	if lastName != "" {
-		orConditions = append(orConditions, bson.M{"civilian.lastName": bson.M{"$regex": lastName, "$options": "i"}})
+		orConditions = append(orConditions, bson.M{"civilian.lastName": bson.M{"$regex": regexp.QuoteMeta(lastName), "$options": "i"}})
 	}
 	if name != "" {
-		orConditions = append(orConditions, bson.M{"civilian.name": bson.M{"$regex": name, "$options": "i"}})
+		orConditions = append(orConditions, bson.M{"civilian.name": bson.M{"$regex": regexp.QuoteMeta(name), "$options": "i"}})
 	}
 
 	filter := bson.M{}
