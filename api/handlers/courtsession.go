@@ -43,15 +43,24 @@ func (cs CourtSession) CreateCourtSessionHandler(w http.ResponseWriter, r *http.
 		session.Details.Status = "scheduled"
 	}
 
-	// Initialize docket entry statuses
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Initialize docket entry statuses and enrich with civilian info from court cases
 	for i := range session.Details.Docket {
 		if session.Details.Docket[i].Status == "" {
 			session.Details.Docket[i].Status = "pending"
 		}
+		// Look up the court case to get civilian name and userID
+		caseID, err := primitive.ObjectIDFromHex(session.Details.Docket[i].CourtCaseID)
+		if err == nil {
+			courtCase, err := cs.CCDB.FindOne(ctx, bson.M{"_id": caseID})
+			if err == nil && courtCase != nil {
+				session.Details.Docket[i].CivilianName = courtCase.Details.CivilianName
+				session.Details.Docket[i].UserID = courtCase.Details.UserID
+			}
+		}
 	}
-
-	ctx, cancel := api.WithQueryTimeout(r.Context())
-	defer cancel()
 
 	_, err := cs.DB.InsertOne(ctx, session)
 	if err != nil {

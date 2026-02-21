@@ -40,9 +40,11 @@ type CourtSessionDetails struct {
 
 // DocketEntry represents a single case in the court session's docket
 type DocketEntry struct {
-	CourtCaseID string `json:"courtCaseID" bson:"courtCaseID"`
-	Order       int    `json:"order" bson:"order"`
-	Status      string `json:"status" bson:"status"` // "pending", "active", "completed"
+	CourtCaseID  string `json:"courtCaseID" bson:"courtCaseID"`
+	CivilianName string `json:"civilianName" bson:"civilianName"` // denormalized for display
+	UserID       string `json:"userID" bson:"userID"`             // user who owns the civilian (for defendant role)
+	Order        int    `json:"order" bson:"order"`
+	Status       string `json:"status" bson:"status"` // "pending", "active", "completed"
 }
 
 // SessionParticipant represents a user present in a court session
