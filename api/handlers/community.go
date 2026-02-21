@@ -2446,8 +2446,16 @@ func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	filter := bson.M{"_id": cID}
+
+	// If members is null in the database, initialize it first so dot-notation updates work
 	if community.Details.Members == nil {
 		community.Details.Members = make(map[string]models.MemberDetail)
+		err = c.DB.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"community.members": bson.M{}}})
+		if err != nil {
+			config.ErrorStatus("failed to initialize community members", http.StatusInternalServerError, w, err)
+			return
+		}
 	}
 
 	member := community.Details.Members[userID]
@@ -2463,7 +2471,6 @@ func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.R
 	}
 	community.Details.Members[userID] = member
 
-	filter := bson.M{"_id": cID}
 	update := bson.M{"$set": bson.M{"community.members." + userID + ".departmentCallSigns": member.DepartmentCallSigns}}
 	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
