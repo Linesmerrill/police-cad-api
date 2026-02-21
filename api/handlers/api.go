@@ -92,6 +92,7 @@ func (a *App) New() *mux.Router {
 		DB:  databases.NewCourtCaseDatabase(a.dbHelper),
 		CDB: databases.NewCivilianDatabase(a.dbHelper),
 		ADB: databases.NewArrestReportDatabase(a.dbHelper),
+		SDB: databases.NewCourtSessionDatabase(a.dbHelper),
 	}
 	courtSessionHandler := CourtSession{
 		DB:   databases.NewCourtSessionDatabase(a.dbHelper),

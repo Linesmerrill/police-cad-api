@@ -24,6 +24,7 @@ type CourtCase struct {
 	DB  databases.CourtCaseDatabase
 	CDB databases.CivilianDatabase
 	ADB databases.ArrestReportDatabase
+	SDB databases.CourtSessionDatabase // court session DB for updating docket entries on resolve
 }
 
 // CreateCourtCaseHandler creates a new court case when a civilian contests records
@@ -467,6 +468,30 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		config.ErrorStatus("failed to resolve court case", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Mark the docket entry as "completed" in the court session (if linked)
+	courtCase, _ := cc.DB.FindOne(ctx, bson.M{"_id": bID})
+	if courtCase != nil && courtCase.Details.CourtSessionID != "" {
+		sessionOID, sErr := primitive.ObjectIDFromHex(courtCase.Details.CourtSessionID)
+		if sErr == nil {
+			session, sErr := cc.SDB.FindOne(ctx, bson.M{"_id": sessionOID})
+			if sErr == nil && session != nil {
+				updatedDocket := make([]models.DocketEntry, len(session.Details.Docket))
+				for i, entry := range session.Details.Docket {
+					updatedDocket[i] = entry
+					if entry.CourtCaseID == caseID {
+						updatedDocket[i].Status = "completed"
+					}
+				}
+				_ = cc.SDB.UpdateOne(ctx, bson.M{"_id": sessionOID}, bson.M{
+					"$set": bson.M{
+						"courtSession.docket":    updatedDocket,
+						"courtSession.updatedAt": now,
+					},
+				})
+			}
+		}
 	}
 
 	// Apply resolutions to the original records
