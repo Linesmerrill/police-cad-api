@@ -51,14 +51,17 @@ type CivilianDetails struct {
 
 // CriminalHistory holds the structure for the criminal history
 type CriminalHistory struct {
-	ID        primitive.ObjectID `json:"_id" bson:"_id"`
-	OfficerID string             `json:"officerID" bson:"officerID"`
-	Type      string             `json:"type" bson:"type"` // Citation, Arrest, Warning, etc.
-	Fines     []Fine             `json:"fines" bson:"fines"`
-	Redacted  bool               `json:"redacted" bson:"redacted"` // Rather than deleting records, we can mark them as redacted
-	Notes     string             `json:"notes" bson:"notes"`
-	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	ID          primitive.ObjectID `json:"_id" bson:"_id"`
+	OfficerID   string             `json:"officerID" bson:"officerID"`
+	Type        string             `json:"type" bson:"type"` // Citation, Arrest, Warning, etc.
+	Fines       []Fine             `json:"fines" bson:"fines"`
+	Redacted    bool               `json:"redacted" bson:"redacted"` // Rather than deleting records, we can mark them as redacted
+	Notes       string             `json:"notes" bson:"notes"`
+	Status      string             `json:"status" bson:"status"`           // "", "contested", "dismissed"
+	DismissedBy string             `json:"dismissedBy" bson:"dismissedBy"` // judge name when dismissed
+	CourtCaseID string             `json:"courtCaseID" bson:"courtCaseID"` // linked court case ID
+	CreatedAt   primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Fine holds the structure for the fine
