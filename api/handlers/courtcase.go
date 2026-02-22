@@ -580,6 +580,16 @@ func (cc CourtCase) UpdateCourtCaseStatusHandler(w http.ResponseWriter, r *http.
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Prevent unscheduling a case that is assigned to a court session
+	if statusData.Status == "in_review" || statusData.Status == "submitted" {
+		existing, err := cc.DB.FindOne(ctx, bson.M{"_id": bID})
+		if err == nil && existing != nil && existing.Details.CourtSessionID != "" {
+			config.ErrorStatus("cannot unschedule a case that is assigned to a court session", http.StatusConflict, w,
+				fmt.Errorf("case is assigned to session '%s'", existing.Details.CourtSessionID))
+			return
+		}
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 	setFields := bson.M{
 		"courtCase.status":    statusData.Status,
