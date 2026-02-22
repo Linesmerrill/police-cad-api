@@ -576,11 +576,18 @@ func (cc CourtCase) UpdateCourtCaseStatusHandler(w http.ResponseWriter, r *http.
 	defer cancel()
 
 	now := primitive.NewDateTimeFromTime(time.Now())
+	setFields := bson.M{
+		"courtCase.status":    statusData.Status,
+		"courtCase.updatedAt": now,
+	}
+
+	// Clear scheduled date when returning to queue
+	if statusData.Status == "in_review" || statusData.Status == "submitted" {
+		setFields["courtCase.scheduledDate"] = nil
+	}
+
 	update := bson.M{
-		"$set": bson.M{
-			"courtCase.status":    statusData.Status,
-			"courtCase.updatedAt": now,
-		},
+		"$set": setFields,
 		"$push": bson.M{
 			"courtCase.history": models.CourtCaseHistoryEntry{
 				Action:    statusData.Status,
