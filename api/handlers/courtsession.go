@@ -291,9 +291,15 @@ func (cs CourtSession) EndCourtSessionHandler(w http.ResponseWriter, r *http.Req
 
 	// Reset unresolved docket entries (pending/active) and their linked court cases
 	unresolvedCount := 0
-	for _, entry := range existing.Details.Docket {
+	updatedDocket := make([]models.DocketEntry, len(existing.Details.Docket))
+	copy(updatedDocket, existing.Details.Docket)
+
+	for i, entry := range updatedDocket {
 		if entry.Status == "pending" || entry.Status == "active" {
 			unresolvedCount++
+			// Mark the docket entry as unresolved within the session
+			updatedDocket[i].Status = "unresolved"
+
 			caseID, cErr := primitive.ObjectIDFromHex(entry.CourtCaseID)
 			if cErr != nil {
 				continue
@@ -315,6 +321,7 @@ func (cs CourtSession) EndCourtSessionHandler(w http.ResponseWriter, r *http.Req
 			"courtSession.status":    "completed",
 			"courtSession.endedAt":   now,
 			"courtSession.updatedAt": now,
+			"courtSession.docket":    updatedDocket,
 		},
 	}
 
