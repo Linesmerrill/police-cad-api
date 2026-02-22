@@ -496,7 +496,7 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 
 	// Apply resolutions to the original records
 	for _, resolution := range resolveData.Resolutions {
-		if resolution.Verdict == "dismissed" {
+		if resolution.Verdict == "dismissed" || resolution.Verdict == "upheld" {
 			if resolution.ItemType == "citation" || resolution.ItemType == "warning" {
 				itemID, err := primitive.ObjectIDFromHex(resolution.ItemID)
 				if err != nil {
@@ -514,7 +514,7 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 				_ = cc.CDB.UpdateOne(ctx,
 					bson.M{"_id": civID, "civilian.criminalHistory._id": itemID},
 					bson.M{"$set": bson.M{
-						"civilian.criminalHistory.$.status":      "dismissed",
+						"civilian.criminalHistory.$.status":      resolution.Verdict,
 						"civilian.criminalHistory.$.dismissedBy": resolveData.JudgeName,
 						"civilian.criminalHistory.$.updatedAt":   now,
 					}},
@@ -527,7 +527,7 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 				_ = cc.ADB.UpdateOne(ctx,
 					bson.M{"_id": itemID},
 					bson.M{"$set": bson.M{
-						"arrestReport.status":      "dismissed",
+						"arrestReport.status":      resolution.Verdict,
 						"arrestReport.dismissedBy": resolveData.JudgeName,
 						"arrestReport.updatedAt":   now,
 					}},
