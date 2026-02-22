@@ -29,10 +29,41 @@ type CourtSession struct {
 
 // CreateCourtSessionHandler creates a new court session with a docket
 func (cs CourtSession) CreateCourtSessionHandler(w http.ResponseWriter, r *http.Request) {
-	var session models.CourtSession
-	if err := json.NewDecoder(r.Body).Decode(&session.Details); err != nil {
+	// Decode into a raw map first so we can handle ISO date strings for scheduledStart/scheduledEnd
+	var raw map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
+	}
+
+	// Re-marshal and decode into the struct, but strip out scheduledStart/scheduledEnd first
+	// since they come as ISO strings but primitive.DateTime expects a number
+	rawStart, hasStart := raw["scheduledStart"]
+	rawEnd, hasEnd := raw["scheduledEnd"]
+	delete(raw, "scheduledStart")
+	delete(raw, "scheduledEnd")
+
+	b, _ := json.Marshal(raw)
+	var session models.CourtSession
+	if err := json.Unmarshal(b, &session.Details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Parse scheduledStart/scheduledEnd from ISO strings
+	if hasStart {
+		if s, ok := rawStart.(string); ok && s != "" {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				session.Details.ScheduledStart = primitive.NewDateTimeFromTime(t)
+			}
+		}
+	}
+	if hasEnd {
+		if s, ok := rawEnd.(string); ok && s != "" {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				session.Details.ScheduledEnd = primitive.NewDateTimeFromTime(t)
+			}
+		}
 	}
 
 	session.ID = primitive.NewObjectID()
@@ -360,10 +391,38 @@ func (cs CourtSession) UpdateCourtSessionHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	var details models.CourtSessionDetails
-	if err := json.NewDecoder(r.Body).Decode(&details); err != nil {
+	// Decode into raw map to handle ISO date strings for scheduledStart/scheduledEnd
+	var raw map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
+	}
+
+	rawStart, hasStart := raw["scheduledStart"]
+	rawEnd, hasEnd := raw["scheduledEnd"]
+	delete(raw, "scheduledStart")
+	delete(raw, "scheduledEnd")
+
+	b, _ := json.Marshal(raw)
+	var details models.CourtSessionDetails
+	if err := json.Unmarshal(b, &details); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if hasStart {
+		if s, ok := rawStart.(string); ok && s != "" {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				details.ScheduledStart = primitive.NewDateTimeFromTime(t)
+			}
+		}
+	}
+	if hasEnd {
+		if s, ok := rawEnd.(string); ok && s != "" {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				details.ScheduledEnd = primitive.NewDateTimeFromTime(t)
+			}
+		}
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
