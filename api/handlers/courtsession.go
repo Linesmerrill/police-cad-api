@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -136,7 +137,12 @@ func (cs CourtSession) GetCourtSessionsByCommunityHandler(w http.ResponseWriter,
 		"courtSession.communityID": communityID,
 	}
 	if status != "" {
-		filter["courtSession.status"] = status
+		if strings.Contains(status, ",") {
+			statuses := strings.Split(status, ",")
+			filter["courtSession.status"] = bson.M{"$in": statuses}
+		} else {
+			filter["courtSession.status"] = status
+		}
 	}
 	if departmentID != "" {
 		filter["courtSession.departmentID"] = departmentID
@@ -316,9 +322,15 @@ func (cs CourtSession) EndCourtSessionHandler(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	// Use "cancelled" if there were unresolved items, "completed" if all resolved
+	finalStatus := "completed"
+	if unresolvedCount > 0 {
+		finalStatus = "cancelled"
+	}
+
 	update := bson.M{
 		"$set": bson.M{
-			"courtSession.status":    "completed",
+			"courtSession.status":    finalStatus,
 			"courtSession.endedAt":   now,
 			"courtSession.updatedAt": now,
 			"courtSession.docket":    updatedDocket,
