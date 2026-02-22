@@ -151,6 +151,11 @@ func (cc CourtCase) GetCourtCasesByCommunityHandler(w http.ResponseWriter, r *ht
 	if departmentID != "" {
 		filter["courtCase.departmentID"] = departmentID
 	}
+	if r.URL.Query().Get("unassigned") == "true" {
+		filter["courtCase.courtSessionID"] = bson.M{
+			"$in": []interface{}{nil, ""},
+		}
+	}
 
 	type findResult struct {
 		cases []models.CourtCase
