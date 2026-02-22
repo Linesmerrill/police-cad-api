@@ -280,7 +280,36 @@ func (cs CourtSession) EndCourtSessionHandler(w http.ResponseWriter, r *http.Req
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Fetch the session to check for unresolved docket entries
+	existing, err := cs.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to find court session", http.StatusNotFound, w, err)
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// Reset unresolved docket entries (pending/active) and their linked court cases
+	unresolvedCount := 0
+	for _, entry := range existing.Details.Docket {
+		if entry.Status == "pending" || entry.Status == "active" {
+			unresolvedCount++
+			caseID, cErr := primitive.ObjectIDFromHex(entry.CourtCaseID)
+			if cErr != nil {
+				continue
+			}
+			// Reset the court case back to scheduled and clear the session link
+			_ = cs.CCDB.UpdateOne(ctx,
+				bson.M{"_id": caseID},
+				bson.M{"$set": bson.M{
+					"courtCase.status":         "scheduled",
+					"courtCase.courtSessionID": "",
+					"courtCase.updatedAt":      now,
+				}},
+			)
+		}
+	}
+
 	update := bson.M{
 		"$set": bson.M{
 			"courtSession.status":    "completed",
@@ -297,7 +326,8 @@ func (cs CourtSession) EndCourtSessionHandler(w http.ResponseWriter, r *http.Req
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Court session ended",
+		"message":         "Court session ended",
+		"unresolvedCount": unresolvedCount,
 	})
 }
 
