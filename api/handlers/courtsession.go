@@ -477,14 +477,21 @@ func (cs CourtSession) ActivateDocketEntryHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Update docket entries: set the target case to "active", mark any previously active as "completed"
+	// Check if this is a skip (previous active case goes back to pending instead of completed)
+	skipPrevious := r.URL.Query().Get("skip") == "true"
+
+	// Update docket entries: set the target case to "active", handle previously active case
 	updatedDocket := make([]models.DocketEntry, len(existing.Details.Docket))
 	for i, entry := range existing.Details.Docket {
 		updatedDocket[i] = entry
 		if entry.CourtCaseID == caseID {
 			updatedDocket[i].Status = "active"
 		} else if entry.Status == "active" {
-			updatedDocket[i].Status = "completed"
+			if skipPrevious {
+				updatedDocket[i].Status = "pending"
+			} else {
+				updatedDocket[i].Status = "completed"
+			}
 		}
 	}
 
