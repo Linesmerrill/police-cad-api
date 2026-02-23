@@ -27,6 +27,9 @@ type ArrestReportDetails struct {
 	Witnesses        string             `json:"witnesses" bson:"witnesses"`
 	ForceUsed        bool               `json:"forceUsed" bson:"forceUsed"`
 	AttachedForms    []AttachedForm     `json:"attachedForms" bson:"attachedForms"`
+	Status           string             `json:"status" bson:"status"`           // "", "contested", "dismissed"
+	DismissedBy      string             `json:"dismissedBy" bson:"dismissedBy"` // judge name when dismissed
+	CourtCaseID      string             `json:"courtCaseID" bson:"courtCaseID"` // linked court case ID
 	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt        primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }

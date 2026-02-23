@@ -87,6 +87,19 @@ func (a *App) New() *mux.Router {
 	departmentTemplateHandler := NewDepartmentTemplate(databases.NewCommunityDatabase(a.dbHelper), templateDB)
 	emsMedicalHandler := NewEMSMedicalComponent(componentDB, templateDB, databases.NewCommunityDatabase(a.dbHelper))
 
+	// Court case and session handlers
+	courtCaseHandler := CourtCase{
+		DB:  databases.NewCourtCaseDatabase(a.dbHelper),
+		CDB: databases.NewCivilianDatabase(a.dbHelper),
+		ADB: databases.NewArrestReportDatabase(a.dbHelper),
+		SDB: databases.NewCourtSessionDatabase(a.dbHelper),
+	}
+	courtSessionHandler := CourtSession{
+		DB:   databases.NewCourtSessionDatabase(a.dbHelper),
+		CCDB: databases.NewCourtCaseDatabase(a.dbHelper),
+		ChDB: databases.NewCourtChatDatabase(a.dbHelper),
+	}
+
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
 
@@ -365,6 +378,30 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/warrants/search", api.Middleware(http.HandlerFunc(w.WarrantsSearchHandler))).Methods("GET")
 	apiCreate.Handle("/warrants/pending/community/{community_id}", api.Middleware(http.HandlerFunc(w.PendingWarrantsByCommunityHandler))).Methods("GET")
 	apiV2.Handle("/warrants/community/{community_id}", api.Middleware(http.HandlerFunc(w.WarrantsByCommunityHandlerV2))).Methods("GET")
+
+	// Court case routes
+	apiV2.Handle("/court-cases/{case_id}/assign", api.Middleware(http.HandlerFunc(courtCaseHandler.AssignCourtCaseHandler))).Methods("PUT")
+	apiV2.Handle("/court-cases/{case_id}/schedule", api.Middleware(http.HandlerFunc(courtCaseHandler.ScheduleCourtCaseHandler))).Methods("PUT")
+	apiV2.Handle("/court-cases/{case_id}/resolve", api.Middleware(http.HandlerFunc(courtCaseHandler.ResolveCourtCaseHandler))).Methods("PUT")
+	apiV2.Handle("/court-cases/{case_id}/status", api.Middleware(http.HandlerFunc(courtCaseHandler.UpdateCourtCaseStatusHandler))).Methods("PUT")
+	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCaseByIDHandler))).Methods("GET")
+	apiV2.Handle("/court-cases", api.Middleware(http.HandlerFunc(courtCaseHandler.CreateCourtCaseHandler))).Methods("POST")
+	apiV2.Handle("/court-cases/community/{community_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCasesByCommunityHandler))).Methods("GET")
+	apiV2.Handle("/court-cases/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCasesByCivilianHandler))).Methods("GET")
+
+	// Court session routes
+	apiV2.Handle("/court-sessions/{session_id}/start", api.Middleware(http.HandlerFunc(courtSessionHandler.StartCourtSessionHandler))).Methods("PUT")
+	apiV2.Handle("/court-sessions/{session_id}/end", api.Middleware(http.HandlerFunc(courtSessionHandler.EndCourtSessionHandler))).Methods("PUT")
+	apiV2.Handle("/court-sessions/{session_id}/docket/{case_id}/activate", api.Middleware(http.HandlerFunc(courtSessionHandler.ActivateDocketEntryHandler))).Methods("PUT")
+	apiV2.Handle("/court-sessions/{session_id}/join", api.Middleware(http.HandlerFunc(courtSessionHandler.JoinCourtSessionHandler))).Methods("POST")
+	apiV2.Handle("/court-sessions/{session_id}/leave/{user_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.LeaveCourtSessionHandler))).Methods("DELETE")
+	apiV2.Handle("/court-sessions/{session_id}/chat", api.Middleware(http.HandlerFunc(courtSessionHandler.GetCourtChatHandler))).Methods("GET")
+	apiV2.Handle("/court-sessions/{session_id}/chat", api.Middleware(http.HandlerFunc(courtSessionHandler.PostCourtChatHandler))).Methods("POST")
+	apiV2.Handle("/court-sessions/{session_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.GetCourtSessionByIDHandler))).Methods("GET")
+	apiV2.Handle("/court-sessions/{session_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.UpdateCourtSessionHandler))).Methods("PUT")
+	apiV2.Handle("/court-sessions/{session_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.DeleteCourtSessionHandler))).Methods("DELETE")
+	apiV2.Handle("/court-sessions", api.Middleware(http.HandlerFunc(courtSessionHandler.CreateCourtSessionHandler))).Methods("POST")
+	apiV2.Handle("/court-sessions/community/{community_id}", api.Middleware(http.HandlerFunc(courtSessionHandler.GetCourtSessionsByCommunityHandler))).Methods("GET")
 
 	// EMS Medical Component routes (focused testing) - MUST come before generic /ems/{ems_id} route
 	apiCreate.Handle("/ems/medical-component", api.Middleware(http.HandlerFunc(emsMedicalHandler.GetEMSMedicalComponentHandler))).Methods("GET")
