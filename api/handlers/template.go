@@ -241,75 +241,81 @@ func (t *Template) GetDefaultTemplatesHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// GetDefaultTemplatesResolvedHandler retrieves all default templates with
-// component references resolved to their names. Returns a map of template
-// category → [{name, enabled}] so the frontend can know the canonical
-// component list for each department type without hardcoding it.
+// GetDefaultTemplatesResolvedHandler returns the canonical component list for
+// each template type. This is derived directly from the code definitions (the
+// same source of truth used by CreateDefaultTemplates) so it is always up to
+// date, even if the templates collection in the database is stale.
+// Returns: { templates: { civilian: [{name, enabled}], police: [...], ... } }
 func (t *Template) GetDefaultTemplatesResolvedHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-
-	templates, err := t.DB.GetDefaultTemplates(ctx)
-	if err != nil {
-		config.ErrorStatus("failed to retrieve default templates", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Collect all unique component IDs across all templates
-	idSet := make(map[primitive.ObjectID]struct{})
-	for _, tpl := range templates {
-		for _, ref := range tpl.Components {
-			idSet[ref.ComponentID] = struct{}{}
-		}
-	}
-
-	ids := make([]primitive.ObjectID, 0, len(idSet))
-	for id := range idSet {
-		ids = append(ids, id)
-	}
-
-	// Resolve component IDs → names
-	compNameMap := make(map[string]string) // hex ID → name
-	if len(ids) > 0 && t.ComponentDB != nil {
-		components, err := t.ComponentDB.GetComponentsByIDs(ctx, ids)
-		if err != nil {
-			config.ErrorStatus("failed to resolve component names", http.StatusInternalServerError, w, err)
-			return
-		}
-		for _, c := range components {
-			compNameMap[c.ID.Hex()] = c.Name
-		}
-	}
-
-	// Build resolved map: category → [{name, enabled}]
-	type resolvedComponent struct {
-		Name    string `json:"name"`
-		Enabled bool   `json:"enabled"`
-	}
-
-	result := make(map[string][]resolvedComponent)
-	for _, tpl := range templates {
-		category := tpl.Category
-		if category == "" {
-			category = tpl.Name
-		}
-		var comps []resolvedComponent
-		for _, ref := range tpl.Components {
-			name := compNameMap[ref.ComponentID.Hex()]
-			if name == "" {
-				continue // skip unresolved references
-			}
-			comps = append(comps, resolvedComponent{
-				Name:    name,
-				Enabled: ref.Enabled,
-			})
-		}
-		result[category] = comps
-	}
+	result := GetCanonicalTemplateComponents()
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"templates": result,
 	})
+}
+
+// canonicalComponent is a lightweight struct for the resolved endpoint.
+type canonicalComponent struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+// GetCanonicalTemplateComponents returns the canonical component list for every
+// template type. This is the single source of truth — update this function when
+// adding or removing components from a template.
+func GetCanonicalTemplateComponents() map[string][]canonicalComponent {
+	return map[string][]canonicalComponent{
+		"police": {
+			{Name: "10CodesInterface", Enabled: true},
+			{Name: "personSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "firearmSearch", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"ems": {
+			{Name: "10CodesInterface", Enabled: true},
+			{Name: "medicalDatabase", Enabled: true},
+			{Name: "personSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"fire": {
+			{Name: "10CodesInterface", Enabled: true},
+			{Name: "medicalDatabase", Enabled: true},
+			{Name: "personSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"dispatch": {
+			{Name: "dispatchUnits", Enabled: true},
+			{Name: "createAndManageCalls", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "manage911Calls", Enabled: true},
+			{Name: "nameSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "firearmSearch", Enabled: true},
+		},
+		"civilian": {
+			{Name: "createCivilians", Enabled: false},
+			{Name: "createVehicles", Enabled: false},
+			{Name: "createFirearms", Enabled: false},
+			{Name: "call911", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"judicial": {
+			{Name: "reviewWarrants", Enabled: true},
+			{Name: "allWarrants", Enabled: true},
+			{Name: "penalCodes", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+	}
 }
 
 // GetTemplatesByCategoryHandler retrieves templates filtered by category
