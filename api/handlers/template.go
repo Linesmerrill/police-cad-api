@@ -241,6 +241,77 @@ func (t *Template) GetDefaultTemplatesHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// GetDefaultTemplatesResolvedHandler retrieves all default templates with
+// component references resolved to their names. Returns a map of template
+// category → [{name, enabled}] so the frontend can know the canonical
+// component list for each department type without hardcoding it.
+func (t *Template) GetDefaultTemplatesResolvedHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	templates, err := t.DB.GetDefaultTemplates(ctx)
+	if err != nil {
+		config.ErrorStatus("failed to retrieve default templates", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Collect all unique component IDs across all templates
+	idSet := make(map[primitive.ObjectID]struct{})
+	for _, tpl := range templates {
+		for _, ref := range tpl.Components {
+			idSet[ref.ComponentID] = struct{}{}
+		}
+	}
+
+	ids := make([]primitive.ObjectID, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+
+	// Resolve component IDs → names
+	compNameMap := make(map[string]string) // hex ID → name
+	if len(ids) > 0 && t.ComponentDB != nil {
+		components, err := t.ComponentDB.GetComponentsByIDs(ctx, ids)
+		if err != nil {
+			config.ErrorStatus("failed to resolve component names", http.StatusInternalServerError, w, err)
+			return
+		}
+		for _, c := range components {
+			compNameMap[c.ID.Hex()] = c.Name
+		}
+	}
+
+	// Build resolved map: category → [{name, enabled}]
+	type resolvedComponent struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+
+	result := make(map[string][]resolvedComponent)
+	for _, tpl := range templates {
+		category := tpl.Category
+		if category == "" {
+			category = tpl.Name
+		}
+		var comps []resolvedComponent
+		for _, ref := range tpl.Components {
+			name := compNameMap[ref.ComponentID.Hex()]
+			if name == "" {
+				continue // skip unresolved references
+			}
+			comps = append(comps, resolvedComponent{
+				Name:    name,
+				Enabled: ref.Enabled,
+			})
+		}
+		result[category] = comps
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"templates": result,
+	})
+}
+
 // GetTemplatesByCategoryHandler retrieves templates filtered by category
 func (t *Template) GetTemplatesByCategoryHandler(w http.ResponseWriter, r *http.Request) {
 	category := mux.Vars(r)["category"]

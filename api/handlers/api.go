@@ -489,6 +489,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/templates", api.Middleware(http.HandlerFunc(templateHandler.CreateTemplateHandler))).Methods("POST")
 	apiCreate.Handle("/templates", api.Middleware(http.HandlerFunc(templateHandler.GetTemplatesHandler))).Methods("GET")
 	apiCreate.Handle("/templates/defaults", api.Middleware(http.HandlerFunc(templateHandler.GetDefaultTemplatesHandler))).Methods("GET")
+	apiCreate.Handle("/templates/defaults/resolved", api.Middleware(http.HandlerFunc(templateHandler.GetDefaultTemplatesResolvedHandler))).Methods("GET")
 	apiCreate.Handle("/templates/category/{category}", api.Middleware(http.HandlerFunc(templateHandler.GetTemplatesByCategoryHandler))).Methods("GET")
 	apiCreate.Handle("/templates/initialize-defaults", api.Middleware(http.HandlerFunc(templateHandler.InitializeDefaultTemplatesHandler))).Methods("POST")
 	apiCreate.Handle("/templates/{templateId}", api.Middleware(http.HandlerFunc(templateHandler.GetTemplateHandler))).Methods("GET")
