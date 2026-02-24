@@ -5157,12 +5157,42 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 		componentMap[comp.ID.Hex()] = comp
 	}
 
-	// Update existing components based on the request
+	// Also index existing components by name for matching components without a valid _id
+	componentByName := make(map[string]string) // name → ID hex
+	for _, comp := range components {
+		if comp.Name != "" {
+			componentByName[comp.Name] = comp.ID.Hex()
+		}
+	}
+
+	// Update existing components or add new ones from the request
 	for _, newComp := range requestBody.Components {
-		if existingComp, exists := componentMap[newComp.ID.Hex()]; exists {
-			existingComp.Name = newComp.Name
-			existingComp.Enabled = newComp.Enabled
-			componentMap[newComp.ID.Hex()] = existingComp
+		idHex := newComp.ID.Hex()
+		zeroID := primitive.NilObjectID.Hex()
+
+		if idHex != "" && idHex != zeroID {
+			// Has a valid _id — update by ID if it exists
+			if existingComp, exists := componentMap[idHex]; exists {
+				existingComp.Name = newComp.Name
+				existingComp.Enabled = newComp.Enabled
+				componentMap[idHex] = existingComp
+			}
+		} else if newComp.Name != "" {
+			// No valid _id — try to match by name first
+			if existingIDHex, found := componentByName[newComp.Name]; found {
+				if existingComp, exists := componentMap[existingIDHex]; exists {
+					existingComp.Enabled = newComp.Enabled
+					componentMap[existingIDHex] = existingComp
+				}
+			} else {
+				// Component doesn't exist yet — add it with a new ObjectID
+				newID := primitive.NewObjectID()
+				componentMap[newID.Hex()] = models.Component{
+					ID:      newID,
+					Name:    newComp.Name,
+					Enabled: newComp.Enabled,
+				}
+			}
 		}
 	}
 

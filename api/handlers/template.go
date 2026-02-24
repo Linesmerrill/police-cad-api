@@ -241,6 +241,83 @@ func (t *Template) GetDefaultTemplatesHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// GetDefaultTemplatesResolvedHandler returns the canonical component list for
+// each template type. This is derived directly from the code definitions (the
+// same source of truth used by CreateDefaultTemplates) so it is always up to
+// date, even if the templates collection in the database is stale.
+// Returns: { templates: { civilian: [{name, enabled}], police: [...], ... } }
+func (t *Template) GetDefaultTemplatesResolvedHandler(w http.ResponseWriter, r *http.Request) {
+	result := GetCanonicalTemplateComponents()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"templates": result,
+	})
+}
+
+// canonicalComponent is a lightweight struct for the resolved endpoint.
+type canonicalComponent struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+// GetCanonicalTemplateComponents returns the canonical component list for every
+// template type. This is the single source of truth — update this function when
+// adding or removing components from a template.
+func GetCanonicalTemplateComponents() map[string][]canonicalComponent {
+	return map[string][]canonicalComponent{
+		"police": {
+			{Name: "10CodesInterface", Enabled: true},
+			{Name: "personSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "firearmSearch", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"ems": {
+			{Name: "10CodesInterface", Enabled: true},
+			{Name: "medicalDatabase", Enabled: true},
+			{Name: "personSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"fire": {
+			{Name: "10CodesInterface", Enabled: true},
+			{Name: "medicalDatabase", Enabled: true},
+			{Name: "personSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"dispatch": {
+			{Name: "dispatchUnits", Enabled: true},
+			{Name: "createAndManageCalls", Enabled: true},
+			{Name: "createBolos", Enabled: true},
+			{Name: "manage911Calls", Enabled: true},
+			{Name: "nameSearch", Enabled: true},
+			{Name: "vehicleSearch", Enabled: true},
+			{Name: "firearmSearch", Enabled: true},
+		},
+		"civilian": {
+			{Name: "createCivilians", Enabled: false},
+			{Name: "createVehicles", Enabled: false},
+			{Name: "createFirearms", Enabled: false},
+			{Name: "call911", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+		"judicial": {
+			{Name: "reviewWarrants", Enabled: true},
+			{Name: "allWarrants", Enabled: true},
+			{Name: "penalCodes", Enabled: true},
+			{Name: "notepad", Enabled: true},
+		},
+	}
+}
+
 // GetTemplatesByCategoryHandler retrieves templates filtered by category
 func (t *Template) GetTemplatesByCategoryHandler(w http.ResponseWriter, r *http.Request) {
 	category := mux.Vars(r)["category"]
