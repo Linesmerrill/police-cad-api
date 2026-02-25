@@ -30,7 +30,7 @@ type CourtCase struct {
 // CreateCourtCaseHandler creates a new court case when a civilian contests records
 func (cc CourtCase) CreateCourtCaseHandler(w http.ResponseWriter, r *http.Request) {
 	var courtCase models.CourtCase
-	if err := json.NewDecoder(r.Body).Decode(&courtCase.Details); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&courtCase); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
