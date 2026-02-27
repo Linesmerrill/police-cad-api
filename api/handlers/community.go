@@ -2951,6 +2951,39 @@ func (c Community) BulkReplaceTenCodesHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// ResetTenCodesHandler resets community ten codes to defaults
+func (c Community) ResetTenCodesHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	defaults := defaultTenCodes()
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{
+		"$set": bson.M{
+			"community.tenCodes": defaults,
+		},
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	err = c.DB.UpdateOne(ctx, filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to reset community ten codes", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(defaults)
+}
+
 func defaultTenCodes() []models.TenCodes {
 	return []models.TenCodes{
 		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
