@@ -2890,6 +2890,67 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// BulkReplaceTenCodesHandler replaces all ten codes for a community with the provided array.
+// Used for importing ten codes from a file.
+func (c Community) BulkReplaceTenCodesHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	var requestBody []struct {
+		Code        string `json:"code"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if len(requestBody) == 0 {
+		config.ErrorStatus("at least one ten code is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	// Validate and build ten codes with new IDs
+	var tenCodes []models.TenCodes
+	for i, item := range requestBody {
+		code := strings.TrimSpace(item.Code)
+		description := strings.TrimSpace(item.Description)
+		if code == "" || description == "" {
+			config.ErrorStatus(fmt.Sprintf("ten code at index %d has empty code or description", i), http.StatusBadRequest, w, nil)
+			return
+		}
+		tenCodes = append(tenCodes, models.TenCodes{
+			ID:          primitive.NewObjectID(),
+			Code:        code,
+			Description: description,
+		})
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$set": bson.M{"community.tenCodes": tenCodes}}
+
+	err = c.DB.UpdateOne(ctx, filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to replace ten codes", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":  "Ten codes replaced successfully",
+		"tenCodes": tenCodes,
+	})
+}
+
 func defaultTenCodes() []models.TenCodes {
 	return []models.TenCodes{
 		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
