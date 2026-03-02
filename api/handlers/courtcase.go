@@ -547,6 +547,101 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// DeleteCourtCaseHandler deletes a court case by ID.
+// If the case is not yet completed, it reverts any contested items (citations, warnings, arrests)
+// back to their original state (status: "", courtCaseID: "").
+// If the case is linked to a court session, the docket entry is removed.
+func (cc CourtCase) DeleteCourtCaseHandler(w http.ResponseWriter, r *http.Request) {
+	caseID := mux.Vars(r)["case_id"]
+
+	bID, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		config.ErrorStatus("invalid court case ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	courtCase, err := cc.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to find court case", http.StatusNotFound, w, err)
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// Revert contested items only if the case was not yet completed
+	if courtCase.Details.Status != "completed" {
+		civID, civErr := primitive.ObjectIDFromHex(courtCase.Details.CivilianID)
+		for _, item := range courtCase.Details.ContestedItems {
+			if item.ItemType == "citation" || item.ItemType == "warning" {
+				if civErr != nil {
+					continue
+				}
+				itemID, err := primitive.ObjectIDFromHex(item.ItemID)
+				if err != nil {
+					continue
+				}
+				_ = cc.CDB.UpdateOne(ctx,
+					bson.M{"_id": civID, "civilian.criminalHistory._id": itemID},
+					bson.M{"$set": bson.M{
+						"civilian.criminalHistory.$.status":      "",
+						"civilian.criminalHistory.$.courtCaseID": "",
+						"civilian.criminalHistory.$.updatedAt":   now,
+					}},
+				)
+			} else if item.ItemType == "arrest" {
+				itemID, err := primitive.ObjectIDFromHex(item.ItemID)
+				if err != nil {
+					continue
+				}
+				_ = cc.ADB.UpdateOne(ctx,
+					bson.M{"_id": itemID},
+					bson.M{"$set": bson.M{
+						"arrestReport.status":      "",
+						"arrestReport.courtCaseID": "",
+						"arrestReport.updatedAt":   now,
+					}},
+				)
+			}
+		}
+	}
+
+	// Remove from court session docket if linked
+	if courtCase.Details.CourtSessionID != "" {
+		sessionOID, sErr := primitive.ObjectIDFromHex(courtCase.Details.CourtSessionID)
+		if sErr == nil {
+			session, sErr := cc.SDB.FindOne(ctx, bson.M{"_id": sessionOID})
+			if sErr == nil && session != nil {
+				filteredDocket := make([]models.DocketEntry, 0, len(session.Details.Docket))
+				for _, entry := range session.Details.Docket {
+					if entry.CourtCaseID != caseID {
+						filteredDocket = append(filteredDocket, entry)
+					}
+				}
+				_ = cc.SDB.UpdateOne(ctx, bson.M{"_id": sessionOID}, bson.M{
+					"$set": bson.M{
+						"courtSession.docket":    filteredDocket,
+						"courtSession.updatedAt": now,
+					},
+				})
+			}
+		}
+	}
+
+	err = cc.DB.DeleteOne(ctx, bson.M{"_id": bID})
+	if err != nil {
+		config.ErrorStatus("failed to delete court case", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Court case deleted successfully",
+	})
+}
+
 // UpdateCourtCaseStatusHandler updates the status of a court case
 func (cc CourtCase) UpdateCourtCaseStatusHandler(w http.ResponseWriter, r *http.Request) {
 	caseID := mux.Vars(r)["case_id"]

@@ -387,6 +387,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/court-cases/{case_id}/resolve", api.Middleware(http.HandlerFunc(courtCaseHandler.ResolveCourtCaseHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}/status", api.Middleware(http.HandlerFunc(courtCaseHandler.UpdateCourtCaseStatusHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCaseByIDHandler))).Methods("GET")
+	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.DeleteCourtCaseHandler))).Methods("DELETE")
 	apiV2.Handle("/court-cases", api.Middleware(http.HandlerFunc(courtCaseHandler.CreateCourtCaseHandler))).Methods("POST")
 	apiV2.Handle("/court-cases/community/{community_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCasesByCommunityHandler))).Methods("GET")
 	apiV2.Handle("/court-cases/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCasesByCivilianHandler))).Methods("GET")
