@@ -593,5 +593,30 @@ createIndexSafe(
   }
 );
 
+// ==========================================
+// FEATURE REQUESTS
+// ==========================================
+
+// Text index for search on title + description
+createIndexSafe(
+  db.featureRequests,
+  { title: "text", description: "text" },
+  {
+    name: "feature_request_text_idx",
+    background: true
+  }
+);
+
+// Compound unique index on votes to prevent duplicates
+createIndexSafe(
+  db.featureRequestVotes,
+  { featureRequestId: 1, user: 1 },
+  {
+    name: "feature_request_vote_unique_idx",
+    unique: true,
+    background: true
+  }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -54,7 +55,11 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 		filter["status"] = status
 	}
 	if query != "" {
-		filter["$text"] = bson.M{"$search": query}
+		escaped := regexp.QuoteMeta(query)
+		filter["$or"] = []bson.M{
+			{"title": bson.M{"$regex": escaped, "$options": "i"}},
+			{"description": bson.M{"$regex": escaped, "$options": "i"}},
+		}
 	}
 
 	// Build sort
