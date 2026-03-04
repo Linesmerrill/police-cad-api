@@ -116,6 +116,7 @@ type UserSummary struct {
 	ID             primitive.ObjectID `json:"_id" bson:"_id"`
 	Username       string             `json:"username" bson:"username"`
 	ProfilePicture *string            `json:"profilePicture,omitempty" bson:"profilePicture,omitempty"`
+	AdminRole      *string            `json:"adminRole,omitempty" bson:"-"`
 }
 
 // ReactionResponse holds the structure for reaction responses with populated user data

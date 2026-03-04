@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -139,6 +140,7 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 		userIDs[req.Author] = true
 	}
 	userMap := h.batchFetchUsers(ctx, userIDs)
+	adminRoles := h.getAdminRolesForUsers(ctx, userMap)
 
 	// If userId provided, batch-check votes for all feature requests
 	voteMap := make(map[primitive.ObjectID]bool)
@@ -178,6 +180,9 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 			authorSummary.ProfilePicture = authorDoc.User.ProfilePicture
 		} else {
 			authorSummary.Username = "Unknown"
+		}
+		if role, ok := adminRoles[req.Author]; ok {
+			authorSummary.AdminRole = &role
 		}
 
 		imageURLs := req.ImageURLs
@@ -320,6 +325,7 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 		}
 	}
 	userMap := h.batchFetchUsers(ctx, userIDs)
+	adminRoles := h.getAdminRolesForUsers(ctx, userMap)
 
 	// Check if current user has voted
 	hasVoted := false
@@ -343,6 +349,9 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 	} else {
 		authorSummary.Username = "Unknown"
 	}
+	if role, ok := adminRoles[fr.Author]; ok {
+		authorSummary.AdminRole = &role
+	}
 
 	// Build comments
 	comments := make([]models.FeatureCommentResponse, 0)
@@ -355,6 +364,9 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 				commentUserSummary.ProfilePicture = commentUserDoc.User.ProfilePicture
 			} else {
 				commentUserSummary.Username = "Unknown"
+			}
+			if role, ok := adminRoles[c.User]; ok {
+				commentUserSummary.AdminRole = &role
 			}
 
 			commentImageURLs := c.ImageURLs
@@ -670,8 +682,21 @@ func (h FeatureRequestHandler) AddCommentHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Get user data for response
-	userSummary := h.getUserSummary(ctx, userObjID)
+	// Get user data for response (including admin role)
+	singleUserIDs := map[primitive.ObjectID]bool{userObjID: true}
+	singleUserMap := h.batchFetchUsers(ctx, singleUserIDs)
+	userSummary := models.UserSummary{ID: userObjID}
+	if doc, ok := singleUserMap[userObjID]; ok {
+		userSummary.Username = doc.User.Username
+		userSummary.ProfilePicture = doc.User.ProfilePicture
+	} else {
+		userSummary.Username = "Unknown"
+	}
+	if roles := h.getAdminRolesForUsers(ctx, singleUserMap); len(roles) > 0 {
+		if role, ok := roles[userObjID]; ok {
+			userSummary.AdminRole = &role
+		}
+	}
 
 	commentResponse := models.FeatureCommentResponse{
 		ID:        newComment.ID,
@@ -948,6 +973,47 @@ func (h FeatureRequestHandler) batchFetchUsers(ctx context.Context, userIDs map[
 	}
 
 	return userMap
+}
+
+// getAdminRolesForUsers looks up admin roles for users based on their emails.
+// Returns a map of userID → admin role ("owner" or "admin").
+func (h FeatureRequestHandler) getAdminRolesForUsers(ctx context.Context, userMap map[primitive.ObjectID]UserDoc) map[primitive.ObjectID]string {
+	adminRoles := make(map[primitive.ObjectID]string)
+	if h.AdminDB == nil || len(userMap) == 0 {
+		return adminRoles
+	}
+
+	// Build email → userID mapping
+	emailToUserID := make(map[string]primitive.ObjectID)
+	emails := make([]string, 0)
+	for id, doc := range userMap {
+		if doc.User.Email != "" {
+			lower := strings.ToLower(doc.User.Email)
+			emailToUserID[lower] = id
+			emails = append(emails, doc.User.Email)
+		}
+	}
+
+	if len(emails) == 0 {
+		return adminRoles
+	}
+
+	cursor, err := h.AdminDB.Find(ctx, bson.M{"email": bson.M{"$in": emails}})
+	if err != nil {
+		return adminRoles
+	}
+	defer cursor.Close(ctx)
+
+	var admins []models.AdminUser
+	if err := cursor.All(ctx, &admins); err == nil {
+		for _, admin := range admins {
+			if userID, ok := emailToUserID[strings.ToLower(admin.Email)]; ok {
+				adminRoles[userID] = admin.Role
+			}
+		}
+	}
+
+	return adminRoles
 }
 
 // getUserSummary gets a user summary for a single user
