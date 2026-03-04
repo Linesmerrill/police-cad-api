@@ -51,10 +51,12 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Build filter
+	// Build filter — exclude merged tickets by default
 	filter := bson.M{}
 	if status != "" {
 		filter["status"] = status
+	} else {
+		filter["status"] = bson.M{"$ne": "merged"}
 	}
 	if query != "" {
 		escaped := regexp.QuoteMeta(query)
@@ -458,6 +460,36 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 		UpdatedAt:    fr.UpdatedAt,
 	}
 
+	// Populate mergedInto if present
+	if fr.MergedInto != nil {
+		mergedIntoFR, err := h.DB.FindOne(ctx, bson.M{"_id": *fr.MergedInto})
+		if err == nil {
+			response.MergedInto = &models.MergedRequestSummary{
+				ID:    mergedIntoFR.ID,
+				Title: mergedIntoFR.Title,
+			}
+		}
+	}
+
+	// Populate mergedFrom if present
+	if len(fr.MergedFrom) > 0 {
+		mergedFromSummaries := make([]models.MergedRequestSummary, 0, len(fr.MergedFrom))
+		mergedCursor, err := h.DB.Find(ctx, bson.M{"_id": bson.M{"$in": fr.MergedFrom}})
+		if err == nil {
+			var mergedFRs []models.FeatureRequest
+			if err := mergedCursor.All(ctx, &mergedFRs); err == nil {
+				for _, mfr := range mergedFRs {
+					mergedFromSummaries = append(mergedFromSummaries, models.MergedRequestSummary{
+						ID:    mfr.ID,
+						Title: mfr.Title,
+					})
+				}
+			}
+			mergedCursor.Close(ctx)
+		}
+		response.MergedFrom = mergedFromSummaries
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
@@ -605,9 +637,15 @@ func (h FeatureRequestHandler) ToggleVoteHandler(w http.ResponseWriter, r *http.
 	defer cancel()
 
 	// Check if feature request exists
-	_, err = h.DB.FindOne(ctx, bson.M{"_id": frID})
+	fr, err := h.DB.FindOne(ctx, bson.M{"_id": frID})
 	if err != nil {
 		config.ErrorStatus("Feature request not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Reject votes on merged tickets
+	if fr.Status == "merged" {
+		config.ErrorStatus("Cannot vote on a merged feature request", http.StatusBadRequest, w, fmt.Errorf("feature request is merged"))
 		return
 	}
 
@@ -705,6 +743,17 @@ func (h FeatureRequestHandler) AddCommentHandler(w http.ResponseWriter, r *http.
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Reject comments on merged tickets
+	frCheck, err := h.DB.FindOne(ctx, bson.M{"_id": frID})
+	if err != nil {
+		config.ErrorStatus("Feature request not found", http.StatusNotFound, w, err)
+		return
+	}
+	if frCheck.Status == "merged" {
+		config.ErrorStatus("Cannot comment on a merged feature request", http.StatusBadRequest, w, fmt.Errorf("feature request is merged"))
+		return
+	}
 
 	imageURLs := req.ImageURLs
 	if imageURLs == nil {
@@ -995,6 +1044,143 @@ func (h FeatureRequestHandler) UpdateStatusHandler(w http.ResponseWriter, r *htt
 		"success": true,
 		"message": "Status updated successfully",
 		"status":  req.Status,
+	})
+}
+
+// MergeHandler merges a source feature request into a target (admin only)
+func (h FeatureRequestHandler) MergeHandler(w http.ResponseWriter, r *http.Request) {
+	targetID := mux.Vars(r)["targetId"]
+	userID := r.URL.Query().Get("userId")
+
+	if userID == "" {
+		config.ErrorStatus("User ID is required", http.StatusBadRequest, w, fmt.Errorf("userId query param is required"))
+		return
+	}
+
+	targetObjID, err := primitive.ObjectIDFromHex(targetID)
+	if err != nil {
+		config.ErrorStatus("Invalid target ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Admin only
+	if !h.checkIsAdmin(ctx, userID) {
+		config.ErrorStatus("Only admins can merge feature requests", http.StatusForbidden, w, fmt.Errorf("admin access required"))
+		return
+	}
+
+	var req models.MergeFeatureRequestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	sourceObjID, err := primitive.ObjectIDFromHex(req.SourceID)
+	if err != nil {
+		config.ErrorStatus("Invalid source ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if sourceObjID == targetObjID {
+		config.ErrorStatus("Cannot merge a request into itself", http.StatusBadRequest, w, fmt.Errorf("source and target are the same"))
+		return
+	}
+
+	// Fetch both tickets
+	source, err := h.DB.FindOne(ctx, bson.M{"_id": sourceObjID})
+	if err != nil {
+		config.ErrorStatus("Source feature request not found", http.StatusNotFound, w, err)
+		return
+	}
+	target, err := h.DB.FindOne(ctx, bson.M{"_id": targetObjID})
+	if err != nil {
+		config.ErrorStatus("Target feature request not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Validate neither is already merged
+	if source.MergedInto != nil {
+		config.ErrorStatus("Source is already merged into another request", http.StatusBadRequest, w, fmt.Errorf("source already merged"))
+		return
+	}
+	if target.MergedInto != nil {
+		config.ErrorStatus("Target is already merged into another request", http.StatusBadRequest, w, fmt.Errorf("target already merged"))
+		return
+	}
+
+	// Transfer unique votes from source to target
+	sourceVoteCursor, err := h.VDB.Find(ctx, bson.M{"featureRequestId": sourceObjID})
+	newVoteCount := 0
+	if err == nil {
+		var sourceVotes []models.FeatureRequestVote
+		if err := sourceVoteCursor.All(ctx, &sourceVotes); err == nil {
+			for _, sv := range sourceVotes {
+				// Check if user already voted on target
+				_, err := h.VDB.FindOne(ctx, bson.M{
+					"featureRequestId": targetObjID,
+					"user":             sv.User,
+				})
+				if err != nil {
+					// User hasn't voted on target — create vote
+					newVote := models.FeatureRequestVote{
+						ID:               primitive.NewObjectID(),
+						FeatureRequestID: targetObjID,
+						User:             sv.User,
+						CreatedAt:        sv.CreatedAt,
+					}
+					h.VDB.InsertOne(ctx, newVote)
+					newVoteCount++
+				}
+			}
+		}
+		sourceVoteCursor.Close(ctx)
+	}
+
+	// Update source: status = "merged", mergedInto = targetID
+	now := primitive.NewDateTimeFromTime(time.Now())
+	err = h.DB.UpdateOne(ctx, bson.M{"_id": sourceObjID}, bson.M{
+		"$set": bson.M{
+			"status":     "merged",
+			"mergedInto": targetObjID,
+			"updatedAt":  now,
+		},
+	})
+	if err != nil {
+		config.ErrorStatus("Failed to update source feature request", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Update target: push sourceID to mergedFrom, increment upvoteCount
+	err = h.DB.UpdateOne(ctx, bson.M{"_id": targetObjID}, bson.M{
+		"$push": bson.M{"mergedFrom": sourceObjID},
+		"$inc":  bson.M{"upvoteCount": newVoteCount},
+		"$set":  bson.M{"updatedAt": now},
+	})
+	if err != nil {
+		config.ErrorStatus("Failed to update target feature request", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Get updated target for response
+	updatedTarget, _ := h.DB.FindOne(ctx, bson.M{"_id": targetObjID})
+	targetUpvoteCount := target.UpvoteCount + newVoteCount
+	if updatedTarget != nil {
+		targetUpvoteCount = updatedTarget.UpvoteCount
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":           true,
+		"message":           "Feature request merged successfully",
+		"sourceId":          sourceObjID.Hex(),
+		"targetId":          targetObjID.Hex(),
+		"targetUpvoteCount": targetUpvoteCount,
+		"sourceTitle":       source.Title,
+		"targetTitle":       target.Title,
 	})
 }
 

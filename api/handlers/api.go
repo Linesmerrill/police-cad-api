@@ -563,6 +563,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/feature-requests/{id}/comments/{commentId}", api.Middleware(http.HandlerFunc(featureRequest.UpdateCommentHandler))).Methods("PUT")
 	apiCreate.Handle("/feature-requests/{id}/comments/{commentId}", api.Middleware(http.HandlerFunc(featureRequest.DeleteCommentHandler))).Methods("DELETE")
 	apiCreate.Handle("/feature-requests/{id}/status", api.Middleware(http.HandlerFunc(featureRequest.UpdateStatusHandler))).Methods("PUT")
+	apiCreate.Handle("/feature-requests/{targetId}/merge", api.Middleware(http.HandlerFunc(featureRequest.MergeHandler))).Methods("POST")
 
 	// Content Creator Program routes
 	contentCreator := ContentCreator{

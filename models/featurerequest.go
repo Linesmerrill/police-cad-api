@@ -10,10 +10,12 @@ type FeatureRequest struct {
 	Title        string             `json:"title" bson:"title"`
 	Description  string             `json:"description" bson:"description"`
 	Author       primitive.ObjectID `json:"author" bson:"author"`
-	Status       string             `json:"status" bson:"status"` // "open", "under_review", "planned", "in_progress", "released", "declined"
+	Status       string             `json:"status" bson:"status"` // "open", "under_review", "planned", "in_progress", "released", "declined", "merged"
 	ImageURLs    []string           `json:"imageUrls" bson:"imageUrls"`
 	UpvoteCount  int                `json:"upvoteCount" bson:"upvoteCount"`
 	CommentCount int                `json:"commentCount" bson:"commentCount"`
+	MergedInto   *primitive.ObjectID  `json:"mergedInto,omitempty" bson:"mergedInto,omitempty"`
+	MergedFrom   []primitive.ObjectID `json:"mergedFrom,omitempty" bson:"mergedFrom,omitempty"`
 	Comments     []FeatureComment   `json:"comments" bson:"comments"`
 	CreatedAt    primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt    primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
@@ -60,6 +62,17 @@ type UpdateFeatureCommentRequest struct {
 	Content string `json:"content" validate:"required,min=1,max=2000"`
 }
 
+// MergeFeatureRequestRequest holds the structure for merging a feature request into a target
+type MergeFeatureRequestRequest struct {
+	SourceID string `json:"sourceId"`
+}
+
+// MergedRequestSummary holds minimal info for displaying merged request references
+type MergedRequestSummary struct {
+	ID    primitive.ObjectID `json:"_id"`
+	Title string             `json:"title"`
+}
+
 // FeatureRequestResponse holds the structure for feature request responses with populated user data
 type FeatureRequestResponse struct {
 	ID           primitive.ObjectID       `json:"_id"`
@@ -71,6 +84,8 @@ type FeatureRequestResponse struct {
 	UpvoteCount  int                      `json:"upvoteCount"`
 	CommentCount int                      `json:"commentCount"`
 	HasVoted     bool                     `json:"hasVoted"`
+	MergedInto   *MergedRequestSummary    `json:"mergedInto,omitempty"`
+	MergedFrom   []MergedRequestSummary   `json:"mergedFrom,omitempty"`
 	Comments     []FeatureCommentResponse `json:"comments"`
 	CreatedAt    primitive.DateTime       `json:"createdAt"`
 	UpdatedAt    primitive.DateTime       `json:"updatedAt"`

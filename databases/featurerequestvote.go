@@ -17,6 +17,7 @@ type FeatureRequestVoteDatabase interface {
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
 	InsertOne(ctx context.Context, vote models.FeatureRequestVote, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
+	DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 }
 
@@ -55,6 +56,10 @@ func (f *featureRequestVoteDatabase) InsertOne(ctx context.Context, vote models.
 
 func (f *featureRequestVoteDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
 	return f.db.Collection(featureRequestVoteCollectionName).DeleteOne(ctx, filter, opts...)
+}
+
+func (f *featureRequestVoteDatabase) DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error) {
+	return f.db.Collection(featureRequestVoteCollectionName).DeleteMany(ctx, filter, opts...)
 }
 
 func (f *featureRequestVoteDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
