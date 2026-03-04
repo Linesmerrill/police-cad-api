@@ -643,9 +643,9 @@ func (h FeatureRequestHandler) ToggleVoteHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Reject votes on merged tickets
-	if fr.Status == "merged" {
-		config.ErrorStatus("Cannot vote on a merged feature request", http.StatusBadRequest, w, fmt.Errorf("feature request is merged"))
+	// Reject votes on closed tickets (merged, released, declined)
+	if fr.Status == "merged" || fr.Status == "released" || fr.Status == "declined" {
+		config.ErrorStatus("Cannot vote on a closed feature request", http.StatusBadRequest, w, fmt.Errorf("feature request status is %s", fr.Status))
 		return
 	}
 
@@ -750,8 +750,8 @@ func (h FeatureRequestHandler) AddCommentHandler(w http.ResponseWriter, r *http.
 		config.ErrorStatus("Feature request not found", http.StatusNotFound, w, err)
 		return
 	}
-	if frCheck.Status == "merged" {
-		config.ErrorStatus("Cannot comment on a merged feature request", http.StatusBadRequest, w, fmt.Errorf("feature request is merged"))
+	if frCheck.Status == "merged" || frCheck.Status == "released" || frCheck.Status == "declined" {
+		config.ErrorStatus("Cannot comment on a closed feature request", http.StatusBadRequest, w, fmt.Errorf("feature request status is %s", frCheck.Status))
 		return
 	}
 
