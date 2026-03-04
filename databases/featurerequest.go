@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -19,6 +20,7 @@ type FeatureRequestDatabase interface {
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
+	Aggregate(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error)
 }
 
 type featureRequestDatabase struct {
@@ -65,4 +67,8 @@ func (f *featureRequestDatabase) DeleteOne(ctx context.Context, filter interface
 
 func (f *featureRequestDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	return f.db.Collection(featureRequestCollectionName).CountDocuments(ctx, filter, opts...)
+}
+
+func (f *featureRequestDatabase) Aggregate(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error) {
+	return f.db.Collection(featureRequestCollectionName).Aggregate(ctx, pipeline, opts...)
 }

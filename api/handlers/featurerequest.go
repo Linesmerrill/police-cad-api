@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/api"
@@ -63,22 +64,9 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 		}
 	}
 
-	// Build sort
-	var sort bson.D
-	switch sortBy {
-	case "top":
-		sort = bson.D{{Key: "upvoteCount", Value: -1}, {Key: "createdAt", Value: -1}}
-	case "trending":
-		sort = bson.D{{Key: "upvoteCount", Value: -1}, {Key: "createdAt", Value: -1}}
-	case "newest":
-		sort = bson.D{{Key: "createdAt", Value: -1}}
-	default:
-		sort = bson.D{{Key: "createdAt", Value: -1}}
-	}
-
 	skip := (page - 1) * limit
 
-	// Run Find + Count in parallel
+	// Run Find/Aggregate + Count in parallel
 	type countResult struct {
 		count int64
 		err   error
@@ -97,24 +85,79 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 	}()
 
 	go func() {
-		findOptions := options.Find().
-			SetSkip(int64(skip)).
-			SetLimit(int64(limit)).
-			SetSort(sort)
+		if sortBy == "trending" {
+			// HN-style trending: score = (votes + comments*0.5) / (ageHours + 2)^1.5
+			pipeline := mongo.Pipeline{
+				{{Key: "$match", Value: filter}},
+				{{Key: "$addFields", Value: bson.D{
+					{Key: "trendingScore", Value: bson.D{
+						{Key: "$divide", Value: bson.A{
+							bson.D{{Key: "$add", Value: bson.A{
+								"$upvoteCount",
+								bson.D{{Key: "$multiply", Value: bson.A{"$commentCount", 0.5}}},
+							}}},
+							bson.D{{Key: "$pow", Value: bson.A{
+								bson.D{{Key: "$add", Value: bson.A{
+									bson.D{{Key: "$divide", Value: bson.A{
+										bson.D{{Key: "$subtract", Value: bson.A{"$$NOW", "$createdAt"}}},
+										3600000.0, // ms to hours
+									}}},
+									2.0, // offset so brand-new posts don't divide by zero
+								}}},
+								1.5, // gravity — higher = faster decay
+							}}},
+						}},
+					}},
+				}}},
+				{{Key: "$sort", Value: bson.D{{Key: "trendingScore", Value: -1}}}},
+				{{Key: "$skip", Value: int64(skip)}},
+				{{Key: "$limit", Value: int64(limit)}},
+			}
 
-		cursor, err := h.DB.Find(ctx, filter, findOptions)
-		if err != nil {
-			findCh <- findResult{nil, err}
-			return
-		}
-		defer cursor.Close(ctx)
+			cursor, err := h.DB.Aggregate(ctx, pipeline)
+			if err != nil {
+				findCh <- findResult{nil, err}
+				return
+			}
+			defer cursor.Close(ctx)
 
-		var requests []models.FeatureRequest
-		if err := cursor.All(ctx, &requests); err != nil {
-			findCh <- findResult{nil, err}
-			return
+			var requests []models.FeatureRequest
+			if err := cursor.All(ctx, &requests); err != nil {
+				findCh <- findResult{nil, err}
+				return
+			}
+			findCh <- findResult{requests, nil}
+		} else {
+			// top / newest / default
+			var sort bson.D
+			switch sortBy {
+			case "top":
+				sort = bson.D{{Key: "upvoteCount", Value: -1}, {Key: "createdAt", Value: -1}}
+			case "newest":
+				sort = bson.D{{Key: "createdAt", Value: -1}}
+			default:
+				sort = bson.D{{Key: "createdAt", Value: -1}}
+			}
+
+			findOptions := options.Find().
+				SetSkip(int64(skip)).
+				SetLimit(int64(limit)).
+				SetSort(sort)
+
+			cursor, err := h.DB.Find(ctx, filter, findOptions)
+			if err != nil {
+				findCh <- findResult{nil, err}
+				return
+			}
+			defer cursor.Close(ctx)
+
+			var requests []models.FeatureRequest
+			if err := cursor.All(ctx, &requests); err != nil {
+				findCh <- findResult{nil, err}
+				return
+			}
+			findCh <- findResult{requests, nil}
 		}
-		findCh <- findResult{requests, nil}
 	}()
 
 	countRes := <-countCh
