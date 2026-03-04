@@ -260,7 +260,7 @@ func (h FeatureRequestHandler) CreateFeatureRequestHandler(w http.ResponseWriter
 		Author:       userObjID,
 		Status:       "open",
 		ImageURLs:    imageURLs,
-		UpvoteCount:  0,
+		UpvoteCount:  1,
 		CommentCount: 0,
 		Comments:     []models.FeatureComment{},
 		CreatedAt:    now,
@@ -273,6 +273,15 @@ func (h FeatureRequestHandler) CreateFeatureRequestHandler(w http.ResponseWriter
 		return
 	}
 
+	// Auto-upvote: author automatically votes on their own request (Reddit-style)
+	autoVote := models.FeatureRequestVote{
+		ID:               primitive.NewObjectID(),
+		FeatureRequestID: featureRequest.ID,
+		User:             userObjID,
+		CreatedAt:        now,
+	}
+	h.VDB.InsertOne(ctx, autoVote) // best-effort, don't fail the create if this errors
+
 	// Get user data for response
 	authorSummary := h.getUserSummary(ctx, userObjID)
 
@@ -283,9 +292,9 @@ func (h FeatureRequestHandler) CreateFeatureRequestHandler(w http.ResponseWriter
 		Author:       authorSummary,
 		Status:       featureRequest.Status,
 		ImageURLs:    imageURLs,
-		UpvoteCount:  0,
+		UpvoteCount:  1,
 		CommentCount: 0,
-		HasVoted:     false,
+		HasVoted:     true,
 		Comments:     []models.FeatureCommentResponse{},
 		CreatedAt:    featureRequest.CreatedAt,
 		UpdatedAt:    featureRequest.UpdatedAt,
