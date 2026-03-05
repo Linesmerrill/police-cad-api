@@ -33,6 +33,7 @@ type UserDoc struct {
 	User struct {
 		Username       string  `bson:"username"`
 		ProfilePicture *string `bson:"profilePicture"`
+		Email          string  `bson:"email"`
 	} `bson:"user"`
 }
 

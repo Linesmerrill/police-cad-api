@@ -542,6 +542,29 @@ func (a *App) New() *mux.Router {
 	// Websocket routes
 	ws.Handle("/notifications", api.Middleware(http.HandlerFunc(HandleNotificationsWebSocket))).Methods("GET")
 
+	// Feature Request routes
+	featureRequest := FeatureRequestHandler{
+		DB:      databases.NewFeatureRequestDatabase(a.dbHelper),
+		VDB:     databases.NewFeatureRequestVoteDatabase(a.dbHelper),
+		UDB:     databases.NewUserDatabase(a.dbHelper),
+		AdminDB: databases.NewAdminDatabase(a.dbHelper),
+	}
+
+	// Public feature request routes (no auth required)
+	apiV2.Handle("/feature-requests", http.HandlerFunc(featureRequest.ListFeatureRequestsHandler)).Methods("GET")
+	apiCreate.Handle("/feature-requests/{id}", http.HandlerFunc(featureRequest.GetFeatureRequestHandler)).Methods("GET")
+
+	// Authenticated feature request routes
+	apiCreate.Handle("/feature-requests", api.Middleware(http.HandlerFunc(featureRequest.CreateFeatureRequestHandler))).Methods("POST")
+	apiCreate.Handle("/feature-requests/{id}", api.Middleware(http.HandlerFunc(featureRequest.UpdateFeatureRequestHandler))).Methods("PUT")
+	apiCreate.Handle("/feature-requests/{id}", api.Middleware(http.HandlerFunc(featureRequest.DeleteFeatureRequestHandler))).Methods("DELETE")
+	apiCreate.Handle("/feature-requests/{id}/vote", api.Middleware(http.HandlerFunc(featureRequest.ToggleVoteHandler))).Methods("POST")
+	apiCreate.Handle("/feature-requests/{id}/comments", api.Middleware(http.HandlerFunc(featureRequest.AddCommentHandler))).Methods("POST")
+	apiCreate.Handle("/feature-requests/{id}/comments/{commentId}", api.Middleware(http.HandlerFunc(featureRequest.UpdateCommentHandler))).Methods("PUT")
+	apiCreate.Handle("/feature-requests/{id}/comments/{commentId}", api.Middleware(http.HandlerFunc(featureRequest.DeleteCommentHandler))).Methods("DELETE")
+	apiCreate.Handle("/feature-requests/{id}/status", api.Middleware(http.HandlerFunc(featureRequest.UpdateStatusHandler))).Methods("PUT")
+	apiCreate.Handle("/feature-requests/{targetId}/merge", api.Middleware(http.HandlerFunc(featureRequest.MergeHandler))).Methods("POST")
+
 	// Content Creator Program routes
 	contentCreator := ContentCreator{
 		AppDB:   databases.NewContentCreatorApplicationDatabase(a.dbHelper),
