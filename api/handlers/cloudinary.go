@@ -33,12 +33,10 @@ func (c CloudinaryHandler) GenerateSignature(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Respond with the timestamp, signature, and Cloudinary config
+	// Respond with the timestamp and signature
 	response := map[string]string{
 		"timestamp": timestamp,
 		"signature": signature,
-		"cloudName": os.Getenv("CLOUDINARY_CLOUD_NAME"),
-		"apiKey":    os.Getenv("CLOUDINARY_API_KEY"),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
