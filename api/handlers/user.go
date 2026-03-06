@@ -40,6 +40,7 @@ type User struct {
 	CDB   databases.CommunityDatabase
 	EntDB databases.ContentCreatorEntitlementDatabase
 	PTDB  databases.PushTokenDatabase
+	ALDB  databases.AuditLogDatabase
 }
 
 // UserHandler returns a user given a userID
@@ -2087,6 +2088,9 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Audit log — member left
+	logAudit(u.ALDB, cID, "member.left", "member", userID, resolveActorName(u.DB, userID), userID, "", nil)
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community and roles updated successfully"}`))
 }
@@ -2148,6 +2152,10 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 		config.ErrorStatus("failed to update community ban list", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log — member banned
+	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	logAudit(u.ALDB, cID, "member.banned", "member", actorID, resolveActorName(u.DB, actorID), userID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User banned from community successfully"}`))

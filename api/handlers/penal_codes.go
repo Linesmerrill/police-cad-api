@@ -79,6 +79,10 @@ func (c Community) SetCommunityPenalCodesHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Audit log
+	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	logAudit(c.ALDB, cID, "penal_codes.updated", "penal_codes", actorID, resolveActorName(c.UDB, actorID), "", "", nil)
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community penal codes updated successfully"}`))
 }
