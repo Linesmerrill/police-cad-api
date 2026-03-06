@@ -1851,7 +1851,7 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 
 			// Audit log: member approved (joined via request approval)
 			actorID := resolveActorFromRequest(r)
-			logAudit(u.ALDB, cID, "member.joined", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
+			logAudit(u.ALDB, cID, "member.approved", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
 		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"message": "Community status updated successfully"}`))
