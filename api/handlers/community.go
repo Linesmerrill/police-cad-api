@@ -647,7 +647,7 @@ func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Req
 
 	// Return the created event with its ID
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "event.created", "event", actorID, resolveActorName(c.UDB, actorID), event.ID.Hex(), event.Title, nil)
 
 	response := map[string]interface{}{
@@ -785,7 +785,7 @@ func (c Community) UpdateEventByIDHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "event.updated", "event", actorID, resolveActorName(c.UDB, actorID), eventID, "", nil)
 
 	// Return the updated event
@@ -836,7 +836,7 @@ func (c Community) DeleteEventByIDHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "event.deleted", "event", actorID, resolveActorName(c.UDB, actorID), eventID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -898,7 +898,7 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 	for key := range req {
 		changedFields = append(changedFields, key)
 	}
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, objID, "settings.updated", "settings", actorID, resolveActorName(c.UDB, actorID), "", "", map[string]interface{}{"fields": changedFields})
 
 	w.WriteHeader(http.StatusOK)
@@ -1034,7 +1034,7 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "role.created", "role", actorID, resolveActorName(c.UDB, actorID), role.ID.Hex(), role.Name, nil)
 
 	response := map[string]interface{}{
@@ -1090,7 +1090,7 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "role.member_added", "role", actorID, resolveActorName(c.UDB, actorID), roleID, "", map[string]interface{}{"memberIds": memberIDs})
 
 	w.WriteHeader(http.StatusOK)
@@ -1137,7 +1137,7 @@ func (c Community) UpdateRoleNameHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "role.renamed", "role", actorID, resolveActorName(c.UDB, actorID), roleID, requestBody.Name, nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -1175,7 +1175,7 @@ func (c Community) DeleteRoleByIDHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "role.deleted", "role", actorID, resolveActorName(c.UDB, actorID), roleID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -1222,7 +1222,7 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "role.permissions_updated", "role", actorID, resolveActorName(c.UDB, actorID), roleID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -1384,7 +1384,7 @@ func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(u.ALDB, cID, "member.unbanned", "member", actorID, resolveActorName(u.DB, actorID), userID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -1462,7 +1462,7 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, communityObjID, "invite.created", "invite", actorID, resolveActorName(c.UDB, actorID), inviteCodeID, inviteCodeDoc.Code, nil)
 
 	// Respond with minimal data for security
@@ -1848,7 +1848,7 @@ func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "role.member_removed", "role", actorID, resolveActorName(c.UDB, actorID), memberID, "", map[string]interface{}{"roleId": roleID})
 
 	w.WriteHeader(http.StatusOK)
@@ -2240,7 +2240,7 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "department.created", "department", actorID, resolveActorName(c.UDB, actorID), department.ID.Hex(), department.Name, nil)
 
 	response := map[string]interface{}{
@@ -2284,7 +2284,7 @@ func (c Community) DeleteCommunityDepartmentByIDHandler(w http.ResponseWriter, r
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "department.deleted", "department", actorID, resolveActorName(c.UDB, actorID), departmentID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -2718,7 +2718,7 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "department.updated", "department", actorID, resolveActorName(c.UDB, actorID), departmentID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -2855,7 +2855,7 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "ten_codes.updated", "ten_codes", actorID, resolveActorName(c.UDB, actorID), codeID, "", map[string]interface{}{"action": "deleted"})
 
 	w.WriteHeader(http.StatusOK)
@@ -2909,7 +2909,7 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "ten_codes.updated", "ten_codes", actorID, resolveActorName(c.UDB, actorID), codeID, "", map[string]interface{}{"action": "edited"})
 
 	w.WriteHeader(http.StatusOK)
@@ -2961,7 +2961,7 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "ten_codes.updated", "ten_codes", actorID, resolveActorName(c.UDB, actorID), "", "", map[string]interface{}{"action": "added"})
 
 	w.WriteHeader(http.StatusOK)
@@ -3220,7 +3220,7 @@ func (c Community) SetCommunityFinesHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "fines.updated", "fines", actorID, resolveActorName(c.UDB, actorID), "", "", nil)
 
 	w.WriteHeader(http.StatusOK)
@@ -5579,7 +5579,7 @@ func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	if err == nil {
 		logAudit(c.ALDB, communityObjID, "invite.deleted", "invite", actorID, resolveActorName(c.UDB, actorID), inviteCodeID, inviteCode.Code, nil)
 	}

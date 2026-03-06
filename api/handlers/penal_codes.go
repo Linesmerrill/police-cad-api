@@ -80,7 +80,7 @@ func (c Community) SetCommunityPenalCodesHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Audit log
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, cID, "penal_codes.updated", "penal_codes", actorID, resolveActorName(c.UDB, actorID), "", "", nil)
 
 	w.WriteHeader(http.StatusOK)

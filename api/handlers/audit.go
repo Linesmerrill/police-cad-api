@@ -66,9 +66,20 @@ func resolveActorName(udb databases.UserDatabase, actorID string) string {
 	return user.Details.Username
 }
 
+// resolveActorFromRequest gets the actor user ID from the request.
+// It first tries the bearer token (via middleware context), then falls back to the
+// "userId" query parameter — matching the existing codebase pattern where all endpoints
+// identify users via query params since the in-memory token cache doesn't survive restarts.
+func resolveActorFromRequest(r *http.Request) string {
+	if id := api.GetAuthenticatedUserIDFromContext(r.Context()); id != "" {
+		return id
+	}
+	return r.URL.Query().Get("userId")
+}
+
 // GetCommunityAuditLogsHandler returns paginated audit logs for a community.
 // GET /api/v2/community/{communityId}/audit-logs
-// Query params: page, limit, category, action, actorId
+// Query params: page, limit, category, action, actorId, userId
 func (c Community) GetCommunityAuditLogsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
@@ -80,7 +91,8 @@ func (c Community) GetCommunityAuditLogsHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Permission check: user must have "view audit logs" or "administrator"
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	// Try bearer token first, fall back to userId query param (matches existing API patterns)
+	actorID := resolveActorFromRequest(r)
 	if actorID == "" {
 		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no authenticated user"))
 		return

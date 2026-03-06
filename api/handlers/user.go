@@ -2154,7 +2154,7 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Audit log — member banned
-	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	actorID := resolveActorFromRequest(r)
 	logAudit(u.ALDB, cID, "member.banned", "member", actorID, resolveActorName(u.DB, actorID), userID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
