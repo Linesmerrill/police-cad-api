@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
@@ -100,23 +101,29 @@ func TestUser_RemoveCommunityFromUserHandler_Success(t *testing.T) {
 	// Mock role member removal for each role
 	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(nil).Times(2)
 	
+	// Mock audit log DB (logAudit runs in a fire-and-forget goroutine)
+	mockAuditLogDB := &mocks.AuditLogDatabase{}
+	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
+
 	// Create handler
 	u := handlers.User{
-		DB:  mockUserDB,
-		CDB: mockCommunityDB,
+		DB:   mockUserDB,
+		CDB:  mockCommunityDB,
+		ALDB: mockAuditLogDB,
 	}
-	
+
 	// Create response recorder
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(u.RemoveCommunityFromUserHandler)
-	
+
 	// Execute request
 	handler.ServeHTTP(rr, req)
-	
+	time.Sleep(50 * time.Millisecond) // let logAudit goroutine complete
+
 	// Assertions
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "Community and roles updated successfully")
-	
+
 	// Verify all mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
@@ -462,25 +469,31 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) 
 		},
 	}
 	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).Return(mockCommunity, errors.New("database error"))
-	
+
+	// Mock audit log DB (logAudit runs in a fire-and-forget goroutine)
+	mockAuditLogDB := &mocks.AuditLogDatabase{}
+	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
+
 	// Create handler
 	u := handlers.User{
-		DB:  mockUserDB,
-		CDB: mockCommunityDB,
+		DB:   mockUserDB,
+		CDB:  mockCommunityDB,
+		ALDB: mockAuditLogDB,
 	}
-	
+
 	// Create response recorder
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(u.RemoveCommunityFromUserHandler)
-	
+
 	// Execute request
 	handler.ServeHTTP(rr, req)
-	
+	time.Sleep(50 * time.Millisecond) // let logAudit goroutine complete
+
 	// Assertions - Note: The handler has a bug - it doesn't check the error from FindOne
 	// So it continues processing and returns success instead of failing
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "Community and roles updated successfully")
-	
+
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
@@ -652,24 +665,30 @@ func TestUser_RemoveCommunityFromUserHandler_NoRoles(t *testing.T) {
 	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).Return(mockCommunity, nil)
 	
 	// No role removal calls expected since there are no roles
-	
+
+	// Mock audit log DB (logAudit runs in a fire-and-forget goroutine)
+	mockAuditLogDB := &mocks.AuditLogDatabase{}
+	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
+
 	// Create handler
 	u := handlers.User{
-		DB:  mockUserDB,
-		CDB: mockCommunityDB,
+		DB:   mockUserDB,
+		CDB:  mockCommunityDB,
+		ALDB: mockAuditLogDB,
 	}
-	
+
 	// Create response recorder
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(u.RemoveCommunityFromUserHandler)
-	
+
 	// Execute request
 	handler.ServeHTTP(rr, req)
-	
+	time.Sleep(50 * time.Millisecond) // let logAudit goroutine complete
+
 	// Assertions
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "Community and roles updated successfully")
-	
+
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
@@ -756,20 +775,26 @@ func TestUser_RemoveCommunityFromUserHandler_UserNotInRoles(t *testing.T) {
 	// Mock role member removal calls - even though user is not in roles, the handler will try to remove them
 	// This reveals that the handler doesn't check if the user is actually in the roles before attempting removal
 	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID, "community.roles._id": primitive.ObjectID{}, "community.roles.members": userID}, bson.M{"$pull": bson.M{"community.roles.$.members": userID}}).Return(nil).Times(2)
-	
+
+	// Mock audit log DB (logAudit runs in a fire-and-forget goroutine)
+	mockAuditLogDB := &mocks.AuditLogDatabase{}
+	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
+
 	// Create handler
 	u := handlers.User{
-		DB:  mockUserDB,
-		CDB: mockCommunityDB,
+		DB:   mockUserDB,
+		CDB:  mockCommunityDB,
+		ALDB: mockAuditLogDB,
 	}
-	
+
 	// Create response recorder
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(u.RemoveCommunityFromUserHandler)
-	
+
 	// Execute request
 	handler.ServeHTTP(rr, req)
-	
+	time.Sleep(50 * time.Millisecond) // let logAudit goroutine complete
+
 	// Assertions
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "Community and roles updated successfully")

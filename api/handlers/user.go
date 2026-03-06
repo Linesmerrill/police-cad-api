@@ -2092,8 +2092,13 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Audit log — member left
-	logAudit(u.ALDB, cID, "member.left", "member", userID, resolveActorName(u.DB, userID), userID, "", nil)
+	// Audit log — distinguish kick (admin removed member) vs leave (self-initiated)
+	actorID := resolveActorFromRequest(r)
+	if actorID != "" && actorID != userID {
+		logAudit(u.ALDB, cID, "member.kicked", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
+	} else {
+		logAudit(u.ALDB, cID, "member.left", "member", userID, resolveActorName(u.DB, userID), userID, "", nil)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community and roles updated successfully"}`))
