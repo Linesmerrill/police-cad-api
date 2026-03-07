@@ -57,6 +57,7 @@ func (m *medicalReportDatabase) GetMedicalReportsByCivilianID(ctx context.Contex
 		}},
 		{"$project": bson.M{
 			"_id":                1,
+			"name":               "$report.name",
 			"civilianID":         "$report.civilianID",
 			"reportingEmsID":     "$report.reportingEmsID",
 			"reportDate":         "$report.date",

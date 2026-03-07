@@ -36,6 +36,7 @@ type MedicalReportResponse struct {
 // MedicalReportWithEms includes EMS information for the response
 type MedicalReportWithEms struct {
 	ID                primitive.ObjectID `json:"_id" bson:"_id"`
+	Name              string             `json:"name" bson:"name"`
 	CivilianID        string             `json:"civilianID" bson:"civilianID"`
 	ReportingEmsID    string             `json:"reportingEmsID" bson:"reportingEmsID"`
 	ReportDate        string             `json:"reportDate" bson:"reportDate"`
