@@ -37,8 +37,8 @@ var cache store.Cache
 // authenticatedUserIDContextKey is a type for storing authenticated user ID in context
 type authenticatedUserIDContextKey struct{}
 
-// getAuthenticatedUserIDFromContext extracts authenticated user ID from context
-func getAuthenticatedUserIDFromContext(ctx context.Context) string {
+// GetAuthenticatedUserIDFromContext extracts authenticated user ID from context.
+func GetAuthenticatedUserIDFromContext(ctx context.Context) string {
 	if val := ctx.Value(authenticatedUserIDContextKey{}); val != nil {
 		return val.(string)
 	}
@@ -101,6 +101,19 @@ func Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 
 		} else {
+			// For non-login routes, try to extract user ID from bearer token
+			// so handlers can identify who is making the request (e.g. for audit logging).
+			// This is non-blocking: if auth fails we still proceed.
+			if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+				user, err := authenticator.Authenticate(r)
+				if err == nil && user != nil {
+					userID := user.ID()
+					if userID != "" {
+						ctx := withAuthenticatedUserID(r.Context(), userID)
+						r = r.WithContext(ctx)
+					}
+				}
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -121,7 +134,7 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 
 	// OPTIMIZATION: Get user ID from context (set by ValidateUser) to avoid duplicate DB query
 	// ValidateUser already looked up the user and validated credentials
-	userID := getAuthenticatedUserIDFromContext(r.Context())
+	userID := GetAuthenticatedUserIDFromContext(r.Context())
 	
 	if userID == "" {
 		// Fallback: if user ID not in context, do DB lookup (shouldn't happen in normal flow)

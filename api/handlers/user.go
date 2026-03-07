@@ -40,6 +40,7 @@ type User struct {
 	CDB   databases.CommunityDatabase
 	EntDB databases.ContentCreatorEntitlementDatabase
 	PTDB  databases.PushTokenDatabase
+	ALDB  databases.AuditLogDatabase
 }
 
 // UserHandler returns a user given a userID
@@ -1847,6 +1848,10 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 				config.ErrorStatus("failed to increment community membersCount", http.StatusInternalServerError, w, fmt.Errorf("failed to increment community membersCount: %w", err))
 				return
 			}
+
+			// Audit log: member approved (joined via request approval)
+			actorID := resolveActorFromRequest(r)
+			logAudit(u.ALDB, cID, "member.approved", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
 		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"message": "Community status updated successfully"}`))
@@ -2087,6 +2092,14 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Audit log — distinguish kick (admin removed member) vs leave (self-initiated)
+	actorID := resolveActorFromRequest(r)
+	if actorID != "" && actorID != userID {
+		logAudit(u.ALDB, cID, "member.kicked", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
+	} else {
+		logAudit(u.ALDB, cID, "member.left", "member", userID, resolveActorName(u.DB, userID), userID, "", nil)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community and roles updated successfully"}`))
 }
@@ -2148,6 +2161,10 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 		config.ErrorStatus("failed to update community ban list", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log — member banned
+	actorID := resolveActorFromRequest(r)
+	logAudit(u.ALDB, cID, "member.banned", "member", actorID, resolveActorName(u.DB, actorID), userID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User banned from community successfully"}`))

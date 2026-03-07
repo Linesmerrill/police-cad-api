@@ -68,6 +68,7 @@ var defaultPermissionDefs = []struct {
 	{"manage members", "Allows managing members"},
 	{"manage bans", "Allows managing bans"},
 	{"manage most wanted", "Allows managing the most wanted list (add, edit, delete, reorder entries)"},
+	{"view audit logs", "Allows viewing the community audit log"},
 	{"administrator", "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant."},
 }
 
@@ -159,6 +160,7 @@ type Community struct {
 	FDB      databases.FirearmDatabase
 	DBHelper databases.DatabaseHelper
 	PTDB     databases.PushTokenDatabase
+	ALDB     databases.AuditLogDatabase
 }
 
 // CommunityHandler returns a community given a communityID
@@ -644,6 +646,10 @@ func (c Community) AddEventToCommunityHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// Return the created event with its ID
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "event.created", "event", actorID, resolveActorName(c.UDB, actorID), event.ID.Hex(), event.Title, nil)
+
 	response := map[string]interface{}{
 		"message": "Event added successfully",
 		"event":   event,
@@ -778,6 +784,10 @@ func (c Community) UpdateEventByIDHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "event.updated", "event", actorID, resolveActorName(c.UDB, actorID), eventID, "", nil)
+
 	// Return the updated event
 	response := map[string]interface{}{
 		"message": "Event updated successfully",
@@ -824,6 +834,10 @@ func (c Community) DeleteEventByIDHandler(w http.ResponseWriter, r *http.Request
 		config.ErrorStatus("failed to delete event from community", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "event.deleted", "event", actorID, resolveActorName(c.UDB, actorID), eventID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Event deleted successfully"}`))
@@ -878,6 +892,14 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		config.ErrorStatus("failed to update community", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log — record which fields were changed
+	changedFields := make([]string, 0, len(req))
+	for key := range req {
+		changedFields = append(changedFields, key)
+	}
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, objID, "settings.updated", "settings", actorID, resolveActorName(c.UDB, actorID), "", "", map[string]interface{}{"fields": changedFields})
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "community updated successfully"}`))
@@ -1011,6 +1033,10 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "role.created", "role", actorID, resolveActorName(c.UDB, actorID), role.ID.Hex(), role.Name, nil)
+
 	response := map[string]interface{}{
 		"message": "Role added successfully",
 		"role_id": role.ID.Hex(),
@@ -1063,6 +1089,10 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "role.member_added", "role", actorID, resolveActorName(c.UDB, actorID), roleID, "", map[string]interface{}{"memberIds": memberIDs})
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role members updated successfully"}`))
 }
@@ -1106,6 +1136,10 @@ func (c Community) UpdateRoleNameHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "role.renamed", "role", actorID, resolveActorName(c.UDB, actorID), roleID, requestBody.Name, nil)
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role name updated successfully"}`))
 }
@@ -1139,6 +1173,10 @@ func (c Community) DeleteRoleByIDHandler(w http.ResponseWriter, r *http.Request)
 		config.ErrorStatus("failed to delete role from community", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "role.deleted", "role", actorID, resolveActorName(c.UDB, actorID), roleID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role deleted successfully"}`))
@@ -1182,6 +1220,10 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 		config.ErrorStatus("failed to update role permissions", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "role.permissions_updated", "role", actorID, resolveActorName(c.UDB, actorID), roleID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role permissions updated successfully"}`))
@@ -1341,6 +1383,10 @@ func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(u.ALDB, cID, "member.unbanned", "member", actorID, resolveActorName(u.DB, actorID), userID, "", nil)
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User unbanned from community successfully"}`))
 }
@@ -1414,6 +1460,10 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		config.ErrorStatus("Failed to update community", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, communityObjID, "invite.created", "invite", actorID, resolveActorName(c.UDB, actorID), inviteCodeID, inviteCodeDoc.Code, nil)
 
 	// Respond with minimal data for security
 	response := map[string]string{
@@ -1686,6 +1736,9 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Audit log
+	logAudit(c.ALDB, communityObjID, "member.joined", "member", req.UserID, resolveActorName(c.UDB, req.UserID), req.UserID, "", nil)
+
 	// Respond with success
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
@@ -1793,6 +1846,10 @@ func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Reques
 		config.ErrorStatus("failed to delete role member", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "role.member_removed", "role", actorID, resolveActorName(c.UDB, actorID), memberID, "", map[string]interface{}{"roleId": roleID})
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Role member deleted successfully"}`))
@@ -2182,6 +2239,10 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "department.created", "department", actorID, resolveActorName(c.UDB, actorID), department.ID.Hex(), department.Name, nil)
+
 	response := map[string]interface{}{
 		"message":       "Department added successfully",
 		"department_id": department.ID.Hex(),
@@ -2221,6 +2282,10 @@ func (c Community) DeleteCommunityDepartmentByIDHandler(w http.ResponseWriter, r
 		config.ErrorStatus("failed to delete department from community", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "department.deleted", "department", actorID, resolveActorName(c.UDB, actorID), departmentID, "", nil)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department deleted successfully"}`))
@@ -2652,6 +2717,10 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "department.updated", "department", actorID, resolveActorName(c.UDB, actorID), departmentID, "", nil)
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department details updated successfully"}`))
 }
@@ -2785,6 +2854,10 @@ func (c Community) DeleteTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "ten_codes.updated", "ten_codes", actorID, resolveActorName(c.UDB, actorID), codeID, "", map[string]interface{}{"action": "deleted"})
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Ten-Code deleted successfully"}`))
 }
@@ -2835,6 +2908,10 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "ten_codes.updated", "ten_codes", actorID, resolveActorName(c.UDB, actorID), codeID, "", map[string]interface{}{"action": "edited"})
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Ten-Code updated successfully"}`))
 }
@@ -2882,6 +2959,10 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("failed to add Ten-Code", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "ten_codes.updated", "ten_codes", actorID, resolveActorName(c.UDB, actorID), "", "", map[string]interface{}{"action": "added"})
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -3137,6 +3218,10 @@ func (c Community) SetCommunityFinesHandler(w http.ResponseWriter, r *http.Reque
 		config.ErrorStatus("failed to update community fines", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "fines.updated", "fines", actorID, resolveActorName(c.UDB, actorID), "", "", nil)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community fines updated successfully"}`))
@@ -5491,6 +5576,12 @@ func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Reques
 			bson.M{"_id": communityObjID},
 			bson.M{"$pull": bson.M{"community.inviteCodeIds": inviteCodeID}},
 		)
+	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	if err == nil {
+		logAudit(c.ALDB, communityObjID, "invite.deleted", "invite", actorID, resolveActorName(c.UDB, actorID), inviteCodeID, inviteCode.Code, nil)
 	}
 
 	// Return success response
