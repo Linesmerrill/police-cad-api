@@ -57,7 +57,7 @@ func (a *App) New() *mux.Router {
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
 	cloudinaryHandler := CloudinaryHandler{}
-	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper)}
+	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	announcement := Announcement{
 		ADB:  databases.NewAnnouncementDatabase(a.dbHelper),
 		UDB:  databases.NewUserDatabase(a.dbHelper),

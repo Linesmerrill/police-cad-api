@@ -20,7 +20,8 @@ import (
 
 // UserPreferences exported for testing purposes
 type UserPreferences struct {
-	DB databases.UserPreferencesDatabase
+	DB  databases.UserPreferencesDatabase
+	UDB databases.UserDatabase
 }
 
 // GetUserPreferencesHandler returns user preferences for a given userID
@@ -248,9 +249,9 @@ func (up UserPreferences) GetBetaDashboardMetricsHandler(w http.ResponseWriter, 
 		return
 	}
 
-	total, err := up.DB.CountDocuments(ctx, bson.M{})
+	total, err := up.UDB.CountDocuments(ctx, bson.M{})
 	if err != nil {
-		config.ErrorStatus("failed to count total user preferences", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to count total users", http.StatusInternalServerError, w, err)
 		return
 	}
 
