@@ -4,11 +4,12 @@ import "go.mongodb.org/mongo-driver/bson/primitive"
 
 // UserPreferences holds the structure for user preferences collection in mongo
 type UserPreferences struct {
-	ID                   primitive.ObjectID           `json:"_id" bson:"_id"`
-	UserID               string                       `json:"userId" bson:"userId"`
+	ID                   primitive.ObjectID             `json:"_id" bson:"_id"`
+	UserID               string                         `json:"userId" bson:"userId"`
+	BetaCivDashboard     bool                           `json:"betaCivDashboard" bson:"betaCivDashboard"`
 	CommunityPreferences map[string]CommunityPreference `json:"communityPreferences" bson:"communityPreferences"`
-	CreatedAt            interface{}                  `json:"createdAt" bson:"createdAt"`
-	UpdatedAt            interface{}                  `json:"updatedAt" bson:"updatedAt"`
+	CreatedAt            interface{}                    `json:"createdAt" bson:"createdAt"`
+	UpdatedAt            interface{}                    `json:"updatedAt" bson:"updatedAt"`
 }
 
 // CommunityPreference holds preferences for a specific community

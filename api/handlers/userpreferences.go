@@ -237,3 +237,37 @@ func (up UserPreferences) DeleteUserPreferencesHandler(w http.ResponseWriter, r 
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// GetBetaDashboardMetricsHandler returns adoption metrics for the beta civilian dashboard
+func (up UserPreferences) GetBetaDashboardMetricsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	optedIn, err := up.DB.CountDocuments(ctx, bson.M{"betaCivDashboard": true})
+	if err != nil {
+		config.ErrorStatus("failed to count beta dashboard opt-ins", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	total, err := up.DB.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		config.ErrorStatus("failed to count total user preferences", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	classic := total - optedIn
+
+	response := map[string]int64{
+		"optedIn": optedIn,
+		"classic": classic,
+		"total":   total,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
