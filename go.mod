@@ -3,7 +3,7 @@ module github.com/linesmerrill/police-cad-api
 go 1.24.0
 
 //heroku specific values:
-// +heroku goVersion 1.22
+// +heroku goVersion 1.24
 
 require (
 	github.com/cloudinary/cloudinary-go/v2 v2.9.1
