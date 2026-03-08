@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -20,7 +23,8 @@ import (
 
 // UserPreferences exported for testing purposes
 type UserPreferences struct {
-	DB databases.UserPreferencesDatabase
+	DB  databases.UserPreferencesDatabase
+	UDB databases.UserDatabase
 }
 
 // GetUserPreferencesHandler returns user preferences for a given userID
@@ -144,6 +148,11 @@ func (up UserPreferences) UpdateUserPreferencesHandler(w http.ResponseWriter, r 
 		return
 	}
 
+	// If betaCivDashboard preference changed, notify admin metrics listeners
+	if _, hasBeta := updateData["betaCivDashboard"]; hasBeta {
+		go up.notifyMetricsUpdate()
+	}
+
 	// Return the updated preferences
 	up.GetUserPreferencesHandler(w, r)
 }
@@ -236,4 +245,104 @@ func (up UserPreferences) DeleteUserPreferencesHandler(w http.ResponseWriter, r 
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetBetaDashboardMetricsHandler returns adoption metrics for the beta civilian dashboard
+func (up UserPreferences) GetBetaDashboardMetricsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	optedIn, err := up.DB.CountDocuments(ctx, bson.M{"betaCivDashboard": true})
+	if err != nil {
+		config.ErrorStatus("failed to count beta dashboard opt-ins", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	total, err := up.UDB.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		config.ErrorStatus("failed to count total users", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	classic := total - optedIn
+
+	response := map[string]int64{
+		"optedIn": optedIn,
+		"classic": classic,
+		"total":   total,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
+// notifyMetricsUpdate sends a webhook to the Node.js server to broadcast
+// updated beta dashboard metrics via Socket.IO to admin console listeners.
+// Runs in a goroutine to avoid blocking the HTTP response.
+func (up UserPreferences) notifyMetricsUpdate() {
+	nodeServerURL := os.Getenv("NODE_SERVER_WEBHOOK_URL")
+	apiKey := os.Getenv("NODE_SERVER_API_KEY")
+
+	if nodeServerURL == "" {
+		return
+	}
+
+	// Derive metrics broadcast URL from the panic broadcast URL
+	metricsURL := strings.Replace(nodeServerURL, "/internal/panic-broadcast", "/internal/metrics-broadcast", 1)
+
+	ctx := context.Background()
+
+	optedIn, err := up.DB.CountDocuments(ctx, bson.M{"betaCivDashboard": true})
+	if err != nil {
+		zap.S().Errorf("notifyMetricsUpdate: failed to count opted-in users: %v", err)
+		return
+	}
+
+	total, err := up.UDB.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		zap.S().Errorf("notifyMetricsUpdate: failed to count total users: %v", err)
+		return
+	}
+
+	classic := total - optedIn
+
+	payload := map[string]interface{}{
+		"event": "beta_metrics_updated",
+		"data": map[string]int64{
+			"optedIn": optedIn,
+			"classic": classic,
+			"total":   total,
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		zap.S().Errorf("notifyMetricsUpdate: failed to marshal payload: %v", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", metricsURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		zap.S().Errorf("notifyMetricsUpdate: failed to create request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-API-Key", apiKey)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		zap.S().Errorf("notifyMetricsUpdate: failed to send webhook: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		zap.S().Warnf("notifyMetricsUpdate: webhook returned status %d", resp.StatusCode)
+	}
 }

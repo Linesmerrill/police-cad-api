@@ -57,7 +57,7 @@ func (a *App) New() *mux.Router {
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
 	cloudinaryHandler := CloudinaryHandler{}
-	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper)}
+	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	announcement := Announcement{
 		ADB:  databases.NewAnnouncementDatabase(a.dbHelper),
 		UDB:  databases.NewUserDatabase(a.dbHelper),
@@ -325,6 +325,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user-preferences/{user_id}", api.Middleware(http.HandlerFunc(userPrefs.DeleteUserPreferencesHandler))).Methods("DELETE")
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.GetDepartmentOrderHandler))).Methods("GET")
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.UpdateDepartmentOrderHandler))).Methods("PUT")
+	apiCreate.Handle("/admin/beta-dashboard-metrics", http.HandlerFunc(userPrefs.GetBetaDashboardMetricsHandler)).Methods("GET")
 
 	// Civilian approval routes (must come before parameterized routes)
 	apiCreate.Handle("/civilian/approval", api.Middleware(http.HandlerFunc(civ.CivilianApprovalHandler))).Methods("POST")

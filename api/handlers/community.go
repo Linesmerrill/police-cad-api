@@ -5324,61 +5324,50 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Update components with pagination
+	// Update components preserving the request array order (for drag-to-reorder)
 	components := targetDepartment.Template.Components
 	if components == nil {
 		components = []models.Component{}
 	}
 
-	// Create a map for efficient lookup of existing components
-	componentMap := make(map[string]models.Component)
+	// Index existing components by ID and name for lookup
+	componentByID := make(map[string]models.Component)
 	for _, comp := range components {
-		componentMap[comp.ID.Hex()] = comp
+		componentByID[comp.ID.Hex()] = comp
 	}
-
-	// Also index existing components by name for matching components without a valid _id
-	componentByName := make(map[string]string) // name → ID hex
+	componentByName := make(map[string]models.Component)
 	for _, comp := range components {
 		if comp.Name != "" {
-			componentByName[comp.Name] = comp.ID.Hex()
+			componentByName[comp.Name] = comp
 		}
 	}
 
-	// Update existing components or add new ones from the request
+	// Build the updated array in request order to preserve drag-to-reorder
+	zeroID := primitive.NilObjectID.Hex()
+	updatedComponents := make([]models.Component, 0, len(requestBody.Components))
 	for _, newComp := range requestBody.Components {
 		idHex := newComp.ID.Hex()
-		zeroID := primitive.NilObjectID.Hex()
 
 		if idHex != "" && idHex != zeroID {
-			// Has a valid _id — update by ID if it exists
-			if existingComp, exists := componentMap[idHex]; exists {
-				existingComp.Name = newComp.Name
-				existingComp.Enabled = newComp.Enabled
-				componentMap[idHex] = existingComp
+			// Has a valid _id — merge with existing
+			if existing, exists := componentByID[idHex]; exists {
+				existing.Name = newComp.Name
+				existing.Enabled = newComp.Enabled
+				updatedComponents = append(updatedComponents, existing)
+			} else {
+				updatedComponents = append(updatedComponents, newComp)
 			}
 		} else if newComp.Name != "" {
-			// No valid _id — try to match by name first
-			if existingIDHex, found := componentByName[newComp.Name]; found {
-				if existingComp, exists := componentMap[existingIDHex]; exists {
-					existingComp.Enabled = newComp.Enabled
-					componentMap[existingIDHex] = existingComp
-				}
+			// No valid _id — try to match by name
+			if existing, found := componentByName[newComp.Name]; found {
+				existing.Enabled = newComp.Enabled
+				updatedComponents = append(updatedComponents, existing)
 			} else {
-				// Component doesn't exist yet — add it with a new ObjectID
-				newID := primitive.NewObjectID()
-				componentMap[newID.Hex()] = models.Component{
-					ID:      newID,
-					Name:    newComp.Name,
-					Enabled: newComp.Enabled,
-				}
+				// New component — assign a new ObjectID
+				newComp.ID = primitive.NewObjectID()
+				updatedComponents = append(updatedComponents, newComp)
 			}
 		}
-	}
-
-	// Convert back to array format for database storage
-	updatedComponents := make([]models.Component, 0, len(componentMap))
-	for _, comp := range componentMap {
-		updatedComponents = append(updatedComponents, comp)
 	}
 
 	// Apply pagination to the updated components for response
