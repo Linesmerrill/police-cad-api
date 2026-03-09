@@ -1182,6 +1182,111 @@ func (c Community) DeleteRoleByIDHandler(w http.ResponseWriter, r *http.Request)
 	w.Write([]byte(`{"message": "Role deleted successfully"}`))
 }
 
+// ReorderRolesHandler reorders the roles array in a community document.
+// PUT /api/v1/community/{communityId}/roles/reorder
+func (c Community) ReorderRolesHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse request body
+	var requestBody struct {
+		RoleIDs []string `json:"roleIds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	if len(requestBody.RoleIDs) == 0 {
+		config.ErrorStatus("roleIds array is required and cannot be empty", http.StatusBadRequest, w, fmt.Errorf("empty roleIds"))
+		return
+	}
+
+	// Convert community ID to ObjectID
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Use request context with timeout
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Find the community
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	existingRoles := community.Details.Roles
+
+	// Validate: request IDs must exactly match existing role IDs
+	if len(requestBody.RoleIDs) != len(existingRoles) {
+		config.ErrorStatus("roleIds count does not match existing roles count", http.StatusBadRequest, w, fmt.Errorf("expected %d, got %d", len(existingRoles), len(requestBody.RoleIDs)))
+		return
+	}
+
+	// Build map of existing roles by hex ID
+	roleMap := make(map[string]models.Role, len(existingRoles))
+	for _, role := range existingRoles {
+		roleMap[role.ID.Hex()] = role
+	}
+
+	// Verify all IDs exist and no duplicates
+	seen := make(map[string]bool, len(requestBody.RoleIDs))
+	for _, id := range requestBody.RoleIDs {
+		if _, exists := roleMap[id]; !exists {
+			config.ErrorStatus(fmt.Sprintf("role ID %s not found in community", id), http.StatusBadRequest, w, fmt.Errorf("unknown role ID"))
+			return
+		}
+		if seen[id] {
+			config.ErrorStatus(fmt.Sprintf("duplicate role ID %s", id), http.StatusBadRequest, w, fmt.Errorf("duplicate role ID"))
+			return
+		}
+		seen[id] = true
+	}
+
+	// Build reordered roles slice
+	reordered := make([]models.Role, 0, len(requestBody.RoleIDs))
+	for _, id := range requestBody.RoleIDs {
+		reordered = append(reordered, roleMap[id])
+	}
+
+	// Pin Head Admin to position 0
+	for i, role := range reordered {
+		isHeadAdmin := false
+		for _, perm := range role.Permissions {
+			if perm.Name == "administrator" && strings.EqualFold(perm.Description, "head admin") && perm.Enabled {
+				isHeadAdmin = true
+				break
+			}
+		}
+		if isHeadAdmin && i > 0 {
+			headAdmin := reordered[i]
+			reordered = append(reordered[:i], reordered[i+1:]...)
+			reordered = append([]models.Role{headAdmin}, reordered...)
+			break
+		}
+	}
+
+	// Save reordered roles
+	filter := bson.M{"_id": cID}
+	update := bson.M{"$set": bson.M{"community.roles": reordered}}
+	err = c.DB.UpdateOne(ctx, filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to reorder roles", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Audit log
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "role.reordered", "role", actorID, resolveActorName(c.UDB, actorID), "", "", nil)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Roles reordered successfully"}`))
+}
+
 // UpdateRolePermissionsHandler updates the permissions of a role in a community
 func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
