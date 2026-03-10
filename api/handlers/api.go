@@ -99,6 +99,7 @@ func (a *App) New() *mux.Router {
 		DB:   databases.NewCourtSessionDatabase(a.dbHelper),
 		CCDB: databases.NewCourtCaseDatabase(a.dbHelper),
 		ChDB: databases.NewCourtChatDatabase(a.dbHelper),
+		UDB:  databases.NewUserDatabase(a.dbHelper),
 	}
 
 	// healthchex

@@ -25,6 +25,7 @@ type CourtSession struct {
 	DB   databases.CourtSessionDatabase
 	CCDB databases.CourtCaseDatabase
 	ChDB databases.CourtChatDatabase
+	UDB  databases.UserDatabase
 }
 
 // CreateCourtSessionHandler creates a new court session with a docket
@@ -80,6 +81,21 @@ func (cs CourtSession) CreateCourtSessionHandler(w http.ResponseWriter, r *http.
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Server-side judge name resolution — don't trust the client-provided judgeName
+	if session.Details.JudgeID != "" {
+		judgeObjID, err := primitive.ObjectIDFromHex(session.Details.JudgeID)
+		if err == nil {
+			var judgeDoc struct {
+				User struct {
+					Username string `bson:"username"`
+				} `bson:"user"`
+			}
+			if cs.UDB.FindOne(ctx, bson.M{"_id": judgeObjID}).Decode(&judgeDoc) == nil && judgeDoc.User.Username != "" {
+				session.Details.JudgeName = judgeDoc.User.Username
+			}
+		}
+	}
 
 	// Initialize docket entry statuses and enrich with civilian info from court cases
 	for i := range session.Details.Docket {
@@ -644,6 +660,21 @@ func (cs CourtSession) JoinCourtSessionHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Server-side user name resolution — don't trust the client-provided userName
+	if participant.UserID != "" {
+		userObjID, err := primitive.ObjectIDFromHex(participant.UserID)
+		if err == nil {
+			var userDoc struct {
+				User struct {
+					Username string `bson:"username"`
+				} `bson:"user"`
+			}
+			if cs.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&userDoc) == nil && userDoc.User.Username != "" {
+				participant.UserName = userDoc.User.Username
+			}
+		}
+	}
+
 	// Read-modify-write to handle legacy sessions where participants may be null
 	existing, err := cs.DB.FindOne(ctx, bson.M{"_id": bID})
 	if err != nil {
@@ -825,6 +856,21 @@ func (cs CourtSession) PostCourtChatHandler(w http.ResponseWriter, r *http.Reque
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Server-side user name resolution — don't trust the client-provided userName
+	if msg.UserID != "" {
+		userObjID, err := primitive.ObjectIDFromHex(msg.UserID)
+		if err == nil {
+			var userDoc struct {
+				User struct {
+					Username string `bson:"username"`
+				} `bson:"user"`
+			}
+			if cs.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&userDoc) == nil && userDoc.User.Username != "" {
+				msg.UserName = userDoc.User.Username
+			}
+		}
+	}
 
 	_, err := cs.ChDB.InsertOne(ctx, msg)
 	if err != nil {
