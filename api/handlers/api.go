@@ -328,6 +328,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.GetDepartmentOrderHandler))).Methods("GET")
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.UpdateDepartmentOrderHandler))).Methods("PUT")
 	apiCreate.Handle("/admin/beta-dashboard-metrics", http.HandlerFunc(userPrefs.GetBetaDashboardMetricsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/beta-dashboard-metrics/daily", http.HandlerFunc(userPrefs.GetBetaDashboardMetricsDailyHandler)).Methods("GET")
 
 	// Civilian approval routes (must come before parameterized routes)
 	apiCreate.Handle("/civilian/approval", api.Middleware(http.HandlerFunc(civ.CivilianApprovalHandler))).Methods("POST")

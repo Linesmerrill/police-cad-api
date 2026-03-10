@@ -281,6 +281,110 @@ func (up UserPreferences) GetBetaDashboardMetricsHandler(w http.ResponseWriter, 
 	w.Write(b)
 }
 
+// GetBetaDashboardMetricsDailyHandler returns daily beta adoption and user registration
+// counts for the past 7 days, used for trend charts on the admin metrics panel.
+func (up UserPreferences) GetBetaDashboardMetricsDailyHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	// Calculate 8 days ago (to ensure we cover 7 full days)
+	now := time.Now().UTC()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	sevenDaysAgo := startOfToday.AddDate(0, 0, -6) // 6 days back + today = 7 days
+
+	// Pipeline: daily beta opt-ins (users who opted in, grouped by updatedAt date)
+	betaPipeline := bson.A{
+		bson.M{"$match": bson.M{
+			"betaCivDashboard": true,
+			"updatedAt":        bson.M{"$gte": sevenDaysAgo},
+		}},
+		bson.M{"$group": bson.M{
+			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$updatedAt"}},
+			"count": bson.M{"$sum": 1},
+		}},
+		bson.M{"$sort": bson.M{"_id": 1}},
+	}
+
+	betaCursor, err := up.DB.Aggregate(ctx, betaPipeline)
+	if err != nil {
+		config.ErrorStatus("failed to aggregate beta daily metrics", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	type dailyCount struct {
+		Date  string `json:"date" bson:"_id"`
+		Count int    `json:"count" bson:"count"`
+	}
+
+	var betaDaily []dailyCount
+	if err := betaCursor.All(ctx, &betaDaily); err != nil {
+		config.ErrorStatus("failed to decode beta daily metrics", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Pipeline: daily new user registrations (grouped by user.createdAt date)
+	userPipeline := bson.A{
+		bson.M{"$match": bson.M{
+			"user.createdAt": bson.M{"$gte": sevenDaysAgo},
+		}},
+		bson.M{"$group": bson.M{
+			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$user.createdAt"}},
+			"count": bson.M{"$sum": 1},
+		}},
+		bson.M{"$sort": bson.M{"_id": 1}},
+	}
+
+	userCursor, err := up.UDB.Aggregate(ctx, userPipeline)
+	if err != nil {
+		config.ErrorStatus("failed to aggregate user daily metrics", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	var userDaily []dailyCount
+	if err := userCursor.All(ctx, &userDaily); err != nil {
+		config.ErrorStatus("failed to decode user daily metrics", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Build a map for quick lookup, then fill in all 7 days (including zero-count days)
+	betaMap := make(map[string]int)
+	for _, d := range betaDaily {
+		betaMap[d.Date] = d.Count
+	}
+	userMap := make(map[string]int)
+	for _, d := range userDaily {
+		userMap[d.Date] = d.Count
+	}
+
+	type dayEntry struct {
+		Date         string `json:"date"`
+		BetaOptIns   int    `json:"betaOptIns"`
+		NewUsers     int    `json:"newUsers"`
+	}
+
+	days := make([]dayEntry, 7)
+	for i := 0; i < 7; i++ {
+		date := sevenDaysAgo.AddDate(0, 0, i).Format("2006-01-02")
+		days[i] = dayEntry{
+			Date:       date,
+			BetaOptIns: betaMap[date],
+			NewUsers:   userMap[date],
+		}
+	}
+
+	response := map[string]interface{}{
+		"days": days,
+	}
+
+	b, err := json.Marshal(response)
+	if err != nil {
+		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(b)
+}
+
 // notifyMetricsUpdate sends a webhook to the Node.js server to broadcast
 // updated beta dashboard metrics via Socket.IO to admin console listeners.
 // Runs in a goroutine to avoid blocking the HTTP response.
