@@ -841,6 +841,8 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		"allRequirementsMet":  allMet,
 		"promoted":            promoted,
 		"previousRank":        previousRank,
+		"rankAssignedAt":      memberStatus.RankAssignedAt,
+		"rankAssignmentType":  memberStatus.RankAssignmentType,
 	})
 }
 
