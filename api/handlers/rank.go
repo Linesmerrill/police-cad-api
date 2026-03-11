@@ -679,8 +679,33 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if memberStatus == nil {
-		config.ErrorStatus("member not found in department", http.StatusNotFound, w, fmt.Errorf("member not found"))
-		return
+		// For public departments, auto-add the user as a member so they can participate in ranks
+		if !dept.ApprovalRequired {
+			newMember := models.MemberStatus{
+				UserID: userID,
+				Status: "approved",
+			}
+			pushPath := fmt.Sprintf("community.departments.%d.members", deptIdx)
+			_ = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$push": bson.M{pushPath: newMember}})
+			// Re-read community to get updated member index
+			community, err = c.DB.FindOne(ctx, bson.M{"_id": cID})
+			if err != nil {
+				config.ErrorStatus("failed to re-read community", http.StatusInternalServerError, w, err)
+				return
+			}
+			_, dept = findDepartment(community, departmentID)
+			for i := range dept.Members {
+				if dept.Members[i].UserID == userID {
+					memberIdx = i
+					memberStatus = &dept.Members[i]
+					break
+				}
+			}
+		}
+		if memberStatus == nil {
+			config.ErrorStatus("member not found in department", http.StatusNotFound, w, fmt.Errorf("member not found"))
+			return
+		}
 	}
 
 	// Compute metrics
