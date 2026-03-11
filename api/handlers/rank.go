@@ -926,6 +926,157 @@ func (c Community) AssignMemberRankHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// PendingPromotion represents a member eligible for admin-review promotion.
+type PendingPromotion struct {
+	UserID         string         `json:"userId"`
+	Username       string         `json:"username"`
+	ProfilePicture string         `json:"profilePicture,omitempty"`
+	CurrentRank    *models.Rank   `json:"currentRank"`
+	NextRank       *models.Rank   `json:"nextRank"`
+	Progress       []RankProgress `json:"progress"`
+}
+
+// GetPendingPromotionsHandler returns members eligible for promotion where the next rank requires admin review (autoPromote=false).
+// GET /api/v1/community/{communityId}/departments/{departmentId}/pending-promotions
+func (c Community) GetPendingPromotionsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	_, dept := findDepartment(community, departmentID)
+	if dept == nil {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
+		return
+	}
+
+	// Sort ranks by displayOrder
+	ranks := make([]models.Rank, len(dept.Ranks))
+	copy(ranks, dept.Ranks)
+	sort.Slice(ranks, func(i, j int) bool { return ranks[i].DisplayOrder < ranks[j].DisplayOrder })
+
+	var pending []PendingPromotion
+
+	for _, member := range dept.Members {
+		// Find current rank
+		currentRankOrder := len(ranks) // below all
+		var currentRank *models.Rank
+		for i := range ranks {
+			if ranks[i].ID.Hex() == member.RankID {
+				currentRank = &ranks[i]
+				currentRankOrder = ranks[i].DisplayOrder
+				break
+			}
+		}
+
+		// If no rank, check for default
+		if currentRank == nil {
+			for i := range ranks {
+				if ranks[i].IsDefault {
+					currentRank = &ranks[i]
+					currentRankOrder = ranks[i].DisplayOrder
+					break
+				}
+			}
+		}
+
+		// Find next rank above current (lower displayOrder)
+		var nextRank *models.Rank
+		for i := len(ranks) - 1; i >= 0; i-- {
+			if ranks[i].DisplayOrder < currentRankOrder {
+				nextRank = &ranks[i]
+				break
+			}
+		}
+
+		// Skip if no next rank, or if next rank is auto-promote (those are handled automatically)
+		if nextRank == nil || nextRank.AutoPromote || len(nextRank.Requirements) == 0 {
+			continue
+		}
+
+		// Compute metrics for this member
+		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID)
+		if err != nil {
+			continue
+		}
+
+		// Check progress toward next rank
+		allMet := true
+		var progress []RankProgress
+		for _, req := range nextRank.Requirements {
+			current := metricsMap[req.MetricType]
+			pct := float64(0)
+			if req.Threshold > 0 {
+				pct = float64(current) / float64(req.Threshold)
+				if pct > 1.0 {
+					pct = 1.0
+				}
+			}
+			met := current >= req.Threshold
+			if !met {
+				allMet = false
+			}
+			progress = append(progress, RankProgress{
+				MetricType:   req.MetricType,
+				DisplayName:  models.MetricTypeDisplayNames[req.MetricType],
+				CurrentValue: current,
+				Threshold:    req.Threshold,
+				Percentage:   pct,
+				Met:          met,
+			})
+		}
+
+		if !allMet {
+			continue
+		}
+
+		// Resolve user info
+		username := member.UserID
+		profilePic := ""
+		if c.UDB != nil {
+			var user models.User
+			if decodeErr := c.UDB.FindOne(ctx, bson.M{"userID": member.UserID}).Decode(&user); decodeErr == nil {
+				if user.Details.Username != "" {
+					username = user.Details.Username
+				}
+				profilePic = user.Details.ProfilePicture
+			}
+		}
+
+		pending = append(pending, PendingPromotion{
+			UserID:         member.UserID,
+			Username:       username,
+			ProfilePicture: profilePic,
+			CurrentRank:    currentRank,
+			NextRank:       nextRank,
+			Progress:       progress,
+		})
+	}
+
+	if pending == nil {
+		pending = []PendingPromotion{}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"pending": pending,
+		"count":   len(pending),
+	})
+}
+
 // CheckAllPromotionsHandler checks and auto-promotes all eligible members in a department.
 // POST /api/v1/community/{communityId}/departments/{departmentId}/ranks/check-promotions
 func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Request) {

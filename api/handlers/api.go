@@ -224,6 +224,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks", api.Middleware(http.HandlerFunc(c.CreateRankHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/reorder", api.Middleware(http.HandlerFunc(c.ReorderRanksHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/check-promotions", api.Middleware(http.HandlerFunc(c.CheckAllPromotionsHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/pending-promotions", api.Middleware(http.HandlerFunc(c.GetPendingPromotionsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/{rankId}", api.Middleware(http.HandlerFunc(c.UpdateRankHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/{rankId}", api.Middleware(http.HandlerFunc(c.DeleteRankHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/ranks/metric-types", api.Middleware(http.HandlerFunc(c.GetMetricTypesHandler))).Methods("GET")
