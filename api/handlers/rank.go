@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -16,6 +17,14 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/models"
 )
+
+// getDepartmentType returns the lowercase department type from the embedded template name.
+func getDepartmentType(dept *models.Department) string {
+	if dept.Template.Name != "" {
+		return strings.ToLower(dept.Template.Name)
+	}
+	return ""
+}
 
 // ---------- helpers ----------
 
@@ -449,6 +458,50 @@ func (c Community) GetMetricTypesHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// GetDepartmentMetricTypesHandler returns metric types filtered for a specific department's type.
+// GET /api/v1/community/{communityId}/departments/{departmentId}/ranks/metric-types
+func (c Community) GetDepartmentMetricTypesHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	_, dept := findDepartment(community, departmentID)
+	if dept == nil {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
+		return
+	}
+
+	deptType := getDepartmentType(dept)
+	var metricTypes []models.MetricTypeDef
+	if deptType != "" {
+		metricTypes = models.MetricTypesForDepartment(deptType)
+	}
+	// Fallback: if no type match or unknown type, return all
+	if len(metricTypes) == 0 {
+		metricTypes = models.MetricTypeRegistry
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"metricTypes":    metricTypes,
+		"departmentType": deptType,
+	})
+}
+
 // ---------- Officer Stats & Rank Progress ----------
 
 // OfficerMetric represents one metric's current value for an officer
@@ -468,19 +521,38 @@ type RankProgress struct {
 	Met          bool    `json:"met"`
 }
 
-// computeOfficerMetrics aggregates all metric values for a given officer in a department.
-func (c Community) computeOfficerMetrics(ctx context.Context, communityID, departmentID, userID string) (map[string]int, error) {
+// computeOfficerMetrics aggregates metric values for a given officer in a department.
+// deptType filters which pipelines to run (e.g. "police", "ems", "fire", "dispatch", "judicial").
+// If deptType is empty, all pipelines run (backward compat).
+func (c Community) computeOfficerMetrics(ctx context.Context, communityID, departmentID, userID, deptType string) (map[string]int, error) {
 	metrics := make(map[string]int)
+
+	// Build set of relevant metric types for this department
+	relevant := make(map[string]bool)
+	if deptType != "" {
+		for _, mt := range models.MetricTypesForDepartment(deptType) {
+			relevant[mt.Type] = true
+		}
+	}
+	needMetric := func(metricType string) bool {
+		if deptType == "" {
+			return true // no filter, run all
+		}
+		return relevant[metricType]
+	}
 
 	// Citations, Warnings, Arrests — from civilians collection
 	for _, entry := range []struct {
-		metricType     string
-		crimHistType   string
+		metricType   string
+		crimHistType string
 	}{
 		{"citations_issued", "Citation"},
 		{"warnings_issued", "Warning"},
 		{"arrests_made", "Arrest"},
 	} {
+		if !needMetric(entry.metricType) {
+			continue
+		}
 		pipeline := bson.A{
 			bson.M{"$match": bson.M{"civilian.activeCommunityID": communityID}},
 			bson.M{"$unwind": "$civilian.criminalHistory"},
@@ -499,88 +571,161 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	}
 
 	// Calls Created
-	count, err := c.runCountPipeline(ctx, "calls", bson.A{
-		bson.M{"$match": bson.M{
-			"call.communityID": communityID,
-			"call.createdByID": userID,
-			"call.departments": departmentID,
-		}},
-		bson.M{"$count": "total"},
-	})
-	if err != nil {
-		return nil, err
+	if needMetric("calls_created") {
+		count, err := c.runCountPipeline(ctx, "calls", bson.A{
+			bson.M{"$match": bson.M{
+				"call.communityID": communityID,
+				"call.createdByID": userID,
+				"call.departments": departmentID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["calls_created"] = count
 	}
-	metrics["calls_created"] = count
 
 	// Calls Responded
-	count, err = c.runCountPipeline(ctx, "calls", bson.A{
-		bson.M{"$match": bson.M{
-			"call.communityID": communityID,
-			"call.assignedTo":  userID,
-			"call.departments": departmentID,
-		}},
-		bson.M{"$count": "total"},
-	})
-	if err != nil {
-		return nil, err
+	if needMetric("calls_responded") {
+		count, err := c.runCountPipeline(ctx, "calls", bson.A{
+			bson.M{"$match": bson.M{
+				"call.communityID": communityID,
+				"call.assignedTo":  userID,
+				"call.departments": departmentID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["calls_responded"] = count
 	}
-	metrics["calls_responded"] = count
 
 	// Calls Cleared
-	count, err = c.runCountPipeline(ctx, "calls", bson.A{
-		bson.M{"$match": bson.M{
-			"call.communityID":       communityID,
-			"call.clearingOfficerID": userID,
-			"call.departments":       departmentID,
-		}},
-		bson.M{"$count": "total"},
-	})
-	if err != nil {
-		return nil, err
+	if needMetric("calls_cleared") {
+		count, err := c.runCountPipeline(ctx, "calls", bson.A{
+			bson.M{"$match": bson.M{
+				"call.communityID":       communityID,
+				"call.clearingOfficerID": userID,
+				"call.departments":       departmentID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["calls_cleared"] = count
 	}
-	metrics["calls_cleared"] = count
 
 	// BOLOs Created
-	count, err = c.runCountPipeline(ctx, "bolos", bson.A{
-		bson.M{"$match": bson.M{
-			"bolo.communityID":  communityID,
-			"bolo.reportedByID": userID,
-			"bolo.departmentID": departmentID,
-		}},
-		bson.M{"$count": "total"},
-	})
-	if err != nil {
-		return nil, err
+	if needMetric("bolos_created") {
+		count, err := c.runCountPipeline(ctx, "bolos", bson.A{
+			bson.M{"$match": bson.M{
+				"bolo.communityID":  communityID,
+				"bolo.reportedByID": userID,
+				"bolo.departmentID": departmentID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["bolos_created"] = count
 	}
-	metrics["bolos_created"] = count
 
 	// Warrants Requested
-	count, err = c.runCountPipeline(ctx, "warrants", bson.A{
-		bson.M{"$match": bson.M{
-			"warrant.activeCommunityID":  communityID,
-			"warrant.requestingOfficerID": userID,
-			"warrant.departmentId":        departmentID,
-		}},
-		bson.M{"$count": "total"},
-	})
-	if err != nil {
-		return nil, err
+	if needMetric("warrants_requested") {
+		count, err := c.runCountPipeline(ctx, "warrants", bson.A{
+			bson.M{"$match": bson.M{
+				"warrant.activeCommunityID":   communityID,
+				"warrant.requestingOfficerID": userID,
+				"warrant.departmentId":        departmentID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["warrants_requested"] = count
 	}
-	metrics["warrants_requested"] = count
 
 	// Warrants Executed
-	count, err = c.runCountPipeline(ctx, "warrants", bson.A{
-		bson.M{"$match": bson.M{
-			"warrant.activeCommunityID": communityID,
-			"warrant.executingOfficerID": userID,
-			"warrant.departmentId":       departmentID,
-		}},
-		bson.M{"$count": "total"},
-	})
-	if err != nil {
-		return nil, err
+	if needMetric("warrants_executed") {
+		count, err := c.runCountPipeline(ctx, "warrants", bson.A{
+			bson.M{"$match": bson.M{
+				"warrant.activeCommunityID":  communityID,
+				"warrant.executingOfficerID": userID,
+				"warrant.departmentId":       departmentID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["warrants_executed"] = count
 	}
-	metrics["warrants_executed"] = count
+
+	// Medical Reports Created — EMS/Fire
+	if needMetric("medical_reports_created") {
+		count, err := c.runCountPipeline(ctx, "medicalreports", bson.A{
+			bson.M{"$match": bson.M{
+				"medicalReport.activeCommunityID": communityID,
+				"medicalReport.reportingEmsID":    userID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["medical_reports_created"] = count
+	}
+
+	// Calls Dispatched — Dispatch (same as calls_created but scoped for dispatch departments)
+	if needMetric("calls_dispatched") {
+		count, err := c.runCountPipeline(ctx, "calls", bson.A{
+			bson.M{"$match": bson.M{
+				"call.communityID": communityID,
+				"call.createdByID": userID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["calls_dispatched"] = count
+	}
+
+	// Warrants Reviewed — Judicial (judge who reviewed the warrant)
+	if needMetric("warrants_reviewed") {
+		count, err := c.runCountPipeline(ctx, "warrants", bson.A{
+			bson.M{"$match": bson.M{
+				"warrant.activeCommunityID": communityID,
+				"warrant.judgeID":           userID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["warrants_reviewed"] = count
+	}
+
+	// Court Cases Completed — Judicial
+	if needMetric("court_cases_completed") {
+		count, err := c.runCountPipeline(ctx, "courtcases", bson.A{
+			bson.M{"$match": bson.M{
+				"courtCase.communityID": communityID,
+				"courtCase.judgeID":     userID,
+				"courtCase.status":      "completed",
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["court_cases_completed"] = count
+	}
 
 	return metrics, nil
 }
@@ -615,15 +760,36 @@ func (c Community) GetOfficerStatsHandler(w http.ResponseWriter, r *http.Request
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, userID)
+	// Look up department to determine type for metric filtering
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	_, dept := findDepartment(community, departmentID)
+	deptType := ""
+	if dept != nil {
+		deptType = getDepartmentType(dept)
+	}
+
+	metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, userID, deptType)
 	if err != nil {
 		config.ErrorStatus("failed to compute officer metrics", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Build response with display names
+	// Build response with display names, filtered to relevant metrics
+	registry := models.MetricTypeRegistry
+	if deptType != "" {
+		registry = models.MetricTypesForDepartment(deptType)
+	}
 	var metrics []OfficerMetric
-	for _, mt := range models.MetricTypeRegistry {
+	for _, mt := range registry {
 		metrics = append(metrics, OfficerMetric{
 			MetricType:   mt.Type,
 			DisplayName:  mt.DisplayName,
@@ -709,7 +875,7 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Compute metrics
-	metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, userID)
+	metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, userID, getDepartmentType(dept))
 	if err != nil {
 		config.ErrorStatus("failed to compute officer metrics", http.StatusInternalServerError, w, err)
 		return
@@ -814,9 +980,14 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Build metrics list
+	// Build metrics list, filtered to relevant metrics for this department type
+	deptType := getDepartmentType(dept)
+	metricsRegistry := models.MetricTypeRegistry
+	if deptType != "" {
+		metricsRegistry = models.MetricTypesForDepartment(deptType)
+	}
 	var metricsResponse []OfficerMetric
-	for _, mt := range models.MetricTypeRegistry {
+	for _, mt := range metricsRegistry {
 		metricsResponse = append(metricsResponse, OfficerMetric{
 			MetricType:   mt.Type,
 			DisplayName:  mt.DisplayName,
@@ -1070,7 +1241,7 @@ func (c Community) GetPendingPromotionsHandler(w http.ResponseWriter, r *http.Re
 		}
 
 		// Compute metrics for this member
-		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID)
+		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID, getDepartmentType(dept))
 		if err != nil {
 			continue
 		}
@@ -1177,7 +1348,7 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 	setFields := bson.M{}
 
 	for memberIdx, member := range dept.Members {
-		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID)
+		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID, getDepartmentType(dept))
 		if err != nil {
 			continue // skip members we can't compute metrics for
 		}
@@ -1318,7 +1489,7 @@ func (c Community) GetPendingPromotionCountsHandler(w http.ResponseWriter, r *ht
 			}
 
 			// Compute metrics for this member
-			metricsMap, err := c.computeOfficerMetrics(ctx, communityID, deptID, member.UserID)
+			metricsMap, err := c.computeOfficerMetrics(ctx, communityID, deptID, member.UserID, getDepartmentType(&dept))
 			if err != nil {
 				continue
 			}

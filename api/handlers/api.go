@@ -229,6 +229,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/{rankId}", api.Middleware(http.HandlerFunc(c.UpdateRankHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/{rankId}", api.Middleware(http.HandlerFunc(c.DeleteRankHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/ranks/metric-types", api.Middleware(http.HandlerFunc(c.GetMetricTypesHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/metric-types", api.Middleware(http.HandlerFunc(c.GetDepartmentMetricTypesHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/stats", api.Middleware(http.HandlerFunc(c.GetOfficerStatsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/rank-progress", api.Middleware(http.HandlerFunc(c.GetRankProgressHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/rank", api.Middleware(http.HandlerFunc(c.AssignMemberRankHandler))).Methods("PUT")
