@@ -233,6 +233,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/stats", api.Middleware(http.HandlerFunc(c.GetOfficerStatsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/rank-progress", api.Middleware(http.HandlerFunc(c.GetRankProgressHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/rank", api.Middleware(http.HandlerFunc(c.AssignMemberRankHandler))).Methods("PUT")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/custom-requirements/{requirementId}", api.Middleware(http.HandlerFunc(c.ToggleCustomRequirementHandler))).Methods("PUT")
 
 	apiCreate.Handle("/community/{communityId}/tenCodes/active", api.Middleware(http.HandlerFunc(c.GetActiveTenCodeHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/tenCodes/bulk", api.Middleware(http.HandlerFunc(c.BulkReplaceTenCodesHandler))).Methods("PUT")

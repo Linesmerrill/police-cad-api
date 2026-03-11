@@ -182,10 +182,14 @@ type MemberDetail struct {
 	DepartmentCallSigns  map[string]string `json:"departmentCallSigns,omitempty" bson:"departmentCallSigns,omitempty"`
 }
 
-// RankRequirement defines a single threshold for rank eligibility
+// RankRequirement defines a single threshold for rank eligibility.
+// For tracked metrics: MetricType is a registry key (e.g. "citations_issued"), Threshold is the target value.
+// For custom requirements: MetricType is "custom", CustomLabel is the free-text description, Threshold is ignored.
 type RankRequirement struct {
-	MetricType string `json:"metricType" bson:"metricType"` // e.g. "citations_issued", "calls_responded"
-	Threshold  int    `json:"threshold" bson:"threshold"`   // e.g. 50
+	ID          string `json:"id,omitempty" bson:"id,omitempty"`                   // stable identifier for tracking completion
+	MetricType  string `json:"metricType" bson:"metricType"`                       // e.g. "citations_issued" or "custom"
+	Threshold   int    `json:"threshold" bson:"threshold"`                         // e.g. 50 (ignored for custom)
+	CustomLabel string `json:"customLabel,omitempty" bson:"customLabel,omitempty"` // free-text label for custom requirements
 }
 
 // Rank defines a configurable LEO rank within a department
@@ -257,12 +261,13 @@ type Event struct {
 
 // MemberStatus holds the structure for a member status
 type MemberStatus struct {
-	UserID             string             `json:"userID" bson:"userID"`
-	Status             string             `json:"status" bson:"status"`
-	TenCodeID          string             `json:"tenCodeID" bson:"tenCodeID"`
-	RankID             string             `json:"rankId,omitempty" bson:"rankId,omitempty"`
-	RankAssignedAt     primitive.DateTime `json:"rankAssignedAt,omitempty" bson:"rankAssignedAt,omitempty"`
-	RankAssignmentType string             `json:"rankAssignmentType,omitempty" bson:"rankAssignmentType,omitempty"` // "auto" or "manual"
+	UserID                string             `json:"userID" bson:"userID"`
+	Status                string             `json:"status" bson:"status"`
+	TenCodeID             string             `json:"tenCodeID" bson:"tenCodeID"`
+	RankID                string             `json:"rankId,omitempty" bson:"rankId,omitempty"`
+	RankAssignedAt        primitive.DateTime `json:"rankAssignedAt,omitempty" bson:"rankAssignedAt,omitempty"`
+	RankAssignmentType    string             `json:"rankAssignmentType,omitempty" bson:"rankAssignmentType,omitempty"` // "auto" or "manual"
+	CustomRequirementsMet []string           `json:"customRequirementsMet,omitempty" bson:"customRequirementsMet,omitempty"`
 }
 
 // Attendance holds the structure for attendance

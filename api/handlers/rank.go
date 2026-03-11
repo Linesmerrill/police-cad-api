@@ -99,6 +99,7 @@ func (c Community) CreateRankHandler(w http.ResponseWriter, r *http.Request) {
 	if rank.Requirements == nil {
 		rank.Requirements = []models.RankRequirement{}
 	}
+	rank.Requirements = ensureRequirementIDs(rank.Requirements)
 
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
@@ -231,6 +232,18 @@ func (c Community) UpdateRankHandler(w http.ResponseWriter, r *http.Request) {
 	for field, bsonPath := range allowedFields {
 		if val, ok := updatedFields[field]; ok {
 			setFields[bsonPath] = val
+		}
+	}
+
+	// Ensure requirement IDs are assigned for new/existing requirements
+	reqsPath := prefix + "requirements"
+	if rawReqs, ok := setFields[reqsPath]; ok {
+		// Re-marshal and unmarshal to typed slice so we can assign IDs
+		reqBytes, _ := json.Marshal(rawReqs)
+		var reqs []models.RankRequirement
+		if json.Unmarshal(reqBytes, &reqs) == nil {
+			reqs = ensureRequirementIDs(reqs)
+			setFields[reqsPath] = reqs
 		}
 	}
 
@@ -513,12 +526,96 @@ type OfficerMetric struct {
 
 // RankProgress shows progress toward a single requirement
 type RankProgress struct {
-	MetricType   string  `json:"metricType"`
-	DisplayName  string  `json:"displayName"`
-	CurrentValue int     `json:"currentValue"`
-	Threshold    int     `json:"threshold"`
-	Percentage   float64 `json:"percentage"`
-	Met          bool    `json:"met"`
+	MetricType    string  `json:"metricType"`
+	DisplayName   string  `json:"displayName"`
+	CurrentValue  int     `json:"currentValue"`
+	Threshold     int     `json:"threshold"`
+	Percentage    float64 `json:"percentage"`
+	Met           bool    `json:"met"`
+	IsCustom      bool    `json:"isCustom,omitempty"`
+	CustomLabel   string  `json:"customLabel,omitempty"`
+	RequirementID string  `json:"requirementId,omitempty"`
+}
+
+// containsString checks if a string slice contains a value.
+func containsString(slice []string, val string) bool {
+	for _, s := range slice {
+		if s == val {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureRequirementIDs assigns IDs to any requirements that don't have one.
+func ensureRequirementIDs(reqs []models.RankRequirement) []models.RankRequirement {
+	for i := range reqs {
+		if reqs[i].ID == "" {
+			reqs[i].ID = primitive.NewObjectID().Hex()
+		}
+	}
+	return reqs
+}
+
+// checkAllRequirementsMet checks if all requirements (tracked + custom) are met for a member.
+func checkAllRequirementsMet(reqs []models.RankRequirement, metricsMap map[string]int, customMet []string) bool {
+	for _, req := range reqs {
+		if req.MetricType == "custom" {
+			if !containsString(customMet, req.ID) {
+				return false
+			}
+		} else {
+			if metricsMap[req.MetricType] < req.Threshold {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// buildRequirementProgress builds RankProgress entries for a set of requirements.
+func buildRequirementProgress(reqs []models.RankRequirement, metricsMap map[string]int, customMet []string) []RankProgress {
+	var progress []RankProgress
+	for _, req := range reqs {
+		if req.MetricType == "custom" {
+			met := containsString(customMet, req.ID)
+			currentVal := 0
+			pct := float64(0)
+			if met {
+				currentVal = 1
+				pct = 1.0
+			}
+			progress = append(progress, RankProgress{
+				MetricType:    "custom",
+				DisplayName:   req.CustomLabel,
+				CustomLabel:   req.CustomLabel,
+				IsCustom:      true,
+				RequirementID: req.ID,
+				CurrentValue:  currentVal,
+				Threshold:     1,
+				Percentage:    pct,
+				Met:           met,
+			})
+		} else {
+			current := metricsMap[req.MetricType]
+			pct := float64(0)
+			if req.Threshold > 0 {
+				pct = float64(current) / float64(req.Threshold)
+				if pct > 1.0 {
+					pct = 1.0
+				}
+			}
+			progress = append(progress, RankProgress{
+				MetricType:   req.MetricType,
+				DisplayName:  models.MetricTypeDisplayNames[req.MetricType],
+				CurrentValue: current,
+				Threshold:    req.Threshold,
+				Percentage:   pct,
+				Met:          current >= req.Threshold,
+			})
+		}
+	}
+	return progress
 }
 
 // computeOfficerMetrics aggregates metric values for a given officer in a department.
@@ -934,15 +1031,9 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		if !ranks[i].AutoPromote {
 			continue
 		}
-		// Check if all requirements are met
-		allMet := true
-		for _, req := range ranks[i].Requirements {
-			if metricsMap[req.MetricType] < req.Threshold {
-				allMet = false
-				break
-			}
-		}
-		if allMet && len(ranks[i].Requirements) > 0 {
+		// Check if all requirements are met (tracked + custom)
+		allMet := len(ranks[i].Requirements) > 0 && checkAllRequirementsMet(ranks[i].Requirements, metricsMap, memberStatus.CustomRequirementsMet)
+		if allMet {
 			// Promote to this rank
 			memberStatus.RankID = ranks[i].ID.Hex()
 			memberStatus.RankAssignedAt = primitive.NewDateTimeFromTime(time.Now())
@@ -998,24 +1089,7 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 	// Build progress toward next rank
 	var progress []RankProgress
 	if nextRank != nil {
-		for _, req := range nextRank.Requirements {
-			current := metricsMap[req.MetricType]
-			pct := float64(0)
-			if req.Threshold > 0 {
-				pct = float64(current) / float64(req.Threshold)
-				if pct > 1.0 {
-					pct = 1.0
-				}
-			}
-			progress = append(progress, RankProgress{
-				MetricType:   req.MetricType,
-				DisplayName:  models.MetricTypeDisplayNames[req.MetricType],
-				CurrentValue: current,
-				Threshold:    req.Threshold,
-				Percentage:   pct,
-				Met:          current >= req.Threshold,
-			})
-		}
+		progress = buildRequirementProgress(nextRank.Requirements, metricsMap, memberStatus.CustomRequirementsMet)
 	}
 
 	allMet := len(progress) > 0
@@ -1246,33 +1320,18 @@ func (c Community) GetPendingPromotionsHandler(w http.ResponseWriter, r *http.Re
 			continue
 		}
 
-		// Check progress toward next rank
-		allMet := true
-		var progress []RankProgress
+		// Check progress toward next rank — show in pending if all TRACKED metrics are met
+		// (custom requirements can be toggled by admin from the pending promotions panel)
+		progress := buildRequirementProgress(nextRank.Requirements, metricsMap, member.CustomRequirementsMet)
+		trackedMet := true
 		for _, req := range nextRank.Requirements {
-			current := metricsMap[req.MetricType]
-			pct := float64(0)
-			if req.Threshold > 0 {
-				pct = float64(current) / float64(req.Threshold)
-				if pct > 1.0 {
-					pct = 1.0
-				}
+			if req.MetricType != "custom" && metricsMap[req.MetricType] < req.Threshold {
+				trackedMet = false
+				break
 			}
-			met := current >= req.Threshold
-			if !met {
-				allMet = false
-			}
-			progress = append(progress, RankProgress{
-				MetricType:   req.MetricType,
-				DisplayName:  models.MetricTypeDisplayNames[req.MetricType],
-				CurrentValue: current,
-				Threshold:    req.Threshold,
-				Percentage:   pct,
-				Met:          met,
-			})
 		}
 
-		if !allMet {
+		if !trackedMet {
 			continue
 		}
 
@@ -1372,14 +1431,7 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 			if !ranks[i].AutoPromote || len(ranks[i].Requirements) == 0 {
 				continue
 			}
-			allMet := true
-			for _, req := range ranks[i].Requirements {
-				if metricsMap[req.MetricType] < req.Threshold {
-					allMet = false
-					break
-				}
-			}
-			if allMet {
+			if checkAllRequirementsMet(ranks[i].Requirements, metricsMap, member.CustomRequirementsMet) {
 				bestRankID = ranks[i].ID.Hex()
 				bestRankOrder = ranks[i].DisplayOrder
 				bestRankName = ranks[i].Name
@@ -1494,15 +1546,15 @@ func (c Community) GetPendingPromotionCountsHandler(w http.ResponseWriter, r *ht
 				continue
 			}
 
-			allMet := true
+			// Count as pending if all tracked metrics are met (custom reqs can be toggled by admin)
+			trackedMet := true
 			for _, req := range nextRank.Requirements {
-				if metricsMap[req.MetricType] < req.Threshold {
-					allMet = false
+				if req.MetricType != "custom" && metricsMap[req.MetricType] < req.Threshold {
+					trackedMet = false
 					break
 				}
 			}
-
-			if allMet {
+			if trackedMet {
 				count++
 			}
 		}
@@ -1515,6 +1567,96 @@ func (c Community) GetPendingPromotionCountsHandler(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"counts": counts,
+	})
+}
+
+// ---------- Custom Requirement Toggle ----------
+
+// ToggleCustomRequirementHandler marks a custom requirement as met or unmet for a member.
+// PUT /api/v1/community/{communityId}/departments/{departmentId}/members/{userId}/custom-requirements/{requirementId}
+func (c Community) ToggleCustomRequirementHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+	departmentID := mux.Vars(r)["departmentId"]
+	userID := mux.Vars(r)["userId"]
+	requirementID := mux.Vars(r)["requirementId"]
+
+	var body struct {
+		Met bool `json:"met"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	deptIdx, dept := findDepartment(community, departmentID)
+	if dept == nil {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
+		return
+	}
+
+	memberIdx := -1
+	for i, m := range dept.Members {
+		if m.UserID == userID {
+			memberIdx = i
+			break
+		}
+	}
+	if memberIdx == -1 {
+		config.ErrorStatus("member not found", http.StatusNotFound, w, fmt.Errorf("member not found in department"))
+		return
+	}
+
+	member := dept.Members[memberIdx]
+	path := fmt.Sprintf("community.departments.%d.members.%d.customRequirementsMet", deptIdx, memberIdx)
+
+	var update bson.M
+	if body.Met {
+		// Add requirement ID if not already present
+		if !containsString(member.CustomRequirementsMet, requirementID) {
+			update = bson.M{"$push": bson.M{path: requirementID}}
+		}
+	} else {
+		// Remove requirement ID
+		update = bson.M{"$pull": bson.M{path: requirementID}}
+	}
+
+	if update != nil {
+		err = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, update)
+		if err != nil {
+			config.ErrorStatus("failed to toggle custom requirement", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
+	actorID := resolveActorFromRequest(r)
+	action := "custom_requirement.met"
+	if !body.Met {
+		action = "custom_requirement.unmet"
+	}
+	logAudit(c.ALDB, cID, action, "rank", actorID, resolveActorName(c.UDB, actorID), requirementID, "", map[string]interface{}{
+		"departmentId": departmentID,
+		"userId":       userID,
+	})
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Custom requirement updated",
+		"met":     body.Met,
 	})
 }
 
