@@ -726,6 +726,13 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Save previous rank before promotion check
+	var previousRank *models.Rank
+	if currentRank != nil {
+		prevCopy := *currentRank
+		previousRank = &prevCopy
+	}
+
 	// Auto-promotion check: try to promote to the highest eligible rank
 	promoted := false
 	for i := range ranks {
@@ -833,6 +840,7 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		"progress":            progress,
 		"allRequirementsMet":  allMet,
 		"promoted":            promoted,
+		"previousRank":        previousRank,
 	})
 }
 
