@@ -830,6 +830,21 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// If all requirements met for a non-auto-promote rank, notify the community owner
+	if allMet && nextRank != nil && !nextRank.AutoPromote && !promoted {
+		// Resolve officer username for the notification message
+		officerName := userID
+		if userObjID, parseErr := primitive.ObjectIDFromHex(userID); parseErr == nil {
+			var user models.User
+			if decodeErr := c.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user); decodeErr == nil {
+				if user.Details.Username != "" {
+					officerName = user.Details.Username
+				}
+			}
+		}
+		go c.sendPromotionEligibleNotification(ctx, community, departmentID, dept.Name, userID, officerName)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"userId":              userID,
@@ -1195,4 +1210,165 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 		"message":       "Promotion check completed",
 		"promotedCount": promotedCount,
 	})
+}
+
+// ---------- Pending Promotion Counts (bulk) ----------
+
+// GetPendingPromotionCountsHandler returns pending promotion counts for all departments in a community.
+// GET /api/v1/community/{communityId}/pending-promotion-counts
+func (c Community) GetPendingPromotionCountsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	counts := make(map[string]int)
+
+	for _, dept := range community.Details.Departments {
+		deptID := dept.ID.Hex()
+		if len(dept.Ranks) == 0 {
+			continue
+		}
+
+		// Sort ranks by displayOrder
+		ranks := make([]models.Rank, len(dept.Ranks))
+		copy(ranks, dept.Ranks)
+		sort.Slice(ranks, func(i, j int) bool { return ranks[i].DisplayOrder < ranks[j].DisplayOrder })
+
+		seen := make(map[string]bool)
+		count := 0
+
+		for _, member := range dept.Members {
+			if seen[member.UserID] {
+				continue
+			}
+			seen[member.UserID] = true
+
+			// Find current rank
+			currentRankOrder := len(ranks)
+			for i := range ranks {
+				if ranks[i].ID.Hex() == member.RankID {
+					currentRankOrder = ranks[i].DisplayOrder
+					break
+				}
+			}
+			// Check default rank if none assigned
+			if member.RankID == "" {
+				for i := range ranks {
+					if ranks[i].IsDefault {
+						currentRankOrder = ranks[i].DisplayOrder
+						break
+					}
+				}
+			}
+
+			// Find next rank above current (lower displayOrder)
+			var nextRank *models.Rank
+			for i := len(ranks) - 1; i >= 0; i-- {
+				if ranks[i].DisplayOrder < currentRankOrder {
+					nextRank = &ranks[i]
+					break
+				}
+			}
+
+			if nextRank == nil || nextRank.AutoPromote || len(nextRank.Requirements) == 0 {
+				continue
+			}
+
+			// Compute metrics for this member
+			metricsMap, err := c.computeOfficerMetrics(ctx, communityID, deptID, member.UserID)
+			if err != nil {
+				continue
+			}
+
+			allMet := true
+			for _, req := range nextRank.Requirements {
+				if metricsMap[req.MetricType] < req.Threshold {
+					allMet = false
+					break
+				}
+			}
+
+			if allMet {
+				count++
+			}
+		}
+
+		if count > 0 {
+			counts[deptID] = count
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"counts": counts,
+	})
+}
+
+// ---------- Promotion Eligibility Notification ----------
+
+// sendPromotionEligibleNotification sends a notification to the community owner
+// when an officer meets all requirements for a non-auto-promote rank.
+// It checks for duplicate unseen notifications to avoid spam.
+func (c Community) sendPromotionEligibleNotification(ctx context.Context, community *models.Community, departmentID, departmentName, userID, username string) {
+	if c.UDB == nil {
+		return
+	}
+
+	ownerID := community.Details.OwnerID
+	if ownerID == "" {
+		return
+	}
+
+	// Look up owner by userID field (auth ID), not _id
+	var owner models.User
+	if err := c.UDB.FindOne(ctx, bson.M{"userID": ownerID}).Decode(&owner); err != nil {
+		return
+	}
+	ownerObjID := owner.ID // string hex of _id
+
+	// Check for existing unseen notification about this user+department to avoid spam
+	for _, n := range owner.Details.Notifications {
+		if n.Type == "promotion_eligible" && n.Data1 == userID && n.Data2 == departmentID && !n.Seen {
+			return // already notified
+		}
+	}
+
+	notification := models.Notification{
+		ID:         primitive.NewObjectID().Hex(),
+		SentFromID: userID,
+		SentToID:   ownerObjID,
+		Type:       "promotion_eligible",
+		Message:    username + " is eligible for promotion in " + departmentName,
+		Data1:      userID,             // eligible officer's user ID
+		Data2:      departmentID,       // department ID
+		Data3:      community.ID.Hex(), // community ID
+		Data4:      departmentName,     // department name (for display)
+		Seen:       false,
+		CreatedAt:  time.Now(),
+	}
+
+	ownerDocID, parseErr := primitive.ObjectIDFromHex(ownerObjID)
+	if parseErr != nil {
+		return
+	}
+	filter := bson.M{"_id": ownerDocID}
+	update := bson.M{"$push": bson.M{"user.notifications": notification}}
+	if _, err := c.UDB.UpdateOne(ctx, filter, update); err != nil {
+		return
+	}
+
+	sendNotificationToUser(ownerObjID, notification)
 }

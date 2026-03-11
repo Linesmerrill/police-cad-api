@@ -220,6 +220,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/join-requests", api.Middleware(http.HandlerFunc(c.UpdateDepartmentJoinRequestHandler))).Methods("PUT")
 
 	// Department Rank routes
+	apiCreate.Handle("/community/{communityId}/pending-promotion-counts", api.Middleware(http.HandlerFunc(c.GetPendingPromotionCountsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks", api.Middleware(http.HandlerFunc(c.GetRanksHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks", api.Middleware(http.HandlerFunc(c.CreateRankHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/reorder", api.Middleware(http.HandlerFunc(c.ReorderRanksHandler))).Methods("PUT")
