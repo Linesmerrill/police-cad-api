@@ -490,9 +490,9 @@ func (c Community) GetDepartmentMetricTypesHandler(w http.ResponseWriter, r *htt
 	if deptType != "" {
 		metricTypes = models.MetricTypesForDepartment(deptType)
 	}
-	// Fallback: if no type match or unknown type, return all
-	if len(metricTypes) == 0 {
-		metricTypes = models.MetricTypeRegistry
+	// If no metrics match (e.g. civilian), return empty list — don't fall back to all
+	if metricTypes == nil {
+		metricTypes = []models.MetricTypeDef{}
 	}
 
 	w.WriteHeader(http.StatusOK)
