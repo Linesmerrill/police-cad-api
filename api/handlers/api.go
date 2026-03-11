@@ -218,6 +218,19 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/remove-user", api.Middleware(http.HandlerFunc(c.RemoveUserFromDepartmentHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/update-image", api.Middleware(http.HandlerFunc(c.UpdateDepartmentImageLinkHandler))).Methods("PATCH")
 	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/join-requests", api.Middleware(http.HandlerFunc(c.UpdateDepartmentJoinRequestHandler))).Methods("PUT")
+
+	// Department Rank routes
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks", api.Middleware(http.HandlerFunc(c.GetRanksHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks", api.Middleware(http.HandlerFunc(c.CreateRankHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/reorder", api.Middleware(http.HandlerFunc(c.ReorderRanksHandler))).Methods("PUT")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/check-promotions", api.Middleware(http.HandlerFunc(c.CheckAllPromotionsHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/{rankId}", api.Middleware(http.HandlerFunc(c.UpdateRankHandler))).Methods("PUT")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/ranks/{rankId}", api.Middleware(http.HandlerFunc(c.DeleteRankHandler))).Methods("DELETE")
+	apiCreate.Handle("/community/{communityId}/ranks/metric-types", api.Middleware(http.HandlerFunc(c.GetMetricTypesHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/stats", api.Middleware(http.HandlerFunc(c.GetOfficerStatsHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/rank-progress", api.Middleware(http.HandlerFunc(c.GetRankProgressHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/departments/{departmentId}/members/{userId}/rank", api.Middleware(http.HandlerFunc(c.AssignMemberRankHandler))).Methods("PUT")
+
 	apiCreate.Handle("/community/{communityId}/tenCodes/active", api.Middleware(http.HandlerFunc(c.GetActiveTenCodeHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/tenCodes/bulk", api.Middleware(http.HandlerFunc(c.BulkReplaceTenCodesHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/tenCodes/reset", api.Middleware(http.HandlerFunc(c.ResetTenCodesHandler))).Methods("POST")

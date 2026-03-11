@@ -55,6 +55,9 @@ type WarrantDetails struct {
 	// History
 	History []WarrantHistoryEntry `json:"history" bson:"history"`
 
+	// Department context
+	DepartmentID string `json:"departmentId,omitempty" bson:"departmentId,omitempty"` // department the officer was active in
+
 	// Metadata
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	ExpirationDate    primitive.DateTime `json:"expirationDate" bson:"expirationDate"`

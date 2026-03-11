@@ -182,6 +182,23 @@ type MemberDetail struct {
 	DepartmentCallSigns  map[string]string `json:"departmentCallSigns,omitempty" bson:"departmentCallSigns,omitempty"`
 }
 
+// RankRequirement defines a single threshold for rank eligibility
+type RankRequirement struct {
+	MetricType string `json:"metricType" bson:"metricType"` // e.g. "citations_issued", "calls_responded"
+	Threshold  int    `json:"threshold" bson:"threshold"`   // e.g. 50
+}
+
+// Rank defines a configurable LEO rank within a department
+type Rank struct {
+	ID           primitive.ObjectID `json:"_id" bson:"_id"`
+	Name         string             `json:"name" bson:"name"`                         // e.g. "Sergeant"
+	Prefix       string             `json:"prefix,omitempty" bson:"prefix,omitempty"` // e.g. "PD", "SO"
+	DisplayOrder int                `json:"displayOrder" bson:"displayOrder"`         // lower = higher rank
+	Requirements []RankRequirement  `json:"requirements" bson:"requirements"`
+	AutoPromote  bool               `json:"autoPromote" bson:"autoPromote"`
+	CanViewStats bool               `json:"canViewStats" bson:"canViewStats"` // can view department metrics
+}
+
 // Department holds the structure for a department
 type Department struct {
 	ID                primitive.ObjectID `json:"_id" bson:"_id"`
@@ -190,6 +207,7 @@ type Department struct {
 	Image             string             `json:"image" bson:"image"`
 	ApprovalRequired  bool               `json:"approvalRequired" bson:"approvalRequired"`
 	Members           []MemberStatus     `json:"members" bson:"members"`
+	Ranks             []Rank             `json:"ranks" bson:"ranks"`
 	Template          Template           `json:"template" bson:"template"` // Legacy embedded template (for backward compatibility)
 	TemplateRef       *TemplateReference `json:"templateRef" bson:"templateRef"` // New template reference system
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
@@ -238,9 +256,12 @@ type Event struct {
 
 // MemberStatus holds the structure for a member status
 type MemberStatus struct {
-	UserID    string `json:"userID" bson:"userID"`
-	Status    string `json:"status" bson:"status"`
-	TenCodeID string `json:"tenCodeID" bson:"tenCodeID"`
+	UserID             string             `json:"userID" bson:"userID"`
+	Status             string             `json:"status" bson:"status"`
+	TenCodeID          string             `json:"tenCodeID" bson:"tenCodeID"`
+	RankID             string             `json:"rankId,omitempty" bson:"rankId,omitempty"`
+	RankAssignedAt     primitive.DateTime `json:"rankAssignedAt,omitempty" bson:"rankAssignedAt,omitempty"`
+	RankAssignmentType string             `json:"rankAssignmentType,omitempty" bson:"rankAssignmentType,omitempty"` // "auto" or "manual"
 }
 
 // Attendance holds the structure for attendance
