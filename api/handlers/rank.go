@@ -842,7 +842,12 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 				}
 			}
 		}
-		go c.sendPromotionEligibleNotification(ctx, community, departmentID, dept.Name, userID, officerName)
+		// Use a background context — the request ctx will be cancelled by defer cancel() before the goroutine runs
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		go func() {
+			defer bgCancel()
+			c.sendPromotionEligibleNotification(bgCtx, community, departmentID, dept.Name, userID, officerName)
+		}()
 	}
 
 	w.WriteHeader(http.StatusOK)
