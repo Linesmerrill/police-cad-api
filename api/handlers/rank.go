@@ -706,6 +706,26 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// If no rank assigned, use the default rank and persist it
+	if currentRank == nil && memberStatus.RankID == "" {
+		for i := range ranks {
+			if ranks[i].IsDefault {
+				currentRank = &ranks[i]
+				currentRankOrder = ranks[i].DisplayOrder
+				// Persist the default rank assignment
+				memberStatus.RankID = ranks[i].ID.Hex()
+				memberStatus.RankAssignmentType = "auto"
+				rankPath := fmt.Sprintf("community.departments.%d.members.%d.rankId", deptIdx, memberIdx)
+				typePath := fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx)
+				_ = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": bson.M{
+					rankPath: memberStatus.RankID,
+					typePath:  memberStatus.RankAssignmentType,
+				}})
+				break
+			}
+		}
+	}
+
 	// Auto-promotion check: try to promote to the highest eligible rank
 	promoted := false
 	for i := range ranks {

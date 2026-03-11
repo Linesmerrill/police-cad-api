@@ -227,9 +227,10 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 		memberData := map[string]interface{}{
 			"_id": member.UserID,
 			"user": map[string]interface{}{
-				"userID":       member.UserID,
-				"username":     user.Details.Username,
-				"subscription": user.Details.Subscription,
+				"userID":         member.UserID,
+				"username":       user.Details.Username,
+				"subscription":   user.Details.Subscription,
+				"profilePicture": user.Details.ProfilePicture,
 			},
 		}
 		if member.RankID != "" {
