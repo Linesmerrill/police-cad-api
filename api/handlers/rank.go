@@ -969,8 +969,15 @@ func (c Community) GetPendingPromotionsHandler(w http.ResponseWriter, r *http.Re
 	sort.Slice(ranks, func(i, j int) bool { return ranks[i].DisplayOrder < ranks[j].DisplayOrder })
 
 	var pending []PendingPromotion
+	seen := make(map[string]bool)
 
 	for _, member := range dept.Members {
+		// Deduplicate by userID
+		if seen[member.UserID] {
+			continue
+		}
+		seen[member.UserID] = true
+
 		// Find current rank
 		currentRankOrder := len(ranks) // below all
 		var currentRank *models.Rank
