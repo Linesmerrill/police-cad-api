@@ -166,10 +166,12 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Filter members with status "approved"
+	// Filter members with status "approved" and deduplicate by userID
+	seen := make(map[string]bool)
 	var approvedMembers []models.MemberStatus
 	for _, member := range department.Members {
-		if member.Status == "approved" {
+		if member.Status == "approved" && !seen[member.UserID] {
+			seen[member.UserID] = true
 			approvedMembers = append(approvedMembers, member)
 		}
 	}
