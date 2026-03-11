@@ -20,7 +20,7 @@ var MetricTypeRegistry = []MetricTypeDef{
 	{"arrests_made", "Arrests Made", "Total arrests made by the officer", []string{"police"}},
 
 	// Shared: police, ems, fire, dispatch
-	{"calls_created", "Calls Created", "Total calls created", []string{"police", "ems", "fire", "dispatch"}},
+	{"calls_created", "Calls Created", "Total calls created", []string{"police", "dispatch"}},
 	{"calls_responded", "Calls Responded To", "Total calls assigned to this member", []string{"police", "ems", "fire"}},
 	{"calls_cleared", "Calls Cleared", "Total calls cleared by this member", []string{"police", "ems", "fire"}},
 	{"bolos_created", "BOLOs Created", "Total BOLOs created", []string{"police", "ems", "fire", "dispatch"}},
