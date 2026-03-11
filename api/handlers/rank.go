@@ -1043,16 +1043,18 @@ func (c Community) GetPendingPromotionsHandler(w http.ResponseWriter, r *http.Re
 			continue
 		}
 
-		// Resolve user info
+		// Resolve user info — member.UserID is an ObjectID hex string, lookup by _id
 		username := member.UserID
 		profilePic := ""
 		if c.UDB != nil {
-			var user models.User
-			if decodeErr := c.UDB.FindOne(ctx, bson.M{"userID": member.UserID}).Decode(&user); decodeErr == nil {
-				if user.Details.Username != "" {
-					username = user.Details.Username
+			if userObjID, parseErr := primitive.ObjectIDFromHex(member.UserID); parseErr == nil {
+				var user models.User
+				if decodeErr := c.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user); decodeErr == nil {
+					if user.Details.Username != "" {
+						username = user.Details.Username
+					}
+					profilePic = user.Details.ProfilePicture
 				}
-				profilePic = user.Details.ProfilePicture
 			}
 		}
 
