@@ -34,6 +34,7 @@ type UserDetails struct {
 	RestoreUntil          interface{}           `json:"restoreUntil" bson:"restoreUntil"`
 	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
+	DismissedTutorials    []string              `json:"dismissedTutorials,omitempty" bson:"dismissedTutorials,omitempty"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt             interface{}           `json:"updatedAt" bson:"updatedAt"`
 }
