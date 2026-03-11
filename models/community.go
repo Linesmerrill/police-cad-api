@@ -197,6 +197,7 @@ type Rank struct {
 	Requirements []RankRequirement  `json:"requirements" bson:"requirements"`
 	AutoPromote  bool               `json:"autoPromote" bson:"autoPromote"`
 	CanViewStats bool               `json:"canViewStats" bson:"canViewStats"` // can view department metrics
+	IsDefault    bool               `json:"isDefault" bson:"isDefault"`       // unranked members get this rank
 }
 
 // Department holds the structure for a department

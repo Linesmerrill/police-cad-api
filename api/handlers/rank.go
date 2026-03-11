@@ -112,7 +112,7 @@ func (c Community) CreateRankHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, dept := findDepartment(community, departmentID)
+	deptIdx, dept := findDepartment(community, departmentID)
 	if dept == nil {
 		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
 		return
@@ -120,6 +120,23 @@ func (c Community) CreateRankHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-assign displayOrder to end of list
 	rank.DisplayOrder = len(dept.Ranks)
+
+	// Default canViewStats to true for new ranks
+	rank.CanViewStats = true
+
+	// If this rank is default, clear isDefault on existing ranks first
+	if rank.IsDefault && len(dept.Ranks) > 0 {
+		clearFields := bson.M{}
+		for i, rk := range dept.Ranks {
+			if rk.IsDefault {
+				clearPath := fmt.Sprintf("community.departments.%d.ranks.%d.isDefault", deptIdx, i)
+				clearFields[clearPath] = false
+			}
+		}
+		if len(clearFields) > 0 {
+			_ = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": clearFields})
+		}
+	}
 
 	// Push rank into the department's ranks array using positional filter
 	filter := bson.M{"_id": cID, "community.departments._id": deptObjID}
@@ -199,6 +216,7 @@ func (c Community) UpdateRankHandler(w http.ResponseWriter, r *http.Request) {
 		"requirements": prefix + "requirements",
 		"autoPromote":  prefix + "autoPromote",
 		"canViewStats": prefix + "canViewStats",
+		"isDefault":    prefix + "isDefault",
 	}
 
 	for field, bsonPath := range allowedFields {
@@ -210,6 +228,18 @@ func (c Community) UpdateRankHandler(w http.ResponseWriter, r *http.Request) {
 	if len(setFields) == 0 {
 		config.ErrorStatus("no valid fields to update", http.StatusBadRequest, w, fmt.Errorf("no valid fields"))
 		return
+	}
+
+	// If setting isDefault=true, clear isDefault on all other ranks in this department first
+	if isDefault, ok := updatedFields["isDefault"]; ok {
+		if def, isBool := isDefault.(bool); isBool && def {
+			for i, rk := range dept.Ranks {
+				if rk.ID.Hex() != rankID && rk.IsDefault {
+					clearPath := fmt.Sprintf("community.departments.%d.ranks.%d.isDefault", deptIdx, i)
+					setFields[clearPath] = false
+				}
+			}
+		}
 	}
 
 	filter := bson.M{"_id": cID}
