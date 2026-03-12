@@ -5034,3 +5034,37 @@ func (u User) RemovePushTokenHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "Push token(s) removed successfully",
 	})
 }
+
+// DismissTutorialHandler adds a tutorial key to the user's dismissedTutorials array.
+// PUT /api/v1/user/{userId}/dismiss-tutorial
+func (u User) DismissTutorialHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	var body struct {
+		TutorialKey string `json:"tutorialKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.TutorialKey == "" {
+		config.ErrorStatus("tutorialKey is required", http.StatusBadRequest, w, fmt.Errorf("invalid body"))
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
+		"$addToSet": bson.M{"user.dismissedTutorials": body.TutorialKey},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to dismiss tutorial", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}

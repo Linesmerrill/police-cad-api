@@ -68,6 +68,7 @@ var defaultPermissionDefs = []struct {
 	{"manage members", "Allows managing members"},
 	{"manage bans", "Allows managing bans"},
 	{"manage most wanted", "Allows managing the most wanted list (add, edit, delete, reorder entries)"},
+	{"manage ranks", "Allows managing LEO ranks and assigning ranks to members"},
 	{"view audit logs", "Allows viewing the community audit log"},
 	{"administrator", "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant."},
 }

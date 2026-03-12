@@ -11,6 +11,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // GetDepartmentsScreenDataHandler handles the request to get departments screen data
@@ -166,77 +167,141 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Filter members with status "approved"
-	var approvedMembers []models.MemberStatus
+	// Build a map of rankId by userID from department members for cross-referencing
+	rankByUserID := make(map[string]string)
 	for _, member := range department.Members {
-		if member.Status == "approved" {
-			approvedMembers = append(approvedMembers, member)
+		if member.RankID != "" {
+			rankByUserID[member.UserID] = member.RankID
 		}
 	}
 
-	// Paginate the approved members
-	start := offset
-	end := offset + limit
-	if start > len(approvedMembers) {
-		start = len(approvedMembers)
-	}
-	if end > len(approvedMembers) {
-		end = len(approvedMembers)
-	}
-	paginatedMembers := approvedMembers[start:end]
-
-	// OPTIMIZATION: Batch fetch all users in a single query to avoid N+1 queries
-	userIDs := make([]primitive.ObjectID, 0, len(paginatedMembers))
-	userIDMap := make(map[string]int) // Map userID string to index in paginatedMembers
-	for i, member := range paginatedMembers {
-		userID, err := primitive.ObjectIDFromHex(member.UserID)
-		if err != nil {
-			continue // Skip invalid user IDs
-		}
-		userIDs = append(userIDs, userID)
-		userIDMap[member.UserID] = i
-	}
-
-	// Batch fetch all users
-	var users []models.User
-	if len(userIDs) > 0 {
-		cursor, err := c.UDB.Find(ctx, bson.M{"_id": bson.M{"$in": userIDs}})
-		if err == nil {
-			defer cursor.Close(ctx)
-			cursor.All(ctx, &users)
-		}
-	}
-
-	// Create a map for O(1) lookup
-	userMap := make(map[string]models.User)
-	for _, user := range users {
-		userMap[user.ID] = user
-	}
-
-	// Enrich members with user data
 	var enrichedMembers []map[string]interface{}
-	for _, member := range paginatedMembers {
-		user, exists := userMap[member.UserID]
-		if !exists {
-			continue // Skip if user not found
+	var totalCount int
+
+	if !department.ApprovalRequired {
+		// PUBLIC department: return all community members, cross-referenced with rank data
+		filter := bson.M{
+			"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      "approved",
+				},
+			},
 		}
 
-		// Add enriched member data
-		enrichedMembers = append(enrichedMembers, map[string]interface{}{
-			"_id": member.UserID,
-			"user": map[string]interface{}{
-				"userID":       member.UserID,
-				"username":     user.Details.Username,
-				"subscription": user.Details.Subscription,
-			},
-		})
+		// Count total community members
+		total, err := c.UDB.CountDocuments(ctx, filter)
+		if err != nil {
+			totalCount = 0
+		} else {
+			totalCount = int(total)
+		}
+
+		// Fetch paginated community members
+		findOptions := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
+		cursor, err := c.UDB.Find(ctx, filter, findOptions)
+		if err != nil {
+			http.Error(w, "Failed to fetch community members", http.StatusInternalServerError)
+			return
+		}
+		defer cursor.Close(ctx)
+
+		var users []models.User
+		if err = cursor.All(ctx, &users); err != nil {
+			http.Error(w, "Failed to decode community members", http.StatusInternalServerError)
+			return
+		}
+
+		for _, user := range users {
+			memberData := map[string]interface{}{
+				"_id": user.ID,
+				"user": map[string]interface{}{
+					"userID":         user.ID,
+					"username":       user.Details.Username,
+					"subscription":   user.Details.Subscription,
+					"profilePicture": user.Details.ProfilePicture,
+				},
+			}
+			if rankID, ok := rankByUserID[user.ID]; ok {
+				memberData["rankId"] = rankID
+			}
+			enrichedMembers = append(enrichedMembers, memberData)
+		}
+	} else {
+		// PRIVATE department: return only approved department members
+		seen := make(map[string]bool)
+		var approvedMembers []models.MemberStatus
+		for _, member := range department.Members {
+			if member.Status == "approved" && !seen[member.UserID] {
+				seen[member.UserID] = true
+				approvedMembers = append(approvedMembers, member)
+			}
+		}
+
+		totalCount = len(approvedMembers)
+
+		// Paginate the approved members
+		start := offset
+		end := offset + limit
+		if start > totalCount {
+			start = totalCount
+		}
+		if end > totalCount {
+			end = totalCount
+		}
+		paginatedMembers := approvedMembers[start:end]
+
+		// Batch fetch all users in a single query
+		userIDs := make([]primitive.ObjectID, 0, len(paginatedMembers))
+		for _, member := range paginatedMembers {
+			userID, err := primitive.ObjectIDFromHex(member.UserID)
+			if err != nil {
+				continue
+			}
+			userIDs = append(userIDs, userID)
+		}
+
+		var users []models.User
+		if len(userIDs) > 0 {
+			cursor, err := c.UDB.Find(ctx, bson.M{"_id": bson.M{"$in": userIDs}})
+			if err == nil {
+				defer cursor.Close(ctx)
+				cursor.All(ctx, &users)
+			}
+		}
+
+		userMap := make(map[string]models.User)
+		for _, user := range users {
+			userMap[user.ID] = user
+		}
+
+		for _, member := range paginatedMembers {
+			user, exists := userMap[member.UserID]
+			if !exists {
+				continue
+			}
+
+			memberData := map[string]interface{}{
+				"_id": member.UserID,
+				"user": map[string]interface{}{
+					"userID":         member.UserID,
+					"username":       user.Details.Username,
+					"subscription":   user.Details.Subscription,
+					"profilePicture": user.Details.ProfilePicture,
+				},
+			}
+			if member.RankID != "" {
+				memberData["rankId"] = member.RankID
+			}
+			enrichedMembers = append(enrichedMembers, memberData)
+		}
 	}
 
 	// Return the response
 	response := map[string]interface{}{
 		"page":             page,
 		"limit":            limit,
-		"totalCount":       len(approvedMembers),
+		"totalCount":       totalCount,
 		"approvalRequired": department.ApprovalRequired,
 		"data":             enrichedMembers,
 	}
