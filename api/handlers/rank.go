@@ -1198,8 +1198,35 @@ func (c Community) AssignMemberRankHandler(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if memberIdx == -1 {
-		config.ErrorStatus("member not found in department", http.StatusNotFound, w, fmt.Errorf("member not found"))
-		return
+		// For public departments, auto-add the user as a member so they can receive ranks
+		if !dept.ApprovalRequired {
+			newMember := models.MemberStatus{
+				UserID: userID,
+				Status: "approved",
+			}
+			pushPath := fmt.Sprintf("community.departments.%d.members", deptIdx)
+			if err := c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$push": bson.M{pushPath: newMember}}); err != nil {
+				config.ErrorStatus("failed to add member to department", http.StatusInternalServerError, w, err)
+				return
+			}
+			// Re-read community to get updated member index
+			community, err = c.DB.FindOne(ctx, bson.M{"_id": cID})
+			if err != nil {
+				config.ErrorStatus("failed to re-read community", http.StatusInternalServerError, w, err)
+				return
+			}
+			deptIdx, dept = findDepartment(community, departmentID)
+			for i, m := range dept.Members {
+				if m.UserID == userID {
+					memberIdx = i
+					break
+				}
+			}
+		}
+		if memberIdx == -1 {
+			config.ErrorStatus("member not found in department", http.StatusNotFound, w, fmt.Errorf("member not found"))
+			return
+		}
 	}
 
 	setFields := bson.M{
