@@ -2319,6 +2319,15 @@ func (c Community) CreateCommunityDepartmentHandler(w http.ResponseWriter, r *ht
 		}
 	}
 
+	// Ensure slice fields are initialized so MongoDB stores [] instead of null.
+	// A null array causes $push to fail when adding ranks later.
+	if department.Ranks == nil {
+		department.Ranks = []models.Rank{}
+	}
+	if department.Members == nil {
+		department.Members = []models.MemberStatus{}
+	}
+
 	// Set the createdAt and updatedAt fields to the current time
 	now := primitive.NewDateTimeFromTime(time.Now())
 	department.CreatedAt = now

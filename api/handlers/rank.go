@@ -148,9 +148,16 @@ func (c Community) CreateRankHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Push rank into the department's ranks array using positional filter
+	// If the department's ranks array is nil/null in the DB, $push will fail.
+	// Use $set to initialize the array with the new rank instead.
 	filter := bson.M{"_id": cID, "community.departments._id": deptObjID}
-	update := bson.M{"$push": bson.M{"community.departments.$.ranks": rank}}
+	var update bson.M
+	if dept.Ranks == nil {
+		rankPath := fmt.Sprintf("community.departments.%d.ranks", deptIdx)
+		update = bson.M{"$set": bson.M{rankPath: []models.Rank{rank}}}
+	} else {
+		update = bson.M{"$push": bson.M{"community.departments.$.ranks": rank}}
+	}
 	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to create rank", http.StatusInternalServerError, w, err)
