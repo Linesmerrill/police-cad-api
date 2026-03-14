@@ -56,6 +56,10 @@ type CommunityDetails struct {
 	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
 	ActivePanicAlerts       []PanicAlert          `json:"activePanicAlerts" bson:"activePanicAlerts"`
 	CustomToneGroups        []CustomToneGroup     `json:"customToneGroups" bson:"customToneGroups"`
+	CustomToneSounds        []CustomToneSound     `json:"customToneSounds" bson:"customToneSounds"`
+	DefaultToneLeo          string                `json:"defaultToneLeo,omitempty" bson:"defaultToneLeo,omitempty"`
+	DefaultToneFd           string                `json:"defaultToneFd,omitempty" bson:"defaultToneFd,omitempty"`
+	DefaultToneEms          string                `json:"defaultToneEms,omitempty" bson:"defaultToneEms,omitempty"`
 	WarrantApprovalMode        string              `json:"warrantApprovalMode" bson:"warrantApprovalMode"`               // "auto-approve", "random", "require-judge"
 	WarrantRandomApprovalRate  int                 `json:"warrantRandomApprovalRate" bson:"warrantRandomApprovalRate"`   // 0-100 percentage, default 70
 	MostWantedEnabled       bool                   `json:"mostWantedEnabled" bson:"mostWantedEnabled"`
@@ -330,6 +334,14 @@ type CustomToneGroup struct {
 	ToneSound     string             `json:"toneSound" bson:"toneSound"` // "leo", "fd", or "ems"
 	CreatedBy     string             `json:"createdBy" bson:"createdBy"`
 	CreatedAt     primitive.DateTime `json:"createdAt" bson:"createdAt"`
+}
+
+// CustomToneSound represents a community-uploaded custom tone sound file.
+type CustomToneSound struct {
+	Key       string             `json:"key" bson:"key"`             // unique identifier, e.g. "custom_abc123"
+	Name      string             `json:"name" bson:"name"`           // display name, e.g. "Station 5 Fire Tone"
+	URL       string             `json:"url" bson:"url"`             // Cloudinary URL
+	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
 }
 
 // PanicAlert holds the structure for a panic alert

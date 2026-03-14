@@ -71,6 +71,39 @@ func (c Community) SendToneHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve tone sound URL for custom tones
+	var toneSoundUrl string
+	community, cErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if cErr == nil {
+		// Build custom sound lookup
+		for _, s := range community.Details.CustomToneSounds {
+			if s.Key == request.ToneType {
+				toneSoundUrl = s.URL
+				break
+			}
+		}
+		// If it's a built-in key, check for template default override
+		if toneSoundUrl == "" {
+			var defaultKey string
+			switch request.ToneType {
+			case "leo":
+				defaultKey = community.Details.DefaultToneLeo
+			case "fd":
+				defaultKey = community.Details.DefaultToneFd
+			case "ems":
+				defaultKey = community.Details.DefaultToneEms
+			}
+			if defaultKey != "" {
+				for _, s := range community.Details.CustomToneSounds {
+					if s.Key == defaultKey {
+						toneSoundUrl = s.URL
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// Broadcast via WebSocket
 	toneData := map[string]interface{}{
 		"toneType":            request.ToneType,
@@ -81,6 +114,9 @@ func (c Community) SendToneHandler(w http.ResponseWriter, r *http.Request) {
 		"triggeredByCallSign": request.TriggeredByCallSign,
 		"communityId":         communityID,
 		"createdAt":           now,
+	}
+	if toneSoundUrl != "" {
+		toneData["toneSoundUrl"] = toneSoundUrl
 	}
 
 	broadcastPanicAlertEvent("tone_activated", toneData)
@@ -234,9 +270,40 @@ func (c Community) GetToneGroupsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Build a lookup map of custom tone sounds by key
+	customSoundMap := make(map[string]string, len(community.Details.CustomToneSounds))
+	for _, s := range community.Details.CustomToneSounds {
+		customSoundMap[s.Key] = s.URL
+	}
+
+	// resolveToneSoundURL resolves the URL for a tone sound key using the cascade:
+	// 1. Custom tone sound URL (if key starts with "custom_")
+	// 2. Community template default (if set and is a custom key)
+	// 3. Empty string (client uses built-in default)
+	resolveToneSoundURL := func(toneSound string) string {
+		// If it's a custom key, look up the URL
+		if url, ok := customSoundMap[toneSound]; ok {
+			return url
+		}
+		// If it's a built-in key (leo/fd/ems), check if there's a template default override
+		var defaultKey string
+		switch toneSound {
+		case "leo":
+			defaultKey = community.Details.DefaultToneLeo
+		case "fd":
+			defaultKey = community.Details.DefaultToneFd
+		case "ems":
+			defaultKey = community.Details.DefaultToneEms
+		}
+		if defaultKey != "" {
+			if url, ok := customSoundMap[defaultKey]; ok {
+				return url
+			}
+		}
+		return "" // client uses built-in default
+	}
+
 	// Build preset tone groups from department templates.
-	// Template.Name is the legacy embedded template name (e.g. "police", "fire", "ems").
-	// It is always populated regardless of whether the department uses the new TemplateRef system.
 	var presets []map[string]interface{}
 	for _, dept := range community.Details.Departments {
 		// Use per-department ToneSound override if set, otherwise derive from template
@@ -260,6 +327,7 @@ func (c Community) GetToneGroupsHandler(w http.ResponseWriter, r *http.Request) 
 			"name":          dept.Name,
 			"departmentIds": []string{dept.ID.Hex()},
 			"toneSound":     toneSound,
+			"toneSoundUrl":  resolveToneSoundURL(toneSound),
 			"isPreset":      true,
 		})
 	}
@@ -269,11 +337,34 @@ func (c Community) GetToneGroupsHandler(w http.ResponseWriter, r *http.Request) 
 		customGroups = []models.CustomToneGroup{}
 	}
 
+	// Enrich custom groups with resolved URLs
+	var enrichedGroups []map[string]interface{}
+	for _, g := range customGroups {
+		enrichedGroups = append(enrichedGroups, map[string]interface{}{
+			"_id":           g.ID,
+			"name":          g.Name,
+			"departmentIds": g.DepartmentIDs,
+			"toneSound":     g.ToneSound,
+			"toneSoundUrl":  resolveToneSoundURL(g.ToneSound),
+			"createdBy":     g.CreatedBy,
+			"createdAt":     g.CreatedAt,
+		})
+	}
+	if enrichedGroups == nil {
+		enrichedGroups = []map[string]interface{}{}
+	}
+
+	customSounds := community.Details.CustomToneSounds
+	if customSounds == nil {
+		customSounds = []models.CustomToneSound{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"presets":      presets,
-		"customGroups": customGroups,
+		"success":          true,
+		"presets":          presets,
+		"customGroups":     enrichedGroups,
+		"customToneSounds": customSounds,
 	})
 }
 

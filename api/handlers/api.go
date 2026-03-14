@@ -283,6 +283,13 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/tone-groups", api.Middleware(http.HandlerFunc(c.CreateToneGroupHandler))).Methods("POST")
 	apiCreate.Handle("/community/{communityId}/tone-groups/{groupId}", api.Middleware(http.HandlerFunc(c.DeleteToneGroupHandler))).Methods("DELETE")
 
+	// Tone Sounds routes (custom uploaded tones)
+	apiCreate.Handle("/community/{communityId}/tone-sounds", api.Middleware(http.HandlerFunc(c.GetToneSoundsHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/tone-sounds", api.Middleware(http.HandlerFunc(c.CreateToneSoundHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/tone-sounds/{soundKey}", api.Middleware(http.HandlerFunc(c.UpdateToneSoundHandler))).Methods("PATCH")
+	apiCreate.Handle("/community/{communityId}/tone-sounds/{soundKey}", api.Middleware(http.HandlerFunc(c.DeleteToneSoundHandler))).Methods("DELETE")
+	apiCreate.Handle("/community/{communityId}/tone-defaults", api.Middleware(http.HandlerFunc(c.SetToneDefaultHandler))).Methods("PUT")
+
 	apiCreate.Handle("/community/{community_id}/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunityByCommunityAndOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
 	apiV2.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
