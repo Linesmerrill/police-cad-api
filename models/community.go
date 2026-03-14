@@ -55,6 +55,7 @@ type CommunityDetails struct {
 	FirearmCreationLimit  int                      `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
 	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
 	ActivePanicAlerts       []PanicAlert          `json:"activePanicAlerts" bson:"activePanicAlerts"`
+	CustomToneGroups        []CustomToneGroup     `json:"customToneGroups" bson:"customToneGroups"`
 	WarrantApprovalMode        string              `json:"warrantApprovalMode" bson:"warrantApprovalMode"`               // "auto-approve", "random", "require-judge"
 	WarrantRandomApprovalRate  int                 `json:"warrantRandomApprovalRate" bson:"warrantRandomApprovalRate"`   // 0-100 percentage, default 70
 	MostWantedEnabled       bool                   `json:"mostWantedEnabled" bson:"mostWantedEnabled"`
@@ -215,6 +216,7 @@ type Department struct {
 	Ranks             []Rank             `json:"ranks" bson:"ranks"`
 	Template          Template           `json:"template" bson:"template"` // Legacy embedded template (for backward compatibility)
 	TemplateRef       *TemplateReference `json:"templateRef" bson:"templateRef"` // New template reference system
+	ToneSound         string             `json:"toneSound,omitempty" bson:"toneSound,omitempty"` // "leo", "fd", "ems", or "" (uses template default)
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt         primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 	OnlineMemberCount int                `json:"onlineMemberCount" bson:"onlineMemberCount"`
@@ -305,6 +307,29 @@ type Signal100Data struct {
 	ClearedByUsername     string `json:"clearedByUsername,omitempty" bson:"clearedByUsername,omitempty"`
 	ClearedByCallSign     string `json:"clearedByCallSign,omitempty" bson:"clearedByCallSign,omitempty"`
 	ClearedAt             string `json:"clearedAt,omitempty" bson:"clearedAt,omitempty"`
+}
+
+// ToneLog represents a single dispatch tone event, stored in the tone_logs collection.
+type ToneLog struct {
+	ID                  primitive.ObjectID `json:"_id" bson:"_id,omitempty"`
+	CommunityID         string             `json:"communityId" bson:"communityId"`
+	ToneType            string             `json:"toneType" bson:"toneType"`
+	ToneName            string             `json:"toneName" bson:"toneName"`
+	TargetDeptIDs       []string           `json:"targetDeptIds" bson:"targetDeptIds"`
+	TriggeredByID       string             `json:"triggeredById" bson:"triggeredById"`
+	TriggeredByName     string             `json:"triggeredByName" bson:"triggeredByName"`
+	TriggeredByCallSign string             `json:"triggeredByCallSign" bson:"triggeredByCallSign"`
+	CreatedAt           primitive.DateTime `json:"createdAt" bson:"createdAt"`
+}
+
+// CustomToneGroup defines a custom tone group within a community.
+type CustomToneGroup struct {
+	ID            primitive.ObjectID `json:"_id" bson:"_id"`
+	Name          string             `json:"name" bson:"name"`
+	DepartmentIDs []string           `json:"departmentIds" bson:"departmentIds"`
+	ToneSound     string             `json:"toneSound" bson:"toneSound"` // "leo", "fd", or "ems"
+	CreatedBy     string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt     primitive.DateTime `json:"createdAt" bson:"createdAt"`
 }
 
 // PanicAlert holds the structure for a panic alert
