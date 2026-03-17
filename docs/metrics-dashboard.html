@@ -2,1317 +2,1046 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Performance Metrics Dashboard</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364b5f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>API Metrics</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --bg: #07090c;
+            --bg-surface: #0b0f14;
+            --bg-elevated: #101720;
+            --bg-hover: #141e28;
+            --border: #19232e;
+            --border-strong: #22303d;
+            --text: #dce8f0;
+            --text-muted: #7a93a8;
+            --text-dim: #3a5264;
+            --green: #00e887;
+            --green-dim: rgba(0, 232, 135, 0.09);
+            --green-glow: rgba(0, 232, 135, 0.18);
+            --amber: #f5a623;
+            --amber-dim: rgba(245, 166, 35, 0.09);
+            --red: #ff5252;
+            --red-dim: rgba(255, 82, 82, 0.09);
+            --blue: #4d9fff;
+            --blue-dim: rgba(77, 159, 255, 0.1);
+            --purple: #a78bfa;
+            --purple-dim: rgba(167, 139, 250, 0.1);
+            --cyan: #22d3ee;
+            --cyan-dim: rgba(34, 211, 238, 0.1);
         }
-        
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html { height: 100%; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-            background-attachment: fixed;
+            font-family: 'Figtree', system-ui, sans-serif;
+            background-color: var(--bg);
+            background-image:
+                radial-gradient(ellipse 100% 40% at 50% 0%, rgba(0, 232, 135, 0.025) 0%, transparent 100%),
+                radial-gradient(circle, var(--border) 1px, transparent 1px);
+            background-size: 100% 100%, 28px 28px;
             min-height: 100vh;
-            padding: 20px;
-            color: #e0e0e0;
-            position: relative;
+            color: var(--text);
             overflow-x: hidden;
         }
-        
-        /* Floating dots background */
-        .floating-dots {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 0;
-            overflow: hidden;
-        }
-        
-        .dot {
-            position: absolute;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.03);
-            backdrop-filter: blur(1px);
-            animation: float 20s infinite ease-in-out;
-        }
-        
-        .dot:nth-child(1) {
-            width: 120px;
-            height: 120px;
-            left: 10%;
-            animation-duration: 25s;
-            animation-delay: 0s;
-        }
-        
-        .dot:nth-child(2) {
-            width: 150px;
-            height: 150px;
-            left: 30%;
-            animation-duration: 30s;
-            animation-delay: -5s;
-        }
-        
-        .dot:nth-child(3) {
-            width: 100px;
-            height: 100px;
-            left: 50%;
-            animation-duration: 22s;
-            animation-delay: -10s;
-        }
-        
-        .dot:nth-child(4) {
-            width: 180px;
-            height: 180px;
-            left: 70%;
-            animation-duration: 35s;
-            animation-delay: -15s;
-        }
-        
-        .dot:nth-child(5) {
-            width: 130px;
-            height: 130px;
-            left: 85%;
-            animation-duration: 28s;
-            animation-delay: -8s;
-        }
-        
-        .dot:nth-child(6) {
-            width: 160px;
-            height: 160px;
-            left: 20%;
-            animation-duration: 32s;
-            animation-delay: -12s;
-        }
-        
-        .dot:nth-child(7) {
-            width: 110px;
-            height: 110px;
-            left: 60%;
-            animation-duration: 26s;
-            animation-delay: -18s;
-        }
-        
-        .dot:nth-child(8) {
-            width: 140px;
-            height: 140px;
-            left: 40%;
-            animation-duration: 29s;
-            animation-delay: -3s;
-        }
-        
-        @keyframes float {
-            0%, 100% {
-                transform: translate(0, 0) scale(1);
-                opacity: 0.3;
-            }
-            25% {
-                transform: translate(30px, -50px) scale(1.1);
-                opacity: 0.4;
-            }
-            50% {
-                transform: translate(-20px, -100px) scale(0.9);
-                opacity: 0.25;
-            }
-            75% {
-                transform: translate(40px, -30px) scale(1.05);
-                opacity: 0.35;
-            }
-        }
-        
-        /* Overlay to make dots more subtle */
-        .dots-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, rgba(15, 12, 41, 0.4) 0%, rgba(48, 43, 99, 0.3) 50%, rgba(36, 36, 62, 0.4) 100%);
-            pointer-events: none;
-            z-index: 1;
-        }
-        
-        .container {
-            position: relative;
-            z-index: 2;
-        }
-        
-        .container {
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-        
-        h1 {
-            color: #ffffff;
-            margin-bottom: 30px;
-            font-size: 2.5rem;
-            font-weight: 700;
-            text-align: center;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            letter-spacing: -0.5px;
-        }
-        
-        .controls {
-            margin-bottom: 30px;
+
+        /* ─── HEADER ─── */
+        .app-header {
             display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        
-        button {
-            padding: 12px 24px;
-            background: rgba(255, 255, 255, 0.1);
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(7, 9, 12, 0.92);
             backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #ffffff;
-            border-radius: 12px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-        }
-        
-        button:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-        }
-        
-        button:active {
-            transform: translateY(0);
-        }
-        
-        select {
-            padding: 12px 20px;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #ffffff;
-            border-radius: 12px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-        }
-        
-        select:hover {
-            background: rgba(255, 255, 255, 0.15);
-        }
-        
-        select option {
-            background: #1a1a2e;
-            color: #ffffff;
-        }
-        
-        .summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .card {
-            background: rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            padding: 24px;
-            border-radius: 16px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
-        }
-        
-        .card:hover {
-            transform: translateY(-4px);
-            background: rgba(255, 255, 255, 0.12);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-        }
-        
-        .card h3 {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 13px;
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
-        }
-        
-        .card .value {
-            font-size: 36px;
-            font-weight: 700;
-            color: #ffffff;
-            line-height: 1.2;
-            margin-bottom: 4px;
-        }
-        
-        .card .subvalue {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.6);
-            margin-top: 8px;
-        }
-        
-        .section {
-            background: rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            padding: 28px;
-            border-radius: 16px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            margin-bottom: 24px;
-        }
-        
-        .section h2 {
-            color: #ffffff;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
-            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        th, td {
-            padding: 14px 16px;
-            text-align: left;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        th {
-            background: #0f0c29;
-            backdrop-filter: blur(10px);
-            font-weight: 600;
-            color: rgba(255, 255, 255, 0.9);
+            -webkit-backdrop-filter: blur(10px);
             position: sticky;
             top: 0;
-            font-size: 13px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            z-index: 10;
-            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-            cursor: pointer;
-            user-select: none;
-            transition: background 0.2s ease;
-            padding-right: 24px;
-            position: relative;
+            z-index: 100;
+            gap: 10px;
         }
-        
-        th:hover {
-            background: rgba(255, 255, 255, 0.1);
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
         }
-        
-        th.sortable {
-            padding-right: 28px;
+
+        .live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--green);
+            flex-shrink: 0;
+            animation: live-pulse 2.4s ease-in-out infinite;
         }
-        
-        .sort-icon {
-            position: absolute;
-            right: 8px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 12px;
-            height: 12px;
-            opacity: 0.5;
-            transition: opacity 0.2s ease;
+
+        .live-dot.paused {
+            background: var(--text-dim);
+            animation: none;
         }
-        
-        th:hover .sort-icon {
-            opacity: 0.8;
+
+        @keyframes live-pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--green-glow); }
+            50% { opacity: 0.85; box-shadow: 0 0 0 5px transparent; }
         }
-        
-        th.sort-asc .sort-icon,
-        th.sort-desc .sort-icon {
-            opacity: 1;
-        }
-        
-        th.sort-asc {
-            color: #64b5f6;
-        }
-        
-        th.sort-desc {
-            color: #64b5f6;
-        }
-        
-        tbody tr {
-            transition: all 0.2s ease;
-        }
-        
-        tbody tr:hover {
-            background: rgba(255, 255, 255, 0.08);
-        }
-        
-        td {
-            color: rgba(255, 255, 255, 0.85);
+
+        .app-title {
             font-size: 14px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.2px;
+            white-space: nowrap;
         }
-        
-        .method {
-            font-weight: 600;
-            color: #64b5f6;
-            font-family: 'Courier New', monospace;
-            padding: 4px 8px;
-            background: rgba(100, 181, 246, 0.15);
-            border-radius: 6px;
+
+        .header-badge {
+            display: none;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-dim);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            padding: 2px 7px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+
+        @media (min-width: 520px) { .header-badge { display: inline-block; } }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        select {
+            font-family: 'Figtree', sans-serif;
             font-size: 12px;
-        }
-        
-        .duration {
-            font-family: 'Courier New', monospace;
-            font-weight: 500;
-        }
-        
-        .slow {
-            color: #ef5350;
             font-weight: 600;
+            padding: 6px 24px 6px 10px;
+            background: var(--bg-elevated);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%233a5264' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            border: 1px solid var(--border-strong);
+            color: var(--text-muted);
+            border-radius: 5px;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+            transition: border-color 0.15s, color 0.15s;
         }
-        
-        .medium {
-            color: #ffb74d;
+
+        select:hover { border-color: var(--green); color: var(--text); }
+        select option { background: #101720; }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            font-family: 'Figtree', sans-serif;
+            font-size: 12px;
             font-weight: 600;
-        }
-        
-        .fast {
-            color: #66bb6a;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 60px;
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 16px;
-        }
-        
-        .loading::after {
-            content: '...';
-            animation: dots 1.5s steps(4, end) infinite;
-        }
-        
-        @keyframes dots {
-            0%, 20% { content: '.'; }
-            40% { content: '..'; }
-            60%, 100% { content: '...'; }
-        }
-        
-        .error {
-            background: rgba(239, 83, 80, 0.2);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(239, 83, 80, 0.3);
-            color: #ffcdd2;
-            padding: 16px 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 15px rgba(239, 83, 80, 0.2);
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 14px;
-        }
-        
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 10px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.2);
+            padding: 6px 10px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-strong);
+            color: var(--text-muted);
             border-radius: 5px;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s;
+            white-space: nowrap;
+            line-height: 1;
         }
-        
-        ::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.3);
-        }
-        
-        /* Pulse animation for auto-refresh indicator */
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .icon {
-            width: 18px;
-            height: 18px;
-            display: inline-block;
-            vertical-align: middle;
-            margin-right: 6px;
+
+        .btn:hover { border-color: var(--green); color: var(--green); }
+
+        .btn svg {
+            width: 13px;
+            height: 13px;
             stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
             stroke-linejoin: round;
+            flex-shrink: 0;
         }
-        
-        button .icon {
-            margin-right: 8px;
+
+        .btn-label { display: none; }
+        @media (min-width: 480px) { .btn-label { display: inline; } }
+
+        /* ─── KPI GRID ─── */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1px;
+            background: var(--border);
+            border-bottom: 1px solid var(--border);
         }
-        
-        .auto-refresh-indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #66bb6a;
-            display: inline-block;
-            margin-left: 8px;
-            animation: pulse 2s ease-in-out infinite;
+
+        @media (min-width: 600px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 900px) { .kpi-grid { grid-template-columns: repeat(5, 1fr); } }
+
+        .kpi-card {
+            background: var(--bg-surface);
+            padding: 14px 18px 16px;
+            transition: background 0.15s;
         }
-        
-        .refreshing {
-            opacity: 0.7;
-            transition: opacity 0.3s ease;
+
+        .kpi-card:hover { background: var(--bg-elevated); }
+
+        .kpi-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+            margin-bottom: 10px;
         }
-        
-        .value-updating {
-            transition: all 0.3s ease;
+
+        .kpi-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 26px;
+            font-weight: 600;
+            color: var(--text);
+            line-height: 1;
+            margin-bottom: 6px;
+            transition: color 0.3s;
         }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-5px); }
-            to { opacity: 1; transform: translateY(0); }
+
+        .kpi-sub {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-dim);
         }
-        
-        .value-updated {
-            animation: fadeIn 0.3s ease;
+
+        .kpi-card.st-good .kpi-value { color: var(--green); }
+        .kpi-card.st-warn .kpi-value { color: var(--amber); }
+        .kpi-card.st-bad  .kpi-value { color: var(--red); }
+
+        @media (max-width: 599px) {
+            .kpi-value { font-size: 20px; }
+            .kpi-card { padding: 12px 14px 14px; }
         }
-        
-        .refresh-indicator {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: rgba(100, 181, 246, 0.2);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(100, 181, 246, 0.3);
-            padding: 8px 16px;
-            border-radius: 20px;
-            color: #64b5f6;
+
+        /* ─── ERROR BANNER ─── */
+        .error-banner {
+            margin: 12px 16px;
+            padding: 10px 14px;
+            background: var(--red-dim);
+            border: 1px solid rgba(255, 82, 82, 0.2);
+            border-radius: 5px;
+            color: #ffaaaa;
             font-size: 12px;
-            display: none;
-            z-index: 1000;
-            animation: fadeIn 0.3s ease;
-            align-items: center;
         }
-        
-        .refresh-indicator.active {
+
+        /* ─── TABS ─── */
+        .tabs {
             display: flex;
-        }
-        
-        .refresh-indicator .icon {
-            width: 14px;
-            height: 14px;
-            margin-right: 6px;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 12px;
-            margin-top: 20px;
-            padding: 16px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-        }
-        
-        .pagination button {
-            padding: 8px 16px;
-            min-width: 40px;
-        }
-        
-        .pagination .page-info {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 14px;
-        }
-        
-        .pagination button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .pagination button:disabled:hover {
-            transform: none;
-        }
-        
-        /* Mobile-responsive table containers - make tables horizontally scrollable */
-        #slowestRoutes,
-        #mostFrequentRoutes,
-        #slowQueries {
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-surface);
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
-            margin: 0 -28px;
-            padding: 0 28px;
+            scrollbar-width: none;
         }
-        
-        #slowestRoutes table,
-        #mostFrequentRoutes table,
-        #slowQueries table {
-            min-width: 800px; /* Ensure table doesn't shrink below readable width */
+
+        .tabs::-webkit-scrollbar { display: none; }
+
+        .tab {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 11px 18px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--text-dim);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+            transition: color 0.15s, border-color 0.15s;
+            user-select: none;
         }
-        
-        /* Mobile-specific adjustments */
-        @media (max-width: 768px) {
-            body {
-                padding: 12px;
-            }
-            
-            .section {
-                padding: 16px;
-                margin-bottom: 16px;
-            }
-            
-            #slowestRoutes,
-            #mostFrequentRoutes,
-            #slowQueries {
-                margin: 0 -16px;
-                padding: 0 16px;
-            }
-            
-            th, td {
-                padding: 10px 12px;
-                font-size: 13px;
-            }
-            
-            .section h2 {
-                font-size: 1.25rem;
-            }
+
+        .tab:hover { color: var(--text-muted); }
+
+        .tab.active {
+            color: var(--text);
+            border-bottom-color: var(--green);
         }
+
+        .tab-count {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: var(--bg-elevated);
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+
+        .tab.active .tab-count {
+            background: var(--green-dim);
+            color: var(--green);
+        }
+
+        /* ─── TAB PANELS ─── */
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ─── TABLE ─── */
+        .table-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead tr { background: var(--bg-elevated); }
+
+        th {
+            padding: 9px 14px;
+            text-align: left;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dim);
+            border-bottom: 1px solid var(--border-strong);
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        th:first-child {
+            position: sticky;
+            left: 0;
+            background: var(--bg-elevated);
+            z-index: 2;
+        }
+
+        th:hover { color: var(--text-muted); }
+        th.sort-asc, th.sort-desc { color: var(--green); }
+
+        .sort-ind { margin-left: 3px; font-size: 9px; opacity: 0.4; }
+        th.sort-asc  .sort-ind::after { content: '↑'; opacity: 1; color: var(--green); }
+        th.sort-desc .sort-ind::after { content: '↓'; opacity: 1; color: var(--green); }
+        th:not(.sort-asc):not(.sort-desc) .sort-ind::after { content: '⇅'; }
+
+        tbody tr {
+            border-bottom: 1px solid var(--border);
+            transition: background 0.1s;
+        }
+
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:hover { background: var(--bg-elevated); }
+
+        td {
+            padding: 9px 14px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        td:first-child {
+            position: sticky;
+            left: 0;
+            background: var(--bg-surface);
+            z-index: 1;
+        }
+
+        tbody tr:hover td:first-child { background: var(--bg-elevated); }
+
+        td.cell-path {
+            color: var(--text);
+            max-width: 280px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        td.cell-count { color: var(--text); font-weight: 500; }
+
+        /* METHOD BADGE */
+        .badge {
+            display: inline-block;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 5px;
+            border-radius: 3px;
+            letter-spacing: 0.04em;
+        }
+
+        .badge-GET    { color: var(--blue);   background: var(--blue-dim); }
+        .badge-POST   { color: var(--purple); background: var(--purple-dim); }
+        .badge-PUT    { color: var(--amber);  background: var(--amber-dim); }
+        .badge-DELETE { color: var(--red);    background: var(--red-dim); }
+        .badge-PATCH  { color: var(--cyan);   background: var(--cyan-dim); }
+
+        /* DURATION CELLS WITH INLINE BAR */
+        td.dur-cell {
+            position: relative;
+            padding-left: 14px;
+        }
+
+        td.dur-cell .bar {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            background: var(--green-dim);
+            border-right: 2px solid rgba(0, 232, 135, 0.2);
+            pointer-events: none;
+        }
+
+        td.dur-cell.dur-medium .bar { background: var(--amber-dim); border-right-color: rgba(245, 166, 35, 0.2); }
+        td.dur-cell.dur-slow   .bar { background: var(--red-dim);   border-right-color: rgba(255, 82, 82, 0.2); }
+
+        td.dur-cell .val { position: relative; z-index: 1; }
+
+        .dur-fast   { color: var(--green); }
+        .dur-medium { color: var(--amber); }
+        .dur-slow   { color: var(--red); font-weight: 600; }
+
+        /* ERROR RATE */
+        .err-none { color: var(--text-dim); }
+        .err-low  { color: var(--amber); }
+        .err-high { color: var(--red); font-weight: 600; }
+
+        /* EMPTY / LOADING */
+        .state-box {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--text-dim);
+            font-size: 12px;
+        }
+
+        .dots-anim::after {
+            content: '';
+            animation: ldots 1.5s steps(4, end) infinite;
+        }
+
+        @keyframes ldots {
+            0%  { content: ''; }
+            25% { content: '.'; }
+            50% { content: '..'; }
+            75%, 100% { content: '...'; }
+        }
+
+        /* PAGINATION */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            border-top: 1px solid var(--border);
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .page-info {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        .page-btns { display: flex; gap: 5px; }
+
+        .btn-pg {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 5px 9px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-strong);
+            color: var(--text-muted);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: border-color 0.12s, color 0.12s;
+        }
+
+        .btn-pg:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+        .btn-pg:disabled { opacity: 0.25; cursor: not-allowed; }
+
+        /* LOAD QUERIES BUTTON */
+        .load-queries-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 16px;
+            background: transparent;
+            border: none;
+            border-top: 1px solid var(--border);
+            color: var(--text-dim);
+            font-family: 'Figtree', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .load-queries-btn:hover { background: var(--bg-elevated); color: var(--green); }
+
+        .load-queries-btn svg {
+            width: 13px; height: 13px;
+            stroke: currentColor; fill: none;
+            stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+        }
+
+        /* FADE IN */
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(4px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .fade-in { animation: fade-in 0.25s ease-out; }
+
+        /* VALUE UPDATE */
+        @keyframes val-flash {
+            0%   { color: var(--green); }
+            100% { color: inherit; }
+        }
+
+        .value-updated { animation: val-flash 0.4s ease-out; }
+
+        .refreshing { opacity: 0.65; transition: opacity 0.2s; }
     </style>
 </head>
 <body>
-    <div class="floating-dots">
-        <div class="dot"></div>
-        <div class="dot"></div>
-        <div class="dot"></div>
-        <div class="dot"></div>
-        <div class="dot"></div>
-        <div class="dot"></div>
-        <div class="dot"></div>
-        <div class="dot"></div>
+
+<!-- ─── HEADER ─── -->
+<header class="app-header">
+    <div class="header-left">
+        <div class="live-dot" id="liveDot"></div>
+        <span class="app-title">API Performance</span>
+        <span class="header-badge" id="lastUpdated">—</span>
     </div>
-    <div class="dots-overlay"></div>
-    <div class="container">
-        <h1>API Performance Metrics</h1>
-        
-        <div class="controls">
-            <button onclick="loadMetrics()">
-                <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-                Refresh
-            </button>
-            <button id="autoRefreshBtn" onclick="toggleAutoRefresh()">
-                <svg class="icon" id="autoRefreshIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                <span id="autoRefreshText">Pause Auto-Refresh</span>
-                <span class="auto-refresh-indicator" id="autoRefreshDot"></span>
-            </button>
-            <button onclick="loadSlowQueries()">
-                <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Slow Queries
-            </button>
-            <select id="timeRange" onchange="loadMetrics()">
-                <option value="5m">Last 5 minutes</option>
-                <option value="15m">Last 15 minutes</option>
-                <option value="1h" selected>Last hour</option>
-                <option value="6h">Last 6 hours</option>
-            </select>
-        </div>
-
-        <div id="error" style="display: none;"></div>
-        <div id="loading" class="loading" style="display: none;">Loading metrics</div>
-        <div id="refreshIndicator" class="refresh-indicator">
-            <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-            Refreshing...
-        </div>
-        <div id="content">
-            <div class="summary" id="summary"></div>
-            
-            <div class="section">
-                <h2>
-                    <svg class="icon" style="width: 24px; height: 24px; margin-right: 8px; vertical-align: middle;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    Slowest Routes
-                </h2>
-                <div id="slowestRoutes"></div>
-                <div id="slowestRoutesPagination" class="pagination" style="display: none;"></div>
-            </div>
-
-            <div class="section">
-                <h2>
-                    <svg class="icon" style="width: 24px; height: 24px; margin-right: 8px; vertical-align: middle;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                    Most Frequent Routes
-                </h2>
-                <div id="mostFrequentRoutes"></div>
-                <div id="mostFrequentRoutesPagination" class="pagination" style="display: none;"></div>
-            </div>
-
-            <div class="section" id="slowQueriesSection" style="display: none;">
-                <h2>
-                    <svg class="icon" style="width: 24px; height: 24px; margin-right: 8px; vertical-align: middle;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    Slow Database Queries
-                </h2>
-                <div id="slowQueries"></div>
-            </div>
-        </div>
+    <div class="header-controls">
+        <select id="timeRange" onchange="loadMetrics()">
+            <option value="5m">5m</option>
+            <option value="15m">15m</option>
+            <option value="1h" selected>1h</option>
+            <option value="6h">6h</option>
+        </select>
+        <button class="btn" onclick="loadMetrics()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            <span class="btn-label">Refresh</span>
+        </button>
+        <button class="btn" id="autoRefreshBtn" onclick="toggleAutoRefresh()">
+            <svg id="autoRefreshIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            <span class="btn-label" id="autoRefreshText">Pause</span>
+        </button>
     </div>
+</header>
 
-    <script>
-        const API_BASE = '/api/v2/metrics';
-        
-        function formatDuration(ms) {
-            if (typeof ms === 'string') {
-                return ms;
+<!-- ─── KPI GRID ─── -->
+<div class="kpi-grid">
+    <div class="kpi-card" id="kpi-requests-card">
+        <div class="kpi-label">Requests</div>
+        <div class="kpi-value" id="kpi-requests">—</div>
+        <div class="kpi-sub" id="kpi-tps-sub">— req/s</div>
+    </div>
+    <div class="kpi-card" id="kpi-errorrate-card">
+        <div class="kpi-label">Error Rate</div>
+        <div class="kpi-value" id="kpi-errorrate">—</div>
+        <div class="kpi-sub" id="kpi-errors-sub">— errors</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">DB Queries</div>
+        <div class="kpi-value" id="kpi-dbqueries">—</div>
+        <div class="kpi-sub" id="kpi-dbavg-sub">avg —</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Routes</div>
+        <div class="kpi-value" id="kpi-routes">—</div>
+        <div class="kpi-sub" id="kpi-traces-sub">— traces</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Throughput</div>
+        <div class="kpi-value" id="kpi-tps">—</div>
+        <div class="kpi-sub">req / sec</div>
+    </div>
+</div>
+
+<!-- ─── ERROR BANNER ─── -->
+<div id="errorBanner" class="error-banner" style="display:none;"></div>
+
+<!-- ─── TABS ─── -->
+<nav class="tabs">
+    <div class="tab active" id="tab-slowest" onclick="switchTab('slowest')">
+        Slowest <span class="tab-count" id="badge-slowest">—</span>
+    </div>
+    <div class="tab" id="tab-frequent" onclick="switchTab('frequent')">
+        Most Frequent <span class="tab-count" id="badge-frequent">—</span>
+    </div>
+    <div class="tab" id="tab-queries" onclick="switchTab('queries')" style="display:none;">
+        DB Queries <span class="tab-count" id="badge-queries">—</span>
+    </div>
+</nav>
+
+<!-- ─── PANELS ─── -->
+<div id="panel-slowest" class="tab-panel active">
+    <div id="slowestContent">
+        <div class="state-box"><span class="dots-anim">Loading</span></div>
+    </div>
+    <div id="slowestPagination"></div>
+</div>
+
+<div id="panel-frequent" class="tab-panel">
+    <div id="frequentContent">
+        <div class="state-box"><span class="dots-anim">Loading</span></div>
+    </div>
+    <div id="frequentPagination"></div>
+</div>
+
+<div id="panel-queries" class="tab-panel">
+    <div id="queriesContent">
+        <button class="load-queries-btn" onclick="loadSlowQueries()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Load Slow DB Queries
+        </button>
+    </div>
+</div>
+
+<script>
+    const API_BASE = '/api/v2/metrics';
+    const ROUTES_PER_PAGE = 20;
+    const AUTO_REFRESH_MS = 30000;
+
+    let autoRefreshEnabled = true;
+    let autoRefreshTimer = null;
+
+    let slowestOffset = 0;
+    let frequentOffset = 0;
+    let slowestSort = { col: null, dir: 'desc' };
+    let frequentSort = { col: null, dir: 'desc' };
+    let slowestData = [];
+    let frequentData = [];
+
+    // ─── FORMATTING ─────────────────────────────────────────────────────
+    function fmtNum(n)  { return (n || 0).toLocaleString(); }
+    function fmtPct(n)  { return ((n || 0) * 100).toFixed(2) + '%'; }
+    function fmtMs(ms) {
+        if (typeof ms === 'string') return ms;
+        if (ms == null || isNaN(ms)) return '—';
+        if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
+        return Math.round(ms) + 'ms';
+    }
+    function durClass(ms) {
+        const v = typeof ms === 'string' ? parseFloat(ms) : (ms || 0);
+        if (v > 2000) return 'dur-slow';
+        if (v >= 1000) return 'dur-medium';
+        return 'dur-fast';
+    }
+    function errClass(rate) {
+        const pct = (rate || 0) * 100;
+        if (pct === 0) return 'err-none';
+        if (pct < 5) return 'err-low';
+        return 'err-high';
+    }
+    function methodBadge(m) {
+        const cls = 'badge-' + (m || '').toUpperCase();
+        return '<span class="badge ' + cls + '">' + (m || '') + '</span>';
+    }
+    function nowStr() {
+        return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    // ─── TABS ────────────────────────────────────────────────────────────
+    function switchTab(name) {
+        document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+        document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+        document.getElementById('tab-' + name).classList.add('active');
+        document.getElementById('panel-' + name).classList.add('active');
+    }
+
+    // ─── KPI UPDATE ──────────────────────────────────────────────────────
+    function setEl(id, val) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        if (el.textContent !== String(val)) {
+            el.textContent = val;
+            el.classList.remove('value-updated');
+            void el.offsetWidth;
+            el.classList.add('value-updated');
+        }
+    }
+
+    function renderKPIs(s) {
+        setEl('kpi-requests',   fmtNum(s.totalRequests));
+        setEl('kpi-tps-sub',    s.tps.toFixed(2) + ' req/s');
+        setEl('kpi-tps',        s.tps.toFixed(2));
+        setEl('kpi-errorrate',  fmtPct(s.errorRate));
+        setEl('kpi-errors-sub', fmtNum(s.totalErrors) + ' errors');
+        setEl('kpi-dbqueries',  fmtNum(s.totalDBQueries));
+        setEl('kpi-dbavg-sub',  'avg ' + (s.avgDBTime || '—'));
+        setEl('kpi-routes',     fmtNum(s.routeCount));
+        setEl('kpi-traces-sub', fmtNum(s.traceCount) + ' traces');
+
+        var errCard = document.getElementById('kpi-errorrate-card');
+        errCard.className = 'kpi-card';
+        var errPct = (s.errorRate || 0) * 100;
+        if (errPct === 0)       errCard.classList.add('st-good');
+        else if (errPct < 5)    errCard.classList.add('st-warn');
+        else                    errCard.classList.add('st-bad');
+
+        document.getElementById('lastUpdated').textContent = nowStr();
+    }
+
+    // ─── SORTING ─────────────────────────────────────────────────────────
+    function sortRoutes(routes, col, dir) {
+        var d = dir === 'asc' ? 1 : -1;
+        return routes.slice().sort(function(a, b) {
+            switch (col) {
+                case 'method':    return d * (a.method || '').localeCompare(b.method || '');
+                case 'path':      return d * (a.path || '').localeCompare(b.path || '');
+                case 'count':     return d * ((a.count || 0) - (b.count || 0));
+                case 'avgTime':   return d * ((a.avgTime || 0) - (b.avgTime || 0));
+                case 'p50':       return d * ((a.p50Time || 0) - (b.p50Time || 0));
+                case 'p95':       return d * ((a.p95Time || 0) - (b.p95Time || 0));
+                case 'p99':       return d * ((a.p99Time || 0) - (b.p99Time || 0));
+                case 'maxTime':   return d * ((a.maxTime || 0) - (b.maxTime || 0));
+                case 'dbAvgTime': return d * ((a.dbAvgTime || 0) - (b.dbAvgTime || 0));
+                case 'errorRate': return d * (((a.errorCount || 0) / (a.count || 1)) - ((b.errorCount || 0) / (b.count || 1)));
+                default: return 0;
             }
-            if (ms < 1000) {
-                return ms.toFixed(0) + 'ms';
+        });
+    }
+
+    function thClass(col, sortState) {
+        if (sortState.col !== col) return '';
+        return 'sort-' + sortState.dir;
+    }
+
+    // ─── DURATION BAR CELL ───────────────────────────────────────────────
+    function durCell(ms, maxMs) {
+        var dc = durClass(ms);
+        var pct = maxMs > 0 ? Math.min(100, ((ms || 0) / maxMs) * 100) : 0;
+        return '<td class="dur-cell ' + dc + '"><div class="bar" style="width:' + pct.toFixed(1) + '%"></div><span class="val">' + fmtMs(ms) + '</span></td>';
+    }
+
+    // ─── SLOWEST ROUTES ──────────────────────────────────────────────────
+    function renderSlowest(routes, pagination) {
+        if (!routes || routes.length === 0) {
+            document.getElementById('slowestContent').innerHTML = '<div class="state-box">No data</div>';
+            document.getElementById('slowestPagination').innerHTML = '';
+            return;
+        }
+        slowestData = routes;
+        var total = pagination && pagination.total ? pagination.total : routes.length;
+        document.getElementById('badge-slowest').textContent = fmtNum(total);
+
+        var rows = slowestSort.col ? sortRoutes(routes, slowestSort.col, slowestSort.dir) : routes;
+        var maxAvg = Math.max.apply(null, rows.map(function(r) { return r.avgTime || 0; }));
+        var maxMax = Math.max.apply(null, rows.map(function(r) { return r.maxTime || 0; }));
+
+        var cols = [
+            { key: 'method',    label: 'Method' },
+            { key: 'path',      label: 'Path' },
+            { key: 'count',     label: 'Count' },
+            { key: 'avgTime',   label: 'Avg' },
+            { key: 'p50',       label: 'P50' },
+            { key: 'p95',       label: 'P95' },
+            { key: 'p99',       label: 'P99' },
+            { key: 'maxTime',   label: 'Max' },
+            { key: 'dbAvgTime', label: 'DB Avg' },
+            { key: 'errorRate', label: 'Err%' },
+        ];
+
+        var thead = cols.map(function(c) {
+            return '<th class="' + thClass(c.key, slowestSort) + '" onclick="sortSlowest(\'' + c.key + '\')">' + c.label + '<span class="sort-ind"></span></th>';
+        }).join('');
+
+        var tbody = rows.map(function(r) {
+            var errRate = (r.errorCount || 0) / (r.count || 1);
+            return '<tr data-key="' + r.method + '-' + r.path + '">' +
+                '<td>' + methodBadge(r.method) + '</td>' +
+                '<td class="cell-path">' + r.path + '</td>' +
+                '<td class="cell-count">' + fmtNum(r.count) + '</td>' +
+                durCell(r.avgTime, maxAvg) +
+                '<td class="' + durClass(r.p50Time) + '">' + fmtMs(r.p50Time) + '</td>' +
+                '<td class="' + durClass(r.p95Time) + '">' + fmtMs(r.p95Time) + '</td>' +
+                '<td class="' + durClass(r.p99Time) + '">' + fmtMs(r.p99Time) + '</td>' +
+                durCell(r.maxTime, maxMax) +
+                '<td class="' + durClass(r.dbAvgTime) + '">' + fmtMs(r.dbAvgTime) + '</td>' +
+                '<td class="' + errClass(errRate) + '">' + fmtPct(errRate) + '</td>' +
+                '</tr>';
+        }).join('');
+
+        document.getElementById('slowestContent').innerHTML =
+            '<div class="table-wrapper fade-in"><table><thead><tr>' + thead + '</tr></thead><tbody>' + tbody + '</tbody></table></div>';
+
+        renderPagination('slowestPagination', pagination, slowestOffset, 'loadSlowestPage');
+    }
+
+    function sortSlowest(col) {
+        if (slowestSort.col === col) {
+            slowestSort.dir = slowestSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            slowestSort.col = col;
+            slowestSort.dir = 'desc';
+        }
+        renderSlowest(slowestData, { total: slowestData.length });
+    }
+
+    function updateSlowest(routes, pagination) {
+        if (!slowestData.length || !document.querySelector('#slowestContent table')) {
+            renderSlowest(routes, pagination); return;
+        }
+        slowestData = routes;
+        document.getElementById('badge-slowest').textContent = fmtNum(pagination && pagination.total ? pagination.total : routes.length);
+        routes.forEach(function(r) {
+            var row = document.querySelector('#slowestContent tr[data-key="' + r.method + '-' + r.path + '"]');
+            if (!row) { renderSlowest(routes, pagination); return; }
+            var cells = row.querySelectorAll('td');
+            if (cells[2] && cells[2].textContent !== fmtNum(r.count)) {
+                cells[2].textContent = fmtNum(r.count);
+                cells[2].classList.add('value-updated');
+                setTimeout(function() { cells[2].classList.remove('value-updated'); }, 400);
             }
-            return (ms / 1000).toFixed(2) + 's';
+        });
+    }
+
+    // ─── MOST FREQUENT ROUTES ────────────────────────────────────────────
+    function renderFrequent(routes, pagination) {
+        if (!routes || routes.length === 0) {
+            document.getElementById('frequentContent').innerHTML = '<div class="state-box">No data</div>';
+            document.getElementById('frequentPagination').innerHTML = '';
+            return;
         }
+        frequentData = routes;
+        var total = pagination && pagination.total ? pagination.total : routes.length;
+        document.getElementById('badge-frequent').textContent = fmtNum(total);
 
-        function getDurationClass(duration) {
-            const ms = typeof duration === 'string' ? parseFloat(duration) : duration;
-            if (ms > 2000) return 'slow'; // Red: > 2 seconds
-            if (ms >= 1000 && ms <= 2000) return 'medium'; // Yellow: 1-2 seconds
-            if (ms < 1000) return 'fast'; // Green: < 1 second
-            return '';
+        var rows = frequentSort.col ? sortRoutes(routes, frequentSort.col, frequentSort.dir) : routes;
+        var maxAvg = Math.max.apply(null, rows.map(function(r) { return r.avgTime || 0; }));
+
+        var cols = [
+            { key: 'method',    label: 'Method' },
+            { key: 'path',      label: 'Path' },
+            { key: 'count',     label: 'Count' },
+            { key: 'avgTime',   label: 'Avg' },
+            { key: 'p95',       label: 'P95' },
+            { key: 'dbAvgTime', label: 'DB Avg' },
+            { key: 'errorRate', label: 'Err%' },
+        ];
+
+        var thead = cols.map(function(c) {
+            return '<th class="' + thClass(c.key, frequentSort) + '" onclick="sortFrequent(\'' + c.key + '\')">' + c.label + '<span class="sort-ind"></span></th>';
+        }).join('');
+
+        var tbody = rows.map(function(r) {
+            var errRate = (r.errorCount || 0) / (r.count || 1);
+            return '<tr data-key="' + r.method + '-' + r.path + '">' +
+                '<td>' + methodBadge(r.method) + '</td>' +
+                '<td class="cell-path">' + r.path + '</td>' +
+                '<td class="cell-count">' + fmtNum(r.count) + '</td>' +
+                durCell(r.avgTime, maxAvg) +
+                '<td class="' + durClass(r.p95Time) + '">' + fmtMs(r.p95Time) + '</td>' +
+                '<td class="' + durClass(r.dbAvgTime) + '">' + fmtMs(r.dbAvgTime) + '</td>' +
+                '<td class="' + errClass(errRate) + '">' + fmtPct(errRate) + '</td>' +
+                '</tr>';
+        }).join('');
+
+        document.getElementById('frequentContent').innerHTML =
+            '<div class="table-wrapper fade-in"><table><thead><tr>' + thead + '</tr></thead><tbody>' + tbody + '</tbody></table></div>';
+
+        renderPagination('frequentPagination', pagination, frequentOffset, 'loadFrequentPage');
+    }
+
+    function sortFrequent(col) {
+        if (frequentSort.col === col) {
+            frequentSort.dir = frequentSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            frequentSort.col = col;
+            frequentSort.dir = 'desc';
         }
+        renderFrequent(frequentData, { total: frequentData.length });
+    }
 
-        function formatNumber(num) {
-            return num.toLocaleString();
+    function updateFrequent(routes, pagination) {
+        if (!frequentData.length || !document.querySelector('#frequentContent table')) {
+            renderFrequent(routes, pagination); return;
         }
-
-        function formatPercent(num) {
-            return (num * 100).toFixed(2) + '%';
-        }
-
-        // Pagination state
-        let slowestRoutesOffset = 0;
-        let mostFrequentRoutesOffset = 0;
-        const routesPerPage = 20;
-        
-        // Sorting state
-        let slowestRoutesSort = { column: null, direction: 'asc' };
-        let mostFrequentRoutesSort = { column: null, direction: 'asc' };
-        let slowestRoutesData = [];
-        let mostFrequentRoutesData = [];
-
-        async function loadMetrics(showLoading = false) {
-            const timeRange = document.getElementById('timeRange').value;
-            const since = timeRange;
-            
-            try {
-                // Show subtle refresh indicator instead of hiding content
-                const refreshIndicator = document.getElementById('refreshIndicator');
-                refreshIndicator.classList.add('active');
-                
-                // Only show full loading on initial load
-                if (showLoading) {
-                    document.getElementById('loading').style.display = 'block';
-                    document.getElementById('content').style.display = 'none';
-                } else {
-                    // Add refreshing class for subtle visual feedback
-                    document.getElementById('content').classList.add('refreshing');
-                }
-                
-                document.getElementById('error').style.display = 'none';
-
-                const response = await fetch(`${API_BASE}?since=${since}&limit=${routesPerPage}&offset=0`);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                const data = await response.json();
-
-                // Render or update summary (always render on initial load)
-                if (showLoading || !document.getElementById('summary-total-requests')) {
-                    renderSummary(data.summary);
-                } else {
-                    updateSummary(data.summary);
-                }
-                
-                // Render or update routes
-                if (showLoading || !document.getElementById('slowestRoutes').querySelector('table')) {
-                    renderSlowestRoutes(data.routes.slowest, data.pagination);
-                    renderMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
-                } else {
-                    updateSlowestRoutes(data.routes.slowest, data.pagination);
-                    updateMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
-                }
-
-                // Hide loading indicators
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('content').style.display = 'block';
-                document.getElementById('content').classList.remove('refreshing');
-                refreshIndicator.classList.remove('active');
-            } catch (error) {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('content').classList.remove('refreshing');
-                refreshIndicator.classList.remove('active');
-                document.getElementById('error').style.display = 'block';
-                document.getElementById('error').textContent = 'Error loading metrics: ' + error.message;
+        frequentData = routes;
+        document.getElementById('badge-frequent').textContent = fmtNum(pagination && pagination.total ? pagination.total : routes.length);
+        routes.forEach(function(r) {
+            var row = document.querySelector('#frequentContent tr[data-key="' + r.method + '-' + r.path + '"]');
+            if (!row) { renderFrequent(routes, pagination); return; }
+            var cells = row.querySelectorAll('td');
+            if (cells[2] && cells[2].textContent !== fmtNum(r.count)) {
+                cells[2].textContent = fmtNum(r.count);
+                cells[2].classList.add('value-updated');
+                setTimeout(function() { cells[2].classList.remove('value-updated'); }, 400);
             }
+        });
+    }
+
+    // ─── SLOW QUERIES ────────────────────────────────────────────────────
+    function renderQueries(queries) {
+        if (!queries || queries.length === 0) {
+            document.getElementById('queriesContent').innerHTML = '<div class="state-box">No slow queries found</div>';
+            return;
         }
-        
-        // Smooth number update function
-        function updateNumber(element, newValue, formatter) {
-            if (!element) return;
-            const currentValue = element.textContent.trim();
-            const formattedNew = formatter(newValue);
-            
-            if (currentValue !== formattedNew) {
-                element.classList.add('value-updated');
-                element.textContent = formattedNew;
-                setTimeout(() => {
-                    element.classList.remove('value-updated');
-                }, 300);
-            }
+        document.getElementById('badge-queries').textContent = queries.length;
+
+        var tbody = queries.map(function(q) {
+            return '<tr>' +
+                '<td>' + new Date(q.timestamp).toLocaleTimeString() + '</td>' +
+                '<td>' + methodBadge(q.method) + ' <span style="color:var(--text)">' + q.path + '</span></td>' +
+                '<td>' + q.operation + '</td>' +
+                '<td>' + q.collection + '</td>' +
+                '<td class="dur-slow">' + q.duration + '</td>' +
+                '<td style="color:' + (q.error ? 'var(--red)' : 'var(--text-dim)') + '">' + (q.error || '—') + '</td>' +
+                '</tr>';
+        }).join('');
+
+        document.getElementById('queriesContent').innerHTML =
+            '<div class="table-wrapper fade-in"><table>' +
+            '<thead><tr><th>Time<span class="sort-ind"></span></th><th>Request<span class="sort-ind"></span></th><th>Operation<span class="sort-ind"></span></th><th>Collection<span class="sort-ind"></span></th><th>Duration<span class="sort-ind"></span></th><th>Error<span class="sort-ind"></span></th></tr></thead>' +
+            '<tbody>' + tbody + '</tbody></table></div>';
+    }
+
+    // ─── PAGINATION ──────────────────────────────────────────────────────
+    function renderPagination(containerId, pagination, currentOffset, loadFnName) {
+        var el = document.getElementById(containerId);
+        if (!pagination || pagination.total <= ROUTES_PER_PAGE) { el.innerHTML = ''; return; }
+
+        var total = pagination.total;
+        var totalPages = Math.ceil(total / ROUTES_PER_PAGE);
+        var currentPage = Math.floor(currentOffset / ROUTES_PER_PAGE) + 1;
+        var lastOffset = Math.floor((total - 1) / ROUTES_PER_PAGE) * ROUTES_PER_PAGE;
+        var prevOffset = Math.max(0, currentOffset - ROUTES_PER_PAGE);
+        var nextOffset = currentOffset + ROUTES_PER_PAGE;
+
+        el.innerHTML =
+            '<div class="pagination">' +
+            '<span class="page-info">Page ' + currentPage + ' of ' + totalPages + ' &nbsp;·&nbsp; ' + fmtNum(total) + ' routes</span>' +
+            '<div class="page-btns">' +
+            '<button class="btn-pg" ' + (currentOffset === 0 ? 'disabled' : '') + ' onclick="' + loadFnName + '(0)">«</button>' +
+            '<button class="btn-pg" ' + (currentOffset === 0 ? 'disabled' : '') + ' onclick="' + loadFnName + '(' + prevOffset + ')">‹</button>' +
+            '<button class="btn-pg" ' + (!pagination.hasMore ? 'disabled' : '') + ' onclick="' + loadFnName + '(' + nextOffset + ')">›</button>' +
+            '<button class="btn-pg" ' + (!pagination.hasMore ? 'disabled' : '') + ' onclick="' + loadFnName + '(' + lastOffset + ')">»</button>' +
+            '</div></div>';
+    }
+
+    // ─── PAGE LOADERS ────────────────────────────────────────────────────
+    async function loadSlowestPage(offset) {
+        slowestOffset = offset;
+        var since = document.getElementById('timeRange').value;
+        var res = await fetch(API_BASE + '?since=' + since + '&limit=' + ROUTES_PER_PAGE + '&offset=' + offset);
+        var data = await res.json();
+        renderSlowest(data.routes.slowest, data.pagination);
+    }
+
+    async function loadFrequentPage(offset) {
+        frequentOffset = offset;
+        var since = document.getElementById('timeRange').value;
+        var res = await fetch(API_BASE + '?since=' + since + '&limit=' + ROUTES_PER_PAGE + '&offset=' + offset);
+        var data = await res.json();
+        renderFrequent(data.routes.mostFrequent, data.pagination);
+    }
+
+    // ─── MAIN LOAD ───────────────────────────────────────────────────────
+    async function loadMetrics(initial) {
+        var since = document.getElementById('timeRange').value;
+        var errBanner = document.getElementById('errorBanner');
+        errBanner.style.display = 'none';
+
+        if (!initial) {
+            document.getElementById('slowestContent').classList.add('refreshing');
+            document.getElementById('frequentContent').classList.add('refreshing');
         }
 
-        async function loadSlowestRoutesPage(offset) {
-            const timeRange = document.getElementById('timeRange').value;
-            slowestRoutesOffset = offset;
-            
-            try {
-                const response = await fetch(`${API_BASE}?since=${timeRange}&limit=${routesPerPage}&offset=${offset}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                const data = await response.json();
-                renderSlowestRoutes(data.routes.slowest, data.pagination);
-            } catch (error) {
-                alert('Error loading routes: ' + error.message);
-            }
-        }
+        try {
+            var res = await fetch(API_BASE + '?since=' + since + '&limit=' + ROUTES_PER_PAGE + '&offset=0');
+            if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + res.statusText);
+            var data = await res.json();
 
-        async function loadMostFrequentRoutesPage(offset) {
-            const timeRange = document.getElementById('timeRange').value;
-            mostFrequentRoutesOffset = offset;
-            
-            try {
-                const response = await fetch(`${API_BASE}?since=${timeRange}&limit=${routesPerPage}&offset=${offset}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                const data = await response.json();
-                renderMostFrequentRoutes(data.routes.mostFrequent, data.pagination);
-            } catch (error) {
-                alert('Error loading routes: ' + error.message);
-            }
-        }
+            renderKPIs(data.summary);
 
-        async function loadSlowQueries() {
-            const timeRange = document.getElementById('timeRange').value;
-            
-            try {
-                const response = await fetch(`${API_BASE}/slow-queries?since=${timeRange}&minDuration=100ms&limit=100`);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                const data = await response.json();
-
-                renderSlowQueries(data.slowQueries);
-                document.getElementById('slowQueriesSection').style.display = 'block';
-                // Scroll to slow queries section
-                document.getElementById('slowQueriesSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } catch (error) {
-                alert('Error loading slow queries: ' + error.message);
-            }
-        }
-
-        function renderSummary(summary) {
-            const html = `
-                <div class="card">
-                    <h3>Total Requests</h3>
-                    <div class="value" id="summary-total-requests">${formatNumber(summary.totalRequests)}</div>
-                </div>
-                <div class="card">
-                    <h3>TPS</h3>
-                    <div class="value" id="summary-tps">${summary.tps.toFixed(2)}</div>
-                    <div class="subvalue">requests/second</div>
-                </div>
-                <div class="card">
-                    <h3>Error Rate</h3>
-                    <div class="value" id="summary-error-rate">${formatPercent(summary.errorRate)}</div>
-                    <div class="subvalue" id="summary-error-count">${formatNumber(summary.totalErrors)} errors</div>
-                </div>
-                <div class="card">
-                    <h3>DB Queries</h3>
-                    <div class="value" id="summary-db-queries">${formatNumber(summary.totalDBQueries)}</div>
-                    <div class="subvalue" id="summary-db-avg-time">Avg: ${summary.avgDBTime}</div>
-                </div>
-                <div class="card">
-                    <h3>Routes</h3>
-                    <div class="value" id="summary-route-count">${summary.routeCount}</div>
-                    <div class="subvalue" id="summary-trace-count">${summary.traceCount} traces</div>
-                </div>
-            `;
-            document.getElementById('summary').innerHTML = html;
-        }
-        
-        function updateSummary(summary) {
-            // Update values smoothly without re-rendering entire cards
-            updateNumber(document.getElementById('summary-total-requests'), summary.totalRequests, formatNumber);
-            updateNumber(document.getElementById('summary-tps'), summary.tps, (v) => v.toFixed(2));
-            updateNumber(document.getElementById('summary-error-rate'), summary.errorRate, formatPercent);
-            updateNumber(document.getElementById('summary-error-count'), summary.totalErrors, (v) => formatNumber(v) + ' errors');
-            updateNumber(document.getElementById('summary-db-queries'), summary.totalDBQueries, formatNumber);
-            const dbAvgEl = document.getElementById('summary-db-avg-time');
-            if (dbAvgEl && dbAvgEl.textContent !== `Avg: ${summary.avgDBTime}`) {
-                dbAvgEl.classList.add('value-updated');
-                dbAvgEl.textContent = `Avg: ${summary.avgDBTime}`;
-                setTimeout(() => dbAvgEl.classList.remove('value-updated'), 300);
-            }
-            updateNumber(document.getElementById('summary-route-count'), summary.routeCount, formatNumber);
-            updateNumber(document.getElementById('summary-trace-count'), summary.traceCount, (v) => formatNumber(v) + ' traces');
-        }
-
-        function getSortIcon(column, currentSort) {
-            if (currentSort.column !== column) {
-                return '<svg class="sort-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M7 3v18M15 3v18M3 7h8M3 11h8M3 15h8M3 19h8M13 7h8M13 11h8M13 15h8M13 19h8"/></svg>';
-            }
-            if (currentSort.direction === 'asc') {
-                return '<svg class="sort-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>';
-            }
-            return '<svg class="sort-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
-        }
-        
-        function sortRoutes(routes, column, direction) {
-            const sorted = [...routes];
-            sorted.sort((a, b) => {
-                let aVal, bVal;
-                
-                switch(column) {
-                    case 'method':
-                        aVal = a.method || '';
-                        bVal = b.method || '';
-                        return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-                    case 'path':
-                        aVal = a.path || '';
-                        bVal = b.path || '';
-                        return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-                    case 'count':
-                        aVal = a.count || 0;
-                        bVal = b.count || 0;
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    case 'avgTime':
-                        aVal = a.avgTime || 0;
-                        bVal = b.avgTime || 0;
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    case 'p50':
-                        aVal = a.p50Time || 0;
-                        bVal = b.p50Time || 0;
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    case 'p95':
-                        aVal = a.p95Time || 0;
-                        bVal = b.p95Time || 0;
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    case 'p99':
-                        aVal = a.p99Time || 0;
-                        bVal = b.p99Time || 0;
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    case 'maxTime':
-                        aVal = a.maxTime || 0;
-                        bVal = b.maxTime || 0;
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    case 'dbAvgTime':
-                        aVal = a.dbAvgTime || 0;
-                        bVal = b.dbAvgTime || 0;
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    case 'errorRate':
-                        aVal = (a.errorCount || 0) / (a.count || 1);
-                        bVal = (b.errorCount || 0) / (b.count || 1);
-                        return direction === 'asc' ? aVal - bVal : bVal - aVal;
-                    default:
-                        return 0;
-                }
-            });
-            return sorted;
-        }
-        
-        function renderSlowestRoutes(routes, pagination) {
-            if (!routes || routes.length === 0) {
-                document.getElementById('slowestRoutes').innerHTML = '<div class="empty-state">No route data available</div>';
-                document.getElementById('slowestRoutesPagination').style.display = 'none';
-                return;
-            }
-            
-            // Store routes data for sorting
-            slowestRoutesData = routes;
-            
-            // Apply sorting if active
-            let displayRoutes = routes;
-            if (slowestRoutesSort.column) {
-                displayRoutes = sortRoutes(routes, slowestRoutesSort.column, slowestRoutesSort.direction);
-            }
-
-            const html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th class="sortable ${slowestRoutesSort.column === 'method' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('method')">
-                                Method${getSortIcon('method', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'path' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('path')">
-                                Path${getSortIcon('path', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'count' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('count')">
-                                Count${getSortIcon('count', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'avgTime' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('avgTime')">
-                                Avg Time${getSortIcon('avgTime', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'p50' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('p50')">
-                                P50${getSortIcon('p50', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'p95' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('p95')">
-                                P95${getSortIcon('p95', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'p99' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('p99')">
-                                P99${getSortIcon('p99', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'maxTime' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('maxTime')">
-                                Max Time${getSortIcon('maxTime', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'dbAvgTime' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('dbAvgTime')">
-                                DB Avg Time${getSortIcon('dbAvgTime', slowestRoutesSort)}
-                            </th>
-                            <th class="sortable ${slowestRoutesSort.column === 'errorRate' ? 'sort-' + slowestRoutesSort.direction : ''}" onclick="sortSlowestRoutes('errorRate')">
-                                Error Rate${getSortIcon('errorRate', slowestRoutesSort)}
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${displayRoutes.map((route, idx) => `
-                            <tr data-route-key="${route.method}-${route.path}">
-                                <td><span class="method">${route.method}</span></td>
-                                <td>${route.path}</td>
-                                <td class="route-count">${formatNumber(route.count)}</td>
-                                <td class="duration ${getDurationClass(route.avgTime)} route-avg-time">${formatDuration(route.avgTime)}</td>
-                                <td class="duration ${getDurationClass(route.p50Time)}">${formatDuration(route.p50Time)}</td>
-                                <td class="duration ${getDurationClass(route.p95Time)}">${formatDuration(route.p95Time)}</td>
-                                <td class="duration ${getDurationClass(route.p99Time)}">${formatDuration(route.p99Time)}</td>
-                                <td class="duration ${getDurationClass(route.maxTime)}">${formatDuration(route.maxTime)}</td>
-                                <td class="duration ${getDurationClass(route.dbAvgTime)}">${formatDuration(route.dbAvgTime)}</td>
-                                <td>${formatPercent(route.errorCount / route.count)}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
-            document.getElementById('slowestRoutes').innerHTML = html;
-            
-            // Render pagination
-            if (pagination && pagination.total > routesPerPage) {
-                renderPagination('slowestRoutesPagination', pagination, slowestRoutesOffset, loadSlowestRoutesPage);
+            if (initial) {
+                renderSlowest(data.routes.slowest, data.pagination);
+                renderFrequent(data.routes.mostFrequent, data.pagination);
             } else {
-                document.getElementById('slowestRoutesPagination').style.display = 'none';
-            }
-        }
-        
-        function sortSlowestRoutes(column) {
-            if (slowestRoutesSort.column === column) {
-                // Toggle direction if same column
-                slowestRoutesSort.direction = slowestRoutesSort.direction === 'asc' ? 'desc' : 'asc';
-            } else {
-                // New column, default to ascending
-                slowestRoutesSort.column = column;
-                slowestRoutesSort.direction = 'asc';
-            }
-            // Re-render with new sort
-            const pagination = { total: slowestRoutesData.length, limit: routesPerPage, hasMore: false };
-            renderSlowestRoutes(slowestRoutesData, pagination);
-        }
-        
-        function updateSlowestRoutes(routes, pagination) {
-            // Only update if routes exist and table exists
-            const container = document.getElementById('slowestRoutes');
-            if (!routes || routes.length === 0 || !container.querySelector('table')) {
-                renderSlowestRoutes(routes, pagination);
-                return;
-            }
-            
-            // Update existing rows or render new ones
-            routes.forEach(route => {
-                const row = container.querySelector(`tr[data-route-key="${route.method}-${route.path}"]`);
-                if (row) {
-                    // Update existing row values smoothly
-                    const countCell = row.querySelector('.route-count');
-                    const avgTimeCell = row.querySelector('.route-avg-time');
-                    if (countCell) updateNumber(countCell, route.count, formatNumber);
-                    if (avgTimeCell) {
-                        const newValue = formatDuration(route.avgTime);
-                        if (avgTimeCell.textContent !== newValue) {
-                            avgTimeCell.classList.add('value-updated');
-                            avgTimeCell.textContent = newValue;
-                            avgTimeCell.className = `duration ${getDurationClass(route.avgTime)} route-avg-time`;
-                            setTimeout(() => avgTimeCell.classList.remove('value-updated'), 300);
-                        }
-                    }
-                } else {
-                    // If route doesn't exist, re-render (might be new route or pagination changed)
-                    renderSlowestRoutes(routes, pagination);
-                    return;
-                }
-            });
-        }
-
-        function renderMostFrequentRoutes(routes, pagination) {
-            if (!routes || routes.length === 0) {
-                document.getElementById('mostFrequentRoutes').innerHTML = '<div class="empty-state">No route data available</div>';
-                document.getElementById('mostFrequentRoutesPagination').style.display = 'none';
-                return;
-            }
-            
-            // Store routes data for sorting
-            mostFrequentRoutesData = routes;
-            
-            // Apply sorting if active
-            let displayRoutes = routes;
-            if (mostFrequentRoutesSort.column) {
-                displayRoutes = sortRoutes(routes, mostFrequentRoutesSort.column, mostFrequentRoutesSort.direction);
+                updateSlowest(data.routes.slowest, data.pagination);
+                updateFrequent(data.routes.mostFrequent, data.pagination);
             }
 
-            const html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th class="sortable ${mostFrequentRoutesSort.column === 'method' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('method')">
-                                Method${getSortIcon('method', mostFrequentRoutesSort)}
-                            </th>
-                            <th class="sortable ${mostFrequentRoutesSort.column === 'path' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('path')">
-                                Path${getSortIcon('path', mostFrequentRoutesSort)}
-                            </th>
-                            <th class="sortable ${mostFrequentRoutesSort.column === 'count' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('count')">
-                                Count${getSortIcon('count', mostFrequentRoutesSort)}
-                            </th>
-                            <th class="sortable ${mostFrequentRoutesSort.column === 'avgTime' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('avgTime')">
-                                Avg Time${getSortIcon('avgTime', mostFrequentRoutesSort)}
-                            </th>
-                            <th class="sortable ${mostFrequentRoutesSort.column === 'p95' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('p95')">
-                                P95${getSortIcon('p95', mostFrequentRoutesSort)}
-                            </th>
-                            <th class="sortable ${mostFrequentRoutesSort.column === 'dbAvgTime' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('dbAvgTime')">
-                                DB Avg Time${getSortIcon('dbAvgTime', mostFrequentRoutesSort)}
-                            </th>
-                            <th class="sortable ${mostFrequentRoutesSort.column === 'errorRate' ? 'sort-' + mostFrequentRoutesSort.direction : ''}" onclick="sortMostFrequentRoutes('errorRate')">
-                                Error Rate${getSortIcon('errorRate', mostFrequentRoutesSort)}
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${displayRoutes.map((route, idx) => `
-                            <tr data-route-key="${route.method}-${route.path}">
-                                <td><span class="method">${route.method}</span></td>
-                                <td>${route.path}</td>
-                                <td class="route-count">${formatNumber(route.count)}</td>
-                                <td class="duration ${getDurationClass(route.avgTime)} route-avg-time">${formatDuration(route.avgTime)}</td>
-                                <td class="duration ${getDurationClass(route.p95Time)}">${formatDuration(route.p95Time)}</td>
-                                <td class="duration ${getDurationClass(route.dbAvgTime)}">${formatDuration(route.dbAvgTime)}</td>
-                                <td>${formatPercent(route.errorCount / route.count)}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
-            document.getElementById('mostFrequentRoutes').innerHTML = html;
-            
-            // Render pagination
-            if (pagination && pagination.total > routesPerPage) {
-                renderPagination('mostFrequentRoutesPagination', pagination, mostFrequentRoutesOffset, loadMostFrequentRoutesPage);
-            } else {
-                document.getElementById('mostFrequentRoutesPagination').style.display = 'none';
-            }
+            document.getElementById('slowestContent').classList.remove('refreshing');
+            document.getElementById('frequentContent').classList.remove('refreshing');
+        } catch (err) {
+            document.getElementById('slowestContent').classList.remove('refreshing');
+            document.getElementById('frequentContent').classList.remove('refreshing');
+            errBanner.textContent = 'Failed to load metrics: ' + err.message;
+            errBanner.style.display = 'block';
         }
-        
-        function sortMostFrequentRoutes(column) {
-            if (mostFrequentRoutesSort.column === column) {
-                // Toggle direction if same column
-                mostFrequentRoutesSort.direction = mostFrequentRoutesSort.direction === 'asc' ? 'desc' : 'asc';
-            } else {
-                // New column, default to ascending
-                mostFrequentRoutesSort.column = column;
-                mostFrequentRoutesSort.direction = 'asc';
-            }
-            // Re-render with new sort
-            const pagination = { total: mostFrequentRoutesData.length, limit: routesPerPage, hasMore: false };
-            renderMostFrequentRoutes(mostFrequentRoutesData, pagination);
+    }
+
+    async function loadSlowQueries() {
+        var since = document.getElementById('timeRange').value;
+        document.getElementById('queriesContent').innerHTML = '<div class="state-box"><span class="dots-anim">Loading</span></div>';
+
+        try {
+            var res = await fetch(API_BASE + '/slow-queries?since=' + since + '&minDuration=100ms&limit=100');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var data = await res.json();
+            document.getElementById('tab-queries').style.display = 'flex';
+            renderQueries(data.slowQueries);
+        } catch (err) {
+            document.getElementById('queriesContent').innerHTML =
+                '<div class="state-box" style="color:var(--red)">Error: ' + err.message + '</div>';
         }
-        
-        function updateMostFrequentRoutes(routes, pagination) {
-            // Only update if routes exist and table exists
-            const container = document.getElementById('mostFrequentRoutes');
-            if (!routes || routes.length === 0 || !container.querySelector('table')) {
-                renderMostFrequentRoutes(routes, pagination);
-                return;
-            }
-            
-            // Update existing rows or render new ones
-            routes.forEach(route => {
-                const row = container.querySelector(`tr[data-route-key="${route.method}-${route.path}"]`);
-                if (row) {
-                    // Update existing row values smoothly
-                    const countCell = row.querySelector('.route-count');
-                    const avgTimeCell = row.querySelector('.route-avg-time');
-                    if (countCell) updateNumber(countCell, route.count, formatNumber);
-                    if (avgTimeCell) {
-                        const newValue = formatDuration(route.avgTime);
-                        if (avgTimeCell.textContent !== newValue) {
-                            avgTimeCell.classList.add('value-updated');
-                            avgTimeCell.textContent = newValue;
-                            avgTimeCell.className = `duration ${getDurationClass(route.avgTime)} route-avg-time`;
-                            setTimeout(() => avgTimeCell.classList.remove('value-updated'), 300);
-                        }
-                    }
-                } else {
-                    // If route doesn't exist, re-render (might be new route or pagination changed)
-                    renderMostFrequentRoutes(routes, pagination);
-                    return;
-                }
-            });
+    }
+
+    // ─── AUTO REFRESH ────────────────────────────────────────────────────
+    function startAutoRefresh() {
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        autoRefreshTimer = setInterval(function() { loadMetrics(false); }, AUTO_REFRESH_MS);
+    }
+
+    function stopAutoRefresh() {
+        if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    }
+
+    function toggleAutoRefresh() {
+        autoRefreshEnabled = !autoRefreshEnabled;
+        var icon = document.getElementById('autoRefreshIcon');
+        var text = document.getElementById('autoRefreshText');
+        var dot  = document.getElementById('liveDot');
+
+        if (autoRefreshEnabled) {
+            startAutoRefresh();
+            icon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+            text.textContent = 'Pause';
+            dot.classList.remove('paused');
+        } else {
+            stopAutoRefresh();
+            icon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+            text.textContent = 'Resume';
+            dot.classList.add('paused');
         }
+    }
 
-        function renderPagination(containerId, pagination, currentOffset, loadPageFn) {
-            const container = document.getElementById(containerId);
-            const total = pagination.total;
-            const limit = pagination.limit;
-            const currentPage = Math.floor(currentOffset / limit) + 1;
-            const totalPages = Math.ceil(total / limit);
-            const lastOffset = Math.max(0, Math.floor((total - 1) / limit) * limit);
-            
-            // Create buttons with proper event handlers
-            container.innerHTML = '';
-            
-            const firstBtn = document.createElement('button');
-            firstBtn.innerHTML = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>First';
-            firstBtn.disabled = currentOffset === 0;
-            firstBtn.onclick = () => loadPageFn(0);
-            container.appendChild(firstBtn);
-            
-            const prevBtn = document.createElement('button');
-            prevBtn.innerHTML = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Prev';
-            prevBtn.disabled = currentOffset === 0;
-            prevBtn.onclick = () => loadPageFn(Math.max(0, currentOffset - limit));
-            container.appendChild(prevBtn);
-            
-            const pageInfo = document.createElement('span');
-            pageInfo.className = 'page-info';
-            pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${formatNumber(total)} total routes)`;
-            container.appendChild(pageInfo);
-            
-            const nextBtn = document.createElement('button');
-            nextBtn.innerHTML = 'Next<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
-            nextBtn.disabled = !pagination.hasMore;
-            nextBtn.onclick = () => loadPageFn(currentOffset + limit);
-            container.appendChild(nextBtn);
-            
-            const lastBtn = document.createElement('button');
-            lastBtn.innerHTML = 'Last<svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>';
-            lastBtn.disabled = !pagination.hasMore;
-            lastBtn.onclick = () => loadPageFn(lastOffset);
-            container.appendChild(lastBtn);
-            
-            container.style.display = 'flex';
-        }
-
-        function renderSlowQueries(queries) {
-            if (!queries || queries.length === 0) {
-                document.getElementById('slowQueries').innerHTML = '<div class="empty-state">No slow queries found</div>';
-                return;
-            }
-
-            const html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Request</th>
-                            <th>Operation</th>
-                            <th>Collection</th>
-                            <th>Duration</th>
-                            <th>Error</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${queries.map(query => `
-                            <tr>
-                                <td>${new Date(query.timestamp).toLocaleTimeString()}</td>
-                                <td><span class="method">${query.method}</span> ${query.path}</td>
-                                <td>${query.operation}</td>
-                                <td>${query.collection}</td>
-                                <td class="duration slow">${query.duration}</td>
-                                <td>${query.error || '-'}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
-            document.getElementById('slowQueries').innerHTML = html;
-        }
-
-        // Auto-refresh control
-        let autoRefreshInterval = null;
-        let autoRefreshEnabled = true;
-        const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
-
-        function startAutoRefresh() {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-            }
-            autoRefreshInterval = setInterval(loadMetrics, AUTO_REFRESH_INTERVAL);
-            document.getElementById('autoRefreshDot').style.display = 'inline-block';
-        }
-
-        function stopAutoRefresh() {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-                autoRefreshInterval = null;
-            }
-            document.getElementById('autoRefreshDot').style.display = 'none';
-        }
-
-        function toggleAutoRefresh() {
-            autoRefreshEnabled = !autoRefreshEnabled;
-            const btn = document.getElementById('autoRefreshBtn');
-            const icon = document.getElementById('autoRefreshIcon');
-            const text = document.getElementById('autoRefreshText');
-            const dot = document.getElementById('autoRefreshDot');
-            
-            if (autoRefreshEnabled) {
-                startAutoRefresh();
-                icon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
-                text.textContent = 'Pause Auto-Refresh';
-                dot.style.display = 'inline-block';
-            } else {
-                stopAutoRefresh();
-                icon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
-                text.textContent = 'Resume Auto-Refresh';
-                dot.style.display = 'none';
-            }
-        }
-
-        // Start auto-refresh (30 seconds interval)
-        startAutoRefresh();
-        
-        // Load on page load (show loading on initial load)
-        loadMetrics(true);
-    </script>
+    // ─── BOOT ────────────────────────────────────────────────────────────
+    startAutoRefresh();
+    loadMetrics(true);
+</script>
 </body>
 </html>
