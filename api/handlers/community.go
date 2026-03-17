@@ -162,6 +162,7 @@ type Community struct {
 	DBHelper databases.DatabaseHelper
 	PTDB     databases.PushTokenDatabase
 	ALDB     databases.AuditLogDatabase
+	TLDB     databases.ToneLogDatabase
 }
 
 // CommunityHandler returns a community given a communityID
