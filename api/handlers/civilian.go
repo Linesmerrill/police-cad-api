@@ -27,6 +27,13 @@ import (
 var (
 	// Page denotes the starting Page for pagination results
 	Page = 0
+
+	// accentInsensitiveCollation enables accent and case insensitive matching
+	// so that searches for "r" match "ř", "a" matches "á", etc.
+	accentInsensitiveCollation = &options.Collation{
+		Locale:   "en",
+		Strength: 1, // primary strength: ignores case and accents
+	}
 )
 
 // Civilian exported for testing purposes
@@ -310,13 +317,13 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	dbResp, err = c.DB.Find(ctx, filter, &options.FindOptions{Limit: &limit64, Skip: &skip64})
+	dbResp, err = c.DB.Find(ctx, filter, options.Find().SetLimit(limit64).SetSkip(skip64).SetCollation(accentInsensitiveCollation))
 	if err != nil {
 		// Check if the error is related to warrants field decoding
 		if strings.Contains(err.Error(), "warrants") || strings.Contains(err.Error(), "SliceDecodeValue") {
 			zap.S().Warnw("decoding error for warrants field, attempting to exclude warrants from projection", "error", err)
 			// Try again with warrants field excluded from projection
-			opts := options.Find().SetLimit(limit64).SetSkip(skip64).SetProjection(bson.M{"civilian.warrants": 0})
+			opts := options.Find().SetLimit(limit64).SetSkip(skip64).SetProjection(bson.M{"civilian.warrants": 0}).SetCollation(accentInsensitiveCollation)
 			dbResp, err = c.DB.Find(ctx, filter, opts)
 			if err != nil {
 				config.ErrorStatus("failed to get civilian name search", http.StatusInternalServerError, w, err)
@@ -956,11 +963,12 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 
 	// Search civilians with pagination (async)
 	go func() {
-		civilians, err := c.DB.Find(ctx, filter, &options.FindOptions{
-			Skip:  &skip,
-			Limit: &limit64,
-			Sort:  bson.M{"civilian.name": 1}, // Sort by name for consistent results
-		})
+		civilians, err := c.DB.Find(ctx, filter, options.Find().
+			SetSkip(skip).
+			SetLimit(limit64).
+			SetSort(bson.M{"civilian.name": 1}).
+			SetCollation(accentInsensitiveCollation),
+		)
 		if err != nil {
 			findChan <- findResult{err: err}
 			return
@@ -970,7 +978,7 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 
 	// Count total documents (async)
 	go func() {
-		totalCount, err := c.DB.CountDocuments(ctx, filter)
+		totalCount, err := c.DB.CountDocuments(ctx, filter, options.Count().SetCollation(accentInsensitiveCollation))
 		countChan <- countResult{total: totalCount, err: err}
 	}()
 
