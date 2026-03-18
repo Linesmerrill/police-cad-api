@@ -682,7 +682,7 @@
     }
     function errClass(rate) {
         const pct = (rate || 0) * 100;
-        if (pct === 0) return 'err-none';
+        if (pct < 1) return 'err-none';
         if (pct < 5) return 'err-low';
         return 'err-high';
     }
@@ -728,7 +728,7 @@
         var errCard = document.getElementById('kpi-errorrate-card');
         errCard.className = 'kpi-card';
         var errPct = (s.errorRate || 0) * 100;
-        if (errPct === 0)       errCard.classList.add('st-good');
+        if (errPct < 1)         errCard.classList.add('st-good');
         else if (errPct < 5)    errCard.classList.add('st-warn');
         else                    errCard.classList.add('st-bad');
 
