@@ -21,6 +21,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/helpers"
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
@@ -289,13 +290,25 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	var orConditions []bson.M
 
 	if firstName != "" {
-		orConditions = append(orConditions, bson.M{"civilian.firstName": bson.M{"$regex": regexp.QuoteMeta(firstName), "$options": "i"}})
+		normalized := helpers.NormalizeForSearch(firstName)
+		orConditions = append(orConditions,
+			bson.M{"civilian.searchName": bson.M{"$regex": regexp.QuoteMeta(normalized), "$options": "i"}},
+			bson.M{"civilian.firstName": bson.M{"$regex": regexp.QuoteMeta(firstName), "$options": "i"}},
+		)
 	}
 	if lastName != "" {
-		orConditions = append(orConditions, bson.M{"civilian.lastName": bson.M{"$regex": regexp.QuoteMeta(lastName), "$options": "i"}})
+		normalized := helpers.NormalizeForSearch(lastName)
+		orConditions = append(orConditions,
+			bson.M{"civilian.searchName": bson.M{"$regex": regexp.QuoteMeta(normalized), "$options": "i"}},
+			bson.M{"civilian.lastName": bson.M{"$regex": regexp.QuoteMeta(lastName), "$options": "i"}},
+		)
 	}
 	if name != "" {
-		orConditions = append(orConditions, bson.M{"civilian.name": bson.M{"$regex": regexp.QuoteMeta(name), "$options": "i"}})
+		normalized := helpers.NormalizeForSearch(name)
+		orConditions = append(orConditions,
+			bson.M{"civilian.searchName": bson.M{"$regex": regexp.QuoteMeta(normalized), "$options": "i"}},
+			bson.M{"civilian.name": bson.M{"$regex": regexp.QuoteMeta(name), "$options": "i"}},
+		)
 	}
 
 	filter := bson.M{}
@@ -374,6 +387,7 @@ func (c Civilian) CreateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	civilian.ID = primitive.NewObjectID()
 	civilian.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	civilian.Details.UpdatedAt = civilian.Details.CreatedAt
+	civilian.Details.SearchName = helpers.NormalizeForSearch(civilian.Details.Name)
 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -413,6 +427,13 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	update := bson.M{}
 	for key, value := range updatedFields {
 		update["civilian."+key] = value
+	}
+
+	// If name is being updated, recompute the normalized searchName
+	if nameVal, ok := updatedFields["name"]; ok {
+		if nameStr, ok := nameVal.(string); ok {
+			update["civilian.searchName"] = helpers.NormalizeForSearch(nameStr)
+		}
 	}
 
 	// Add the updatedAt field to track the update time
@@ -928,12 +949,19 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Search by name (case-insensitive) within the specified community
+	// Search by name (case-insensitive, accent-insensitive) within the specified community.
+	// Uses $or to match against searchName (normalized, for accent-insensitive matching)
+	// and the original name field (fallback for civilians not yet updated with searchName).
+	normalizedQuery := helpers.NormalizeForSearch(query)
 	escapedQuery := regexp.QuoteMeta(query)
+	escapedNormalized := regexp.QuoteMeta(normalizedQuery)
 	filter := bson.M{
 		"$and": []bson.M{
 			{
-				"civilian.name": bson.M{"$regex": escapedQuery, "$options": "i"},
+				"$or": []bson.M{
+					{"civilian.searchName": bson.M{"$regex": escapedNormalized, "$options": "i"}},
+					{"civilian.name": bson.M{"$regex": escapedQuery, "$options": "i"}},
+				},
 			},
 			{
 				"civilian.activeCommunityID": req.CommunityID,
@@ -959,7 +987,7 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 		civilians, err := c.DB.Find(ctx, filter, &options.FindOptions{
 			Skip:  &skip,
 			Limit: &limit64,
-			Sort:  bson.M{"civilian.name": 1}, // Sort by name for consistent results
+			Sort:  bson.M{"civilian.name": 1},
 		})
 		if err != nil {
 			findChan <- findResult{err: err}
