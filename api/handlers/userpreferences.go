@@ -148,8 +148,11 @@ func (up UserPreferences) UpdateUserPreferencesHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	// If betaCivDashboard preference changed, notify admin metrics listeners
+	// If betaCivDashboard or betaCommandDashboard preference changed, notify admin metrics listeners
 	if _, hasBeta := updateData["betaCivDashboard"]; hasBeta {
+		go up.notifyMetricsUpdate()
+	}
+	if _, hasBetaCmd := updateData["betaCommandDashboard"]; hasBetaCmd {
 		go up.notifyMetricsUpdate()
 	}
 
@@ -247,13 +250,20 @@ func (up UserPreferences) DeleteUserPreferencesHandler(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GetBetaDashboardMetricsHandler returns adoption metrics for the beta civilian dashboard
+// GetBetaDashboardMetricsHandler returns adoption metrics for both the beta civilian
+// dashboard and the command dashboard.
 func (up UserPreferences) GetBetaDashboardMetricsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	optedIn, err := up.DB.CountDocuments(ctx, bson.M{"betaCivDashboard": true})
 	if err != nil {
 		config.ErrorStatus("failed to count beta dashboard opt-ins", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	cmdOptedIn, err := up.DB.CountDocuments(ctx, bson.M{"betaCommandDashboard": true})
+	if err != nil {
+		config.ErrorStatus("failed to count command dashboard opt-ins", http.StatusInternalServerError, w, err)
 		return
 	}
 
@@ -265,10 +275,12 @@ func (up UserPreferences) GetBetaDashboardMetricsHandler(w http.ResponseWriter, 
 
 	classic := total - optedIn
 
-	response := map[string]int64{
-		"optedIn": optedIn,
-		"classic": classic,
-		"total":   total,
+	response := map[string]interface{}{
+		"optedIn":        optedIn,
+		"classic":        classic,
+		"total":          total,
+		"cmdOptedIn":     cmdOptedIn,
+		"cmdClassic":     total - cmdOptedIn,
 	}
 
 	b, err := json.Marshal(response)
@@ -321,6 +333,31 @@ func (up UserPreferences) GetBetaDashboardMetricsDailyHandler(w http.ResponseWri
 		return
 	}
 
+	// Pipeline: daily command dashboard opt-ins (users who opted in, grouped by updatedAt date)
+	cmdPipeline := bson.A{
+		bson.M{"$match": bson.M{
+			"betaCommandDashboard": true,
+			"updatedAt":            bson.M{"$gte": sevenDaysAgo},
+		}},
+		bson.M{"$group": bson.M{
+			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$updatedAt"}},
+			"count": bson.M{"$sum": 1},
+		}},
+		bson.M{"$sort": bson.M{"_id": 1}},
+	}
+
+	cmdCursor, err := up.DB.Aggregate(ctx, cmdPipeline)
+	if err != nil {
+		config.ErrorStatus("failed to aggregate command dashboard daily metrics", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	var cmdDaily []dailyCount
+	if err := cmdCursor.All(ctx, &cmdDaily); err != nil {
+		config.ErrorStatus("failed to decode command dashboard daily metrics", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	// Pipeline: daily new user registrations (grouped by user.createdAt date)
 	userPipeline := bson.A{
 		bson.M{"$match": bson.M{
@@ -350,6 +387,10 @@ func (up UserPreferences) GetBetaDashboardMetricsDailyHandler(w http.ResponseWri
 	for _, d := range betaDaily {
 		betaMap[d.Date] = d.Count
 	}
+	cmdMap := make(map[string]int)
+	for _, d := range cmdDaily {
+		cmdMap[d.Date] = d.Count
+	}
 	userMap := make(map[string]int)
 	for _, d := range userDaily {
 		userMap[d.Date] = d.Count
@@ -358,6 +399,7 @@ func (up UserPreferences) GetBetaDashboardMetricsDailyHandler(w http.ResponseWri
 	type dayEntry struct {
 		Date         string `json:"date"`
 		BetaOptIns   int    `json:"betaOptIns"`
+		CmdOptIns    int    `json:"cmdOptIns"`
 		NewUsers     int    `json:"newUsers"`
 	}
 
@@ -367,6 +409,7 @@ func (up UserPreferences) GetBetaDashboardMetricsDailyHandler(w http.ResponseWri
 		days[i] = dayEntry{
 			Date:       date,
 			BetaOptIns: betaMap[date],
+			CmdOptIns:  cmdMap[date],
 			NewUsers:   userMap[date],
 		}
 	}
@@ -407,6 +450,12 @@ func (up UserPreferences) notifyMetricsUpdate() {
 		return
 	}
 
+	cmdOptedIn, err := up.DB.CountDocuments(ctx, bson.M{"betaCommandDashboard": true})
+	if err != nil {
+		zap.S().Errorf("notifyMetricsUpdate: failed to count command dashboard opt-ins: %v", err)
+		return
+	}
+
 	total, err := up.UDB.CountDocuments(ctx, bson.M{})
 	if err != nil {
 		zap.S().Errorf("notifyMetricsUpdate: failed to count total users: %v", err)
@@ -417,10 +466,12 @@ func (up UserPreferences) notifyMetricsUpdate() {
 
 	payload := map[string]interface{}{
 		"event": "beta_metrics_updated",
-		"data": map[string]int64{
-			"optedIn": optedIn,
-			"classic": classic,
-			"total":   total,
+		"data": map[string]interface{}{
+			"optedIn":    optedIn,
+			"classic":    classic,
+			"total":      total,
+			"cmdOptedIn": cmdOptedIn,
+			"cmdClassic": total - cmdOptedIn,
 		},
 	}
 
