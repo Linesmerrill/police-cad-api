@@ -87,6 +87,9 @@ func (up UserPreferences) CreateUserPreferencesHandler(w http.ResponseWriter, r 
 	now := time.Now()
 	userPreferences.CreatedAt = now
 	userPreferences.UpdatedAt = now
+	if userPreferences.BetaCommandDashboard {
+		userPreferences.CommandDashboardOptedAt = now
+	}
 
 	// Initialize empty community preferences if not provided
 	if userPreferences.CommunityPreferences == nil {
@@ -133,7 +136,15 @@ func (up UserPreferences) UpdateUserPreferencesHandler(w http.ResponseWriter, r 
 	}
 
 	// Add updated timestamp
-	updateData["updatedAt"] = time.Now()
+	now := time.Now()
+	updateData["updatedAt"] = now
+
+	// Track when the user opted into the command dashboard
+	if val, ok := updateData["betaCommandDashboard"]; ok {
+		if enabled, isBool := val.(bool); isBool && enabled {
+			updateData["commandDashboardOptedAt"] = now
+		}
+	}
 
 	// Use upsert to create if doesn't exist, update if it does
 	opts := options.Update().SetUpsert(true)
@@ -333,14 +344,14 @@ func (up UserPreferences) GetBetaDashboardMetricsDailyHandler(w http.ResponseWri
 		return
 	}
 
-	// Pipeline: daily command dashboard opt-ins (users who opted in, grouped by updatedAt date)
+	// Pipeline: daily command dashboard opt-ins (grouped by commandDashboardOptedAt date)
 	cmdPipeline := bson.A{
 		bson.M{"$match": bson.M{
-			"betaCommandDashboard": true,
-			"updatedAt":            bson.M{"$gte": sevenDaysAgo},
+			"betaCommandDashboard":  true,
+			"commandDashboardOptedAt": bson.M{"$gte": sevenDaysAgo},
 		}},
 		bson.M{"$group": bson.M{
-			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$updatedAt"}},
+			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$commandDashboardOptedAt"}},
 			"count": bson.M{"$sum": 1},
 		}},
 		bson.M{"$sort": bson.M{"_id": 1}},

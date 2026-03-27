@@ -273,6 +273,7 @@ func GetCanonicalTemplateComponents() map[string][]canonicalComponent {
 			{Name: "firearmSearch", Enabled: true},
 			{Name: "createBolos", Enabled: true},
 			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "activeCalls", Enabled: true},
 			{Name: "notepad", Enabled: true},
 		},
 		"ems": {
@@ -282,6 +283,7 @@ func GetCanonicalTemplateComponents() map[string][]canonicalComponent {
 			{Name: "vehicleSearch", Enabled: true},
 			{Name: "createBolos", Enabled: true},
 			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "activeCalls", Enabled: true},
 			{Name: "notepad", Enabled: true},
 		},
 		"fire": {
@@ -291,11 +293,13 @@ func GetCanonicalTemplateComponents() map[string][]canonicalComponent {
 			{Name: "vehicleSearch", Enabled: true},
 			{Name: "createBolos", Enabled: true},
 			{Name: "viewBolosAndWarrants", Enabled: true},
+			{Name: "activeCalls", Enabled: true},
 			{Name: "notepad", Enabled: true},
 		},
 		"dispatch": {
 			{Name: "dispatchUnits", Enabled: true},
 			{Name: "createAndManageCalls", Enabled: true},
+			{Name: "activeCalls", Enabled: true},
 			{Name: "createBolos", Enabled: true},
 			{Name: "manage911Calls", Enabled: true},
 			{Name: "nameSearch", Enabled: true},

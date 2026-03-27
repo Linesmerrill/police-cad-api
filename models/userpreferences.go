@@ -7,7 +7,8 @@ type UserPreferences struct {
 	ID                   primitive.ObjectID             `json:"_id" bson:"_id"`
 	UserID               string                         `json:"userId" bson:"userId"`
 	BetaCivDashboard     bool                           `json:"betaCivDashboard" bson:"betaCivDashboard"`
-	BetaCommandDashboard bool                           `json:"betaCommandDashboard" bson:"betaCommandDashboard"`
+	BetaCommandDashboard     bool                           `json:"betaCommandDashboard" bson:"betaCommandDashboard"`
+	CommandDashboardOptedAt  interface{}                    `json:"commandDashboardOptedAt,omitempty" bson:"commandDashboardOptedAt,omitempty"`
 	CommunityPreferences map[string]CommunityPreference `json:"communityPreferences" bson:"communityPreferences"`
 	CreatedAt            interface{}                    `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            interface{}                    `json:"updatedAt" bson:"updatedAt"`
