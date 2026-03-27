@@ -364,14 +364,24 @@ func (v Vehicle) VehicleSearchHandler(w http.ResponseWriter, r *http.Request) {
 	zap.S().Debugf("model: '%v'", model)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
-	// Build the query (escape regex metacharacters in user input)
-	query := bson.M{
-		"$or": []bson.M{
-			{"vehicle.plate": bson.M{"$regex": regexp.QuoteMeta(plate), "$options": "i"}},
-			{"vehicle.vin": bson.M{"$regex": regexp.QuoteMeta(vin), "$options": "i"}},
-			{"vehicle.make": bson.M{"$regex": regexp.QuoteMeta(vehMake), "$options": "i"}},
-			{"vehicle.model": bson.M{"$regex": regexp.QuoteMeta(model), "$options": "i"}},
-		},
+	// Build the query — only include non-empty search fields
+	var orConditions []bson.M
+	if plate != "" {
+		orConditions = append(orConditions, bson.M{"vehicle.plate": bson.M{"$regex": regexp.QuoteMeta(plate), "$options": "i"}})
+	}
+	if vin != "" {
+		orConditions = append(orConditions, bson.M{"vehicle.vin": bson.M{"$regex": regexp.QuoteMeta(vin), "$options": "i"}})
+	}
+	if vehMake != "" {
+		orConditions = append(orConditions, bson.M{"vehicle.make": bson.M{"$regex": regexp.QuoteMeta(vehMake), "$options": "i"}})
+	}
+	if model != "" {
+		orConditions = append(orConditions, bson.M{"vehicle.model": bson.M{"$regex": regexp.QuoteMeta(model), "$options": "i"}})
+	}
+
+	query := bson.M{}
+	if len(orConditions) > 0 {
+		query["$or"] = orConditions
 	}
 	if activeCommunityID != "" {
 		query["vehicle.activeCommunityID"] = activeCommunityID
