@@ -344,14 +344,20 @@ func (up UserPreferences) GetBetaDashboardMetricsDailyHandler(w http.ResponseWri
 		return
 	}
 
-	// Pipeline: daily command dashboard opt-ins (grouped by commandDashboardOptedAt date)
+	// Pipeline: daily command dashboard opt-ins
+	// Use commandDashboardOptedAt if available, fall back to updatedAt for older records
 	cmdPipeline := bson.A{
 		bson.M{"$match": bson.M{
-			"betaCommandDashboard":  true,
-			"commandDashboardOptedAt": bson.M{"$gte": sevenDaysAgo},
+			"betaCommandDashboard": true,
+		}},
+		bson.M{"$addFields": bson.M{
+			"_optDate": bson.M{"$ifNull": bson.A{"$commandDashboardOptedAt", "$updatedAt"}},
+		}},
+		bson.M{"$match": bson.M{
+			"_optDate": bson.M{"$gte": sevenDaysAgo},
 		}},
 		bson.M{"$group": bson.M{
-			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$commandDashboardOptedAt"}},
+			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$_optDate"}},
 			"count": bson.M{"$sum": 1},
 		}},
 		bson.M{"$sort": bson.M{"_id": 1}},
