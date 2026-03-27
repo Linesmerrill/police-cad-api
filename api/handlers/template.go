@@ -274,6 +274,7 @@ func GetCanonicalTemplateComponents() map[string][]canonicalComponent {
 			{Name: "createBolos", Enabled: true},
 			{Name: "viewBolosAndWarrants", Enabled: true},
 			{Name: "activeCalls", Enabled: true},
+			{Name: "penalCodes", Enabled: true},
 			{Name: "notepad", Enabled: true},
 		},
 		"ems": {
