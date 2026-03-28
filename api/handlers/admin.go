@@ -4091,7 +4091,7 @@ func (h Admin) AdminListCasesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := bson.M{}
-	if status == "open" || status == "completed" {
+	if status == "open" || status == "completed" || status == "cancelled" {
 		filter["status"] = status
 	}
 
