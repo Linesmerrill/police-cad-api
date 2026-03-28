@@ -3678,12 +3678,24 @@ func (h Admin) AdminGetCommunityRolesHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Batch-fetch all users
+	// Batch-fetch all users (try string ID first, then ObjectID)
 	userMap := make(map[string]models.User)
 	for memberID := range memberIDSet {
 		var user models.User
 		err := h.UDB.FindOne(r.Context(), bson.M{"_id": memberID}).Decode(&user)
 		if err != nil {
+			// Try ObjectID form
+			if oid, oidErr := primitive.ObjectIDFromHex(memberID); oidErr == nil {
+				var userObj struct {
+					ID      primitive.ObjectID `bson:"_id"`
+					Details models.UserDetails `bson:"user"`
+					Version int32              `bson:"__v"`
+				}
+				if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
+					user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
+					userMap[memberID] = user
+				}
+			}
 			continue
 		}
 		userMap[memberID] = user
