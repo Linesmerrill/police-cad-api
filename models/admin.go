@@ -269,6 +269,7 @@ type AdminUserCommunity struct {
 	Department  string      `json:"department,omitempty"`
 	JoinedAt    interface{} `json:"joinedAt,omitempty"`
 	MemberCount int         `json:"memberCount"`
+	ImageLink   string      `json:"imageLink,omitempty"`
 }
 
 // AdminAudit stores detailed audit records for sensitive admin actions

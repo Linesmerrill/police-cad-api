@@ -954,6 +954,7 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 				Department:  department,
 				JoinedAt:    community.Details.CreatedAt,
 				MemberCount: community.Details.MembersCount,
+				ImageLink:   community.Details.ImageLink,
 			})
 		}
 	}
