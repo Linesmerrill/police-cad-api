@@ -651,6 +651,33 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Look up sender details for the WebSocket payload
+	var senderUsername, senderProfilePic string
+	if notification.SentFromID != "" {
+		var sender models.User
+		if err := u.DB.FindOne(ctx, bson.M{"_id": notification.SentFromID}).Decode(&sender); err == nil {
+			senderUsername = sender.Details.Username
+			senderProfilePic = sender.Details.ProfilePicture
+		}
+	}
+
+	// Build enriched payload for WebSocket (includes sender details the toast needs)
+	wsPayload := map[string]interface{}{
+		"_id":              newNotification.ID,
+		"sentFromID":       newNotification.SentFromID,
+		"sentToID":         newNotification.SentToID,
+		"type":             newNotification.Type,
+		"message":          newNotification.Message,
+		"data1":            newNotification.Data1,
+		"data2":            newNotification.Data2,
+		"data3":            newNotification.Data3,
+		"data4":            newNotification.Data4,
+		"seen":             newNotification.Seen,
+		"createdAt":        newNotification.CreatedAt,
+		"senderUsername":    senderUsername,
+		"senderProfilePic": senderProfilePic,
+	}
+
 	// Check if the notifications array is nil or empty
 	if dbResp.Details.Notifications == nil || len(dbResp.Details.Notifications) == 0 {
 		update := bson.M{
@@ -661,7 +688,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 			config.ErrorStatus("failed to initialize user's notifications", http.StatusInternalServerError, w, err)
 			return
 		}
-		sendNotificationToUser(notification.SentToID, newNotification)
+		sendNotificationToUser(notification.SentToID, wsPayload)
 	} else {
 		update := bson.M{"$push": bson.M{"user.notifications": newNotification}}
 		opts := options.Update().SetUpsert(false)
@@ -671,7 +698,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 			config.ErrorStatus("failed to create notification", http.StatusInternalServerError, w, err)
 			return
 		}
-		sendNotificationToUser(notification.SentToID, newNotification)
+		sendNotificationToUser(notification.SentToID, wsPayload)
 	}
 
 	w.WriteHeader(http.StatusOK)
