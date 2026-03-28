@@ -66,12 +66,13 @@ func (a *App) New() *mux.Router {
 		ARDB: databases.NewAnnouncementReadDatabase(a.dbHelper),
 	}
 	adminHandler := Admin{
-		ADB:  databases.NewAdminDatabase(a.dbHelper),
-		RDB:  databases.NewAdminResetDatabase(a.dbHelper),
-		UDB:  databases.NewUserDatabase(a.dbHelper),
-		CDB:  databases.NewCommunityDatabase(a.dbHelper),
-		AADB: databases.NewAdminActivityDatabase(a.dbHelper),
-		PVDB: databases.NewPendingVerificationDatabase(a.dbHelper),
+		ADB:     databases.NewAdminDatabase(a.dbHelper),
+		RDB:     databases.NewAdminResetDatabase(a.dbHelper),
+		UDB:     databases.NewUserDatabase(a.dbHelper),
+		CDB:     databases.NewCommunityDatabase(a.dbHelper),
+		AADB:    databases.NewAdminActivityDatabase(a.dbHelper),
+		PVDB:    databases.NewPendingVerificationDatabase(a.dbHelper),
+		AuditDB: databases.NewAdminAuditDatabase(a.dbHelper),
 	}
 
 	medicalReportHandler := MedicalReport{DB: databases.NewMedicalReportDatabase(a.dbHelper)}

@@ -261,12 +261,43 @@ type AdminUserDetails struct {
 }
 
 type AdminUserCommunity struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Status     string      `json:"status"`
-	Role       string      `json:"role"`
-	Department string      `json:"department,omitempty"`
-	JoinedAt   interface{} `json:"joinedAt,omitempty"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Status      string      `json:"status"`
+	Role        string      `json:"role"`
+	Department  string      `json:"department,omitempty"`
+	JoinedAt    interface{} `json:"joinedAt,omitempty"`
+	MemberCount int         `json:"memberCount"`
+}
+
+// AdminAudit stores detailed audit records for sensitive admin actions
+type AdminAudit struct {
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	AdminID       string             `bson:"adminId" json:"adminId"`
+	AdminEmail    string             `bson:"adminEmail" json:"adminEmail"`
+	Action        string             `bson:"action" json:"action"`
+	CommunityID   string             `bson:"communityId" json:"communityId"`
+	CommunityName string             `bson:"communityName" json:"communityName"`
+	Before        interface{}        `bson:"before" json:"before"`
+	After         interface{}        `bson:"after" json:"after"`
+	Details       string             `bson:"details" json:"details"`
+	Timestamp     time.Time          `bson:"timestamp" json:"timestamp"`
+	IP            string             `bson:"ip" json:"ip"`
+}
+
+// AdminRoleWithMembers is a role with resolved member details for admin display
+type AdminRoleWithMembers struct {
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	Members            []AdminRoleMember `json:"members"`
+	HasAdminPermission bool              `json:"hasAdminPermission"`
+}
+
+// AdminRoleMember is a resolved member in a role
+type AdminRoleMember struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
 }
 
 type AdminCommunityDetails struct {

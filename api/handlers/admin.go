@@ -47,12 +47,13 @@ type adminLoginResponse struct {
 
 // Admin represents the admin handler
 type Admin struct {
-	ADB databases.AdminDatabase
-	RDB databases.AdminResetDatabase
-	UDB databases.UserDatabase
-	CDB databases.CommunityDatabase
-	AADB databases.AdminActivityDatabase
-	PVDB databases.PendingVerificationDatabase
+	ADB     databases.AdminDatabase
+	RDB     databases.AdminResetDatabase
+	UDB     databases.UserDatabase
+	CDB     databases.CommunityDatabase
+	AADB    databases.AdminActivityDatabase
+	PVDB    databases.PendingVerificationDatabase
+	AuditDB databases.AdminAuditDatabase
 }
 
 // checkAdminPermissions validates if the current user has sufficient permissions
@@ -943,12 +944,13 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			
 			userCommunities = append(userCommunities, models.AdminUserCommunity{
-				ID:         community.ID.Hex(),
-				Name:       community.Details.Name,
-				Status:     userComm.Status,
-				Role:       role,
-				Department: department,
-				JoinedAt:   community.Details.CreatedAt,
+				ID:          community.ID.Hex(),
+				Name:        community.Details.Name,
+				Status:      userComm.Status,
+				Role:        role,
+				Department:  department,
+				JoinedAt:    community.Details.CreatedAt,
+				MemberCount: community.Details.MembersCount,
 			})
 		}
 	}

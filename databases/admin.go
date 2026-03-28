@@ -15,6 +15,7 @@ import (
 )
 
 const adminCollectionName = "admin_users"
+const adminAuditCollectionName = "admin_audit"
 
 // AdminDatabase defines the interface for admin user operations
 type AdminDatabase interface {
@@ -173,4 +174,25 @@ func (a *adminActivityDatabase) Aggregate(ctx context.Context, pipeline interfac
 	return a.db.Collection(adminActivityCollectionName).Aggregate(ctx, pipeline, opts...)
 }
 
+// AdminAuditDatabase defines the interface for admin audit operations
+type AdminAuditDatabase interface {
+	InsertOne(ctx context.Context, audit models.AdminAudit, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
+}
+
+type adminAuditDatabase struct {
+	db DatabaseHelper
+}
+
+func NewAdminAuditDatabase(db DatabaseHelper) AdminAuditDatabase {
+	return &adminAuditDatabase{db: db}
+}
+
+func (a *adminAuditDatabase) InsertOne(ctx context.Context, audit models.AdminAudit, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	return a.db.Collection(adminAuditCollectionName).InsertOne(ctx, audit, opts...)
+}
+
+func (a *adminAuditDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error) {
+	return a.db.Collection(adminAuditCollectionName).Find(ctx, filter, opts...)
+}
 
