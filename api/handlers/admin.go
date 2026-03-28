@@ -3861,6 +3861,13 @@ func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Prevent removing the community owner — use Reset Owner & Roles instead
+	if community.Details.OwnerID == targetUserID {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Cannot remove the community owner. Use 'Reset Owner & Roles' to transfer ownership first."})
+		return
+	}
+
 	// Capture which roles user is in
 	var rolesUserWasIn []string
 	for _, role := range community.Details.Roles {
