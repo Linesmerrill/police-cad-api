@@ -3494,15 +3494,12 @@ func getClientIP(r *http.Request) string {
 func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Extract community ID from URL
-	pathParts := strings.Split(r.URL.Path, "/")
-	// Expected: /api/v1/admin/communities/{id}/transfer-ownership
-	if len(pathParts) < 6 {
+	communityID := mux.Vars(r)["id"]
+	if communityID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community ID is required"})
 		return
 	}
-	communityID := pathParts[len(pathParts)-2]
 
 	// Parse request body
 	var req struct {
@@ -3630,7 +3627,9 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		Timestamp: time.Now(),
 		IP:        getClientIP(r),
 	}
-	_, _ = h.AuditDB.InsertOne(r.Context(), audit)
+	if _, err := h.AuditDB.InsertOne(r.Context(), audit); err != nil {
+		log.Printf("CRITICAL: failed to write audit log: %v", err)
+	}
 
 	// Also log to admin_activity for the activity feed
 	h.trackAdminAction(primitive.NilObjectID, "ownership_transfer", communityID, "community",
@@ -3648,15 +3647,12 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 func (h Admin) AdminGetCommunityRolesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Extract community ID from URL
-	pathParts := strings.Split(r.URL.Path, "/")
-	// Expected: /api/v1/admin/communities/{id}/roles
-	if len(pathParts) < 6 {
+	communityID := mux.Vars(r)["id"]
+	if communityID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community ID is required"})
 		return
 	}
-	communityID := pathParts[len(pathParts)-2]
 
 	// Fetch the community
 	cID, err := primitive.ObjectIDFromHex(communityID)
@@ -3739,13 +3735,12 @@ func (h Admin) AdminGetCommunityRolesHandler(w http.ResponseWriter, r *http.Requ
 func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 6 {
+	communityID := mux.Vars(r)["id"]
+	if communityID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community ID is required"})
 		return
 	}
-	communityID := pathParts[len(pathParts)-2]
 
 	var req struct {
 		UserEmail   string                 `json:"userEmail"`
@@ -3884,7 +3879,9 @@ func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) 
 		Timestamp: time.Now(),
 		IP:        getClientIP(r),
 	}
-	_, _ = h.AuditDB.InsertOne(r.Context(), audit)
+	if _, err := h.AuditDB.InsertOne(r.Context(), audit); err != nil {
+		log.Printf("CRITICAL: failed to write audit log: %v", err)
+	}
 
 	actionType := "member_removed"
 	if req.Ban {
