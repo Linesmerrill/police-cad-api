@@ -406,6 +406,7 @@ type AdminCaseSteps struct {
 // AdminCase is a persistent workflow case (e.g., ownership reset)
 type AdminCase struct {
 	ID              primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	CaseNumber      int                `bson:"caseNumber" json:"caseNumber"`
 	Type            string             `bson:"type" json:"type"`
 	Status          string             `bson:"status" json:"status"`
 	CommunityID     string             `bson:"communityId" json:"communityId"`

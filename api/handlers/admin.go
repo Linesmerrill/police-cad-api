@@ -4039,8 +4039,20 @@ func (h Admin) AdminCreateCaseHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get next case number by finding the max existing one
+	nextCaseNumber := 1
+	maxCursor, maxErr := h.CaseDB.Find(r.Context(), bson.M{}, options.Find().SetSort(bson.M{"caseNumber": -1}).SetLimit(1))
+	if maxErr == nil {
+		var maxCases []models.AdminCase
+		if maxCursor.All(r.Context(), &maxCases) == nil && len(maxCases) > 0 {
+			nextCaseNumber = maxCases[0].CaseNumber + 1
+		}
+		maxCursor.Close(r.Context())
+	}
+
 	now := time.Now()
 	newCase := models.AdminCase{
+		CaseNumber:    nextCaseNumber,
 		Type:          "ownership_reset",
 		Status:        "open",
 		CommunityID:   req.CommunityID,
@@ -4145,18 +4157,29 @@ func (h Admin) AdminGetCaseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	oid, err := primitive.ObjectIDFromHex(caseID)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
-		return
+	var adminCase models.AdminCase
+	var found bool
+
+	// Try as case number first (if numeric)
+	if caseNum, numErr := strconv.Atoi(caseID); numErr == nil {
+		if err := h.CaseDB.FindOne(r.Context(), bson.M{"caseNumber": caseNum}).Decode(&adminCase); err == nil {
+			found = true
+		}
 	}
 
-	var adminCase models.AdminCase
-	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&adminCase); err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "case not found"})
-		return
+	// Fall back to ObjectID
+	if !found {
+		oid, err := primitive.ObjectIDFromHex(caseID)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "case not found"})
+			return
+		}
+		if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&adminCase); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "case not found"})
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
