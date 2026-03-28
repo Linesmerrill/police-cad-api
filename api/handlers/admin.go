@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,12 +48,14 @@ type adminLoginResponse struct {
 
 // Admin represents the admin handler
 type Admin struct {
-	ADB databases.AdminDatabase
-	RDB databases.AdminResetDatabase
-	UDB databases.UserDatabase
-	CDB databases.CommunityDatabase
-	AADB databases.AdminActivityDatabase
-	PVDB databases.PendingVerificationDatabase
+	ADB     databases.AdminDatabase
+	RDB     databases.AdminResetDatabase
+	UDB     databases.UserDatabase
+	CDB     databases.CommunityDatabase
+	AADB    databases.AdminActivityDatabase
+	PVDB    databases.PendingVerificationDatabase
+	AuditDB databases.AdminAuditDatabase
+	CaseDB  databases.AdminCaseDatabase
 }
 
 // checkAdminPermissions validates if the current user has sufficient permissions
@@ -724,13 +727,14 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 		}
 
 		result := models.AdminCommunityResult{
-			ID:             community.ID.Hex(),
-			Name:           community.Details.Name,
-			Visibility:     visibility,
-			CreatedAt:      community.Details.CreatedAt,
-			Owner:          ownerInfo,
-			MemberCount:    community.Details.MembersCount,
+			ID:              community.ID.Hex(),
+			Name:            community.Details.Name,
+			Visibility:      visibility,
+			CreatedAt:       community.Details.CreatedAt,
+			Owner:           ownerInfo,
+			MemberCount:     community.Details.MembersCount,
 			DepartmentCount: departmentCount,
+			RolesCount:      len(community.Details.Roles),
 		}
 		results = append(results, result)
 	}
@@ -943,12 +947,14 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			
 			userCommunities = append(userCommunities, models.AdminUserCommunity{
-				ID:         community.ID.Hex(),
-				Name:       community.Details.Name,
-				Status:     userComm.Status,
-				Role:       role,
-				Department: department,
-				JoinedAt:   community.Details.CreatedAt,
+				ID:          community.ID.Hex(),
+				Name:        community.Details.Name,
+				Status:      userComm.Status,
+				Role:        role,
+				Department:  department,
+				JoinedAt:    community.Details.CreatedAt,
+				MemberCount: community.Details.MembersCount,
+				ImageLink:   community.Details.ImageLink,
 			})
 		}
 	}
@@ -1083,15 +1089,16 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	details := models.AdminCommunityDetails{
-		ID:             community.ID.Hex(),
-		Name:           community.Details.Name,
-		Visibility:     visibility,
-		CreatedAt:      community.Details.CreatedAt,
-		Owner:          ownerInfo,
-		MemberCount:    community.Details.MembersCount,
-		Departments:    depts,
+		ID:              community.ID.Hex(),
+		Name:            community.Details.Name,
+		Visibility:      visibility,
+		CreatedAt:       community.Details.CreatedAt,
+		Owner:           ownerInfo,
+		MemberCount:     community.Details.MembersCount,
+		Departments:     depts,
 		DepartmentCount: len(community.Details.Departments),
-		Subscription:   subscription,
+		RolesCount:      len(community.Details.Roles),
+		Subscription:    subscription,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -3474,4 +3481,892 @@ func (h Admin) AdminSendEmailHandler(w http.ResponseWriter, r *http.Request) {
 		Success: true,
 		Message: "Email sent successfully",
 	})
+}
+
+// isHeadAdminRole identifies the Head Admin role by its permission structure,
+// not by name (since users can rename roles). The Head Admin role has an
+// "administrator" permission with description "Head Admin".
+func isHeadAdminRole(role models.Role) bool {
+	for _, perm := range role.Permissions {
+		if perm.Name == "administrator" && perm.Description == "Head Admin" && perm.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// getClientIP extracts the client IP from the request
+func getClientIP(r *http.Request) string {
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+	return ip
+}
+
+// AdminTransferOwnershipHandler transfers community ownership by email (admin-privileged, no ownership validation)
+func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	communityID := mux.Vars(r)["id"]
+	if communityID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community ID is required"})
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		NewOwnerEmail string                 `json:"newOwnerEmail"`
+		CurrentUser   map[string]interface{} `json:"currentUser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.NewOwnerEmail == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "newOwnerEmail is required"})
+		return
+	}
+
+	// Check admin permissions
+	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		return
+	}
+
+	// Look up new owner by email
+	var newOwner models.User
+	err := h.UDB.FindOne(r.Context(), bson.M{"user.email": req.NewOwnerEmail}).Decode(&newOwner)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no user found with email: " + req.NewOwnerEmail})
+		return
+	}
+
+	// Fetch the community
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		return
+	}
+
+	community, err := h.CDB.FindOne(r.Context(), bson.M{"_id": cID})
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community not found"})
+		return
+	}
+
+	// Capture before state
+	oldOwnerID := community.Details.OwnerID
+	var oldHeadAdminMembers []string
+	for _, role := range community.Details.Roles {
+		if isHeadAdminRole(role) {
+			oldHeadAdminMembers = make([]string, len(role.Members))
+			copy(oldHeadAdminMembers, role.Members)
+			break
+		}
+	}
+
+	// Look up old owner details for audit
+	var oldOwner models.User
+	_ = h.UDB.FindOne(r.Context(), bson.M{"_id": oldOwnerID}).Decode(&oldOwner)
+
+	// Build update: set new owner
+	newOwnerID := newOwner.ID
+	update := bson.M{
+		"$set": bson.M{
+			"community.ownerID":   newOwnerID,
+			"community.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}
+
+	// Update Head Admin role: replace members with just the new owner (only 1 allowed)
+	addedToHeadAdmin := false
+	for i, role := range community.Details.Roles {
+		if isHeadAdminRole(role) {
+			// Head Admin can only have 1 member — set it to just the new owner
+			update["$set"].(bson.M)[fmt.Sprintf("community.roles.%d.members", i)] = []string{newOwnerID}
+			addedToHeadAdmin = true
+			break
+		}
+	}
+
+	// Check if new owner is on the ban list — remove them (separate update to avoid $pull/$set conflict)
+	isBanned := false
+	for _, bannedID := range community.Details.BanList {
+		if bannedID == newOwnerID {
+			isBanned = true
+			break
+		}
+	}
+
+	// Ensure new owner is in the community members map
+	addedAsMember := false
+	update["$set"].(bson.M)[fmt.Sprintf("community.members.%s", newOwnerID)] = models.MemberDetail{}
+
+	// Count actual members in the map to get an accurate count
+	currentMemberCount := len(community.Details.Members)
+	if _, alreadyMember := community.Details.Members[newOwnerID]; !alreadyMember {
+		addedAsMember = true
+		currentMemberCount++
+	}
+	// Always set the count to be accurate (fixes drift from previous bugs)
+	if currentMemberCount < 1 {
+		currentMemberCount = 1
+	}
+	update["$set"].(bson.M)["community.membersCount"] = currentMemberCount
+
+	// Apply the main update ($set only)
+	err = h.CDB.UpdateOne(r.Context(), bson.M{"_id": cID}, update)
+	if err != nil {
+		log.Printf("Failed to transfer ownership (main update): %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to transfer ownership"})
+		return
+	}
+
+	// Remove from ban list in a separate update (can't mix $pull and $set on same doc reliably)
+	if isBanned {
+		pullUpdate := bson.M{"$pull": bson.M{"community.banList": newOwnerID}}
+		if err := h.CDB.UpdateOne(r.Context(), bson.M{"_id": cID}, pullUpdate); err != nil {
+			log.Printf("Failed to remove new owner from ban list: %v", err)
+		}
+	}
+
+	// Ensure new owner has this community in their user.communities array
+	// Build user filter — try string ID, fall back to ObjectID
+	newOwnerFilter := bson.M{"_id": newOwnerID}
+	if oid, oidErr := primitive.ObjectIDFromHex(newOwnerID); oidErr == nil {
+		var testUser models.User
+		if err := h.UDB.FindOne(r.Context(), newOwnerFilter).Decode(&testUser); err != nil {
+			newOwnerFilter = bson.M{"_id": oid}
+		}
+	}
+
+	// Check if user already has this community in their array
+	hasCommunity := false
+	for _, uc := range newOwner.Details.Communities {
+		if uc.CommunityID == communityID {
+			hasCommunity = true
+			// If it exists but not approved (e.g. declined/blocked), update status
+			if uc.Status != "approved" {
+				h.UDB.UpdateOne(r.Context(), bson.M{"_id": newOwnerFilter["_id"], "user.communities.communityId": communityID},
+					bson.M{"$set": bson.M{"user.communities.$.status": "approved"}})
+			}
+			break
+		}
+	}
+	if !hasCommunity {
+		// Add the community to their communities array
+		newCommunityEntry := models.UserCommunity{
+			ID:          primitive.NewObjectID().Hex(),
+			CommunityID: communityID,
+			Status:      "approved",
+		}
+		h.UDB.UpdateOne(r.Context(), newOwnerFilter, bson.M{"$push": bson.M{"user.communities": newCommunityEntry}})
+	}
+
+	// Get admin email from currentUser
+	adminEmail, _ := req.CurrentUser["email"].(string)
+
+	// Log to admin_audit
+	audit := models.AdminAudit{
+		AdminID:       "",
+		AdminEmail:    adminEmail,
+		Action:        "ownership_transfer",
+		CommunityID:   communityID,
+		CommunityName: community.Details.Name,
+		Before: map[string]interface{}{
+			"ownerID":          oldOwnerID,
+			"ownerEmail":       oldOwner.Details.Email,
+			"headAdminMembers": oldHeadAdminMembers,
+		},
+		After: map[string]interface{}{
+			"ownerID":            newOwnerID,
+			"ownerEmail":         req.NewOwnerEmail,
+			"addedToHeadAdmin":   addedToHeadAdmin,
+			"removedFromBanList": isBanned,
+			"addedAsMember":      addedAsMember,
+		},
+		Details:   fmt.Sprintf("Ownership transferred from %s to %s", oldOwner.Details.Email, req.NewOwnerEmail),
+		Timestamp: time.Now(),
+		IP:        getClientIP(r),
+	}
+	if _, err := h.AuditDB.InsertOne(r.Context(), audit); err != nil {
+		log.Printf("CRITICAL: failed to write audit log: %v", err)
+	}
+
+	// Also log to admin_activity for the activity feed
+	h.trackAdminAction(primitive.NilObjectID, "ownership_transfer", communityID, "community",
+		fmt.Sprintf("Transferred ownership of %s from %s to %s", community.Details.Name, oldOwner.Details.Email, req.NewOwnerEmail), r)
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":            "Ownership transferred successfully",
+		"newOwnerID":         newOwnerID,
+		"addedToHeadAdmin":   addedToHeadAdmin,
+		"removedFromBanList": isBanned,
+		"addedAsMember":      addedAsMember,
+	})
+}
+
+// AdminGetCommunityRolesHandler returns all roles with resolved member details
+func (h Admin) AdminGetCommunityRolesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	communityID := mux.Vars(r)["id"]
+	if communityID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community ID is required"})
+		return
+	}
+
+	// Fetch the community
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		return
+	}
+
+	community, err := h.CDB.FindOne(r.Context(), bson.M{"_id": cID})
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community not found"})
+		return
+	}
+
+	// Resolve all member IDs across all roles
+	memberIDSet := make(map[string]bool)
+	for _, role := range community.Details.Roles {
+		for _, memberID := range role.Members {
+			memberIDSet[memberID] = true
+		}
+	}
+
+	// Batch-fetch all users (try string ID first, then ObjectID)
+	userMap := make(map[string]models.User)
+	for memberID := range memberIDSet {
+		var user models.User
+		err := h.UDB.FindOne(r.Context(), bson.M{"_id": memberID}).Decode(&user)
+		if err != nil {
+			// Try ObjectID form
+			if oid, oidErr := primitive.ObjectIDFromHex(memberID); oidErr == nil {
+				var userObj struct {
+					ID      primitive.ObjectID `bson:"_id"`
+					Details models.UserDetails `bson:"user"`
+					Version int32              `bson:"__v"`
+				}
+				if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
+					user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
+					userMap[memberID] = user
+				}
+			}
+			continue
+		}
+		userMap[memberID] = user
+	}
+
+	// Build response
+	var roles []models.AdminRoleWithMembers
+	for _, role := range community.Details.Roles {
+		hasAdmin := false
+		for _, perm := range role.Permissions {
+			if perm.Name == "administrator" && perm.Enabled {
+				hasAdmin = true
+				break
+			}
+		}
+
+		var members []models.AdminRoleMember
+		for _, memberID := range role.Members {
+			user, ok := userMap[memberID]
+			if ok {
+				members = append(members, models.AdminRoleMember{
+					ID:       memberID,
+					Username: user.Details.Username,
+					Email:    user.Details.Email,
+				})
+			} else {
+				members = append(members, models.AdminRoleMember{
+					ID:       memberID,
+					Username: "(unknown)",
+					Email:    "(unknown)",
+				})
+			}
+		}
+
+		roles = append(roles, models.AdminRoleWithMembers{
+			ID:                 role.ID.Hex(),
+			Name:               role.Name,
+			Members:            members,
+			HasAdminPermission: hasAdmin,
+			IsHeadAdmin:        isHeadAdminRole(role),
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"roles": roles,
+	})
+}
+
+// AdminRemoveMemberHandler removes a user from a community (and optionally bans them)
+func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	communityID := mux.Vars(r)["id"]
+	if communityID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community ID is required"})
+		return
+	}
+
+	var req struct {
+		UserEmail   string                 `json:"userEmail"`
+		Ban         bool                   `json:"ban"`
+		CurrentUser map[string]interface{} `json:"currentUser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.UserEmail == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "userEmail is required"})
+		return
+	}
+
+	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		return
+	}
+
+	var targetUser models.User
+	err := h.UDB.FindOne(r.Context(), bson.M{"user.email": req.UserEmail}).Decode(&targetUser)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "no user found with email: " + req.UserEmail})
+		return
+	}
+	targetUserID := targetUser.ID
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		return
+	}
+
+	community, err := h.CDB.FindOne(r.Context(), bson.M{"_id": cID})
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community not found"})
+		return
+	}
+
+	// Prevent removing the community owner — use Reset Owner & Roles instead
+	if community.Details.OwnerID == targetUserID {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Cannot remove the community owner. Use 'Reset Owner & Roles' to transfer ownership first."})
+		return
+	}
+
+	// Capture which roles user is in
+	var rolesUserWasIn []string
+	for _, role := range community.Details.Roles {
+		for _, member := range role.Members {
+			if member == targetUserID {
+				rolesUserWasIn = append(rolesUserWasIn, role.Name)
+				break
+			}
+		}
+	}
+
+	// Remove user from all roles
+	setFields := bson.M{
+		"community.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+	}
+	for i, role := range community.Details.Roles {
+		var newMembers []string
+		for _, member := range role.Members {
+			if member != targetUserID {
+				newMembers = append(newMembers, member)
+			}
+		}
+		if newMembers == nil {
+			newMembers = []string{}
+		}
+		setFields[fmt.Sprintf("community.roles.%d.members", i)] = newMembers
+	}
+
+	communityUpdate := bson.M{
+		"$set":   setFields,
+		"$unset": bson.M{fmt.Sprintf("community.members.%s", targetUserID): ""},
+		"$inc":   bson.M{"community.membersCount": -1},
+	}
+
+	if req.Ban {
+		communityUpdate["$push"] = bson.M{"community.banList": targetUserID}
+	}
+
+	err = h.CDB.UpdateOne(r.Context(), bson.M{"_id": cID}, communityUpdate)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update community"})
+		return
+	}
+
+	// Build user filter — try string ID first, fall back to ObjectID
+	userFilter := bson.M{"_id": targetUserID}
+	if oid, oidErr := primitive.ObjectIDFromHex(targetUserID); oidErr == nil {
+		// Test if string ID matches by attempting a find
+		var testUser models.User
+		if err := h.UDB.FindOne(r.Context(), userFilter).Decode(&testUser); err != nil {
+			// String didn't match, use ObjectID
+			userFilter = bson.M{"_id": oid}
+		}
+	}
+
+	// Remove community from user's communities array
+	userUpdate := bson.M{
+		"$pull": bson.M{
+			"user.communities": bson.M{"communityId": communityID},
+		},
+	}
+	_, err = h.UDB.UpdateOne(r.Context(), userFilter, userUpdate)
+	if err != nil {
+		log.Printf("Failed to remove community from user's communities: %v", err)
+	}
+
+	// Clear lastAccessedCommunity if it matches
+	if targetUser.Details.LastAccessedCommunity.CommunityID == communityID {
+		clearUpdate := bson.M{
+			"$set": bson.M{
+				"user.lastAccessedCommunity": models.LastAccessedCommunity{},
+			},
+		}
+		_, err = h.UDB.UpdateOne(r.Context(), userFilter, clearUpdate)
+		if err != nil {
+			log.Printf("Failed to clear lastAccessedCommunity: %v", err)
+		}
+	}
+
+	adminEmail, _ := req.CurrentUser["email"].(string)
+
+	audit := models.AdminAudit{
+		AdminEmail:    adminEmail,
+		Action:        "member_removal",
+		CommunityID:   communityID,
+		CommunityName: community.Details.Name,
+		Before: map[string]interface{}{
+			"userID":      targetUserID,
+			"userEmail":   req.UserEmail,
+			"username":    targetUser.Details.Username,
+			"rolesUserIn": rolesUserWasIn,
+			"wasMember":   true,
+		},
+		After: map[string]interface{}{
+			"removed": true,
+			"banned":  req.Ban,
+		},
+		Details:   fmt.Sprintf("Removed %s (%s) from community %s. Banned: %v", targetUser.Details.Username, req.UserEmail, community.Details.Name, req.Ban),
+		Timestamp: time.Now(),
+		IP:        getClientIP(r),
+	}
+	if _, err := h.AuditDB.InsertOne(r.Context(), audit); err != nil {
+		log.Printf("CRITICAL: failed to write audit log: %v", err)
+	}
+
+	actionType := "member_removed"
+	if req.Ban {
+		actionType = "member_removed_banned"
+	}
+	h.trackAdminAction(primitive.NilObjectID, actionType, targetUserID, "user",
+		fmt.Sprintf("Removed %s from %s (banned: %v)", req.UserEmail, community.Details.Name, req.Ban), r)
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":  "Member removed successfully",
+		"banned":   req.Ban,
+		"userID":   targetUserID,
+		"username": targetUser.Details.Username,
+	})
+}
+
+// AdminCreateCaseHandler creates a new admin case or returns an existing open one
+func (h Admin) AdminCreateCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		CommunityID   string                 `json:"communityId"`
+		CommunityName string                 `json:"communityName"`
+		CurrentUser   map[string]interface{} `json:"currentUser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.CommunityID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "communityId is required"})
+		return
+	}
+	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		return
+	}
+
+	// Check for existing open case for this community
+	var existingCase models.AdminCase
+	err := h.CaseDB.FindOne(r.Context(), bson.M{
+		"communityId": req.CommunityID,
+		"status":      "open",
+	}).Decode(&existingCase)
+	if err == nil {
+		// Return existing open case
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": existingCase, "resumed": true})
+		return
+	}
+
+	adminEmail, _ := req.CurrentUser["email"].(string)
+	adminName, _ := req.CurrentUser["name"].(string)
+	adminRoles, _ := req.CurrentUser["roles"].([]interface{})
+	adminRole := "admin"
+	if len(adminRoles) > 0 {
+		if r, ok := adminRoles[0].(string); ok {
+			adminRole = r
+		}
+	}
+
+	// Get next case number by finding the max existing one
+	nextCaseNumber := 1
+	maxCursor, maxErr := h.CaseDB.Find(r.Context(), bson.M{}, options.Find().SetSort(bson.M{"caseNumber": -1}).SetLimit(1))
+	if maxErr == nil {
+		var maxCases []models.AdminCase
+		if maxCursor.All(r.Context(), &maxCases) == nil && len(maxCases) > 0 {
+			nextCaseNumber = maxCases[0].CaseNumber + 1
+		}
+		maxCursor.Close(r.Context())
+	}
+
+	now := time.Now()
+	newCase := models.AdminCase{
+		CaseNumber:    nextCaseNumber,
+		Type:          "ownership_reset",
+		Status:        "open",
+		CommunityID:   req.CommunityID,
+		CommunityName: req.CommunityName,
+		CreatedBy: models.AdminCaseCreatedBy{
+			AdminEmail: adminEmail,
+			AdminName:  adminName,
+			AdminRole:  adminRole,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Steps:     models.AdminCaseSteps{},
+	}
+
+	result, err := h.CaseDB.InsertOne(r.Context(), newCase)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to create case"})
+		return
+	}
+
+	// Get the inserted ID
+	var insertedID primitive.ObjectID
+	if oid, ok := result.Decode().(primitive.ObjectID); ok {
+		insertedID = oid
+	}
+	newCase.ID = insertedID
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": newCase, "resumed": false})
+}
+
+// AdminListCasesHandler lists admin cases with optional filtering and pagination
+func (h Admin) AdminListCasesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	status := r.URL.Query().Get("status")
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+
+	page := 0
+	if p, err := strconv.Atoi(pageStr); err == nil && p >= 0 {
+		page = p
+	}
+	limit := 20
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+
+	filter := bson.M{}
+	if status == "open" || status == "completed" || status == "cancelled" {
+		filter["status"] = status
+	}
+
+	totalCount, err := h.CaseDB.CountDocuments(r.Context(), filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to count cases"})
+		return
+	}
+
+	findOpts := options.Find().
+		SetSkip(int64(page * limit)).
+		SetLimit(int64(limit)).
+		SetSort(bson.M{"createdAt": -1})
+
+	cursor, err := h.CaseDB.Find(r.Context(), filter, findOpts)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch cases"})
+		return
+	}
+	defer cursor.Close(r.Context())
+
+	var cases []models.AdminCase
+	if err := cursor.All(r.Context(), &cases); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode cases"})
+		return
+	}
+	if cases == nil {
+		cases = []models.AdminCase{}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"cases":      cases,
+		"totalCount": totalCount,
+		"page":       page,
+		"limit":      limit,
+	})
+}
+
+// AdminGetCaseHandler retrieves a single admin case by ID
+func (h Admin) AdminGetCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	caseID := mux.Vars(r)["id"]
+	if caseID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "case ID is required"})
+		return
+	}
+
+	var adminCase models.AdminCase
+	var found bool
+
+	// Try as case number first (if numeric)
+	if caseNum, numErr := strconv.Atoi(caseID); numErr == nil {
+		if err := h.CaseDB.FindOne(r.Context(), bson.M{"caseNumber": caseNum}).Decode(&adminCase); err == nil {
+			found = true
+		}
+	}
+
+	// Fall back to ObjectID
+	if !found {
+		oid, err := primitive.ObjectIDFromHex(caseID)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "case not found"})
+			return
+		}
+		if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&adminCase); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "case not found"})
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": adminCase})
+}
+
+// AdminUpdateCaseStepHandler updates a specific step of an admin case
+func (h Admin) AdminUpdateCaseStepHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	caseID := vars["id"]
+	stepName := vars["stepName"]
+
+	validSteps := map[string]bool{
+		"transferOwnership": true,
+		"headAdmin":         true,
+		"roleAudit":         true,
+		"removeBadActor":    true,
+		"summary":           true,
+	}
+	if !validSteps[stepName] {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid step name"})
+		return
+	}
+
+	oid, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
+		return
+	}
+
+	// Parse step data
+	var stepData map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&stepData); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Build update: set each field under steps.<stepName>
+	now := time.Now()
+	setFields := bson.M{
+		"updatedAt": now,
+		fmt.Sprintf("steps.%s.completed", stepName):   true,
+		fmt.Sprintf("steps.%s.completedAt", stepName): now,
+	}
+
+	// Copy step-specific fields
+	for key, value := range stepData {
+		if key == "currentUser" || key == "completed" || key == "completedAt" {
+			continue // skip meta fields
+		}
+		setFields[fmt.Sprintf("steps.%s.%s", stepName, key)] = value
+	}
+
+	update := bson.M{"$set": setFields}
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid, "status": "open"}, update)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update case step"})
+		return
+	}
+
+	// Return updated case
+	var updatedCase models.AdminCase
+	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&updatedCase); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch updated case"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": updatedCase})
+}
+
+// AdminCancelCaseHandler cancels an open case with a reason
+func (h Admin) AdminCancelCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	caseID := mux.Vars(r)["id"]
+	oid, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
+		return
+	}
+
+	var req struct {
+		Reason      string                 `json:"reason"`
+		CurrentUser map[string]interface{} `json:"currentUser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Reason == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "cancellation reason is required"})
+		return
+	}
+
+	adminEmail, _ := req.CurrentUser["email"].(string)
+
+	now := time.Now()
+	update := bson.M{
+		"$set": bson.M{
+			"status":          "cancelled",
+			"cancelledAt":     now,
+			"cancelledReason": req.Reason,
+			"cancelledBy":     adminEmail,
+			"updatedAt":       now,
+		},
+	}
+
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid, "status": "open"}, update)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to cancel case"})
+		return
+	}
+
+	var updatedCase models.AdminCase
+	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&updatedCase); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch updated case"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": updatedCase})
+}
+
+// AdminCompleteCaseHandler marks an admin case as completed
+func (h Admin) AdminCompleteCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	caseID := mux.Vars(r)["id"]
+	oid, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
+		return
+	}
+
+	now := time.Now()
+	update := bson.M{
+		"$set": bson.M{
+			"status":      "completed",
+			"completedAt": now,
+			"updatedAt":   now,
+		},
+	}
+
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid, "status": "open"}, update)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to complete case"})
+		return
+	}
+
+	var updatedCase models.AdminCase
+	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&updatedCase); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch updated case"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": updatedCase})
 }
