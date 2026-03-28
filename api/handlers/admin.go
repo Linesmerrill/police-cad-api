@@ -3610,20 +3610,21 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Check if new owner is in the community members map — add them if not
+	// Ensure new owner is in the community members map
 	addedAsMember := false
-	if community.Details.Members != nil {
-		if _, isMember := community.Details.Members[newOwnerID]; !isMember {
-			update["$set"].(bson.M)[fmt.Sprintf("community.members.%s", newOwnerID)] = models.MemberDetail{}
-			update["$set"].(bson.M)["community.membersCount"] = community.Details.MembersCount + 1
-			addedAsMember = true
-		}
-	} else {
-		// Members map doesn't exist, initialize with the new owner
-		update["$set"].(bson.M)["community.members"] = map[string]models.MemberDetail{newOwnerID: {}}
-		update["$set"].(bson.M)["community.membersCount"] = 1
+	update["$set"].(bson.M)[fmt.Sprintf("community.members.%s", newOwnerID)] = models.MemberDetail{}
+
+	// Count actual members in the map to get an accurate count
+	currentMemberCount := len(community.Details.Members)
+	if _, alreadyMember := community.Details.Members[newOwnerID]; !alreadyMember {
 		addedAsMember = true
+		currentMemberCount++
 	}
+	// Always set the count to be accurate (fixes drift from previous bugs)
+	if currentMemberCount < 1 {
+		currentMemberCount = 1
+	}
+	update["$set"].(bson.M)["community.membersCount"] = currentMemberCount
 
 	// Apply the main update ($set only)
 	err = h.CDB.UpdateOne(r.Context(), bson.M{"_id": cID}, update)
