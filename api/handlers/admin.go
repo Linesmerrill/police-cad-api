@@ -3601,7 +3601,7 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Check if new owner is on the ban list — remove them
+	// Check if new owner is on the ban list — remove them (separate update to avoid $pull/$set conflict)
 	isBanned := false
 	for _, bannedID := range community.Details.BanList {
 		if bannedID == newOwnerID {
@@ -3609,22 +3609,37 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 			break
 		}
 	}
-	if isBanned {
-		update["$pull"] = bson.M{"community.banList": newOwnerID}
-	}
 
 	// Check if new owner is in the community members map — add them if not
-	if _, isMember := community.Details.Members[newOwnerID]; !isMember {
-		update["$set"].(bson.M)[fmt.Sprintf("community.members.%s", newOwnerID)] = models.MemberDetail{}
-		update["$set"].(bson.M)["community.membersCount"] = community.Details.MembersCount + 1
+	addedAsMember := false
+	if community.Details.Members != nil {
+		if _, isMember := community.Details.Members[newOwnerID]; !isMember {
+			update["$set"].(bson.M)[fmt.Sprintf("community.members.%s", newOwnerID)] = models.MemberDetail{}
+			update["$set"].(bson.M)["community.membersCount"] = community.Details.MembersCount + 1
+			addedAsMember = true
+		}
+	} else {
+		// Members map doesn't exist, initialize with the new owner
+		update["$set"].(bson.M)["community.members"] = map[string]models.MemberDetail{newOwnerID: {}}
+		update["$set"].(bson.M)["community.membersCount"] = 1
+		addedAsMember = true
 	}
 
-	// Apply the update
+	// Apply the main update ($set only)
 	err = h.CDB.UpdateOne(r.Context(), bson.M{"_id": cID}, update)
 	if err != nil {
+		log.Printf("Failed to transfer ownership (main update): %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to transfer ownership"})
 		return
+	}
+
+	// Remove from ban list in a separate update (can't mix $pull and $set on same doc reliably)
+	if isBanned {
+		pullUpdate := bson.M{"$pull": bson.M{"community.banList": newOwnerID}}
+		if err := h.CDB.UpdateOne(r.Context(), bson.M{"_id": cID}, pullUpdate); err != nil {
+			log.Printf("Failed to remove new owner from ban list: %v", err)
+		}
 	}
 
 	// Ensure new owner has this community in their user.communities array
@@ -3680,7 +3695,7 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 			"ownerEmail":         req.NewOwnerEmail,
 			"addedToHeadAdmin":   addedToHeadAdmin,
 			"removedFromBanList": isBanned,
-			"addedAsMember":      !func() bool { _, ok := community.Details.Members[newOwnerID]; return ok }(),
+			"addedAsMember":      addedAsMember,
 		},
 		Details:   fmt.Sprintf("Ownership transferred from %s to %s", oldOwner.Details.Email, req.NewOwnerEmail),
 		Timestamp: time.Now(),
@@ -3700,7 +3715,7 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		"newOwnerID":         newOwnerID,
 		"addedToHeadAdmin":   addedToHeadAdmin,
 		"removedFromBanList": isBanned,
-		"addedAsMember":      !func() bool { _, ok := community.Details.Members[newOwnerID]; return ok }(),
+		"addedAsMember":      addedAsMember,
 	})
 }
 
