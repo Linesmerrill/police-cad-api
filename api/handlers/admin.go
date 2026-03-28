@@ -3573,24 +3573,13 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		},
 	}
 
-	// Update Head Admin role: add new owner if not present
+	// Update Head Admin role: replace members with just the new owner (only 1 allowed)
 	addedToHeadAdmin := false
 	for i, role := range community.Details.Roles {
 		if role.Name == "Head Admin" {
-			hasNewOwner := false
-			for _, member := range role.Members {
-				if member == newOwnerID {
-					hasNewOwner = true
-					break
-				}
-			}
-			if !hasNewOwner {
-				newMembers := make([]string, len(role.Members))
-				copy(newMembers, role.Members)
-				newMembers = append(newMembers, newOwnerID)
-				update["$set"].(bson.M)[fmt.Sprintf("community.roles.%d.members", i)] = newMembers
-				addedToHeadAdmin = true
-			}
+			// Head Admin can only have 1 member — set it to just the new owner
+			update["$set"].(bson.M)[fmt.Sprintf("community.roles.%d.members", i)] = []string{newOwnerID}
+			addedToHeadAdmin = true
 			break
 		}
 	}
