@@ -4208,7 +4208,7 @@ func (h Admin) AdminUpdateCaseStepHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	update := bson.M{"$set": setFields}
-	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid}, update)
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid, "status": "open"}, update)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update case step"})
@@ -4306,7 +4306,7 @@ func (h Admin) AdminCompleteCaseHandler(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 
-	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid}, update)
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid, "status": "open"}, update)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to complete case"})
