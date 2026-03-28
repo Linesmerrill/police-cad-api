@@ -4172,6 +4172,64 @@ func (h Admin) AdminUpdateCaseStepHandler(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": updatedCase})
 }
 
+// AdminCancelCaseHandler cancels an open case with a reason
+func (h Admin) AdminCancelCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	caseID := mux.Vars(r)["id"]
+	oid, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
+		return
+	}
+
+	var req struct {
+		Reason      string                 `json:"reason"`
+		CurrentUser map[string]interface{} `json:"currentUser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Reason == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "cancellation reason is required"})
+		return
+	}
+
+	adminEmail, _ := req.CurrentUser["email"].(string)
+
+	now := time.Now()
+	update := bson.M{
+		"$set": bson.M{
+			"status":          "cancelled",
+			"cancelledAt":     now,
+			"cancelledReason": req.Reason,
+			"cancelledBy":     adminEmail,
+			"updatedAt":       now,
+		},
+	}
+
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid, "status": "open"}, update)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to cancel case"})
+		return
+	}
+
+	var updatedCase models.AdminCase
+	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&updatedCase); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch updated case"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": updatedCase})
+}
+
 // AdminCompleteCaseHandler marks an admin case as completed
 func (h Admin) AdminCompleteCaseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

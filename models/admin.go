@@ -404,16 +404,19 @@ type AdminCaseSteps struct {
 
 // AdminCase is a persistent workflow case (e.g., ownership reset)
 type AdminCase struct {
-	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Type          string             `bson:"type" json:"type"`
-	Status        string             `bson:"status" json:"status"`
-	CommunityID   string             `bson:"communityId" json:"communityId"`
-	CommunityName string             `bson:"communityName" json:"communityName"`
-	CreatedBy     AdminCaseCreatedBy `bson:"createdBy" json:"createdBy"`
-	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
-	UpdatedAt     time.Time          `bson:"updatedAt" json:"updatedAt"`
-	CompletedAt   *time.Time         `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
-	Steps         AdminCaseSteps     `bson:"steps" json:"steps"`
+	ID              primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Type            string             `bson:"type" json:"type"`
+	Status          string             `bson:"status" json:"status"`
+	CommunityID     string             `bson:"communityId" json:"communityId"`
+	CommunityName   string             `bson:"communityName" json:"communityName"`
+	CreatedBy       AdminCaseCreatedBy `bson:"createdBy" json:"createdBy"`
+	CreatedAt       time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt       time.Time          `bson:"updatedAt" json:"updatedAt"`
+	CompletedAt     *time.Time         `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	CancelledAt     *time.Time         `bson:"cancelledAt,omitempty" json:"cancelledAt,omitempty"`
+	CancelledReason string             `bson:"cancelledReason,omitempty" json:"cancelledReason,omitempty"`
+	CancelledBy     string             `bson:"cancelledBy,omitempty" json:"cancelledBy,omitempty"`
+	Steps           AdminCaseSteps     `bson:"steps" json:"steps"`
 }
 
 

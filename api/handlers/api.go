@@ -143,6 +143,7 @@ func (a *App) New() *mux.Router {
 	// Admin case management routes
 	apiCreate.Handle("/admin/cases/{id}/steps/{stepName}", http.HandlerFunc(adminHandler.AdminUpdateCaseStepHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/cases/{id}/complete", http.HandlerFunc(adminHandler.AdminCompleteCaseHandler)).Methods("PATCH")
+	apiCreate.Handle("/admin/cases/{id}/cancel", http.HandlerFunc(adminHandler.AdminCancelCaseHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/cases/{id}", http.HandlerFunc(adminHandler.AdminGetCaseHandler)).Methods("GET")
 	apiCreate.Handle("/admin/cases", http.HandlerFunc(adminHandler.AdminCreateCaseHandler)).Methods("POST")
 	apiCreate.Handle("/admin/cases", http.HandlerFunc(adminHandler.AdminListCasesHandler)).Methods("GET")
