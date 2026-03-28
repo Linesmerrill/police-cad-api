@@ -3851,13 +3851,24 @@ func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Build user filter — try string ID first, fall back to ObjectID
+	userFilter := bson.M{"_id": targetUserID}
+	if oid, oidErr := primitive.ObjectIDFromHex(targetUserID); oidErr == nil {
+		// Test if string ID matches by attempting a find
+		var testUser models.User
+		if err := h.UDB.FindOne(r.Context(), userFilter).Decode(&testUser); err != nil {
+			// String didn't match, use ObjectID
+			userFilter = bson.M{"_id": oid}
+		}
+	}
+
 	// Remove community from user's communities array
 	userUpdate := bson.M{
 		"$pull": bson.M{
 			"user.communities": bson.M{"communityId": communityID},
 		},
 	}
-	_, err = h.UDB.UpdateOne(r.Context(), bson.M{"_id": targetUserID}, userUpdate)
+	_, err = h.UDB.UpdateOne(r.Context(), userFilter, userUpdate)
 	if err != nil {
 		log.Printf("Failed to remove community from user's communities: %v", err)
 	}
@@ -3869,7 +3880,7 @@ func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) 
 				"user.lastAccessedCommunity": models.LastAccessedCommunity{},
 			},
 		}
-		_, err = h.UDB.UpdateOne(r.Context(), bson.M{"_id": targetUserID}, clearUpdate)
+		_, err = h.UDB.UpdateOne(r.Context(), userFilter, clearUpdate)
 		if err != nil {
 			log.Printf("Failed to clear lastAccessedCommunity: %v", err)
 		}
