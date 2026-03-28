@@ -140,6 +140,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")
 
 	// Admin community management routes
+	apiCreate.Handle("/admin/communities/{id}/transfer-ownership", http.HandlerFunc(adminHandler.AdminTransferOwnershipHandler)).Methods("POST")
+	apiCreate.Handle("/admin/communities/{id}/remove-member", http.HandlerFunc(adminHandler.AdminRemoveMemberHandler)).Methods("POST")
+	apiCreate.Handle("/admin/communities/{id}/roles", http.HandlerFunc(adminHandler.AdminGetCommunityRolesHandler)).Methods("GET")
 	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
 
 	// Admin management routes (specific before general)
