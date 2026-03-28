@@ -725,13 +725,14 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 		}
 
 		result := models.AdminCommunityResult{
-			ID:             community.ID.Hex(),
-			Name:           community.Details.Name,
-			Visibility:     visibility,
-			CreatedAt:      community.Details.CreatedAt,
-			Owner:          ownerInfo,
-			MemberCount:    community.Details.MembersCount,
+			ID:              community.ID.Hex(),
+			Name:            community.Details.Name,
+			Visibility:      visibility,
+			CreatedAt:       community.Details.CreatedAt,
+			Owner:           ownerInfo,
+			MemberCount:     community.Details.MembersCount,
 			DepartmentCount: departmentCount,
+			RolesCount:      len(community.Details.Roles),
 		}
 		results = append(results, result)
 	}
@@ -1085,15 +1086,16 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	details := models.AdminCommunityDetails{
-		ID:             community.ID.Hex(),
-		Name:           community.Details.Name,
-		Visibility:     visibility,
-		CreatedAt:      community.Details.CreatedAt,
-		Owner:          ownerInfo,
-		MemberCount:    community.Details.MembersCount,
-		Departments:    depts,
+		ID:              community.ID.Hex(),
+		Name:            community.Details.Name,
+		Visibility:      visibility,
+		CreatedAt:       community.Details.CreatedAt,
+		Owner:           ownerInfo,
+		MemberCount:     community.Details.MembersCount,
+		Departments:     depts,
 		DepartmentCount: len(community.Details.Departments),
-		Subscription:   subscription,
+		RolesCount:      len(community.Details.Roles),
+		Subscription:    subscription,
 	}
 
 	w.WriteHeader(http.StatusOK)
