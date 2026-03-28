@@ -291,6 +291,7 @@ type AdminRoleWithMembers struct {
 	Name               string            `json:"name"`
 	Members            []AdminRoleMember `json:"members"`
 	HasAdminPermission bool              `json:"hasAdminPermission"`
+	IsHeadAdmin        bool              `json:"isHeadAdmin"`
 }
 
 // AdminRoleMember is a resolved member in a role

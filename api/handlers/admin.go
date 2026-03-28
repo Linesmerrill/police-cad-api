@@ -3478,6 +3478,18 @@ func (h Admin) AdminSendEmailHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// isHeadAdminRole identifies the Head Admin role by its permission structure,
+// not by name (since users can rename roles). The Head Admin role has an
+// "administrator" permission with description "Head Admin".
+func isHeadAdminRole(role models.Role) bool {
+	for _, perm := range role.Permissions {
+		if perm.Name == "administrator" && perm.Description == "Head Admin" && perm.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
 	ip := r.Header.Get("X-Forwarded-For")
@@ -3553,7 +3565,7 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 	oldOwnerID := community.Details.OwnerID
 	var oldHeadAdminMembers []string
 	for _, role := range community.Details.Roles {
-		if role.Name == "Head Admin" {
+		if isHeadAdminRole(role) {
 			oldHeadAdminMembers = make([]string, len(role.Members))
 			copy(oldHeadAdminMembers, role.Members)
 			break
@@ -3576,7 +3588,7 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 	// Update Head Admin role: replace members with just the new owner (only 1 allowed)
 	addedToHeadAdmin := false
 	for i, role := range community.Details.Roles {
-		if role.Name == "Head Admin" {
+		if isHeadAdminRole(role) {
 			// Head Admin can only have 1 member — set it to just the new owner
 			update["$set"].(bson.M)[fmt.Sprintf("community.roles.%d.members", i)] = []string{newOwnerID}
 			addedToHeadAdmin = true
@@ -3711,6 +3723,7 @@ func (h Admin) AdminGetCommunityRolesHandler(w http.ResponseWriter, r *http.Requ
 			Name:               role.Name,
 			Members:            members,
 			HasAdminPermission: hasAdmin,
+			IsHeadAdmin:        isHeadAdminRole(role),
 		})
 	}
 
