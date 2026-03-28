@@ -4302,6 +4302,11 @@ func (h Admin) AdminCancelCaseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	adminEmail, _ := req.CurrentUser["email"].(string)
+	adminName, _ := req.CurrentUser["name"].(string)
+	cancelledBy := adminName
+	if cancelledBy == "" {
+		cancelledBy = adminEmail
+	}
 
 	now := time.Now()
 	update := bson.M{
@@ -4309,7 +4314,7 @@ func (h Admin) AdminCancelCaseHandler(w http.ResponseWriter, r *http.Request) {
 			"status":          "cancelled",
 			"cancelledAt":     now,
 			"cancelledReason": req.Reason,
-			"cancelledBy":     adminEmail,
+			"cancelledBy":     cancelledBy,
 			"updatedAt":       now,
 		},
 	}
