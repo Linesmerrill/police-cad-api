@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ type Admin struct {
 	AADB    databases.AdminActivityDatabase
 	PVDB    databases.PendingVerificationDatabase
 	AuditDB databases.AdminAuditDatabase
+	CaseDB  databases.AdminCaseDatabase
 }
 
 // checkAdminPermissions validates if the current user has sufficient permissions
@@ -3913,4 +3915,287 @@ func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) 
 		"userID":   targetUserID,
 		"username": targetUser.Details.Username,
 	})
+}
+
+// AdminCreateCaseHandler creates a new admin case or returns an existing open one
+func (h Admin) AdminCreateCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		CommunityID   string                 `json:"communityId"`
+		CommunityName string                 `json:"communityName"`
+		CurrentUser   map[string]interface{} `json:"currentUser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.CommunityID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "communityId is required"})
+		return
+	}
+	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		return
+	}
+
+	// Check for existing open case for this community
+	var existingCase models.AdminCase
+	err := h.CaseDB.FindOne(r.Context(), bson.M{
+		"communityId": req.CommunityID,
+		"status":      "open",
+	}).Decode(&existingCase)
+	if err == nil {
+		// Return existing open case
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": existingCase, "resumed": true})
+		return
+	}
+
+	adminEmail, _ := req.CurrentUser["email"].(string)
+	adminName, _ := req.CurrentUser["name"].(string)
+	adminRoles, _ := req.CurrentUser["roles"].([]interface{})
+	adminRole := "admin"
+	if len(adminRoles) > 0 {
+		if r, ok := adminRoles[0].(string); ok {
+			adminRole = r
+		}
+	}
+
+	now := time.Now()
+	newCase := models.AdminCase{
+		Type:          "ownership_reset",
+		Status:        "open",
+		CommunityID:   req.CommunityID,
+		CommunityName: req.CommunityName,
+		CreatedBy: models.AdminCaseCreatedBy{
+			AdminEmail: adminEmail,
+			AdminName:  adminName,
+			AdminRole:  adminRole,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Steps:     models.AdminCaseSteps{},
+	}
+
+	result, err := h.CaseDB.InsertOne(r.Context(), newCase)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to create case"})
+		return
+	}
+
+	// Get the inserted ID
+	var insertedID primitive.ObjectID
+	if oid, ok := result.Decode().(primitive.ObjectID); ok {
+		insertedID = oid
+	}
+	newCase.ID = insertedID
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": newCase, "resumed": false})
+}
+
+// AdminListCasesHandler lists admin cases with optional filtering and pagination
+func (h Admin) AdminListCasesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	status := r.URL.Query().Get("status")
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+
+	page := 0
+	if p, err := strconv.Atoi(pageStr); err == nil && p >= 0 {
+		page = p
+	}
+	limit := 20
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+
+	filter := bson.M{}
+	if status == "open" || status == "completed" {
+		filter["status"] = status
+	}
+
+	totalCount, err := h.CaseDB.CountDocuments(r.Context(), filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to count cases"})
+		return
+	}
+
+	findOpts := options.Find().
+		SetSkip(int64(page * limit)).
+		SetLimit(int64(limit)).
+		SetSort(bson.M{"createdAt": -1})
+
+	cursor, err := h.CaseDB.Find(r.Context(), filter, findOpts)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch cases"})
+		return
+	}
+	defer cursor.Close(r.Context())
+
+	var cases []models.AdminCase
+	if err := cursor.All(r.Context(), &cases); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode cases"})
+		return
+	}
+	if cases == nil {
+		cases = []models.AdminCase{}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"cases":      cases,
+		"totalCount": totalCount,
+		"page":       page,
+		"limit":      limit,
+	})
+}
+
+// AdminGetCaseHandler retrieves a single admin case by ID
+func (h Admin) AdminGetCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	caseID := mux.Vars(r)["id"]
+	if caseID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "case ID is required"})
+		return
+	}
+
+	oid, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
+		return
+	}
+
+	var adminCase models.AdminCase
+	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&adminCase); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "case not found"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": adminCase})
+}
+
+// AdminUpdateCaseStepHandler updates a specific step of an admin case
+func (h Admin) AdminUpdateCaseStepHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	caseID := vars["id"]
+	stepName := vars["stepName"]
+
+	validSteps := map[string]bool{
+		"transferOwnership": true,
+		"headAdmin":         true,
+		"roleAudit":         true,
+		"removeBadActor":    true,
+		"summary":           true,
+	}
+	if !validSteps[stepName] {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid step name"})
+		return
+	}
+
+	oid, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
+		return
+	}
+
+	// Parse step data
+	var stepData map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&stepData); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Build update: set each field under steps.<stepName>
+	now := time.Now()
+	setFields := bson.M{
+		"updatedAt": now,
+		fmt.Sprintf("steps.%s.completed", stepName):   true,
+		fmt.Sprintf("steps.%s.completedAt", stepName): now,
+	}
+
+	// Copy step-specific fields
+	for key, value := range stepData {
+		if key == "currentUser" || key == "completed" || key == "completedAt" {
+			continue // skip meta fields
+		}
+		setFields[fmt.Sprintf("steps.%s.%s", stepName, key)] = value
+	}
+
+	update := bson.M{"$set": setFields}
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid}, update)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update case step"})
+		return
+	}
+
+	// Return updated case
+	var updatedCase models.AdminCase
+	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&updatedCase); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch updated case"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": updatedCase})
+}
+
+// AdminCompleteCaseHandler marks an admin case as completed
+func (h Admin) AdminCompleteCaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	caseID := mux.Vars(r)["id"]
+	oid, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid case ID"})
+		return
+	}
+
+	now := time.Now()
+	update := bson.M{
+		"$set": bson.M{
+			"status":      "completed",
+			"completedAt": now,
+			"updatedAt":   now,
+		},
+	}
+
+	_, err = h.CaseDB.UpdateOne(r.Context(), bson.M{"_id": oid}, update)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to complete case"})
+		return
+	}
+
+	var updatedCase models.AdminCase
+	if err := h.CaseDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&updatedCase); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to fetch updated case"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"case": updatedCase})
 }

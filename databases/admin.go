@@ -196,3 +196,42 @@ func (a *adminAuditDatabase) Find(ctx context.Context, filter interface{}, opts 
 	return a.db.Collection(adminAuditCollectionName).Find(ctx, filter, opts...)
 }
 
+const adminCaseCollectionName = "admin_cases"
+
+// AdminCaseDatabase defines the interface for admin case operations
+type AdminCaseDatabase interface {
+	InsertOne(ctx context.Context, adminCase models.AdminCase, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
+	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper
+	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
+}
+
+type adminCaseDatabase struct {
+	db DatabaseHelper
+}
+
+func NewAdminCaseDatabase(db DatabaseHelper) AdminCaseDatabase {
+	return &adminCaseDatabase{db: db}
+}
+
+func (a *adminCaseDatabase) InsertOne(ctx context.Context, adminCase models.AdminCase, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {
+	return a.db.Collection(adminCaseCollectionName).InsertOne(ctx, adminCase, opts...)
+}
+
+func (a *adminCaseDatabase) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper {
+	return a.db.Collection(adminCaseCollectionName).FindOne(ctx, filter, opts...)
+}
+
+func (a *adminCaseDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error) {
+	return a.db.Collection(adminCaseCollectionName).Find(ctx, filter, opts...)
+}
+
+func (a *adminCaseDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return a.db.Collection(adminCaseCollectionName).UpdateOne(ctx, filter, update, opts...)
+}
+
+func (a *adminCaseDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	return a.db.Collection(adminCaseCollectionName).CountDocuments(ctx, filter, opts...)
+}
+

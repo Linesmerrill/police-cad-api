@@ -73,6 +73,7 @@ func (a *App) New() *mux.Router {
 		AADB:    databases.NewAdminActivityDatabase(a.dbHelper),
 		PVDB:    databases.NewPendingVerificationDatabase(a.dbHelper),
 		AuditDB: databases.NewAdminAuditDatabase(a.dbHelper),
+		CaseDB:  databases.NewAdminCaseDatabase(a.dbHelper),
 	}
 
 	medicalReportHandler := MedicalReport{DB: databases.NewMedicalReportDatabase(a.dbHelper)}
@@ -138,6 +139,13 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")
+
+	// Admin case management routes
+	apiCreate.Handle("/admin/cases/{id}/steps/{stepName}", http.HandlerFunc(adminHandler.AdminUpdateCaseStepHandler)).Methods("PATCH")
+	apiCreate.Handle("/admin/cases/{id}/complete", http.HandlerFunc(adminHandler.AdminCompleteCaseHandler)).Methods("PATCH")
+	apiCreate.Handle("/admin/cases/{id}", http.HandlerFunc(adminHandler.AdminGetCaseHandler)).Methods("GET")
+	apiCreate.Handle("/admin/cases", http.HandlerFunc(adminHandler.AdminCreateCaseHandler)).Methods("POST")
+	apiCreate.Handle("/admin/cases", http.HandlerFunc(adminHandler.AdminListCasesHandler)).Methods("GET")
 
 	// Admin community management routes
 	apiCreate.Handle("/admin/communities/{id}/transfer-ownership", http.HandlerFunc(adminHandler.AdminTransferOwnershipHandler)).Methods("POST")

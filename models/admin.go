@@ -341,4 +341,79 @@ type AdminPendingVerificationResult struct {
 	CreatedAt interface{}        `json:"createdAt"`
 }
 
+// AdminCasePersonRef is a lightweight reference to a user in a case
+type AdminCasePersonRef struct {
+	ID       string `bson:"id" json:"id"`
+	Username string `bson:"username" json:"username"`
+	Email    string `bson:"email" json:"email"`
+}
+
+// AdminCaseCreatedBy tracks which admin created the case
+type AdminCaseCreatedBy struct {
+	AdminEmail string `bson:"adminEmail" json:"adminEmail"`
+	AdminName  string `bson:"adminName" json:"adminName"`
+	AdminRole  string `bson:"adminRole" json:"adminRole"`
+}
+
+// AdminCaseStepTransferOwnership stores step 1 result
+type AdminCaseStepTransferOwnership struct {
+	Completed        bool                `bson:"completed" json:"completed"`
+	OldOwner         *AdminCasePersonRef `bson:"oldOwner,omitempty" json:"oldOwner,omitempty"`
+	NewOwner         *AdminCasePersonRef `bson:"newOwner,omitempty" json:"newOwner,omitempty"`
+	AddedToHeadAdmin bool                `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
+	CompletedAt      *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+}
+
+// AdminCaseStepHeadAdmin stores step 2 result
+type AdminCaseStepHeadAdmin struct {
+	Completed        bool       `bson:"completed" json:"completed"`
+	AddedToHeadAdmin bool       `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
+	CompletedAt      *time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+}
+
+// AdminCaseStepRoleAudit stores step 3 result
+type AdminCaseStepRoleAudit struct {
+	Completed      bool                   `bson:"completed" json:"completed"`
+	DangerousRoles []AdminRoleWithMembers `bson:"dangerousRoles,omitempty" json:"dangerousRoles,omitempty"`
+	CompletedAt    *time.Time             `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+}
+
+// AdminCaseStepRemoveBadActor stores step 4 result
+type AdminCaseStepRemoveBadActor struct {
+	Completed   bool                `bson:"completed" json:"completed"`
+	Skipped     bool                `bson:"skipped" json:"skipped"`
+	BadActor    *AdminCasePersonRef `bson:"badActor,omitempty" json:"badActor,omitempty"`
+	Banned      bool                `bson:"banned" json:"banned"`
+	CompletedAt *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+}
+
+// AdminCaseStepSummary stores step 5 result
+type AdminCaseStepSummary struct {
+	Completed   bool       `bson:"completed" json:"completed"`
+	CompletedAt *time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+}
+
+// AdminCaseSteps holds all step data for a case
+type AdminCaseSteps struct {
+	TransferOwnership AdminCaseStepTransferOwnership `bson:"transferOwnership" json:"transferOwnership"`
+	HeadAdmin         AdminCaseStepHeadAdmin         `bson:"headAdmin" json:"headAdmin"`
+	RoleAudit         AdminCaseStepRoleAudit         `bson:"roleAudit" json:"roleAudit"`
+	RemoveBadActor    AdminCaseStepRemoveBadActor    `bson:"removeBadActor" json:"removeBadActor"`
+	Summary           AdminCaseStepSummary           `bson:"summary" json:"summary"`
+}
+
+// AdminCase is a persistent workflow case (e.g., ownership reset)
+type AdminCase struct {
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Type          string             `bson:"type" json:"type"`
+	Status        string             `bson:"status" json:"status"`
+	CommunityID   string             `bson:"communityId" json:"communityId"`
+	CommunityName string             `bson:"communityName" json:"communityName"`
+	CreatedBy     AdminCaseCreatedBy `bson:"createdBy" json:"createdBy"`
+	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt     time.Time          `bson:"updatedAt" json:"updatedAt"`
+	CompletedAt   *time.Time         `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	Steps         AdminCaseSteps     `bson:"steps" json:"steps"`
+}
+
 
