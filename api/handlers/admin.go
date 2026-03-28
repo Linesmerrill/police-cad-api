@@ -3600,12 +3600,63 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Check if new owner is on the ban list — remove them
+	isBanned := false
+	for _, bannedID := range community.Details.BanList {
+		if bannedID == newOwnerID {
+			isBanned = true
+			break
+		}
+	}
+	if isBanned {
+		update["$pull"] = bson.M{"community.banList": newOwnerID}
+	}
+
+	// Check if new owner is in the community members map — add them if not
+	if _, isMember := community.Details.Members[newOwnerID]; !isMember {
+		update["$set"].(bson.M)[fmt.Sprintf("community.members.%s", newOwnerID)] = models.MemberDetail{}
+		update["$set"].(bson.M)["community.membersCount"] = community.Details.MembersCount + 1
+	}
+
 	// Apply the update
 	err = h.CDB.UpdateOne(r.Context(), bson.M{"_id": cID}, update)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to transfer ownership"})
 		return
+	}
+
+	// Ensure new owner has this community in their user.communities array
+	// Build user filter — try string ID, fall back to ObjectID
+	newOwnerFilter := bson.M{"_id": newOwnerID}
+	if oid, oidErr := primitive.ObjectIDFromHex(newOwnerID); oidErr == nil {
+		var testUser models.User
+		if err := h.UDB.FindOne(r.Context(), newOwnerFilter).Decode(&testUser); err != nil {
+			newOwnerFilter = bson.M{"_id": oid}
+		}
+	}
+
+	// Check if user already has this community in their array
+	hasCommunity := false
+	for _, uc := range newOwner.Details.Communities {
+		if uc.CommunityID == communityID {
+			hasCommunity = true
+			// If it exists but not approved (e.g. declined/blocked), update status
+			if uc.Status != "approved" {
+				h.UDB.UpdateOne(r.Context(), bson.M{"_id": newOwnerFilter["_id"], "user.communities.communityId": communityID},
+					bson.M{"$set": bson.M{"user.communities.$.status": "approved"}})
+			}
+			break
+		}
+	}
+	if !hasCommunity {
+		// Add the community to their communities array
+		newCommunityEntry := models.UserCommunity{
+			ID:          primitive.NewObjectID().Hex(),
+			CommunityID: communityID,
+			Status:      "approved",
+		}
+		h.UDB.UpdateOne(r.Context(), newOwnerFilter, bson.M{"$push": bson.M{"user.communities": newCommunityEntry}})
 	}
 
 	// Get admin email from currentUser
@@ -3624,9 +3675,11 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 			"headAdminMembers": oldHeadAdminMembers,
 		},
 		After: map[string]interface{}{
-			"ownerID":          newOwnerID,
-			"ownerEmail":       req.NewOwnerEmail,
-			"addedToHeadAdmin": addedToHeadAdmin,
+			"ownerID":            newOwnerID,
+			"ownerEmail":         req.NewOwnerEmail,
+			"addedToHeadAdmin":   addedToHeadAdmin,
+			"removedFromBanList": isBanned,
+			"addedAsMember":      !func() bool { _, ok := community.Details.Members[newOwnerID]; return ok }(),
 		},
 		Details:   fmt.Sprintf("Ownership transferred from %s to %s", oldOwner.Details.Email, req.NewOwnerEmail),
 		Timestamp: time.Now(),
@@ -3642,9 +3695,11 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"message":          "Ownership transferred successfully",
-		"newOwnerID":       newOwnerID,
-		"addedToHeadAdmin": addedToHeadAdmin,
+		"message":            "Ownership transferred successfully",
+		"newOwnerID":         newOwnerID,
+		"addedToHeadAdmin":   addedToHeadAdmin,
+		"removedFromBanList": isBanned,
+		"addedAsMember":      !func() bool { _, ok := community.Details.Members[newOwnerID]; return ok }(),
 	})
 }
 
