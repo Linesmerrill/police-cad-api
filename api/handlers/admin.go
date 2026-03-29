@@ -89,12 +89,42 @@ func checkAdminPermissions(currentUser map[string]interface{}) error {
 			break
 		}
 	}
-	
+
 	if !hasOwnerRole {
 		return errors.New("insufficient permissions to perform admin operations")
 	}
 	
 	return nil
+}
+
+// checkAdminOrOwnerPermissions validates if the current user has admin or owner role
+func checkAdminOrOwnerPermissions(currentUser map[string]interface{}) error {
+	rolesInterface, exists := currentUser["roles"]
+	if !exists {
+		return errors.New("user roles not provided")
+	}
+
+	var roles []string
+	switch v := rolesInterface.(type) {
+	case []string:
+		roles = v
+	case []interface{}:
+		for _, role := range v {
+			if str, ok := role.(string); ok {
+				roles = append(roles, str)
+			}
+		}
+	default:
+		return errors.New("invalid roles format")
+	}
+
+	for _, role := range roles {
+		if role == "owner" || role == "admin" {
+			return nil
+		}
+	}
+
+	return errors.New("insufficient permissions to perform this operation")
 }
 
 // AdminLogoutHandler handles admin logout and tracks the activity
@@ -4026,7 +4056,7 @@ func (h Admin) AdminCreateCaseHandler(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "communityId is required"})
 		return
 	}
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
 		return
