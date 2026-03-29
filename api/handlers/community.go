@@ -199,6 +199,17 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ensure no role has nil Permissions or Members — nil slices serialize as
+	// JSON null, which crashes mobile clients that call .some() on the array.
+	for i := range dbResp.Details.Roles {
+		if dbResp.Details.Roles[i].Permissions == nil {
+			dbResp.Details.Roles[i].Permissions = []models.Permission{}
+		}
+		if dbResp.Details.Roles[i].Members == nil {
+			dbResp.Details.Roles[i].Members = []string{}
+		}
+	}
+
 	b, err := json.Marshal(dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
