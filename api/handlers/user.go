@@ -655,10 +655,13 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	// Look up sender details for the WebSocket payload
 	var senderUsername, senderProfilePic string
 	if notification.SentFromID != "" {
-		var sender models.User
-		if err := u.DB.FindOne(ctx, bson.M{"_id": notification.SentFromID}).Decode(&sender); err == nil {
-			senderUsername = sender.Details.Username
-			senderProfilePic = sender.Details.ProfilePicture
+		senderOID, senderErr := primitive.ObjectIDFromHex(notification.SentFromID)
+		if senderErr == nil {
+			var sender models.User
+			if err := u.DB.FindOne(ctx, bson.M{"_id": senderOID}).Decode(&sender); err == nil {
+				senderUsername = sender.Details.Username
+				senderProfilePic = sender.Details.ProfilePicture
+			}
 		}
 	}
 
