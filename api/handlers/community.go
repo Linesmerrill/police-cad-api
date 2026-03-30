@@ -7152,6 +7152,31 @@ func (c Community) sendPanicPushNotifications(cID primitive.ObjectID, communityI
 		return
 	}
 
+	// Filter out users who have disabled panic alert notifications
+	if c.UPDB != nil {
+		var filteredIDs []string
+		for _, uid := range targetUserIDs {
+			var userPrefs models.UserPreferences
+			if err := c.UPDB.FindOne(ctx, bson.M{"userId": uid}).Decode(&userPrefs); err == nil {
+				p := userPrefs.NotificationPreferences
+				// If prefs have been explicitly set, check them
+				if p.AllNotifications || p.Friends || p.CommunityJoins || p.DepartmentJoins || p.PanicAlerts || p.General {
+					if !p.AllNotifications || !p.PanicAlerts {
+						continue // User opted out
+					}
+				}
+			}
+			// Default (no prefs doc or all-zero = never configured) = send
+			filteredIDs = append(filteredIDs, uid)
+		}
+		targetUserIDs = filteredIDs
+	}
+
+	if len(targetUserIDs) == 0 {
+		zap.S().Infof("sendPanicPushNotifications: all eligible members opted out of panic alerts in community %s", communityID)
+		return
+	}
+
 	// Fetch push tokens for these users
 	tokens, err := c.PTDB.Find(ctx, bson.M{"userId": bson.M{"$in": targetUserIDs}})
 	if err != nil {
@@ -7428,6 +7453,28 @@ func (c Community) sendSignal100PushNotifications(cID primitive.ObjectID, commun
 		if member.ActiveDepartmentID != "" {
 			targetUserIDs = append(targetUserIDs, userID)
 		}
+	}
+
+	if len(targetUserIDs) == 0 {
+		return
+	}
+
+	// Filter out users who have disabled panic alert notifications
+	if c.UPDB != nil {
+		var filteredIDs []string
+		for _, uid := range targetUserIDs {
+			var userPrefs models.UserPreferences
+			if err := c.UPDB.FindOne(ctx, bson.M{"userId": uid}).Decode(&userPrefs); err == nil {
+				p := userPrefs.NotificationPreferences
+				if p.AllNotifications || p.Friends || p.CommunityJoins || p.DepartmentJoins || p.PanicAlerts || p.General {
+					if !p.AllNotifications || !p.PanicAlerts {
+						continue
+					}
+				}
+			}
+			filteredIDs = append(filteredIDs, uid)
+		}
+		targetUserIDs = filteredIDs
 	}
 
 	if len(targetUserIDs) == 0 {

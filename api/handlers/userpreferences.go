@@ -248,6 +248,66 @@ func (up UserPreferences) GetDepartmentOrderHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetNotificationPreferencesHandler returns notification preferences for a user.
+// Returns default (all-enabled) preferences if none are stored yet.
+func (up UserPreferences) GetNotificationPreferencesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+
+	var userPreferences models.UserPreferences
+	err := up.DB.FindOne(context.Background(), bson.M{"userId": userID}).Decode(&userPreferences)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// No preferences doc exists — return defaults
+			prefs := models.DefaultNotificationPreferences()
+			json.NewEncoder(w).Encode(prefs)
+			return
+		}
+		config.ErrorStatus("failed to get notification preferences", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// If the doc exists but notificationPreferences was never set, return defaults
+	prefs := userPreferences.NotificationPreferences
+	if !prefs.AllNotifications && !prefs.Friends && !prefs.CommunityJoins &&
+		!prefs.DepartmentJoins && !prefs.PanicAlerts && !prefs.General {
+		prefs = models.DefaultNotificationPreferences()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prefs)
+}
+
+// UpdateNotificationPreferencesHandler updates notification preferences for a user.
+func (up UserPreferences) UpdateNotificationPreferencesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["user_id"]
+
+	var prefs models.NotificationPreferences
+	if err := json.NewDecoder(r.Body).Decode(&prefs); err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+
+	opts := options.Update().SetUpsert(true)
+	_, err := up.DB.UpdateOne(
+		context.Background(),
+		bson.M{"userId": userID},
+		bson.M{
+			"$set": bson.M{
+				"notificationPreferences": prefs,
+				"updatedAt":               time.Now(),
+			},
+		},
+		opts,
+	)
+	if err != nil {
+		config.ErrorStatus("failed to update notification preferences", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prefs)
+}
+
 // DeleteUserPreferencesHandler deletes user preferences
 func (up UserPreferences) DeleteUserPreferencesHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
