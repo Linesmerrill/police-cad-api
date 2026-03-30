@@ -6409,8 +6409,8 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 	})
 	zap.S().Infof("PANIC ALERT CLEARED - Socket events broadcast completed for alertId: %s", alertID)
 
-	// Send push notifications for panic cleared (async)
-	go c.sendPanicPushNotifications(cID, communityID, alertUserId, "", "", "cleared", alertID)
+	// Send push notifications for panic cleared (async) — skip the user who cleared it
+	go c.sendPanicPushNotifications(cID, communityID, request.ClearedBy, "", "", "cleared", alertID)
 
 	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
 	clearData["alertId"] = alertID
@@ -6507,8 +6507,8 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 	})
 	zap.S().Infof("USER PANIC ALERTS CLEARED - Socket events broadcast completed for userId: %s", userID)
 
-	// Send push notifications for panic cleared (async)
-	go c.sendPanicPushNotifications(cID, communityID, userID, "", "", "cleared", "")
+	// Send push notifications for panic cleared (async) — skip the user who cleared it
+	go c.sendPanicPushNotifications(cID, communityID, request.ClearedBy, "", "", "cleared", "")
 
 	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
 	go c.notifyNodeServerPanic("panic_cleared", clearData)
