@@ -724,10 +724,8 @@ func (u User) sendNotificationPush(recipientID string, notif models.Notification
 		return
 	}
 	if len(tokens) == 0 {
-		zap.S().Infof("sendNotificationPush: no push tokens found for user %s", recipientID)
 		return
 	}
-	zap.S().Infof("sendNotificationPush: found %d push token(s) for user %s", len(tokens), recipientID)
 
 	// Check notification preferences (default to all-enabled if not set)
 	prefs := models.DefaultNotificationPreferences()
