@@ -716,9 +716,15 @@ func (u User) sendNotificationPush(recipientID string, notif models.Notification
 
 	// Look up push tokens for the recipient
 	tokens, err := u.PTDB.Find(ctx, bson.M{"userId": recipientID})
-	if err != nil || len(tokens) == 0 {
+	if err != nil {
+		zap.S().Errorf("sendNotificationPush: failed to fetch push tokens for user %s: %v", recipientID, err)
 		return
 	}
+	if len(tokens) == 0 {
+		zap.S().Infof("sendNotificationPush: no push tokens found for user %s", recipientID)
+		return
+	}
+	zap.S().Infof("sendNotificationPush: found %d push token(s) for user %s", len(tokens), recipientID)
 
 	// Check notification preferences (default to all-enabled if not set)
 	prefs := models.DefaultNotificationPreferences()
