@@ -129,11 +129,34 @@ func (s Search) SearchUsersHandlerV2(w http.ResponseWriter, r *http.Request) {
 	findChan := make(chan findResult, 1)
 	countChan := make(chan countResult, 1)
 
+	queryLen := len(query)
+
 	go func() {
 		cursor, err := s.UserDB.Find(ctx, userFilter, userOptions)
 		if err != nil {
-			findChan <- findResult{err: err}
-			return
+			// If $text search fails (e.g., index doesn't exist), fallback to regex
+			if queryLen >= 3 {
+				zap.S().Warnw("v2 text search failed, falling back to regex", "query", query, "error", err)
+				fallbackFilter := bson.M{
+					"$and": []bson.M{
+						{"$or": []bson.M{
+							{"user.name": bson.M{"$regex": escapedQuery, "$options": "i"}},
+							{"user.username": bson.M{"$regex": escapedQuery, "$options": "i"}},
+						}},
+						{"_id": bson.M{"$ne": currentUserObjectID}},
+						{"user.isDeactivated": bson.M{"$ne": true}},
+					},
+				}
+				fallbackOptions := options.Find().SetLimit(limit).SetSkip(skip)
+				cursor, err = s.UserDB.Find(ctx, fallbackFilter, fallbackOptions)
+				if err != nil {
+					findChan <- findResult{err: err}
+					return
+				}
+			} else {
+				findChan <- findResult{err: err}
+				return
+			}
 		}
 		defer cursor.Close(ctx)
 		var users []models.User
@@ -146,6 +169,20 @@ func (s Search) SearchUsersHandlerV2(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		total, err := s.UserDB.CountDocuments(ctx, userFilter)
+		if err != nil && queryLen >= 3 {
+			// Fallback count with regex filter
+			fallbackFilter := bson.M{
+				"$and": []bson.M{
+					{"$or": []bson.M{
+						{"user.name": bson.M{"$regex": escapedQuery, "$options": "i"}},
+						{"user.username": bson.M{"$regex": escapedQuery, "$options": "i"}},
+					}},
+					{"_id": bson.M{"$ne": currentUserObjectID}},
+					{"user.isDeactivated": bson.M{"$ne": true}},
+				},
+			}
+			total, err = s.UserDB.CountDocuments(ctx, fallbackFilter)
+		}
 		countChan <- countResult{total: total, err: err}
 	}()
 
