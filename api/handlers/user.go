@@ -778,7 +778,7 @@ func (u User) sendNotificationPush(recipientID string, notif models.Notification
 	case "join_request":
 		if notif.Data3 != "" {
 			title = "Department Join Request"
-			body = senderUsername + " wants to join " + notif.Data4
+			body = senderUsername + " wants to join " + notif.Data4 + " in " + notif.Data2
 		} else {
 			title = "Community Join Request"
 			body = senderUsername + " wants to join " + notif.Data2
