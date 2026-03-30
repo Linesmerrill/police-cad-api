@@ -7204,14 +7204,26 @@ func (c Community) sendPanicPushNotifications(cID primitive.ObjectID, communityI
 		"alertId":     alertID,
 	}
 
+	communityName := community.Details.Name
+
+	// Look up the triggering user's active department name from community members
+	deptName := ""
+	if member, ok := community.Details.Members[triggeringUserID]; ok {
+		deptName = member.ActiveDepartmentName
+	}
+
 	if action == "created" {
-		title = "PANIC ALERT"
-		body = fmt.Sprintf("%s (%s) triggered a panic!", username, callSign)
+		title = "PANIC ALERT — " + communityName
+		if deptName != "" {
+			body = fmt.Sprintf("%s (%s) triggered a panic in %s!", username, callSign, deptName)
+		} else {
+			body = fmt.Sprintf("%s (%s) triggered a panic!", username, callSign)
+		}
 		data["userId"] = triggeringUserID
 		data["username"] = username
 		data["callSign"] = callSign
 	} else {
-		title = "Panic Cleared"
+		title = "Panic Cleared — " + communityName
 		body = "A panic alert has been cleared."
 	}
 
@@ -7503,11 +7515,13 @@ func (c Community) sendSignal100PushNotifications(cID primitive.ObjectID, commun
 		"communityId": communityID,
 	}
 
+	communityName := community.Details.Name
+
 	if action == "activated" {
-		title = "SIGNAL 100"
+		title = "SIGNAL 100 — " + communityName
 		body = fmt.Sprintf("Signal 100 activated by %s (%s) — Hold all but emergency traffic", callSign, username)
 	} else {
-		title = "Signal 100 Cleared"
+		title = "Signal 100 Cleared — " + communityName
 		body = fmt.Sprintf("Signal 100 cleared by %s (%s)", callSign, username)
 	}
 
