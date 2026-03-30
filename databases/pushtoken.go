@@ -43,13 +43,12 @@ func (pt *pushTokenDatabase) FindOne(ctx context.Context, filter interface{}, op
 }
 
 func (pt *pushTokenDatabase) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.PushToken, error) {
-	var tokens []models.PushToken
 	cur, err := pt.db.Collection(pushTokenCollectionName).Find(ctx, filter, opts...)
 	if err != nil {
 		return nil, err
 	}
-	err = cur.Decode(&tokens)
-	if err != nil {
+	var tokens []models.PushToken
+	if err = cur.All(ctx, &tokens); err != nil {
 		return nil, err
 	}
 	return tokens, nil
