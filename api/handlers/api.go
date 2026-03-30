@@ -352,6 +352,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{user_id}/deactivate", api.Middleware(http.HandlerFunc(u.DeactivateUserHandler))).Methods("DELETE")
 	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}/read", api.Middleware(http.HandlerFunc(u.MarkNotificationAsReadHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}", api.Middleware(http.HandlerFunc(u.DeleteNotificationHandler))).Methods("DELETE")
+	apiCreate.Handle("/user/{user_id}/email", api.Middleware(http.HandlerFunc(u.ChangeEmailHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UpdateUserByIDHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
 	apiCreate.Handle("/users/discover-people", api.Middleware(http.HandlerFunc(u.UsersDiscoverPeopleHandler))).Methods("GET")
