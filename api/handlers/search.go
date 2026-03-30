@@ -31,6 +31,162 @@ type PaginatedCommunityResponse struct {
 	Data       []models.Community `json:"data"`
 }
 
+// UserSearchResponse holds the v2 paginated user search response
+type UserSearchResponse struct {
+	Users      []models.User          `json:"users"`
+	Pagination map[string]interface{} `json:"pagination"`
+}
+
+// SearchUsersHandlerV2 returns a paginated list of users matching the query.
+// Unlike v1, this does NOT search communities (use /search/communities for that).
+func (s Search) SearchUsersHandlerV2(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "query param q is required"})
+		return
+	}
+
+	currentUserID := r.URL.Query().Get("userId")
+	if currentUserID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "query param userId is required"})
+		return
+	}
+
+	currentUserObjectID, err := primitive.ObjectIDFromHex(currentUserID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid userId"})
+		return
+	}
+
+	limitParam := r.URL.Query().Get("limit")
+	pageParam := r.URL.Query().Get("page")
+
+	limit := int64(10)
+	page := int64(1)
+
+	if limitParam != "" {
+		if l, err := strconv.ParseInt(limitParam, 10, 64); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if pageParam != "" {
+		if p, err := strconv.ParseInt(pageParam, 10, 64); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	skip := (page - 1) * limit
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Build filter — use $text search for 3+ char queries, prefix regex for shorter
+	escapedQuery := regexp.QuoteMeta(query)
+	var userFilter bson.M
+	var userOptions *options.FindOptions
+
+	if len(query) >= 3 {
+		userFilter = bson.M{
+			"$and": []bson.M{
+				{"$text": bson.M{"$search": query}},
+				{"_id": bson.M{"$ne": currentUserObjectID}},
+				{"user.isDeactivated": bson.M{"$ne": true}},
+			},
+		}
+		userOptions = options.Find().
+			SetLimit(limit).
+			SetSkip(skip).
+			SetSort(bson.M{"score": bson.M{"$meta": "textScore"}, "user.name": 1})
+	} else {
+		userFilter = bson.M{
+			"$and": []bson.M{
+				{"$or": []bson.M{
+					{"user.name": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
+					{"user.username": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
+				}},
+				{"_id": bson.M{"$ne": currentUserObjectID}},
+				{"user.isDeactivated": bson.M{"$ne": true}},
+			},
+		}
+		userOptions = options.Find().SetLimit(limit).SetSkip(skip)
+	}
+
+	// Run find and count in parallel
+	type findResult struct {
+		users []models.User
+		err   error
+	}
+	type countResult struct {
+		total int64
+		err   error
+	}
+
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	go func() {
+		cursor, err := s.UserDB.Find(ctx, userFilter, userOptions)
+		if err != nil {
+			findChan <- findResult{err: err}
+			return
+		}
+		defer cursor.Close(ctx)
+		var users []models.User
+		if err = cursor.All(ctx, &users); err != nil {
+			findChan <- findResult{err: err}
+			return
+		}
+		findChan <- findResult{users: users}
+	}()
+
+	go func() {
+		total, err := s.UserDB.CountDocuments(ctx, userFilter)
+		countChan <- countResult{total: total, err: err}
+	}()
+
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		zap.S().Errorw("v2 user search failed", "query", query, "error", findRes.err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
+		return
+	}
+
+	users := findRes.users
+	if users == nil {
+		users = []models.User{}
+	}
+
+	totalCount := countRes.total
+	if countRes.err != nil {
+		totalCount = int64(len(users))
+	}
+
+	totalPages := int((totalCount + limit - 1) / limit)
+
+	pagination := map[string]interface{}{
+		"currentPage":  page,
+		"limit":        limit,
+		"totalRecords": totalCount,
+		"totalPages":   totalPages,
+		"hasNextPage":  page < int64(totalPages),
+		"hasPrevPage":  page > 1,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(UserSearchResponse{
+		Users:      users,
+		Pagination: pagination,
+	})
+}
+
 // SearchHandler returns a list of users and communities that match the query
 func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")

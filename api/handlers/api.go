@@ -575,6 +575,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/search/communities", api.Middleware(http.HandlerFunc(search.SearchCommunityHandler))).Methods("GET")
 	apiCreate.Handle("/search", api.Middleware(http.HandlerFunc(search.SearchHandler))).Methods("GET")
 
+	apiV2.Handle("/search/users", api.Middleware(http.HandlerFunc(search.SearchUsersHandlerV2))).Methods("GET")
+
 	apiCreate.Handle("/generate-signature", api.Middleware(http.HandlerFunc(cloudinaryHandler.GenerateSignature))).Methods("POST")
 
 	apiCreate.Handle("/success", http.HandlerFunc(u.handleSuccessRedirect)).Methods("GET")
