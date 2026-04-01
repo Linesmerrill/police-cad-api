@@ -42,9 +42,11 @@ func (c Community) GetToneSoundsHandler(w http.ResponseWriter, r *http.Request) 
 		"success":  true,
 		"sounds":   sounds,
 		"defaults": map[string]string{
-			"leo": community.Details.DefaultToneLeo,
-			"fd":  community.Details.DefaultToneFd,
-			"ems": community.Details.DefaultToneEms,
+			"leo":       community.Details.DefaultToneLeo,
+			"fd":        community.Details.DefaultToneFd,
+			"ems":       community.Details.DefaultToneEms,
+			"panic":     community.Details.DefaultPanicSound,
+			"signal100": community.Details.DefaultSignal100Sound,
 		},
 	})
 }
@@ -191,6 +193,12 @@ func (c Community) DeleteToneSoundHandler(w http.ResponseWriter, r *http.Request
 		if community.Details.DefaultToneEms == soundKey {
 			unsetFields["community.defaultToneEms"] = ""
 		}
+		if community.Details.DefaultPanicSound == soundKey {
+			unsetFields["community.defaultPanicSound"] = ""
+		}
+		if community.Details.DefaultSignal100Sound == soundKey {
+			unsetFields["community.defaultSignal100Sound"] = ""
+		}
 	}
 	if len(unsetFields) > 0 {
 		_ = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, bson.M{"$unset": unsetFields})
@@ -246,8 +254,12 @@ func (c Community) SetToneDefaultHandler(w http.ResponseWriter, r *http.Request)
 		field = "community.defaultToneFd"
 	case "ems":
 		field = "community.defaultToneEms"
+	case "panic":
+		field = "community.defaultPanicSound"
+	case "signal100":
+		field = "community.defaultSignal100Sound"
 	default:
-		config.ErrorStatus("template must be 'leo', 'fd', or 'ems'", http.StatusBadRequest, w, fmt.Errorf("invalid template: %s", request.Template))
+		config.ErrorStatus("template must be 'leo', 'fd', 'ems', 'panic', or 'signal100'", http.StatusBadRequest, w, fmt.Errorf("invalid template: %s", request.Template))
 		return
 	}
 
