@@ -41,6 +41,7 @@ type User struct {
 	EntDB databases.ContentCreatorEntitlementDatabase
 	PTDB  databases.PushTokenDatabase
 	ALDB  databases.AuditLogDatabase
+	UPDB  databases.UserPreferencesDatabase
 }
 
 // UserHandler returns a user given a userID
@@ -654,10 +655,13 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	// Look up sender details for the WebSocket payload
 	var senderUsername, senderProfilePic string
 	if notification.SentFromID != "" {
-		var sender models.User
-		if err := u.DB.FindOne(ctx, bson.M{"_id": notification.SentFromID}).Decode(&sender); err == nil {
-			senderUsername = sender.Details.Username
-			senderProfilePic = sender.Details.ProfilePicture
+		senderOID, senderErr := primitive.ObjectIDFromHex(notification.SentFromID)
+		if senderErr == nil {
+			var sender models.User
+			if err := u.DB.FindOne(ctx, bson.M{"_id": senderOID}).Decode(&sender); err == nil {
+				senderUsername = sender.Details.Username
+				senderProfilePic = sender.Details.ProfilePicture
+			}
 		}
 	}
 
@@ -701,8 +705,106 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		sendNotificationToUser(notification.SentToID, wsPayload)
 	}
 
+	// Send push notification in the background (non-blocking)
+	go u.sendNotificationPush(notification.SentToID, newNotification, senderUsername)
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "notification created successfully"}`))
+}
+
+// sendNotificationPush sends an Expo push notification for a regular in-app notification.
+// It checks the user's notification preferences before sending.
+func (u User) sendNotificationPush(recipientID string, notif models.Notification, senderUsername string) {
+	ctx := context.Background()
+
+	// Look up push tokens for the recipient
+	tokens, err := u.PTDB.Find(ctx, bson.M{"userId": recipientID})
+	if err != nil {
+		zap.S().Errorf("sendNotificationPush: failed to fetch push tokens for user %s: %v", recipientID, err)
+		return
+	}
+	if len(tokens) == 0 {
+		return
+	}
+
+	// Check notification preferences (default to all-enabled if not set)
+	prefs := models.DefaultNotificationPreferences()
+	if u.UPDB != nil {
+		var userPrefs models.UserPreferences
+		if err := u.UPDB.FindOne(ctx, bson.M{"userId": recipientID}).Decode(&userPrefs); err == nil {
+			p := userPrefs.NotificationPreferences
+			// Only use stored prefs if at least one field has been explicitly set
+			if p.AllNotifications || p.Friends || p.CommunityJoins || p.DepartmentJoins || p.PanicAlerts || p.General {
+				prefs = p
+			}
+		}
+	}
+
+	// Master toggle check
+	if !prefs.AllNotifications {
+		return
+	}
+
+	// Category check
+	switch notif.Type {
+	case "friend_request":
+		if !prefs.Friends {
+			return
+		}
+	case "join_request":
+		if notif.Data3 != "" {
+			// Department join request
+			if !prefs.DepartmentJoins {
+				return
+			}
+		} else {
+			// Community join request
+			if !prefs.CommunityJoins {
+				return
+			}
+		}
+	default:
+		if !prefs.General {
+			return
+		}
+	}
+
+	// Build title and body based on notification type
+	var title, body string
+	switch notif.Type {
+	case "friend_request":
+		title = "Friend Request"
+		body = senderUsername + " sent you a friend request"
+	case "join_request":
+		if notif.Data3 != "" {
+			title = "Department Join Request"
+			body = senderUsername + " wants to join " + notif.Data4 + " in " + notif.Data2
+		} else {
+			title = "Community Join Request"
+			body = senderUsername + " wants to join " + notif.Data2
+		}
+	default:
+		title = "LPC Notification"
+		body = notif.Message
+	}
+
+	data := map[string]interface{}{
+		"type":           notif.Type,
+		"notificationId": notif.ID,
+		"screen":         "Notifications",
+	}
+	if notif.Data1 != "" {
+		data["communityId"] = notif.Data1
+	}
+
+	var tokenStrings []string
+	for _, t := range tokens {
+		tokenStrings = append(tokenStrings, t.Token)
+	}
+
+	if err := SendExpoPushNotifications(tokenStrings, title, body, data); err != nil {
+		zap.S().Errorf("sendNotificationPush: failed to send push for user %s: %v", recipientID, err)
+	}
 }
 
 // GetUserNotificationsHandlerV2 returns all notifications for a user with pagination

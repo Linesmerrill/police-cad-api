@@ -39,7 +39,8 @@ func (a *App) New() *mux.Router {
 	ptDB := databases.NewPushTokenDatabase(a.dbHelper)
 	alDB := databases.NewAuditLogDatabase(a.dbHelper)
 	tlDB := databases.NewToneLogDatabase(a.dbHelper)
-	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB}
+	upDB := databases.NewUserPreferencesDatabase(a.dbHelper)
+	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper)}
@@ -374,6 +375,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user-preferences/{user_id}", api.Middleware(http.HandlerFunc(userPrefs.DeleteUserPreferencesHandler))).Methods("DELETE")
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.GetDepartmentOrderHandler))).Methods("GET")
 	apiCreate.Handle("/user-preferences/{user_id}/community/{community_id}/department-order", api.Middleware(http.HandlerFunc(userPrefs.UpdateDepartmentOrderHandler))).Methods("PUT")
+	apiCreate.Handle("/user/{user_id}/notification-preferences", api.Middleware(http.HandlerFunc(userPrefs.GetNotificationPreferencesHandler))).Methods("GET")
+	apiCreate.Handle("/user/{user_id}/notification-preferences", api.Middleware(http.HandlerFunc(userPrefs.UpdateNotificationPreferencesHandler))).Methods("PUT")
 	apiCreate.Handle("/admin/beta-dashboard-metrics", http.HandlerFunc(userPrefs.GetBetaDashboardMetricsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/beta-dashboard-metrics/daily", http.HandlerFunc(userPrefs.GetBetaDashboardMetricsDailyHandler)).Methods("GET")
 

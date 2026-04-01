@@ -6409,8 +6409,8 @@ func (c Community) ClearPanicAlertHandler(w http.ResponseWriter, r *http.Request
 	})
 	zap.S().Infof("PANIC ALERT CLEARED - Socket events broadcast completed for alertId: %s", alertID)
 
-	// Send push notifications for panic cleared (async)
-	go c.sendPanicPushNotifications(cID, communityID, alertUserId, "", "", "cleared", alertID)
+	// Send push notifications for panic cleared (async) — skip the user who cleared it
+	go c.sendPanicPushNotifications(cID, communityID, request.ClearedBy, "", "", "cleared", alertID)
 
 	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
 	clearData["alertId"] = alertID
@@ -6507,8 +6507,8 @@ func (c Community) ClearUserPanicAlertsHandler(w http.ResponseWriter, r *http.Re
 	})
 	zap.S().Infof("USER PANIC ALERTS CLEARED - Socket events broadcast completed for userId: %s", userID)
 
-	// Send push notifications for panic cleared (async)
-	go c.sendPanicPushNotifications(cID, communityID, userID, "", "", "cleared", "")
+	// Send push notifications for panic cleared (async) — skip the user who cleared it
+	go c.sendPanicPushNotifications(cID, communityID, request.ClearedBy, "", "", "cleared", "")
 
 	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
 	go c.notifyNodeServerPanic("panic_cleared", clearData)
@@ -7152,6 +7152,31 @@ func (c Community) sendPanicPushNotifications(cID primitive.ObjectID, communityI
 		return
 	}
 
+	// Filter out users who have disabled panic alert notifications
+	if c.UPDB != nil {
+		var filteredIDs []string
+		for _, uid := range targetUserIDs {
+			var userPrefs models.UserPreferences
+			if err := c.UPDB.FindOne(ctx, bson.M{"userId": uid}).Decode(&userPrefs); err == nil {
+				p := userPrefs.NotificationPreferences
+				// If prefs have been explicitly set, check them
+				if p.AllNotifications || p.Friends || p.CommunityJoins || p.DepartmentJoins || p.PanicAlerts || p.General {
+					if !p.AllNotifications || !p.PanicAlerts {
+						continue // User opted out
+					}
+				}
+			}
+			// Default (no prefs doc or all-zero = never configured) = send
+			filteredIDs = append(filteredIDs, uid)
+		}
+		targetUserIDs = filteredIDs
+	}
+
+	if len(targetUserIDs) == 0 {
+		zap.S().Infof("sendPanicPushNotifications: all eligible members opted out of panic alerts in community %s", communityID)
+		return
+	}
+
 	// Fetch push tokens for these users
 	tokens, err := c.PTDB.Find(ctx, bson.M{"userId": bson.M{"$in": targetUserIDs}})
 	if err != nil {
@@ -7179,14 +7204,26 @@ func (c Community) sendPanicPushNotifications(cID primitive.ObjectID, communityI
 		"alertId":     alertID,
 	}
 
+	communityName := community.Details.Name
+
+	// Look up the triggering user's active department name from community members
+	deptName := ""
+	if member, ok := community.Details.Members[triggeringUserID]; ok {
+		deptName = member.ActiveDepartmentName
+	}
+
 	if action == "created" {
-		title = "PANIC ALERT"
-		body = fmt.Sprintf("%s (%s) triggered a panic!", username, callSign)
+		title = "PANIC ALERT — " + communityName
+		if deptName != "" {
+			body = fmt.Sprintf("%s (%s) triggered a panic in %s!", username, callSign, deptName)
+		} else {
+			body = fmt.Sprintf("%s (%s) triggered a panic!", username, callSign)
+		}
 		data["userId"] = triggeringUserID
 		data["username"] = username
 		data["callSign"] = callSign
 	} else {
-		title = "Panic Cleared"
+		title = "Panic Cleared — " + communityName
 		body = "A panic alert has been cleared."
 	}
 
@@ -7434,6 +7471,28 @@ func (c Community) sendSignal100PushNotifications(cID primitive.ObjectID, commun
 		return
 	}
 
+	// Filter out users who have disabled panic alert notifications
+	if c.UPDB != nil {
+		var filteredIDs []string
+		for _, uid := range targetUserIDs {
+			var userPrefs models.UserPreferences
+			if err := c.UPDB.FindOne(ctx, bson.M{"userId": uid}).Decode(&userPrefs); err == nil {
+				p := userPrefs.NotificationPreferences
+				if p.AllNotifications || p.Friends || p.CommunityJoins || p.DepartmentJoins || p.PanicAlerts || p.General {
+					if !p.AllNotifications || !p.PanicAlerts {
+						continue
+					}
+				}
+			}
+			filteredIDs = append(filteredIDs, uid)
+		}
+		targetUserIDs = filteredIDs
+	}
+
+	if len(targetUserIDs) == 0 {
+		return
+	}
+
 	tokens, err := c.PTDB.Find(ctx, bson.M{"userId": bson.M{"$in": targetUserIDs}})
 	if err != nil {
 		zap.S().Errorf("sendSignal100PushNotifications: failed to fetch push tokens: %v", err)
@@ -7456,11 +7515,13 @@ func (c Community) sendSignal100PushNotifications(cID primitive.ObjectID, commun
 		"communityId": communityID,
 	}
 
+	communityName := community.Details.Name
+
 	if action == "activated" {
-		title = "SIGNAL 100"
+		title = "SIGNAL 100 — " + communityName
 		body = fmt.Sprintf("Signal 100 activated by %s (%s) — Hold all but emergency traffic", callSign, username)
 	} else {
-		title = "Signal 100 Cleared"
+		title = "Signal 100 Cleared — " + communityName
 		body = fmt.Sprintf("Signal 100 cleared by %s (%s)", callSign, username)
 	}
 

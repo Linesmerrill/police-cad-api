@@ -4,14 +4,38 @@ import "go.mongodb.org/mongo-driver/bson/primitive"
 
 // UserPreferences holds the structure for user preferences collection in mongo
 type UserPreferences struct {
-	ID                   primitive.ObjectID             `json:"_id" bson:"_id"`
-	UserID               string                         `json:"userId" bson:"userId"`
-	BetaCivDashboard     bool                           `json:"betaCivDashboard" bson:"betaCivDashboard"`
+	ID                       primitive.ObjectID             `json:"_id" bson:"_id"`
+	UserID                   string                         `json:"userId" bson:"userId"`
+	BetaCivDashboard         bool                           `json:"betaCivDashboard" bson:"betaCivDashboard"`
 	BetaCommandDashboard     bool                           `json:"betaCommandDashboard" bson:"betaCommandDashboard"`
 	CommandDashboardOptedAt  interface{}                    `json:"commandDashboardOptedAt,omitempty" bson:"commandDashboardOptedAt,omitempty"`
-	CommunityPreferences map[string]CommunityPreference `json:"communityPreferences" bson:"communityPreferences"`
-	CreatedAt            interface{}                    `json:"createdAt" bson:"createdAt"`
-	UpdatedAt            interface{}                    `json:"updatedAt" bson:"updatedAt"`
+	CommunityPreferences     map[string]CommunityPreference `json:"communityPreferences" bson:"communityPreferences"`
+	NotificationPreferences  NotificationPreferences        `json:"notificationPreferences" bson:"notificationPreferences"`
+	CreatedAt                interface{}                    `json:"createdAt" bson:"createdAt"`
+	UpdatedAt                interface{}                    `json:"updatedAt" bson:"updatedAt"`
+}
+
+// NotificationPreferences controls which push notification categories the user receives.
+// All fields default to true (enabled). AllNotifications is a master toggle.
+type NotificationPreferences struct {
+	AllNotifications bool `json:"allNotifications" bson:"allNotifications"`
+	Friends          bool `json:"friends" bson:"friends"`
+	CommunityJoins   bool `json:"communityJoins" bson:"communityJoins"`
+	DepartmentJoins  bool `json:"departmentJoins" bson:"departmentJoins"`
+	PanicAlerts      bool `json:"panicAlerts" bson:"panicAlerts"`
+	General          bool `json:"general" bson:"general"`
+}
+
+// DefaultNotificationPreferences returns preferences with all categories enabled
+func DefaultNotificationPreferences() NotificationPreferences {
+	return NotificationPreferences{
+		AllNotifications: true,
+		Friends:          true,
+		CommunityJoins:   true,
+		DepartmentJoins:  true,
+		PanicAlerts:      true,
+		General:          true,
+	}
 }
 
 // CommunityPreference holds preferences for a specific community
