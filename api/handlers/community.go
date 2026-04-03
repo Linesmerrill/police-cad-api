@@ -6240,6 +6240,19 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Resolve custom panic sound URL (if community has one configured)
+	var panicSoundUrl string
+	if comm, cErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID}); cErr == nil {
+		if key := comm.Details.DefaultPanicSound; key != "" {
+			for _, s := range comm.Details.CustomToneSounds {
+				if s.Key == key {
+					panicSoundUrl = s.URL
+					break
+				}
+			}
+		}
+	}
+
 	// Broadcast panic alert created event to all connected users
 	panicData := map[string]interface{}{
 		"alertId":        alertID,
@@ -6250,6 +6263,9 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		"communityId":    communityID,
 		"triggeredAt":    panicAlert.TriggeredAt,
 		"action":         "created",
+	}
+	if panicSoundUrl != "" {
+		panicData["panicSoundUrl"] = panicSoundUrl
 	}
 
 	zap.S().Infof("PANIC ALERT CREATED - About to broadcast socket events for alertId: %s, userId: %s", alertID, request.UserID)
@@ -7322,6 +7338,19 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Resolve custom signal 100 sound URL (if community has one configured)
+	var signal100SoundUrl string
+	if comm, cErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID}); cErr == nil {
+		if key := comm.Details.DefaultSignal100Sound; key != "" {
+			for _, s := range comm.Details.CustomToneSounds {
+				if s.Key == key {
+					signal100SoundUrl = s.URL
+					break
+				}
+			}
+		}
+	}
+
 	// Broadcast via WebSocket
 	broadcastData := map[string]interface{}{
 		"type":                  "signal_100",
@@ -7333,6 +7362,9 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 		"activatedByDepartment": request.DepartmentName,
 		"activatedAt":           now,
 	}
+	if signal100SoundUrl != "" {
+		broadcastData["signal100SoundUrl"] = signal100SoundUrl
+	}
 	broadcastPanicAlertEvent("signal_100_activated", broadcastData)
 
 	zap.S().Infof("SIGNAL 100 ACTIVATED - community: %s, by: %s (%s)", communityID, request.Username, request.CallSign)
@@ -7341,13 +7373,17 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 	go c.sendSignal100PushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "activated")
 
 	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
-	go c.notifyNodeServerPanic("signal_100_activated", map[string]interface{}{
+	nodeData := map[string]interface{}{
 		"communityId":    communityID,
 		"userId":         request.UserID,
 		"username":       request.Username,
 		"callSign":       request.CallSign,
 		"departmentType": request.DepartmentName,
-	})
+	}
+	if signal100SoundUrl != "" {
+		nodeData["signal100SoundUrl"] = signal100SoundUrl
+	}
+	go c.notifyNodeServerPanic("signal_100_activated", nodeData)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(signal100)

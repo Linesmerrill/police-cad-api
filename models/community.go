@@ -60,6 +60,8 @@ type CommunityDetails struct {
 	DefaultToneLeo          string                `json:"defaultToneLeo,omitempty" bson:"defaultToneLeo,omitempty"`
 	DefaultToneFd           string                `json:"defaultToneFd,omitempty" bson:"defaultToneFd,omitempty"`
 	DefaultToneEms          string                `json:"defaultToneEms,omitempty" bson:"defaultToneEms,omitempty"`
+	DefaultPanicSound       string                `json:"defaultPanicSound,omitempty" bson:"defaultPanicSound,omitempty"`
+	DefaultSignal100Sound   string                `json:"defaultSignal100Sound,omitempty" bson:"defaultSignal100Sound,omitempty"`
 	WarrantApprovalMode        string              `json:"warrantApprovalMode" bson:"warrantApprovalMode"`               // "auto-approve", "random", "require-judge"
 	WarrantRandomApprovalRate  int                 `json:"warrantRandomApprovalRate" bson:"warrantRandomApprovalRate"`   // 0-100 percentage, default 70
 	MostWantedEnabled       bool                   `json:"mostWantedEnabled" bson:"mostWantedEnabled"`
