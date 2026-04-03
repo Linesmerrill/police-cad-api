@@ -1379,8 +1379,68 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Cascade delete all child data in the background
+	bgCtx, bgCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	go func() {
+		defer bgCancel()
+		c.cascadeDeleteCommunityData(bgCtx, communityID, cID)
+	}()
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community deleted and references removed successfully"}`))
+}
+
+// cascadeDeleteCommunityData removes all child data associated with a deleted community.
+// Designed to run in a background goroutine. Best-effort: logs errors but does not fail.
+func (c Community) cascadeDeleteCommunityData(ctx context.Context, communityID string, cID primitive.ObjectID) {
+	type collectionCleanup struct {
+		name   string
+		filter bson.M
+	}
+
+	cleanups := []collectionCleanup{
+		// Collections using string activeCommunityID
+		{"civilians", bson.M{"civilian.activeCommunityID": communityID}},
+		{"vehicles", bson.M{"vehicle.activeCommunityID": communityID}},
+		{"firearms", bson.M{"firearm.activeCommunityID": communityID}},
+		{"licenses", bson.M{"license.activeCommunityID": communityID}},
+		{"warrants", bson.M{"warrant.activeCommunityID": communityID}},
+		{"ems", bson.M{"ems.activeCommunityID": communityID}},
+		{"emsvehicles", bson.M{"vehicle.activeCommunityID": communityID}},
+		{"medicalreports", bson.M{"report.activeCommunityID": communityID}},
+		{"medications", bson.M{"medication.activeCommunityID": communityID}},
+		// Collections using string communityID
+		{"calls", bson.M{"call.communityID": communityID}},
+		{"bolos", bson.M{"bolo.communityID": communityID}},
+		{"courtcases", bson.M{"courtCase.communityID": communityID}},
+		{"courtsessions", bson.M{"courtSession.communityID": communityID}},
+		{"most_wanted_entries", bson.M{"mostWanted.communityID": communityID}},
+		// Collections using string communityId (lowercase d)
+		{"inviteCodes", bson.M{"communityId": communityID}},
+		{"tone_logs", bson.M{"communityId": communityID}},
+		// Collections using ObjectID communityId
+		{"audit_logs", bson.M{"communityId": cID}},
+		{"announcements", bson.M{"community": cID}},
+	}
+
+	for _, col := range cleanups {
+		deleted, err := c.DBHelper.Collection(col.name).DeleteMany(ctx, col.filter)
+		if err != nil {
+			zap.S().Errorw("cascade delete failed",
+				"collection", col.name,
+				"communityId", communityID,
+				"error", err,
+			)
+			continue
+		}
+		if deleted > 0 {
+			zap.S().Infow("cascade deleted documents",
+				"collection", col.name,
+				"communityId", communityID,
+				"count", deleted,
+			)
+		}
+	}
 }
 
 // GetBannedUsersHandler returns all banned users of a community
