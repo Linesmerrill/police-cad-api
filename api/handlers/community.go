@@ -5539,11 +5539,22 @@ func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.R
 			tenCode = tenCodeMap[member.TenCodeID]
 		}
 
-		// Resolve call sign: prefer department-specific, fall back to global
+		// Resolve call sign: prefer active-department-specific, then any department call sign, then global
 		resolvedCallSign := user.Details.CallSign
-		if member.ActiveDepartmentID != "" && member.DepartmentCallSigns != nil {
-			if dcs, ok := member.DepartmentCallSigns[member.ActiveDepartmentID]; ok && dcs != "" {
-				resolvedCallSign = dcs
+		if member.DepartmentCallSigns != nil {
+			if member.ActiveDepartmentID != "" {
+				if dcs, ok := member.DepartmentCallSigns[member.ActiveDepartmentID]; ok && dcs != "" {
+					resolvedCallSign = dcs
+				}
+			}
+			// If still using global and there are department call signs, use the first one found
+			if resolvedCallSign == user.Details.CallSign {
+				for _, dcs := range member.DepartmentCallSigns {
+					if dcs != "" {
+						resolvedCallSign = dcs
+						break
+					}
+				}
 			}
 		}
 
