@@ -2658,14 +2658,49 @@ func (c Community) GetDepartmentCallSignsHandler(w http.ResponseWriter, r *http.
 	})
 }
 
+// userHasCommunityPermission checks if a user is the community owner or has a role
+// with "administrator" or any of the specified permission names enabled.
+func userHasCommunityPermission(community *models.Community, userID string, permissionNames ...string) bool {
+	if community.Details.OwnerID == userID {
+		return true
+	}
+	for _, role := range community.Details.Roles {
+		isMember := false
+		for _, m := range role.Members {
+			if m == userID {
+				isMember = true
+				break
+			}
+		}
+		if !isMember {
+			continue
+		}
+		for _, p := range role.Permissions {
+			if !p.Enabled {
+				continue
+			}
+			if p.Name == "administrator" {
+				return true
+			}
+			for _, name := range permissionNames {
+				if p.Name == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // SetDepartmentCallSignHandler sets a department-specific callsign for a member in a community
 func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	userID := mux.Vars(r)["userId"]
 
 	var request struct {
-		DepartmentID string `json:"departmentId"`
-		CallSign     string `json:"callSign"`
+		DepartmentID     string `json:"departmentId"`
+		CallSign         string `json:"callSign"`
+		RequestingUserID string `json:"requestingUserId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -2696,6 +2731,14 @@ func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
 		return
+	}
+
+	// If a different user is making the request on behalf of the target, verify permissions
+	if request.RequestingUserID != "" && request.RequestingUserID != userID {
+		if !userHasCommunityPermission(community, request.RequestingUserID, "manage members") {
+			config.ErrorStatus("insufficient permissions to manage another member's call sign", http.StatusForbidden, w, fmt.Errorf("user does not have permission"))
+			return
+		}
 	}
 
 	filter := bson.M{"_id": cID}
@@ -5293,6 +5336,236 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBytes)
+}
+
+// FetchCommunityUnitsHandlerV2 returns paginated members enriched with ten-code status,
+// department assignments, and department call signs — optimized for dispatch/unit management.
+func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Optional search query
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+	// Optional department filter
+	departmentFilter := r.URL.Query().Get("department")
+
+	offset := (page - 1) * limit
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Fetch community data (ten codes, members map, departments) and user list in parallel
+	type communityResult struct {
+		community *models.Community
+		err       error
+	}
+	type usersResult struct {
+		users []models.User
+		total int64
+		err   error
+	}
+
+	commChan := make(chan communityResult, 1)
+	usersChan := make(chan usersResult, 1)
+
+	// Community data
+	go func() {
+		community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+		commChan <- communityResult{community: community, err: err}
+	}()
+
+	// Users with pagination
+	go func() {
+		filter := bson.M{
+			"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      "approved",
+				},
+			},
+		}
+
+		// Add search filter if provided
+		if search != "" {
+			filter["$or"] = []bson.M{
+				{"user.username": bson.M{"$regex": search, "$options": "i"}},
+				{"user.callSign": bson.M{"$regex": search, "$options": "i"}},
+			}
+		}
+
+		// Count and find in parallel
+		type countRes struct {
+			n   int64
+			err error
+		}
+		type findRes struct {
+			users []models.User
+			err   error
+		}
+		cntCh := make(chan countRes, 1)
+		fndCh := make(chan findRes, 1)
+
+		go func() {
+			n, err := c.UDB.CountDocuments(ctx, filter)
+			cntCh <- countRes{n: n, err: err}
+		}()
+		go func() {
+			opts := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).
+				SetSort(bson.D{{Key: "user.username", Value: 1}})
+			cursor, err := c.UDB.Find(ctx, filter, opts)
+			if err != nil {
+				fndCh <- findRes{err: err}
+				return
+			}
+			defer cursor.Close(ctx)
+			var users []models.User
+			err = cursor.All(ctx, &users)
+			fndCh <- findRes{users: users, err: err}
+		}()
+
+		cnt := <-cntCh
+		fnd := <-fndCh
+		if fnd.err != nil {
+			usersChan <- usersResult{err: fnd.err}
+			return
+		}
+		total := cnt.n
+		if cnt.err != nil {
+			total = int64(len(fnd.users))
+		}
+		usersChan <- usersResult{users: fnd.users, total: total}
+	}()
+
+	commRes := <-commChan
+	usersRes := <-usersChan
+
+	if commRes.err != nil {
+		config.ErrorStatus("failed to get community", http.StatusNotFound, w, commRes.err)
+		return
+	}
+	if usersRes.err != nil {
+		config.ErrorStatus("failed to get members", http.StatusInternalServerError, w, usersRes.err)
+		return
+	}
+
+	community := commRes.community
+	membersMap := community.Details.Members
+	if membersMap == nil {
+		membersMap = map[string]models.MemberDetail{}
+	}
+
+	// Build department lookup: userId -> []department info
+	type deptInfo struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	userDeptMap := map[string][]deptInfo{}
+	for _, dept := range community.Details.Departments {
+		for _, ms := range dept.Members {
+			uid := ms.UserID
+			if uid == "" {
+				continue
+			}
+			// If department filter is active, track which users match
+			userDeptMap[uid] = append(userDeptMap[uid], deptInfo{
+				ID:   dept.ID.Hex(),
+				Name: dept.Name,
+			})
+		}
+	}
+
+	// Build ten-code lookup
+	tenCodeMap := map[string]map[string]string{}
+	for _, tc := range community.Details.TenCodes {
+		tenCodeMap[tc.ID.Hex()] = map[string]string{
+			"id":   tc.ID.Hex(),
+			"code": tc.Code,
+		}
+	}
+
+	// Build enriched response
+	units := []map[string]interface{}{}
+	for _, user := range usersRes.users {
+		uid := user.ID
+		member := membersMap[uid]
+
+		// Apply department filter if specified
+		if departmentFilter != "" {
+			depts := userDeptMap[uid]
+			inDept := false
+			for _, d := range depts {
+				if d.ID == departmentFilter {
+					inDept = true
+					break
+				}
+			}
+			if !inDept {
+				continue
+			}
+		}
+
+		// Resolve ten code
+		var tenCode map[string]string
+		if member.TenCodeID != "" {
+			tenCode = tenCodeMap[member.TenCodeID]
+		}
+
+		// Resolve call sign: prefer department-specific, fall back to global
+		resolvedCallSign := user.Details.CallSign
+		if member.ActiveDepartmentID != "" && member.DepartmentCallSigns != nil {
+			if dcs, ok := member.DepartmentCallSigns[member.ActiveDepartmentID]; ok && dcs != "" {
+				resolvedCallSign = dcs
+			}
+		}
+
+		unit := map[string]interface{}{
+			"id":                  uid,
+			"username":            user.Details.Username,
+			"profilePicture":      user.Details.ProfilePicture,
+			"globalCallSign":      user.Details.CallSign,
+			"resolvedCallSign":    resolvedCallSign,
+			"tenCode":             tenCode,
+			"activeDepartmentId":  member.ActiveDepartmentID,
+			"activeDepartmentName": member.ActiveDepartmentName,
+			"departmentCallSigns": member.DepartmentCallSigns,
+			"departments":         userDeptMap[uid],
+		}
+
+		units = append(units, unit)
+	}
+
+	totalPages := (usersRes.total + int64(limit) - 1) / int64(limit)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"units": units,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  usersRes.total,
+			"hasNextPage": page < int(totalPages),
+			"hasPrevPage": page > 1,
+		},
+	})
 }
 
 // FetchCommunityMembersExcludeRoleHandlerV2 fetches community members who are NOT in a specific role
