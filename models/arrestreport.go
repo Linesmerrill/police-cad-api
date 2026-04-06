@@ -22,6 +22,9 @@ type ArrestReportDetails struct {
 	IncidentLocation string             `json:"incidentLocation" bson:"incidentLocation"`
 	Arrestee         Arrestee           `json:"arrestee" bson:"arrestee"`
 	Officer          Officer            `json:"officer" bson:"officer"`
+	OfficerID        string             `json:"officerID" bson:"officerID"`
+	ActiveCommunityID string            `json:"activeCommunityID" bson:"activeCommunityID"`
+	DepartmentID     string             `json:"departmentId" bson:"departmentId"`
 	Charges          string             `json:"charges" bson:"charges"`
 	Narrative        string             `json:"narrative" bson:"narrative"`
 	Witnesses        string             `json:"witnesses" bson:"witnesses"`

@@ -645,14 +645,13 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 		return relevant[metricType]
 	}
 
-	// Citations, Warnings, Arrests — from civilians collection
+	// Citations, Warnings — from civilians collection
 	for _, entry := range []struct {
 		metricType   string
 		crimHistType string
 	}{
 		{"citations_issued", "Citation"},
 		{"warnings_issued", "Warning"},
-		{"arrests_made", "Arrest"},
 	} {
 		if !needMetric(entry.metricType) {
 			continue
@@ -672,6 +671,22 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 			return nil, err
 		}
 		metrics[entry.metricType] = count
+	}
+
+	// Arrests Made — from arrestreports collection
+	if needMetric("arrests_made") {
+		count, err := c.runCountPipeline(ctx, "arrestreports", bson.A{
+			bson.M{"$match": bson.M{
+				"arrestReport.activeCommunityID": communityID,
+				"arrestReport.officerID":         userID,
+				"arrestReport.departmentId":      departmentID,
+			}},
+			bson.M{"$count": "total"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		metrics["arrests_made"] = count
 	}
 
 	// Calls Created
