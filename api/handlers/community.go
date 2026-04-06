@@ -5479,15 +5479,23 @@ func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.R
 		Name string `json:"name"`
 	}
 	userDeptMap := map[string][]deptInfo{}
+	userDeptSeen := map[string]map[string]bool{} // userId -> set of deptIDs already added
 	for _, dept := range community.Details.Departments {
+		dID := dept.ID.Hex()
 		for _, ms := range dept.Members {
 			uid := ms.UserID
 			if uid == "" {
 				continue
 			}
-			// If department filter is active, track which users match
+			if userDeptSeen[uid] == nil {
+				userDeptSeen[uid] = map[string]bool{}
+			}
+			if userDeptSeen[uid][dID] {
+				continue // skip duplicate membership entries
+			}
+			userDeptSeen[uid][dID] = true
 			userDeptMap[uid] = append(userDeptMap[uid], deptInfo{
-				ID:   dept.ID.Hex(),
+				ID:   dID,
 				Name: dept.Name,
 			})
 		}
