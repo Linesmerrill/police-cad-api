@@ -5475,8 +5475,9 @@ func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.R
 
 	// Build department lookup: userId -> []department info
 	type deptInfo struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Template string `json:"template,omitempty"`
 	}
 	userDeptMap := map[string][]deptInfo{}
 	userDeptSeen := map[string]map[string]bool{} // userId -> set of deptIDs already added
@@ -5495,8 +5496,9 @@ func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.R
 			}
 			userDeptSeen[uid][dID] = true
 			userDeptMap[uid] = append(userDeptMap[uid], deptInfo{
-				ID:   dID,
-				Name: dept.Name,
+				ID:       dID,
+				Name:     dept.Name,
+				Template: dept.Template.Name,
 			})
 		}
 	}
