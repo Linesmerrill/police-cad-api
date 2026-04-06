@@ -5572,6 +5572,31 @@ func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.R
 			}
 		}
 
+		// Ensure active department is included in the departments list
+		depts := userDeptMap[uid]
+		if member.ActiveDepartmentID != "" {
+			found := false
+			for _, d := range depts {
+				if d.ID == member.ActiveDepartmentID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				// Look up the department info
+				for _, dept := range community.Details.Departments {
+					if dept.ID.Hex() == member.ActiveDepartmentID {
+						depts = append(depts, deptInfo{
+							ID:       dept.ID.Hex(),
+							Name:     dept.Name,
+							Template: dept.Template.Name,
+						})
+						break
+					}
+				}
+			}
+		}
+
 		unit := map[string]interface{}{
 			"id":                  uid,
 			"username":            user.Details.Username,
@@ -5582,7 +5607,7 @@ func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.R
 			"activeDepartmentId":  member.ActiveDepartmentID,
 			"activeDepartmentName": member.ActiveDepartmentName,
 			"departmentCallSigns": member.DepartmentCallSigns,
-			"departments":         userDeptMap[uid],
+			"departments":         depts,
 		}
 
 		units = append(units, unit)
