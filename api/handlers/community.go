@@ -2766,7 +2766,21 @@ func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.R
 	}
 	community.Details.Members[userID] = member
 
-	update := bson.M{"$set": bson.M{"community.members." + userID + ".departmentCallSigns": member.DepartmentCallSigns}}
+	setFields := bson.M{"community.members." + userID + ".departmentCallSigns": member.DepartmentCallSigns}
+
+	// If the member has no active department set, set it to this department
+	if member.ActiveDepartmentID == "" && request.CallSign != "" {
+		setFields["community.members."+userID+".activeDepartmentId"] = request.DepartmentID
+		// Look up the department name
+		for _, dept := range community.Details.Departments {
+			if dept.ID.Hex() == request.DepartmentID {
+				setFields["community.members."+userID+".activeDepartmentName"] = dept.Name
+				break
+			}
+		}
+	}
+
+	update := bson.M{"$set": setFields}
 	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update department callsign", http.StatusInternalServerError, w, err)
