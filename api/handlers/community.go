@@ -7700,6 +7700,14 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Check if signal 100 is already active to avoid duplicate push notifications.
+	// The website POSTs to this endpoint AND emits a socket event that also calls
+	// this endpoint, so we need to guard against sending notifications twice.
+	wasAlreadyActive := false
+	if existing, fetchErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID}); fetchErr == nil {
+		wasAlreadyActive = existing.Details.Signal100.Active || existing.Details.ActiveSignal100
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	signal100 := models.Signal100Data{
@@ -7762,21 +7770,29 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 
 	zap.S().Infof("SIGNAL 100 ACTIVATED - community: %s, by: %s (%s)", communityID, request.Username, request.CallSign)
 
-	// Send push notifications (async)
-	go c.sendSignal100PushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "activated")
+	// Only send push notifications and Node.js webhook if signal 100 was not
+	// already active. This prevents duplicate notifications when the endpoint
+	// is called multiple times for the same activation (e.g. website calls the
+	// API directly and also emits a socket event that triggers a second call).
+	if !wasAlreadyActive {
+		// Send push notifications (async)
+		go c.sendSignal100PushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "activated")
 
-	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
-	nodeData := map[string]interface{}{
-		"communityId":    communityID,
-		"userId":         request.UserID,
-		"username":       request.Username,
-		"callSign":       request.CallSign,
-		"departmentType": request.DepartmentName,
+		// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+		nodeData := map[string]interface{}{
+			"communityId":    communityID,
+			"userId":         request.UserID,
+			"username":       request.Username,
+			"callSign":       request.CallSign,
+			"departmentType": request.DepartmentName,
+		}
+		if signal100SoundUrl != "" {
+			nodeData["signal100SoundUrl"] = signal100SoundUrl
+		}
+		go c.notifyNodeServerPanic("signal_100_activated", nodeData)
+	} else {
+		zap.S().Infof("SIGNAL 100 already active - skipping duplicate push notifications for community: %s", communityID)
 	}
-	if signal100SoundUrl != "" {
-		nodeData["signal100SoundUrl"] = signal100SoundUrl
-	}
-	go c.notifyNodeServerPanic("signal_100_activated", nodeData)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(signal100)
@@ -7811,12 +7827,14 @@ func (c Community) ClearSignal100Handler(w http.ResponseWriter, r *http.Request)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Fetch current signal100 data to preserve activation info
+	// Fetch current signal100 data to preserve activation info and check if already cleared
 	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community", http.StatusNotFound, w, err)
 		return
 	}
+
+	wasActive := community.Details.Signal100.Active || community.Details.ActiveSignal100
 
 	signal100 := community.Details.Signal100
 	signal100.Active = false
@@ -7854,16 +7872,22 @@ func (c Community) ClearSignal100Handler(w http.ResponseWriter, r *http.Request)
 
 	zap.S().Infof("SIGNAL 100 CLEARED - community: %s, by: %s (%s)", communityID, request.ClearedByUsername, request.ClearedByCallSign)
 
-	// Send push notifications (async)
-	go c.sendSignal100PushNotifications(cID, communityID, request.ClearedByUserId, request.ClearedByUsername, request.ClearedByCallSign, "cleared")
+	// Only send push notifications if signal 100 was actually active.
+	// Prevents duplicate "cleared" notifications from multiple callers.
+	if wasActive {
+		// Send push notifications (async)
+		go c.sendSignal100PushNotifications(cID, communityID, request.ClearedByUserId, request.ClearedByUsername, request.ClearedByCallSign, "cleared")
 
-	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
-	go c.notifyNodeServerPanic("signal_100_cleared", map[string]interface{}{
-		"communityId": communityID,
-		"userId":      request.ClearedByUserId,
-		"username":    request.ClearedByUsername,
-		"callSign":    request.ClearedByCallSign,
-	})
+		// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+		go c.notifyNodeServerPanic("signal_100_cleared", map[string]interface{}{
+			"communityId": communityID,
+			"userId":      request.ClearedByUserId,
+			"username":    request.ClearedByUsername,
+			"callSign":    request.ClearedByCallSign,
+		})
+	} else {
+		zap.S().Infof("SIGNAL 100 already inactive - skipping duplicate clear notifications for community: %s", communityID)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(signal100)
