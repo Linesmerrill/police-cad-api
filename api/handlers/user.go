@@ -652,6 +652,21 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Deduplicate join_request notifications: skip if an unseen one already exists
+	// from the same sender for the same community to the same recipient
+	if notification.Type == "join_request" {
+		for _, existing := range dbResp.Details.Notifications {
+			if existing.Type == "join_request" &&
+				existing.SentFromID == notification.SentFromID &&
+				existing.Data1 == notification.Data1 &&
+				!existing.Seen {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"message": "notification already exists"}`))
+				return
+			}
+		}
+	}
+
 	// Look up sender details for the WebSocket payload
 	var senderUsername, senderProfilePic string
 	if notification.SentFromID != "" {

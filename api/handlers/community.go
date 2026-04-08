@@ -2658,14 +2658,49 @@ func (c Community) GetDepartmentCallSignsHandler(w http.ResponseWriter, r *http.
 	})
 }
 
+// userHasCommunityPermission checks if a user is the community owner or has a role
+// with "administrator" or any of the specified permission names enabled.
+func userHasCommunityPermission(community *models.Community, userID string, permissionNames ...string) bool {
+	if community.Details.OwnerID == userID {
+		return true
+	}
+	for _, role := range community.Details.Roles {
+		isMember := false
+		for _, m := range role.Members {
+			if m == userID {
+				isMember = true
+				break
+			}
+		}
+		if !isMember {
+			continue
+		}
+		for _, p := range role.Permissions {
+			if !p.Enabled {
+				continue
+			}
+			if p.Name == "administrator" {
+				return true
+			}
+			for _, name := range permissionNames {
+				if p.Name == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // SetDepartmentCallSignHandler sets a department-specific callsign for a member in a community
 func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	userID := mux.Vars(r)["userId"]
 
 	var request struct {
-		DepartmentID string `json:"departmentId"`
-		CallSign     string `json:"callSign"`
+		DepartmentID     string `json:"departmentId"`
+		CallSign         string `json:"callSign"`
+		RequestingUserID string `json:"requestingUserId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -2698,6 +2733,14 @@ func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// If a different user is making the request on behalf of the target, verify permissions
+	if request.RequestingUserID != "" && request.RequestingUserID != userID {
+		if !userHasCommunityPermission(community, request.RequestingUserID, "manage members") {
+			config.ErrorStatus("insufficient permissions to manage another member's call sign", http.StatusForbidden, w, fmt.Errorf("user does not have permission"))
+			return
+		}
+	}
+
 	filter := bson.M{"_id": cID}
 
 	// If members is null in the database, initialize it first so dot-notation updates work
@@ -2723,7 +2766,21 @@ func (c Community) SetDepartmentCallSignHandler(w http.ResponseWriter, r *http.R
 	}
 	community.Details.Members[userID] = member
 
-	update := bson.M{"$set": bson.M{"community.members." + userID + ".departmentCallSigns": member.DepartmentCallSigns}}
+	setFields := bson.M{"community.members." + userID + ".departmentCallSigns": member.DepartmentCallSigns}
+
+	// If the member has no active department set, set it to this department
+	if member.ActiveDepartmentID == "" && request.CallSign != "" {
+		setFields["community.members."+userID+".activeDepartmentId"] = request.DepartmentID
+		// Look up the department name
+		for _, dept := range community.Details.Departments {
+			if dept.ID.Hex() == request.DepartmentID {
+				setFields["community.members."+userID+".activeDepartmentName"] = dept.Name
+				break
+			}
+		}
+	}
+
+	update := bson.M{"$set": setFields}
 	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to update department callsign", http.StatusInternalServerError, w, err)
@@ -5295,6 +5352,282 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 	w.Write(responseBytes)
 }
 
+// FetchCommunityUnitsHandlerV2 returns paginated members enriched with ten-code status,
+// department assignments, and department call signs — optimized for dispatch/unit management.
+func (c Community) FetchCommunityUnitsHandlerV2(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["communityId"]
+
+	// Parse pagination
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Optional search query
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+	// Optional department filter
+	departmentFilter := r.URL.Query().Get("department")
+
+	offset := (page - 1) * limit
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Fetch community data (ten codes, members map, departments) and user list in parallel
+	type communityResult struct {
+		community *models.Community
+		err       error
+	}
+	type usersResult struct {
+		users []models.User
+		total int64
+		err   error
+	}
+
+	commChan := make(chan communityResult, 1)
+	usersChan := make(chan usersResult, 1)
+
+	// Community data
+	go func() {
+		community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+		commChan <- communityResult{community: community, err: err}
+	}()
+
+	// Users with pagination
+	go func() {
+		filter := bson.M{
+			"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      "approved",
+				},
+			},
+		}
+
+		// Add search filter if provided
+		if search != "" {
+			filter["$or"] = []bson.M{
+				{"user.username": bson.M{"$regex": search, "$options": "i"}},
+				{"user.callSign": bson.M{"$regex": search, "$options": "i"}},
+			}
+		}
+
+		// Count and find in parallel
+		type countRes struct {
+			n   int64
+			err error
+		}
+		type findRes struct {
+			users []models.User
+			err   error
+		}
+		cntCh := make(chan countRes, 1)
+		fndCh := make(chan findRes, 1)
+
+		go func() {
+			n, err := c.UDB.CountDocuments(ctx, filter)
+			cntCh <- countRes{n: n, err: err}
+		}()
+		go func() {
+			opts := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).
+				SetSort(bson.D{{Key: "user.username", Value: 1}})
+			cursor, err := c.UDB.Find(ctx, filter, opts)
+			if err != nil {
+				fndCh <- findRes{err: err}
+				return
+			}
+			defer cursor.Close(ctx)
+			var users []models.User
+			err = cursor.All(ctx, &users)
+			fndCh <- findRes{users: users, err: err}
+		}()
+
+		cnt := <-cntCh
+		fnd := <-fndCh
+		if fnd.err != nil {
+			usersChan <- usersResult{err: fnd.err}
+			return
+		}
+		total := cnt.n
+		if cnt.err != nil {
+			total = int64(len(fnd.users))
+		}
+		usersChan <- usersResult{users: fnd.users, total: total}
+	}()
+
+	commRes := <-commChan
+	usersRes := <-usersChan
+
+	if commRes.err != nil {
+		config.ErrorStatus("failed to get community", http.StatusNotFound, w, commRes.err)
+		return
+	}
+	if usersRes.err != nil {
+		config.ErrorStatus("failed to get members", http.StatusInternalServerError, w, usersRes.err)
+		return
+	}
+
+	community := commRes.community
+	membersMap := community.Details.Members
+	if membersMap == nil {
+		membersMap = map[string]models.MemberDetail{}
+	}
+
+	// Build department lookup: userId -> []department info
+	type deptInfo struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Template string `json:"template,omitempty"`
+	}
+	userDeptMap := map[string][]deptInfo{}
+	userDeptSeen := map[string]map[string]bool{} // userId -> set of deptIDs already added
+	for _, dept := range community.Details.Departments {
+		dID := dept.ID.Hex()
+		for _, ms := range dept.Members {
+			uid := ms.UserID
+			if uid == "" {
+				continue
+			}
+			if userDeptSeen[uid] == nil {
+				userDeptSeen[uid] = map[string]bool{}
+			}
+			if userDeptSeen[uid][dID] {
+				continue // skip duplicate membership entries
+			}
+			userDeptSeen[uid][dID] = true
+			userDeptMap[uid] = append(userDeptMap[uid], deptInfo{
+				ID:       dID,
+				Name:     dept.Name,
+				Template: dept.Template.Name,
+			})
+		}
+	}
+
+	// Build ten-code lookup
+	tenCodeMap := map[string]map[string]string{}
+	for _, tc := range community.Details.TenCodes {
+		tenCodeMap[tc.ID.Hex()] = map[string]string{
+			"id":   tc.ID.Hex(),
+			"code": tc.Code,
+		}
+	}
+
+	// Build enriched response
+	units := []map[string]interface{}{}
+	for _, user := range usersRes.users {
+		uid := user.ID
+		member := membersMap[uid]
+
+		// Apply department filter if specified
+		if departmentFilter != "" {
+			depts := userDeptMap[uid]
+			inDept := false
+			for _, d := range depts {
+				if d.ID == departmentFilter {
+					inDept = true
+					break
+				}
+			}
+			if !inDept {
+				continue
+			}
+		}
+
+		// Resolve ten code
+		var tenCode map[string]string
+		if member.TenCodeID != "" {
+			tenCode = tenCodeMap[member.TenCodeID]
+		}
+
+		// Resolve call sign: prefer active-department-specific, then any department call sign, then global
+		resolvedCallSign := user.Details.CallSign
+		if member.DepartmentCallSigns != nil {
+			if member.ActiveDepartmentID != "" {
+				if dcs, ok := member.DepartmentCallSigns[member.ActiveDepartmentID]; ok && dcs != "" {
+					resolvedCallSign = dcs
+				}
+			}
+			// If still using global and there are department call signs, use the first one found
+			if resolvedCallSign == user.Details.CallSign {
+				for _, dcs := range member.DepartmentCallSigns {
+					if dcs != "" {
+						resolvedCallSign = dcs
+						break
+					}
+				}
+			}
+		}
+
+		// Ensure active department is included in the departments list
+		depts := userDeptMap[uid]
+		if member.ActiveDepartmentID != "" {
+			found := false
+			for _, d := range depts {
+				if d.ID == member.ActiveDepartmentID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				// Look up the department info
+				for _, dept := range community.Details.Departments {
+					if dept.ID.Hex() == member.ActiveDepartmentID {
+						depts = append(depts, deptInfo{
+							ID:       dept.ID.Hex(),
+							Name:     dept.Name,
+							Template: dept.Template.Name,
+						})
+						break
+					}
+				}
+			}
+		}
+
+		unit := map[string]interface{}{
+			"id":                  uid,
+			"username":            user.Details.Username,
+			"profilePicture":      user.Details.ProfilePicture,
+			"globalCallSign":      user.Details.CallSign,
+			"resolvedCallSign":    resolvedCallSign,
+			"tenCode":             tenCode,
+			"activeDepartmentId":  member.ActiveDepartmentID,
+			"activeDepartmentName": member.ActiveDepartmentName,
+			"departmentCallSigns": member.DepartmentCallSigns,
+			"departments":         depts,
+		}
+
+		units = append(units, unit)
+	}
+
+	totalPages := (usersRes.total + int64(limit) - 1) / int64(limit)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"units": units,
+		"pagination": map[string]interface{}{
+			"currentPage": page,
+			"totalPages":  totalPages,
+			"totalCount":  usersRes.total,
+			"hasNextPage": page < int(totalPages),
+			"hasPrevPage": page > 1,
+		},
+	})
+}
+
 // FetchCommunityMembersExcludeRoleHandlerV2 fetches community members who are NOT in a specific role
 func (c *Community) FetchCommunityMembersExcludeRoleHandlerV2(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -7367,6 +7700,14 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Check if signal 100 is already active to avoid duplicate push notifications.
+	// The website POSTs to this endpoint AND emits a socket event that also calls
+	// this endpoint, so we need to guard against sending notifications twice.
+	wasAlreadyActive := false
+	if existing, fetchErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID}); fetchErr == nil {
+		wasAlreadyActive = existing.Details.Signal100.Active || existing.Details.ActiveSignal100
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	signal100 := models.Signal100Data{
@@ -7429,21 +7770,29 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 
 	zap.S().Infof("SIGNAL 100 ACTIVATED - community: %s, by: %s (%s)", communityID, request.Username, request.CallSign)
 
-	// Send push notifications (async)
-	go c.sendSignal100PushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "activated")
+	// Only send push notifications and Node.js webhook if signal 100 was not
+	// already active. This prevents duplicate notifications when the endpoint
+	// is called multiple times for the same activation (e.g. website calls the
+	// API directly and also emits a socket event that triggers a second call).
+	if !wasAlreadyActive {
+		// Send push notifications (async)
+		go c.sendSignal100PushNotifications(cID, communityID, request.UserID, request.Username, request.CallSign, "activated")
 
-	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
-	nodeData := map[string]interface{}{
-		"communityId":    communityID,
-		"userId":         request.UserID,
-		"username":       request.Username,
-		"callSign":       request.CallSign,
-		"departmentType": request.DepartmentName,
+		// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+		nodeData := map[string]interface{}{
+			"communityId":    communityID,
+			"userId":         request.UserID,
+			"username":       request.Username,
+			"callSign":       request.CallSign,
+			"departmentType": request.DepartmentName,
+		}
+		if signal100SoundUrl != "" {
+			nodeData["signal100SoundUrl"] = signal100SoundUrl
+		}
+		go c.notifyNodeServerPanic("signal_100_activated", nodeData)
+	} else {
+		zap.S().Infof("SIGNAL 100 already active - skipping duplicate push notifications for community: %s", communityID)
 	}
-	if signal100SoundUrl != "" {
-		nodeData["signal100SoundUrl"] = signal100SoundUrl
-	}
-	go c.notifyNodeServerPanic("signal_100_activated", nodeData)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(signal100)
@@ -7478,12 +7827,14 @@ func (c Community) ClearSignal100Handler(w http.ResponseWriter, r *http.Request)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Fetch current signal100 data to preserve activation info
+	// Fetch current signal100 data to preserve activation info and check if already cleared
 	community, err := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to get community", http.StatusNotFound, w, err)
 		return
 	}
+
+	wasActive := community.Details.Signal100.Active || community.Details.ActiveSignal100
 
 	signal100 := community.Details.Signal100
 	signal100.Active = false
@@ -7521,16 +7872,22 @@ func (c Community) ClearSignal100Handler(w http.ResponseWriter, r *http.Request)
 
 	zap.S().Infof("SIGNAL 100 CLEARED - community: %s, by: %s (%s)", communityID, request.ClearedByUsername, request.ClearedByCallSign)
 
-	// Send push notifications (async)
-	go c.sendSignal100PushNotifications(cID, communityID, request.ClearedByUserId, request.ClearedByUsername, request.ClearedByCallSign, "cleared")
+	// Only send push notifications if signal 100 was actually active.
+	// Prevents duplicate "cleared" notifications from multiple callers.
+	if wasActive {
+		// Send push notifications (async)
+		go c.sendSignal100PushNotifications(cID, communityID, request.ClearedByUserId, request.ClearedByUsername, request.ClearedByCallSign, "cleared")
 
-	// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
-	go c.notifyNodeServerPanic("signal_100_cleared", map[string]interface{}{
-		"communityId": communityID,
-		"userId":      request.ClearedByUserId,
-		"username":    request.ClearedByUsername,
-		"callSign":    request.ClearedByCallSign,
-	})
+		// Notify Node.js server to broadcast via Socket.IO (for web dashboard updates from mobile)
+		go c.notifyNodeServerPanic("signal_100_cleared", map[string]interface{}{
+			"communityId": communityID,
+			"userId":      request.ClearedByUserId,
+			"username":    request.ClearedByUsername,
+			"callSign":    request.ClearedByCallSign,
+		})
+	} else {
+		zap.S().Infof("SIGNAL 100 already inactive - skipping duplicate clear notifications for community: %s", communityID)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(signal100)
