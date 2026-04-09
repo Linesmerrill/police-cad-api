@@ -210,6 +210,31 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Self-healing: overwrite the denormalized MembersCount with a live count
+	// from the users collection. Protects against historical drift (e.g. bans
+	// that did not decrement the stored field). Uses the same filter as
+	// CommunityMembersHandler so both endpoints agree. Backed by the
+	// {user.communities.communityId, user.communities.status} compound index
+	// (scripts/create_indexes.js).
+	memberFilter := bson.M{
+		"$and": []bson.M{
+			{"user.communities": bson.M{"$exists": true}},
+			{"user.communities": bson.M{"$ne": nil}},
+			{"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": commID,
+					"status":      "approved",
+				},
+			}},
+		},
+	}
+	if liveCount, countErr := c.UDB.CountDocuments(ctx, memberFilter); countErr == nil {
+		dbResp.Details.MembersCount = int(liveCount)
+	} else {
+		zap.S().Warnw("failed to compute live membersCount; falling back to stored value",
+			"community_id", commID, "error", countErr)
+	}
+
 	b, err := json.Marshal(dbResp)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
@@ -1901,9 +1926,15 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Step 5: Increment membersCount if new entry
+	// Step 5: Increment membersCount in two cases:
+	//   1. New entry (not on banList).
+	//   2. Existing entry transitioned from a non-approved, non-banned status
+	//      to "approved" via the update at Step 3 above.
 	isNewEntry := existingCommunity == nil && !contains(community.Details.BanList, req.UserID)
-	if isNewEntry {
+	becameApproved := existingCommunity != nil &&
+		existingCommunity.Status != "approved" &&
+		existingCommunity.Status != "banned"
+	if isNewEntry || becameApproved {
 		if err := c.DB.UpdateOne(
 			ctx,
 			bson.M{"_id": communityObjID},

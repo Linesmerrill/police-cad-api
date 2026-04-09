@@ -2277,6 +2277,32 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Fetch user to determine prior community status — we only decrement
+	// membersCount if this user was previously "approved" (counted).
+	var bannedUser models.User
+	if err := u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&bannedUser); err != nil {
+		config.ErrorStatus("failed to fetch user", http.StatusInternalServerError, w, err)
+		return
+	}
+	priorStatus := ""
+	for _, uc := range bannedUser.Details.Communities {
+		if uc.CommunityID == requestBody.CommunityID {
+			priorStatus = uc.Status
+			break
+		}
+	}
+	if priorStatus == "" {
+		config.ErrorStatus("user is not a member of this community", http.StatusBadRequest, w,
+			fmt.Errorf("community %s is not associated with user %s", requestBody.CommunityID, userID))
+		return
+	}
+	if priorStatus == "banned" {
+		// Idempotent: already banned.
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "User already banned from community"}`))
+		return
+	}
+
 	// Update the user's community status to "banned"
 	userFilter := bson.M{
 		"_id":                          uID,
@@ -2304,6 +2330,19 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		config.ErrorStatus("failed to update community ban list", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Only decrement membersCount if the user was previously approved (counted).
+	// Non-fatal: CommunityHandler's self-healing read will correct any transient
+	// drift on the next GET. Don't block a security-critical action on a
+	// denormalized-field update failure.
+	if priorStatus == "approved" {
+		if err := u.CDB.UpdateOne(ctx, communityFilter, bson.M{
+			"$inc": bson.M{"community.membersCount": -1},
+		}); err != nil {
+			zap.S().Warnw("failed to decrement membersCount on ban",
+				"community_id", requestBody.CommunityID, "user_id", userID, "error", err)
+		}
 	}
 
 	// Audit log — member banned
