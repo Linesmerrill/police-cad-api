@@ -335,11 +335,10 @@ type CommunitySubscription struct {
 }
 
 type AdminPendingVerificationResult struct {
-	ID        primitive.ObjectID `json:"id"`
-	Email     string             `json:"email"`
-	Code      string             `json:"code"`
-	Attempts  int                `json:"attempts"`
-	CreatedAt interface{}        `json:"createdAt"`
+	ID        string      `json:"id"`
+	Email     string      `json:"email"`
+	Username  string      `json:"username"`
+	CreatedAt interface{} `json:"createdAt"`
 }
 
 // AdminCasePersonRef is a lightweight reference to a user in a case

@@ -32,9 +32,12 @@ type UserDetails struct {
 	IsDeactivated         bool                  `json:"isDeactivated" bson:"isDeactivated"`
 	DeactivatedAt         interface{}           `json:"deactivatedAt" bson:"deactivatedAt"`
 	RestoreUntil          interface{}           `json:"restoreUntil" bson:"restoreUntil"`
-	ResetPasswordToken    string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
-	ResetPasswordExpires  interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
-	DismissedTutorials    []string              `json:"dismissedTutorials,omitempty" bson:"dismissedTutorials,omitempty"`
+	ResetPasswordToken       string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
+	ResetPasswordExpires     interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
+	EmailVerified            *bool                 `json:"emailVerified" bson:"emailVerified"`
+	EmailVerificationToken   string                `json:"emailVerificationToken" bson:"emailVerificationToken"`
+	EmailVerificationExpires interface{}           `json:"emailVerificationExpires" bson:"emailVerificationExpires"`
+	DismissedTutorials       []string              `json:"dismissedTutorials,omitempty" bson:"dismissedTutorials,omitempty"`
 	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt             interface{}           `json:"updatedAt" bson:"updatedAt"`
 }
