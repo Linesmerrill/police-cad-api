@@ -2155,6 +2155,88 @@ func (u User) PendingCommunityRequestHandler(w http.ResponseWriter, r *http.Requ
 	w.Write([]byte(`{"message": "Pending community request added successfully"}`))
 }
 
+// CancelPendingCommunityRequestHandler cancels a pending community join request for a user
+func (u User) CancelPendingCommunityRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	// Parse the request body to get the community ID
+	var requestBody struct {
+		CommunityID string `json:"communityId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Convert the user ID to primitive.ObjectID
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Use request context with timeout
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	user := models.User{}
+	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&user)
+	if err != nil {
+		config.ErrorStatus("failed to retrieve user", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Find the matching community entry and verify it's pending
+	var found bool
+	if user.Details.Communities != nil {
+		for _, c := range user.Details.Communities {
+			if c.CommunityID == requestBody.CommunityID && c.Status == "pending" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		config.ErrorStatus("no pending community request found", http.StatusBadRequest, w, fmt.Errorf("no pending community request found for communityId %s", requestBody.CommunityID))
+		return
+	}
+
+	// Remove the pending entry from the user's communities array
+	filter := bson.M{"_id": uID}
+	update := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
+	_, err = u.DB.UpdateOne(ctx, filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to cancel pending community request", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Clean up join_request notifications sent to admins for this request
+	notifFilter := bson.M{
+		"user.notifications": bson.M{
+			"$elemMatch": bson.M{
+				"type":       "join_request",
+				"sentFromID": userID,
+				"data1":      requestBody.CommunityID,
+			},
+		},
+	}
+	notifUpdate := bson.M{
+		"$pull": bson.M{
+			"user.notifications": bson.M{
+				"type":       "join_request",
+				"sentFromID": userID,
+				"data1":      requestBody.CommunityID,
+			},
+		},
+	}
+	// Best-effort cleanup — don't fail the request if notification cleanup fails
+	_, _ = u.DB.UpdateMany(ctx, notifFilter, notifUpdate)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Pending community request cancelled successfully"}`))
+}
+
 // RemoveCommunityFromUserHandler removes a community from a user's array of communities
 func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["userId"]
@@ -2689,6 +2771,105 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User added to department with pending status successfully"}`))
+}
+
+// CancelPendingDepartmentRequestHandler cancels a pending department join request for a user
+func (u User) CancelPendingDepartmentRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	var requestBody struct {
+		CommunityID  string `json:"communityId"`
+		DepartmentID string `json:"departmentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(requestBody.CommunityID)
+	if err != nil {
+		config.ErrorStatus("invalid communityId", http.StatusBadRequest, w, err)
+		return
+	}
+	dID, err := primitive.ObjectIDFromHex(requestBody.DepartmentID)
+	if err != nil {
+		config.ErrorStatus("invalid departmentId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Find the community
+	community, err := u.CDB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to find community", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Find the department and verify user has a pending request
+	var deptFound bool
+	var memberFound bool
+	for i, dept := range community.Details.Departments {
+		if dept.ID == dID {
+			deptFound = true
+			newMembers := make([]models.MemberStatus, 0, len(dept.Members))
+			for _, m := range dept.Members {
+				if m.UserID == userID && m.Status == "pending" {
+					memberFound = true
+					continue // skip this entry to remove it
+				}
+				newMembers = append(newMembers, m)
+			}
+			community.Details.Departments[i].Members = newMembers
+			break
+		}
+	}
+
+	if !deptFound {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, nil)
+		return
+	}
+	if !memberFound {
+		config.ErrorStatus("no pending department request found", http.StatusBadRequest, w, fmt.Errorf("no pending department request found"))
+		return
+	}
+
+	// Update the community with the modified departments array
+	update := bson.M{"$set": bson.M{"community.departments": community.Details.Departments}}
+	err = u.CDB.UpdateOne(ctx, bson.M{"_id": cID}, update)
+	if err != nil {
+		config.ErrorStatus("failed to cancel pending department request", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Clean up join_request notifications sent to admins for this department
+	// Department notifications use type "join_request" with data1=communityId, data3=departmentId
+	notifFilter := bson.M{
+		"user.notifications": bson.M{
+			"$elemMatch": bson.M{
+				"type":       "join_request",
+				"sentFromID": userID,
+				"data1":      requestBody.CommunityID,
+				"data3":      requestBody.DepartmentID,
+			},
+		},
+	}
+	notifUpdate := bson.M{
+		"$pull": bson.M{
+			"user.notifications": bson.M{
+				"type":       "join_request",
+				"sentFromID": userID,
+				"data1":      requestBody.CommunityID,
+				"data3":      requestBody.DepartmentID,
+			},
+		},
+	}
+	// Best-effort cleanup
+	_, _ = u.DB.UpdateMany(ctx, notifFilter, notifUpdate)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Pending department request cancelled successfully"}`))
 }
 
 // CreateCheckoutSessionHandler subscribes a user to a specific tier
