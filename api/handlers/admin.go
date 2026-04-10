@@ -905,17 +905,31 @@ func (h Admin) AdminVerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := bson.M{"_id": userID}
 	update := bson.M{
 		"$set":   bson.M{"user.emailVerified": true},
 		"$unset": bson.M{"user.emailVerificationToken": "", "user.emailVerificationExpires": ""},
 	}
 
+	// Try string ID first
+	filter := bson.M{"_id": userID}
 	result, err := h.UDB.UpdateOne(r.Context(), filter, update)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to verify email"})
 		return
+	}
+
+	// If string ID didn't match, try ObjectID
+	if result.MatchedCount == 0 {
+		if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+			filter = bson.M{"_id": oid}
+			result, err = h.UDB.UpdateOne(r.Context(), filter, update)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to verify email"})
+				return
+			}
+		}
 	}
 
 	if result.MatchedCount == 0 {
