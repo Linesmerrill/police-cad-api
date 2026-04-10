@@ -797,7 +797,7 @@ type pendingVerificationSearchResponse struct {
 	Pagination           map[string]interface{}                 `json:"pagination"`
 }
 
-// AdminPendingVerificationSearchHandler searches for pending verifications by email
+// AdminPendingVerificationSearchHandler searches for users with emailVerified === false by email
 func (h Admin) AdminPendingVerificationSearchHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -818,37 +818,38 @@ func (h Admin) AdminPendingVerificationSearchHandler(w http.ResponseWriter, r *h
 	// Set pagination defaults
 	page := req.Page
 	if page < 0 {
-		page = 0 // Default to first page (0-based)
+		page = 0
 	}
-	
+
 	limit := req.Limit
 	if limit <= 0 {
-		limit = 10 // Default to 10 records per page
+		limit = 10
 	}
-	
+
 	// Calculate skip value for MongoDB
 	skip := int64(page * limit)
 	limit64 := int64(limit)
 
-	// Search by email (case-insensitive)
+	// Search users collection for unverified emails (case-insensitive)
 	escapedQuery := regexp.QuoteMeta(query)
 	filter := bson.M{
-		"email": bson.M{"$regex": escapedQuery, "$options": "i"},
+		"user.email":         bson.M{"$regex": escapedQuery, "$options": "i"},
+		"user.emailVerified": false,
 	}
-	
+
 	// Get total count for pagination metadata
-	totalCount, err := h.PVDB.CountDocuments(r.Context(), filter)
+	totalCount, err := h.UDB.CountDocuments(r.Context(), filter)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
 		return
 	}
-	
-	// Use pending verification database to search with pagination
-	cursor, err := h.PVDB.Find(r.Context(), filter, &options.FindOptions{
+
+	// Search users collection with pagination
+	cursor, err := h.UDB.Find(r.Context(), filter, &options.FindOptions{
 		Skip:  &skip,
 		Limit: &limit64,
-		Sort:  bson.M{"email": 1}, // Sort by email for consistent results
+		Sort:  bson.M{"user.email": 1},
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -857,33 +858,32 @@ func (h Admin) AdminPendingVerificationSearchHandler(w http.ResponseWriter, r *h
 	}
 	defer cursor.Close(r.Context())
 
-	var pendingVerifications []models.PendingVerification
-	if err = cursor.All(r.Context(), &pendingVerifications); err != nil {
+	var users []models.User
+	if err = cursor.All(r.Context(), &users); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode pending verifications"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode users"})
 		return
 	}
 
 	var results []models.AdminPendingVerificationResult
-	for _, pv := range pendingVerifications {
+	for _, u := range users {
 		result := models.AdminPendingVerificationResult{
-			ID:        pv.ID,
-			Email:     pv.Email,
-			Code:      pv.Code,
-			Attempts:  pv.Attempts,
-			CreatedAt: pv.CreatedAt,
+			ID:        u.ID,
+			Email:     u.Details.Email,
+			Username:  u.Details.Username,
+			CreatedAt: u.Details.CreatedAt,
 		}
 		results = append(results, result)
 	}
 
 	// Create pagination metadata
 	pagination := map[string]interface{}{
-		"currentPage": page,
-		"limit":       limit,
+		"currentPage":  page,
+		"limit":        limit,
 		"totalRecords": totalCount,
-		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
-		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)) - 1,
-		"hasPrevPage": page > 0,
+		"totalPages":   int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasNextPage":  page < int((totalCount+int64(limit)-1)/int64(limit)) - 1,
+		"hasPrevPage":  page > 0,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -891,6 +891,41 @@ func (h Admin) AdminPendingVerificationSearchHandler(w http.ResponseWriter, r *h
 		PendingVerifications: results,
 		Pagination:          pagination,
 	})
+}
+
+// AdminVerifyEmailHandler manually verifies a user's email
+func (h Admin) AdminVerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	userID := vars["id"]
+	if userID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user ID required"})
+		return
+	}
+
+	filter := bson.M{"_id": userID}
+	update := bson.M{
+		"$set":   bson.M{"user.emailVerified": true},
+		"$unset": bson.M{"user.emailVerificationToken": "", "user.emailVerificationExpires": ""},
+	}
+
+	result, err := h.UDB.UpdateOne(r.Context(), filter, update)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to verify email"})
+		return
+	}
+
+	if result.MatchedCount == 0 {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "email verified successfully"})
 }
 
 type userDetailsResponse struct {
