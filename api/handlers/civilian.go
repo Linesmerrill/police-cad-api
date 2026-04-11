@@ -423,9 +423,20 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Prepare the update document
+	// Fields that must not be changed via update (ownership, identity, community)
+	protectedFields := map[string]bool{
+		"userID":            true,
+		"activeCommunityID": true,
+		"_id":               true,
+		"createdAt":         true,
+	}
+
+	// Prepare the update document, filtering out protected fields
 	update := bson.M{}
 	for key, value := range updatedFields {
+		if protectedFields[key] {
+			continue
+		}
 		update["civilian."+key] = value
 	}
 
