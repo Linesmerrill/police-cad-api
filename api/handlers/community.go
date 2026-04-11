@@ -6249,7 +6249,6 @@ func (c Community) GetCommunityCiviliansHandlerV2(w http.ResponseWriter, r *http
 					userDetails = map[string]interface{}{
 						"id":       user.ID,
 						"username": user.Details.Username,
-						"email":    user.Details.Email,
 					}
 				}
 			}
