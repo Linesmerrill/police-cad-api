@@ -32,7 +32,8 @@ var (
 
 // Civilian exported for testing purposes
 type Civilian struct {
-	DB databases.CivilianDatabase
+	DB  databases.CivilianDatabase
+	UDB databases.UserDatabase
 }
 
 // CivilianHandler returns all civilians
@@ -423,9 +424,20 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Prepare the update document
+	// Fields that must not be changed via update (ownership, identity, community)
+	protectedFields := map[string]bool{
+		"userID":            true,
+		"activeCommunityID": true,
+		"_id":               true,
+		"createdAt":         true,
+	}
+
+	// Prepare the update document, filtering out protected fields
 	update := bson.M{}
 	for key, value := range updatedFields {
+		if protectedFields[key] {
+			continue
+		}
 		update["civilian."+key] = value
 	}
 
@@ -1024,19 +1036,48 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 		civilians = []models.Civilian{}
 	}
 
+	// Populate user details for each civilian
+	var populatedCivilians []map[string]interface{}
+	for _, civ := range civilians {
+		var userDetails map[string]interface{}
+		if civ.Details.UserID != "" {
+			userObjID, err := primitive.ObjectIDFromHex(civ.Details.UserID)
+			if err == nil {
+				var user models.User
+				err = c.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user)
+				if err == nil {
+					userDetails = map[string]interface{}{
+						"id":       user.ID,
+						"username": user.Details.Username,
+					}
+				}
+			}
+		}
+		populatedCivilians = append(populatedCivilians, map[string]interface{}{
+			"_id":      civ.ID,
+			"civilian": civ.Details,
+			"user":     userDetails,
+			"__v":      civ.Version,
+		})
+	}
+
+	if populatedCivilians == nil {
+		populatedCivilians = []map[string]interface{}{}
+	}
+
 	// Create pagination metadata
 	pagination := map[string]interface{}{
-		"currentPage": page,
-		"limit":       limit,
+		"currentPage":  page,
+		"limit":        limit,
 		"totalRecords": totalCount,
-		"totalPages":  int((totalCount + int64(limit) - 1) / int64(limit)),
-		"hasNextPage": page < int((totalCount + int64(limit) - 1) / int64(limit)) - 1,
-		"hasPrevPage": page > 0,
+		"totalPages":   int((totalCount + int64(limit) - 1) / int64(limit)),
+		"hasNextPage":  page < int((totalCount+int64(limit)-1)/int64(limit))-1,
+		"hasPrevPage":  page > 0,
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(CivilianSearchResponse{
-		Civilians:  civilians,
-		Pagination: pagination,
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"civilians":  populatedCivilians,
+		"pagination": pagination,
 	})
 }
