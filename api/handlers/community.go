@@ -358,40 +358,14 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 		Status:      "approved",
 	}
 
-	// Ensure the user's communities array is initialized
+	// Atomically ensure the user's communities array is initialized (no-op if already an array).
+	// Using a conditional filter avoids overwriting concurrent modifications.
 	filter := bson.M{"_id": uID}
+	_, _ = c.UDB.UpdateOne(ctx, bson.M{"_id": uID, "user.communities": nil}, bson.M{"$set": bson.M{"user.communities": bson.A{}}})
 
-	user := models.User{}
-	err = c.UDB.FindOne(ctx, filter).Decode(&user)
-	if err != nil {
-		config.ErrorStatus("failed to retrieve user's communities", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Initialize null fields
-	if user.Details.Communities == nil {
-		user.Details.Communities = []models.UserCommunity{}
-	}
-	if user.Details.Friends == nil {
-		user.Details.Friends = []models.Friend{}
-	}
-	if user.Details.Notifications == nil {
-		user.Details.Notifications = []models.Notification{}
-	}
-
-	// Update the user's communities array
+	// Atomically append the new community — $addToSet ensures no duplicates.
 	update := bson.M{
-		"$set": bson.M{"user.communities": user.Details.Communities}, // Ensure communities is an array
-	}
-	_, err = c.UDB.UpdateOne(ctx, filter, update)
-	if err != nil {
-		config.ErrorStatus("failed to update user's communities", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Add the new community to the user's communities array
-	update = bson.M{
-		"$addToSet": bson.M{"user.communities": newUserCommunity}, // $addToSet ensures no duplicates
+		"$addToSet": bson.M{"user.communities": newUserCommunity},
 	}
 	_, err = c.UDB.UpdateOne(ctx, filter, update)
 	if err != nil {
@@ -1898,19 +1872,13 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 				"status":      "approved",
 			}
 
-			// Check if user.communities is null and handle accordingly
-			if user.Details.Communities == nil {
-				// If communities is null, set it to an array with the new entry
-				update = bson.M{
-					"$set": bson.M{"user.communities": bson.A{newCommunityEntry}},
-				}
-			} else {
-				// If communities already exists as an array, push to it
-				update = bson.M{
-					"$push": bson.M{"user.communities": newCommunityEntry},
-				}
-			}
+			// Atomically ensure communities array is initialized (no-op if already an array).
+			_, _ = c.UDB.UpdateOne(ctx, bson.M{"_id": userObjID, "user.communities": nil}, bson.M{"$set": bson.M{"user.communities": bson.A{}}})
 
+			// Atomically append the new community entry.
+			update = bson.M{
+				"$push": bson.M{"user.communities": newCommunityEntry},
+			}
 			_, err = c.UDB.UpdateOne(
 				ctx,
 				bson.M{"_id": userObjID},
@@ -2914,6 +2882,10 @@ func (c Community) RemoveUserFromDepartmentHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Audit log for department member removal
+	actorID := resolveActorFromRequest(r)
+	logAudit(c.ALDB, cID, "department.member_removed", "department", actorID, resolveActorName(c.UDB, actorID), requestBody.UserID, resolveActorName(c.UDB, requestBody.UserID), map[string]interface{}{"departmentId": departmentID})
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User removed from department successfully"}`))
 }
@@ -3089,6 +3061,14 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 		config.ErrorStatus("failed to update department join request", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Audit log for department join request decision
+	actorID := resolveActorFromRequest(r)
+	auditAction := "department.member_approved"
+	if requestBody.Status == "declined" {
+		auditAction = "department.member_declined"
+	}
+	logAudit(c.ALDB, cID, auditAction, "department", actorID, resolveActorName(c.UDB, actorID), requestBody.UserID, resolveActorName(c.UDB, requestBody.UserID), map[string]interface{}{"departmentId": departmentID})
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department join request updated successfully"}`))
