@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -25,24 +23,16 @@ type Spotlight struct {
 
 // SpotlightHandler returns all spotlights
 func (s Spotlight) SpotlightHandler(w http.ResponseWriter, r *http.Request) {
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
-	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Empty filter with limit/skip - add sort by _id for better performance
 	opts := options.Find().
 		SetLimit(limit64).
 		SetSkip(skip64).
-		SetSort(bson.M{"_id": -1}) // Sort by _id descending (most recent first) for better index usage
-	
+		SetSort(bson.M{"_id": -1})
+
 	dbResp, err := s.DB.Find(ctx, bson.D{}, opts)
 	if err != nil {
 		config.ErrorStatus("failed to get spotlight", http.StatusNotFound, w, err)

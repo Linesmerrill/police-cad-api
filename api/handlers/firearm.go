@@ -3,11 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"net/http"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -35,18 +33,11 @@ type FirearmList struct {
 
 // FirearmHandler returns all firearms
 func (f Firearm) FirearmHandler(w http.ResponseWriter, r *http.Request) {
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
-	
-	// Use request context with timeout for proper trace tracking and timeout handling
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
+
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
-	
+
 	// Empty filter with limit/skip - add sort by _id for better performance
 	opts := options.Find().
 		SetLimit(limit64).
@@ -104,22 +95,16 @@ func (f Firearm) FirearmByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
-	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
 	var dbResp []models.Firearm
+	var err error
 
 	// If the user is in a community then we want to search for firearms that
 	// are in that same community. This way each user can have different firearms
@@ -127,7 +112,6 @@ func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	//
 	// Likewise, if the user is not in a community, then we will display only the firearms
 	// that are not in a community
-	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = f.DB.Find(ctx, bson.M{
 			"firearm.userID":            userID,
@@ -169,13 +153,7 @@ func (f Firearm) FirearmsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 func (f Firearm) FirearmsByUserIDHandlerV2(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, page64, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -238,12 +216,12 @@ func (f Firearm) FirearmsByUserIDHandlerV2(w http.ResponseWriter, r *http.Reques
 		dbResp = []models.Firearm{}
 	}
 
-	totalPages := int(math.Ceil(float64(totalCount) / float64(Limit)))
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit64)))
 
 	response := map[string]interface{}{
 		"data":       dbResp,
-		"page":       Page,
-		"limit":      Limit,
+		"page":       page64,
+		"limit":      limit64,
 		"totalCount": totalCount,
 		"totalPages": totalPages,
 	}
@@ -260,13 +238,7 @@ func (f Firearm) FirearmsByUserIDHandlerV2(w http.ResponseWriter, r *http.Reques
 // FirearmsByRegisteredOwnerIDHandler returns all firearms that contain the given registeredOwnerID
 func (f Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
 	registeredOwnerID := mux.Vars(r)["registered_owner_id"]
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || Limit <= 0 {
-		Limit = 10 // Default limit
-	}
-	limit64 := int64(Limit)
-	Page := getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, page64, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
 
@@ -331,9 +303,9 @@ func (f Firearm) FirearmsByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 
 	// Build the response
 	response := map[string]interface{}{
-		"limit":    Limit,
+		"limit":    limit64,
 		"firearms": dbResp,
-		"page":     Page,
+		"page":     page64,
 		"total":    total,
 	}
 
@@ -458,13 +430,7 @@ func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 	serialNumber := r.URL.Query().Get("serialNumber")
 	weaponType := r.URL.Query().Get("weaponType")
 	communityID := r.URL.Query().Get("communityId")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || Limit <= 0 {
-		Limit = 10 // Default limit
-	}
-	limit64 := int64(Limit)
-	Page := getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, page64, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -498,8 +464,9 @@ func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 	opts := options.Find().
 		SetLimit(limit64).
 		SetSkip(skip64).
-		SetSort(bson.M{"_id": -1}) // Sort by _id for better index usage
-	
+		SetSort(bson.M{"_id": -1})
+
+	var err error
 	dbResp, err = f.DB.Find(ctx, query, opts)
 	if err != nil {
 		config.ErrorStatus("failed to search firearms", http.StatusNotFound, w, err)
@@ -511,24 +478,21 @@ func (f Firearm) FirearmsSearchHandler(w http.ResponseWriter, r *http.Request) {
 	if len(query) > 0 {
 		total, err = f.DB.CountDocuments(ctx, query)
 	} else {
-		// Empty query - estimate from results
-		total = limit64 * int64(Page + 1)
+		total = limit64 * (page64 + 1)
 	}
 	if err != nil {
 		config.ErrorStatus("failed to count firearms", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Ensure the response is always an array
 	if len(dbResp) == 0 {
 		dbResp = []models.Firearm{}
 	}
 
-	// Build the response
 	response := map[string]interface{}{
-		"limit":    Limit,
+		"limit":    limit64,
 		"firearms": dbResp,
-		"page":     Page,
+		"page":     page64,
 		"total":    total,
 	}
 
