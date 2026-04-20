@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/api/handlers"
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -39,7 +40,7 @@ func TestCiviliansByUserIDHandler_DefaultLimit(t *testing.T) {
 	req = mux.SetURLVars(req, map[string]string{"user_id": "u1"})
 	h.CiviliansByUserIDHandler(httptest.NewRecorder(), req)
 
-	assert.Equal(t, int64(10), gotLimit, "no ?limit= should default to DefaultListLimit (10)")
+	assert.Equal(t, int64(api.DefaultListLimit), gotLimit, "no ?limit= should default to DefaultListLimit")
 	assert.Equal(t, int64(0), gotSkip)
 }
 
@@ -59,7 +60,7 @@ func TestCiviliansByUserIDHandler_CapsExcessiveLimit(t *testing.T) {
 	req = mux.SetURLVars(req, map[string]string{"user_id": "u1"})
 	h.CiviliansByUserIDHandler(httptest.NewRecorder(), req)
 
-	assert.Equal(t, int64(100), gotLimit, "over-cap ?limit= should clamp to MaxListLimit (100)")
+	assert.Equal(t, int64(api.MaxListLimit), gotLimit, "over-cap ?limit= should clamp to MaxListLimit")
 }
 
 // Regression: V2 handler used to compute totalPages = math.Ceil(totalCount / Limit)
@@ -97,7 +98,7 @@ func TestVehiclesByUserIDHandler_DefaultLimit(t *testing.T) {
 	req = mux.SetURLVars(req, map[string]string{"user_id": "u1"})
 	h.VehiclesByUserIDHandler(httptest.NewRecorder(), req)
 
-	assert.Equal(t, int64(10), gotLimit)
+	assert.Equal(t, int64(api.DefaultListLimit), gotLimit)
 }
 
 func TestFirearmsByUserIDHandler_DefaultLimit(t *testing.T) {
@@ -116,5 +117,5 @@ func TestFirearmsByUserIDHandler_DefaultLimit(t *testing.T) {
 	req = mux.SetURLVars(req, map[string]string{"user_id": "u1"})
 	h.FirearmsByUserIDHandler(httptest.NewRecorder(), req)
 
-	assert.Equal(t, int64(10), gotLimit)
+	assert.Equal(t, int64(api.DefaultListLimit), gotLimit)
 }

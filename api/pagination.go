@@ -6,7 +6,15 @@ import (
 )
 
 const (
-	DefaultListLimit = 10
+	// TODO: revert DefaultListLimit to 10 after mobile app v1.22.0 has rolled
+	// out via the App Store and Play Store. v1.22.0 explicitly sends
+	// `limit=100&page=0` on every list call, so the server default only
+	// affects older clients. While 1.22.0 is pending store review, a default
+	// of 10 truncates inventories for users on older builds (they appear to
+	// only have 10 civilians/vehicles/firearms). Bumping the default to 100
+	// restores near-original behavior for those clients until the new
+	// release is live.
+	DefaultListLimit = 100
 	MaxListLimit     = 100
 )
 
