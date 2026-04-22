@@ -30,13 +30,7 @@ type Warrant struct {
 
 // WarrantHandler returns all warrants
 func (v Warrant) WarrantHandler(w http.ResponseWriter, r *http.Request) {
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
-	}
-	limit64 := int64(Limit)
-	page := getPage(0, r)
-	skip64 := int64(page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -98,13 +92,7 @@ func (v Warrant) WarrantByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (v Warrant) WarrantsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	status := r.URL.Query().Get("status")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	page := getPage(0, r)
-	skip64 := int64(page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 

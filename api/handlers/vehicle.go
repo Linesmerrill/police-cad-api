@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"net/http"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -28,24 +26,16 @@ type Vehicle struct {
 
 // VehicleHandler returns all vehicles
 func (v Vehicle) VehicleHandler(w http.ResponseWriter, r *http.Request) {
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
-	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Empty filter with limit/skip - add sort by _id for better performance
 	opts := options.Find().
 		SetLimit(limit64).
 		SetSkip(skip64).
-		SetSort(bson.M{"_id": -1}) // Sort by _id descending (most recent first) for better index usage
-	
+		SetSort(bson.M{"_id": -1})
+
 	dbResp, err := v.DB.Find(ctx, bson.D{}, opts)
 	if err != nil {
 		config.ErrorStatus("failed to get vehicles", http.StatusNotFound, w, err)
@@ -100,22 +90,16 @@ func (v Vehicle) VehicleByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
-	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
 	var dbResp []models.Vehicle
+	var err error
 
 	// If the user is in a community then we want to search for vehicles that
 	// are in that same community. This way each user can have different vehicles
@@ -123,7 +107,6 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	//
 	// Likewise, if the user is not in a community, then we will display only the vehicles
 	// that are not in a community
-	err = nil
 	if activeCommunityID != "" && activeCommunityID != "null" && activeCommunityID != "undefined" {
 		dbResp, err = v.DB.Find(ctx, bson.M{
 			"vehicle.userID":            userID,
@@ -165,13 +148,7 @@ func (v Vehicle) VehiclesByUserIDHandler(w http.ResponseWriter, r *http.Request)
 func (v Vehicle) VehiclesByUserIDHandlerV2(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, page64, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -234,12 +211,12 @@ func (v Vehicle) VehiclesByUserIDHandlerV2(w http.ResponseWriter, r *http.Reques
 		dbResp = []models.Vehicle{}
 	}
 
-	totalPages := int(math.Ceil(float64(totalCount) / float64(Limit)))
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit64)))
 
 	response := map[string]interface{}{
 		"data":       dbResp,
-		"page":       Page,
-		"limit":      Limit,
+		"page":       page64,
+		"limit":      limit64,
 		"totalCount": totalCount,
 		"totalPages": totalPages,
 	}
@@ -256,13 +233,7 @@ func (v Vehicle) VehiclesByUserIDHandlerV2(w http.ResponseWriter, r *http.Reques
 // VehiclesByRegisteredOwnerIDHandler returns all vehicles that contain the given registeredOwnerID
 func (v Vehicle) VehiclesByRegisteredOwnerIDHandler(w http.ResponseWriter, r *http.Request) {
 	registeredOwnerID := mux.Vars(r)["registered_owner_id"]
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || Limit <= 0 {
-		Limit = 10 // Default limit
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, page64, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("registered_owner_id: '%v'", registeredOwnerID)
 
@@ -327,9 +298,9 @@ func (v Vehicle) VehiclesByRegisteredOwnerIDHandler(w http.ResponseWriter, r *ht
 
 	// Build the response
 	response := map[string]interface{}{
-		"limit":    Limit,
+		"limit":    limit64,
 		"vehicles": dbResp,
-		"page":     Page,
+		"page":     page64,
 		"total":    total,
 	}
 
@@ -350,13 +321,7 @@ func (v Vehicle) VehicleSearchHandler(w http.ResponseWriter, r *http.Request) {
 	vehMake := r.URL.Query().Get("make")
 	model := r.URL.Query().Get("model")
 	activeCommunityID := r.URL.Query().Get("active_community_id") // optional
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || Limit <= 0 {
-		Limit = 10 // Default limit
-	}
-	limit64 := int64(Limit)
-	Page := getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, page64, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("plate: '%v'", plate)
 	zap.S().Debugf("vin: '%v'", vin)
@@ -440,9 +405,9 @@ func (v Vehicle) VehicleSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Build the response
 	response := map[string]interface{}{
-		"limit":    Limit,
+		"limit":    limit64,
 		"vehicles": dbResp,
-		"page":     Page,
+		"page":     page64,
 		"total":    total,
 	}
 

@@ -25,11 +25,6 @@ import (
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
-var (
-	// Page denotes the starting Page for pagination results
-	Page = 0
-)
-
 // Civilian exported for testing purposes
 type Civilian struct {
 	DB  databases.CivilianDatabase
@@ -38,19 +33,11 @@ type Civilian struct {
 
 // CivilianHandler returns all civilians
 func (c Civilian) CivilianHandler(w http.ResponseWriter, r *http.Request) {
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v, err: %v", Limit|10, err))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
-	
-	// Use request context with timeout for proper trace tracking and timeout handling
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
+
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
-	
-	// Empty filter with limit/skip - add sort by _id for better performance
+
 	opts := options.Find().
 		SetLimit(limit64).
 		SetSkip(skip64).
@@ -110,22 +97,16 @@ func (c Civilian) CivilianByIDHandler(w http.ResponseWriter, r *http.Request) {
 func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("user_id: '%v'", userID)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
-	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
 	var dbResp []models.Civilian
+	var err error
 
 	// If the user is in a community then we want to search for civilians that
 	// are in that same community. This way each user can have different civilians
@@ -174,13 +155,7 @@ func (c Civilian) CiviliansByUserIDHandler(w http.ResponseWriter, r *http.Reques
 func (c Civilian) CiviliansByUserIDHandlerV2(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 	activeCommunityID := r.URL.Query().Get("active_community_id")
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, page64, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -243,12 +218,12 @@ func (c Civilian) CiviliansByUserIDHandlerV2(w http.ResponseWriter, r *http.Requ
 		dbResp = []models.Civilian{}
 	}
 
-	totalPages := int(math.Ceil(float64(totalCount) / float64(Limit)))
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit64)))
 
 	response := map[string]interface{}{
 		"data":       dbResp,
-		"page":       Page,
-		"limit":      Limit,
+		"page":       page64,
+		"limit":      limit64,
 		"totalCount": totalCount,
 		"totalPages": totalPages,
 	}
@@ -268,26 +243,13 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	lastName := r.URL.Query().Get("last_name")
 	name := r.URL.Query().Get("name")
 	activeCommunityID := r.URL.Query().Get("active_community_id") // optional
-	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		zap.S().Warnf(fmt.Sprintf("limit not set, using default of %v", Limit|10))
-	}
-	limit64 := int64(Limit)
-	Page = getPage(Page, r)
-	skip64 := int64(Page * Limit)
+	limit64, _, skip64 := api.ParseLimitPage(r, api.DefaultListLimit, api.MaxListLimit)
 
 	zap.S().Debugf("first_name: '%v', last_name: '%v'", firstName, lastName)
 	zap.S().Debugf("active_community: '%v'", activeCommunityID)
 
 	var dbResp []models.Civilian
-
-	// If the user is in a community then we want to search for civilians that
-	// are in that same community. This way each user can have different civilians
-	// across different communities.
-	//
-	// Likewise, if the user is not in a community, then we will display only the civilians
-	// that are not in a community
-	err = nil
+	var err error
 	var orConditions []bson.M
 
 	if firstName != "" {
