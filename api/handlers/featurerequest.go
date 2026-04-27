@@ -185,41 +185,55 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 		requests = []models.FeatureRequest{}
 	}
 
-	// Batch-fetch user data for all authors
+	// Phase 2 (parallel): batch-fetch users AND batch-check votes. They don't
+	// depend on each other.
 	userIDs := make(map[primitive.ObjectID]bool)
 	for _, req := range requests {
 		userIDs[req.Author] = true
 	}
-	userMap := h.batchFetchUsers(ctx, userIDs)
-	adminRoles := h.getAdminRolesForUsers(ctx, userMap)
 
-	// If userId provided, batch-check votes for all feature requests
-	voteMap := make(map[primitive.ObjectID]bool)
-	if userID != "" {
+	userMapCh := make(chan map[primitive.ObjectID]UserDoc, 1)
+	go func() { userMapCh <- h.batchFetchUsers(ctx, userIDs) }()
+
+	voteMapCh := make(chan map[primitive.ObjectID]bool, 1)
+	go func() {
+		voteMap := make(map[primitive.ObjectID]bool)
+		if userID == "" || len(requests) == 0 {
+			voteMapCh <- voteMap
+			return
+		}
 		userObjID, err := primitive.ObjectIDFromHex(userID)
-		if err == nil {
-			frIDs := make([]primitive.ObjectID, len(requests))
-			for i, req := range requests {
-				frIDs[i] = req.ID
-			}
-			if len(frIDs) > 0 {
-				voteFilter := bson.M{
-					"featureRequestId": bson.M{"$in": frIDs},
-					"user":             userObjID,
-				}
-				voteCursor, err := h.VDB.Find(ctx, voteFilter)
-				if err == nil {
-					var votes []models.FeatureRequestVote
-					if err := voteCursor.All(ctx, &votes); err == nil {
-						for _, v := range votes {
-							voteMap[v.FeatureRequestID] = true
-						}
-					}
-					voteCursor.Close(ctx)
-				}
+		if err != nil {
+			voteMapCh <- voteMap
+			return
+		}
+		frIDs := make([]primitive.ObjectID, len(requests))
+		for i, req := range requests {
+			frIDs[i] = req.ID
+		}
+		voteCursor, err := h.VDB.Find(ctx, bson.M{
+			"featureRequestId": bson.M{"$in": frIDs},
+			"user":             userObjID,
+		})
+		if err != nil {
+			voteMapCh <- voteMap
+			return
+		}
+		defer voteCursor.Close(ctx)
+		var votes []models.FeatureRequestVote
+		if err := voteCursor.All(ctx, &votes); err == nil {
+			for _, v := range votes {
+				voteMap[v.FeatureRequestID] = true
 			}
 		}
-	}
+		voteMapCh <- voteMap
+	}()
+
+	userMap := <-userMapCh
+	voteMap := <-voteMapCh
+
+	// Phase 3: admin roles depend on userMap (needs emails).
+	adminRoles := h.getAdminRolesForUsers(ctx, userMap)
 
 	// Build response
 	responseData := make([]models.FeatureRequestResponse, len(requests))
