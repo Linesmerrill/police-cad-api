@@ -176,6 +176,13 @@ func (md *mongoDatabase) Client() ClientHelper {
 	return &mongoClient{cl: client}
 }
 
+// Indexes exposes the underlying collection's IndexView so callers can manage indexes.
+// Not part of MongoCollectionHelper because mocks don't need it; production code can
+// type-assert to access it.
+func (mc *MongoCollection) Indexes() mongo.IndexView {
+	return mc.coll.Indexes()
+}
+
 // FindOne returns a single result from the collection
 func (mc *MongoCollection) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper {
 	start := time.Now()
