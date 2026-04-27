@@ -787,10 +787,23 @@ func (cc CourtCase) SearchCourtCasesHandler(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 
 	// Verify the requesting user belongs to the community.
+	// Some users have a string _id, others have an ObjectID _id — try string first, then ObjectID.
 	user := models.User{}
 	if err := cc.UDB.FindOne(ctx, bson.M{"_id": req.UserID}).Decode(&user); err != nil {
-		config.ErrorStatus("failed to verify user", http.StatusForbidden, w, err)
-		return
+		if oid, oidErr := primitive.ObjectIDFromHex(req.UserID); oidErr == nil {
+			var userObj struct {
+				ID      primitive.ObjectID `bson:"_id"`
+				Details models.UserDetails `bson:"user"`
+			}
+			if err2 := cc.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&userObj); err2 != nil {
+				config.ErrorStatus("failed to verify user", http.StatusForbidden, w, err2)
+				return
+			}
+			user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details}
+		} else {
+			config.ErrorStatus("failed to verify user", http.StatusForbidden, w, err)
+			return
+		}
 	}
 	memberOf := user.Details.ActiveCommunity == req.CommunityID
 	if !memberOf {
