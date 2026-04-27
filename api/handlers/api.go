@@ -55,6 +55,29 @@ func (a *App) New() *mux.Router {
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
 	bolo := Bolo{DB: databases.NewBoloDatabase(a.dbHelper)}
 	arrestReport := ArrestReport{DB: databases.NewArrestReportDatabase(a.dbHelper)}
+
+	// Configurable forms (form templates, versions, department toggles, submissions)
+	formTemplateDB := databases.NewFormTemplateDatabase(a.dbHelper)
+	formTemplateVersionDB := databases.NewFormTemplateVersionDatabase(a.dbHelper)
+	departmentFormToggleDB := databases.NewDepartmentFormToggleDatabase(a.dbHelper)
+	formSubmissionDB := databases.NewFormSubmissionDatabase(a.dbHelper)
+	formCounterDB := databases.NewFormCounterDatabase(a.dbHelper)
+	formTemplate := FormTemplate{
+		DB:  formTemplateDB,
+		VDB: formTemplateVersionDB,
+		TDB: departmentFormToggleDB,
+	}
+	departmentFormToggle := DepartmentFormToggle{DB: departmentFormToggleDB}
+	formSubmission := FormSubmission{
+		DB:     formSubmissionDB,
+		TDB:    formTemplateDB,
+		VDB:    formTemplateVersionDB,
+		CDB:    formCounterDB,
+		UDB:    databases.NewUserDatabase(a.dbHelper),
+		CallDB: databases.NewCallDatabase(a.dbHelper),
+		ARDB:   databases.NewArrestReportDatabase(a.dbHelper),
+		CivDB:  databases.NewCivilianDatabase(a.dbHelper),
+	}
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
@@ -443,6 +466,27 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/warrants/search", api.Middleware(http.HandlerFunc(w.WarrantsSearchHandler))).Methods("GET")
 	apiCreate.Handle("/warrants/pending/community/{community_id}", api.Middleware(http.HandlerFunc(w.PendingWarrantsByCommunityHandler))).Methods("GET")
 	apiV2.Handle("/warrants/community/{community_id}", api.Middleware(http.HandlerFunc(w.WarrantsByCommunityHandlerV2))).Methods("GET")
+
+	// Configurable forms — templates
+	apiCreate.Handle("/form-template", api.Middleware(http.HandlerFunc(formTemplate.CreateFormTemplateHandler))).Methods("POST")
+	apiCreate.Handle("/form-template/{template_id}/versions", api.Middleware(http.HandlerFunc(formTemplate.FormTemplateVersionsHandler))).Methods("GET")
+	apiCreate.Handle("/form-template/{template_id}", api.Middleware(http.HandlerFunc(formTemplate.FormTemplateByIDHandler))).Methods("GET")
+	apiCreate.Handle("/form-template/{template_id}", api.Middleware(http.HandlerFunc(formTemplate.UpdateFormTemplateHandler))).Methods("PUT")
+	apiCreate.Handle("/form-template/community/{community_id}/default/{slug}/hide", api.Middleware(http.HandlerFunc(formTemplate.HideDefaultFormTemplateHandler))).Methods("PUT")
+	apiV2.Handle("/form-templates/community/{community_id}", api.Middleware(http.HandlerFunc(formTemplate.FormTemplatesByCommunityHandlerV2))).Methods("GET")
+	apiV2.Handle("/form-templates/department/{dept_id}", api.Middleware(http.HandlerFunc(formTemplate.FormTemplatesByDepartmentHandlerV2))).Methods("GET")
+
+	// Configurable forms — department toggles
+	apiCreate.Handle("/department/{dept_id}/form-toggle/{slug}", api.Middleware(http.HandlerFunc(departmentFormToggle.SetDepartmentFormToggleHandler))).Methods("PUT")
+
+	// Configurable forms — submissions
+	apiCreate.Handle("/form-submission/draft", api.Middleware(http.HandlerFunc(formSubmission.FormSubmissionDraftHandler))).Methods("POST")
+	apiCreate.Handle("/form-submission/{submission_id}", api.Middleware(http.HandlerFunc(formSubmission.FormSubmissionByIDHandler))).Methods("GET")
+	apiCreate.Handle("/form-submission/{submission_id}", api.Middleware(http.HandlerFunc(formSubmission.UpdateFormSubmissionHandler))).Methods("PUT")
+	apiCreate.Handle("/form-submission/{submission_id}", api.Middleware(http.HandlerFunc(formSubmission.DeleteFormSubmissionHandler))).Methods("DELETE")
+	apiCreate.Handle("/form-submission", api.Middleware(http.HandlerFunc(formSubmission.CreateFormSubmissionHandler))).Methods("POST")
+	apiV2.Handle("/form-submissions/community/{community_id}", api.Middleware(http.HandlerFunc(formSubmission.FormSubmissionsByCommunityHandlerV2))).Methods("GET")
+	apiV2.Handle("/form-submissions/by-link/{link_type}/{link_id}", api.Middleware(http.HandlerFunc(formSubmission.FormSubmissionsByLinkHandlerV2))).Methods("GET")
 
 	// Court case routes
 	apiV2.Handle("/court-cases/{case_id}/assign", api.Middleware(http.HandlerFunc(courtCaseHandler.AssignCourtCaseHandler))).Methods("PUT")
