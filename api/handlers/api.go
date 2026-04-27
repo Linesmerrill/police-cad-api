@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,12 +95,24 @@ func (a *App) New() *mux.Router {
 	emsMedicalHandler := NewEMSMedicalComponent(componentDB, templateDB, databases.NewCommunityDatabase(a.dbHelper))
 
 	// Court case and session handlers
+	courtCaseDB := databases.NewCourtCaseDatabase(a.dbHelper)
 	courtCaseHandler := CourtCase{
-		DB:  databases.NewCourtCaseDatabase(a.dbHelper),
-		CDB: databases.NewCivilianDatabase(a.dbHelper),
-		ADB: databases.NewArrestReportDatabase(a.dbHelper),
-		SDB: databases.NewCourtSessionDatabase(a.dbHelper),
+		DB:     courtCaseDB,
+		CDB:    databases.NewCivilianDatabase(a.dbHelper),
+		ADB:    databases.NewArrestReportDatabase(a.dbHelper),
+		SDB:    databases.NewCourtSessionDatabase(a.dbHelper),
+		UDB:    databases.NewUserDatabase(a.dbHelper),
+		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
+	// Ensure court-case indexes exist (idempotent). Run async so a slow Mongo
+	// doesn't delay startup; log on failure but don't crash.
+	go func() {
+		ctx, cancel := api.WithQueryTimeout(context.Background())
+		defer cancel()
+		if err := courtCaseDB.EnsureIndexes(ctx); err != nil {
+			zap.S().Warnw("failed to ensure court-case indexes", "error", err)
+		}
+	}()
 	courtSessionHandler := CourtSession{
 		DB:   databases.NewCourtSessionDatabase(a.dbHelper),
 		CCDB: databases.NewCourtCaseDatabase(a.dbHelper),
@@ -452,6 +465,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCaseByIDHandler))).Methods("GET")
 	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.DeleteCourtCaseHandler))).Methods("DELETE")
 	apiV2.Handle("/court-cases", api.Middleware(http.HandlerFunc(courtCaseHandler.CreateCourtCaseHandler))).Methods("POST")
+	apiV2.Handle("/court-cases/search", api.Middleware(http.HandlerFunc(courtCaseHandler.SearchCourtCasesHandler))).Methods("POST")
 	apiV2.Handle("/court-cases/community/{community_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCasesByCommunityHandler))).Methods("GET")
 	apiV2.Handle("/court-cases/civilian/{civilian_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCasesByCivilianHandler))).Methods("GET")
 

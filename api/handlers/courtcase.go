@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -21,10 +24,12 @@ import (
 
 // CourtCase exported for testing purposes
 type CourtCase struct {
-	DB  databases.CourtCaseDatabase
-	CDB databases.CivilianDatabase
-	ADB databases.ArrestReportDatabase
-	SDB databases.CourtSessionDatabase // court session DB for updating docket entries on resolve
+	DB     databases.CourtCaseDatabase
+	CDB    databases.CivilianDatabase
+	ADB    databases.ArrestReportDatabase
+	SDB    databases.CourtSessionDatabase     // court session DB for updating docket entries on resolve
+	UDB    databases.UserDatabase             // for community-membership checks on search
+	CommDB databases.CommunityDatabase        // for judicial-role checks on delete
 }
 
 // CreateCourtCaseHandler creates a new court case when a civilian contests records
@@ -41,6 +46,17 @@ func (cc CourtCase) CreateCourtCaseHandler(w http.ResponseWriter, r *http.Reques
 	courtCase.Details.UpdatedAt = now
 	courtCase.Details.Status = "submitted"
 
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Generate human-readable case number (CC-YYYY-NNNNNN), unique per community.
+	caseNumber, err := cc.DB.NextCaseNumber(ctx, courtCase.Details.CommunityID)
+	if err != nil {
+		config.ErrorStatus("failed to generate case number", http.StatusInternalServerError, w, err)
+		return
+	}
+	courtCase.Details.CaseNumber = caseNumber
+
 	// Initialize history with submission entry
 	courtCase.Details.History = []models.CourtCaseHistoryEntry{
 		{
@@ -51,10 +67,7 @@ func (cc CourtCase) CreateCourtCaseHandler(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
-	ctx, cancel := api.WithQueryTimeout(r.Context())
-	defer cancel()
-
-	_, err := cc.DB.InsertOne(ctx, courtCase)
+	_, err = cc.DB.InsertOne(ctx, courtCase)
 	if err != nil {
 		config.ErrorStatus("failed to create court case", http.StatusInternalServerError, w, err)
 		return
@@ -97,9 +110,10 @@ func (cc CourtCase) CreateCourtCaseHandler(w http.ResponseWriter, r *http.Reques
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Court case created successfully",
-		"id":      courtCase.ID.Hex(),
-		"status":  courtCase.Details.Status,
+		"message":    "Court case created successfully",
+		"id":         courtCase.ID.Hex(),
+		"caseNumber": courtCase.Details.CaseNumber,
+		"status":     courtCase.Details.Status,
 	})
 }
 
@@ -569,6 +583,18 @@ func (cc CourtCase) DeleteCourtCaseHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Authorization: only the case owner OR a judicial member of the case's community may delete.
+	// Requires `userId` query param to identify the requester.
+	requesterID := strings.TrimSpace(r.URL.Query().Get("userId"))
+	if requesterID == "" {
+		config.ErrorStatus("userId required", http.StatusBadRequest, w, fmt.Errorf("userId query param is empty"))
+		return
+	}
+	if !cc.canDeleteCase(ctx, requesterID, courtCase) {
+		config.ErrorStatus("forbidden", http.StatusForbidden, w, fmt.Errorf("user %s cannot delete this case", requesterID))
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 
 	// Revert contested items only if the case was not yet completed
@@ -719,4 +745,193 @@ func (cc CourtCase) UpdateCourtCaseStatusHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Court case status updated successfully",
 	})
+}
+
+// CourtCaseSearchRequest is the body for POST /api/v2/court-cases/search
+type CourtCaseSearchRequest struct {
+	Query        string `json:"query"`
+	CommunityID  string `json:"communityId"`
+	UserID       string `json:"userId"`       // requesting user; server verifies membership
+	DepartmentID string `json:"departmentId"` // optional: scope to a specific department
+	Page         int    `json:"page"`
+	Limit        int    `json:"limit"`
+}
+
+// SearchCourtCasesHandler searches court cases by case number (exact, case-insensitive)
+// or civilian name (partial, case-insensitive) within a community. Optionally scopes
+// to a single department. Verifies the requesting user belongs to the community
+// (defense in depth — the existing community-scoped court-case endpoints currently
+// don't enforce this; tracked as a follow-up).
+func (cc CourtCase) SearchCourtCasesHandler(w http.ResponseWriter, r *http.Request) {
+	var req CourtCaseSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		config.ErrorStatus("query required", http.StatusBadRequest, w, fmt.Errorf("query is empty"))
+		return
+	}
+	if req.CommunityID == "" {
+		config.ErrorStatus("communityId required", http.StatusBadRequest, w, fmt.Errorf("communityId is empty"))
+		return
+	}
+	if req.UserID == "" {
+		config.ErrorStatus("userId required", http.StatusBadRequest, w, fmt.Errorf("userId is empty"))
+		return
+	}
+
+	page := req.Page
+	if page < 0 {
+		page = 0
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	skip64 := int64(page * limit)
+	limit64 := int64(limit)
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Verify the requesting user belongs to the community.
+	// Some users have a string _id, others have an ObjectID _id — try string first, then ObjectID.
+	user := models.User{}
+	if err := cc.UDB.FindOne(ctx, bson.M{"_id": req.UserID}).Decode(&user); err != nil {
+		if oid, oidErr := primitive.ObjectIDFromHex(req.UserID); oidErr == nil {
+			var userObj struct {
+				ID      primitive.ObjectID `bson:"_id"`
+				Details models.UserDetails `bson:"user"`
+			}
+			if err2 := cc.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&userObj); err2 != nil {
+				config.ErrorStatus("failed to verify user", http.StatusForbidden, w, err2)
+				return
+			}
+			user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details}
+		} else {
+			config.ErrorStatus("failed to verify user", http.StatusForbidden, w, err)
+			return
+		}
+	}
+	memberOf := user.Details.ActiveCommunity == req.CommunityID
+	if !memberOf {
+		for _, c := range user.Details.Communities {
+			if c.CommunityID == req.CommunityID {
+				memberOf = true
+				break
+			}
+		}
+	}
+	if !memberOf {
+		config.ErrorStatus("forbidden", http.StatusForbidden, w, fmt.Errorf("user not a member of community"))
+		return
+	}
+
+	// Build filter: communityID required + (caseNumber exact OR civilianName partial).
+	escaped := regexp.QuoteMeta(query)
+	filter := bson.M{
+		"$and": []bson.M{
+			{"courtCase.communityID": req.CommunityID},
+			{"$or": []bson.M{
+				{"courtCase.caseNumber": bson.M{"$regex": "^" + escaped + "$", "$options": "i"}},
+				{"courtCase.civilianName": bson.M{"$regex": escaped, "$options": "i"}},
+			}},
+		},
+	}
+	if req.DepartmentID != "" {
+		filter["$and"] = append(filter["$and"].([]bson.M), bson.M{"courtCase.departmentID": req.DepartmentID})
+	}
+
+	type findResult struct {
+		cases []models.CourtCase
+		err   error
+	}
+	type countResult struct {
+		count int64
+		err   error
+	}
+	findChan := make(chan findResult, 1)
+	countChan := make(chan countResult, 1)
+
+	go func() {
+		cases, err := cc.DB.Find(ctx, filter, &options.FindOptions{
+			Limit: &limit64,
+			Skip:  &skip64,
+			Sort:  bson.M{"_id": -1},
+		})
+		findChan <- findResult{cases: cases, err: err}
+	}()
+	go func() {
+		count, err := cc.DB.CountDocuments(ctx, filter)
+		countChan <- countResult{count: count, err: err}
+	}()
+
+	findRes := <-findChan
+	countRes := <-countChan
+
+	if findRes.err != nil {
+		config.ErrorStatus("failed to search court cases", http.StatusInternalServerError, w, findRes.err)
+		return
+	}
+
+	dbResp := findRes.cases
+	var totalCount int64
+	if countRes.err != nil {
+		totalCount = int64(len(dbResp))
+	} else {
+		totalCount = countRes.count
+	}
+	if len(dbResp) == 0 {
+		dbResp = []models.CourtCase{}
+	}
+	totalPages := int(math.Ceil(float64(totalCount) / float64(limit)))
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":       dbResp,
+		"page":       page,
+		"limit":      limit,
+		"totalCount": totalCount,
+		"totalPages": totalPages,
+	})
+}
+
+// canDeleteCase returns true if the requester owns the case or is a judicial-department
+// member of the case's community. Used to authorize DELETE /court-cases/{id}.
+func (cc CourtCase) canDeleteCase(ctx context.Context, requesterID string, courtCase *models.CourtCase) bool {
+	// Owner check first — cheapest and the common civilian path.
+	if courtCase.Details.UserID != "" && requesterID == courtCase.Details.UserID {
+		return true
+	}
+
+	// Otherwise, look up the case's community and check whether the requester is a
+	// member of any department whose template name is "judicial".
+	if courtCase.Details.CommunityID == "" {
+		return false
+	}
+	commOID, err := primitive.ObjectIDFromHex(courtCase.Details.CommunityID)
+	if err != nil {
+		return false
+	}
+	community, err := cc.CommDB.FindOne(ctx, bson.M{"_id": commOID})
+	if err != nil || community == nil {
+		return false
+	}
+	for _, dept := range community.Details.Departments {
+		if !strings.EqualFold(dept.Template.Name, "judicial") {
+			continue
+		}
+		for _, m := range dept.Members {
+			if m.UserID == requesterID {
+				return true
+			}
+		}
+	}
+	return false
 }

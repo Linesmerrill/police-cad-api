@@ -11,6 +11,9 @@ type CourtCase struct {
 
 // CourtCaseDetails holds the structure for the inner court case details
 type CourtCaseDetails struct {
+	// Human-readable case number, format CC-YYYY-NNNNNN, unique per community
+	CaseNumber string `json:"caseNumber" bson:"caseNumber"`
+
 	// Civilian
 	CivilianID   string `json:"civilianID" bson:"civilianID"`
 	CivilianName string `json:"civilianName" bson:"civilianName"`

@@ -102,12 +102,13 @@ func (cs CourtSession) CreateCourtSessionHandler(w http.ResponseWriter, r *http.
 		if session.Details.Docket[i].Status == "" {
 			session.Details.Docket[i].Status = "pending"
 		}
-		// Look up the court case to get civilian name and userID
+		// Look up the court case to get civilian name, case number, and userID
 		caseID, err := primitive.ObjectIDFromHex(session.Details.Docket[i].CourtCaseID)
 		if err == nil {
 			courtCase, err := cs.CCDB.FindOne(ctx, bson.M{"_id": caseID})
 			if err == nil && courtCase != nil {
 				session.Details.Docket[i].CivilianName = courtCase.Details.CivilianName
+				session.Details.Docket[i].CaseNumber = courtCase.Details.CaseNumber
 				session.Details.Docket[i].UserID = courtCase.Details.UserID
 			}
 		}
@@ -482,6 +483,7 @@ func (cs CourtSession) UpdateCourtSessionHandler(w http.ResponseWriter, r *http.
 				courtCase, err := cs.CCDB.FindOne(ctx, bson.M{"_id": caseID})
 				if err == nil && courtCase != nil {
 					details.Docket[i].CivilianName = courtCase.Details.CivilianName
+					details.Docket[i].CaseNumber = courtCase.Details.CaseNumber
 					details.Docket[i].UserID = courtCase.Details.UserID
 				}
 			}
