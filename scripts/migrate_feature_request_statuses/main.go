@@ -19,7 +19,7 @@ import (
 //   in_progress  -> beta_testing
 //
 // Usage:
-//   MONGO_URI="..." DB_NAME="..." go run scripts/migrate_feature_request_statuses.go
+//   MONGO_URI="..." DB_NAME="..." go run ./scripts/migrate_feature_request_statuses
 //   # add --dry-run to preview without writing
 
 func main() {
