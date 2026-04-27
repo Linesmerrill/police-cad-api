@@ -9,6 +9,12 @@ type UserPreferences struct {
 	BetaCivDashboard         bool                           `json:"betaCivDashboard" bson:"betaCivDashboard"`
 	BetaCommandDashboard     bool                           `json:"betaCommandDashboard" bson:"betaCommandDashboard"`
 	CommandDashboardOptedAt  interface{}                    `json:"commandDashboardOptedAt,omitempty" bson:"commandDashboardOptedAt,omitempty"`
+	// BetaCommandDispatch opts the user into the new Command Bridge layout at
+	// /command-dashboard when their active department is a dispatch template.
+	// Tracked separately from BetaCommandDashboard (police) so admin adoption
+	// metrics can distinguish police vs. dispatch opt-in.
+	BetaCommandDispatch      bool                           `json:"betaCommandDispatch" bson:"betaCommandDispatch"`
+	CommandDispatchOptedAt   interface{}                    `json:"commandDispatchOptedAt,omitempty" bson:"commandDispatchOptedAt,omitempty"`
 	CommunityPreferences     map[string]CommunityPreference `json:"communityPreferences" bson:"communityPreferences"`
 	NotificationPreferences  NotificationPreferences        `json:"notificationPreferences" bson:"notificationPreferences"`
 	CreatedAt                interface{}                    `json:"createdAt" bson:"createdAt"`
