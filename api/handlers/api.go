@@ -97,11 +97,12 @@ func (a *App) New() *mux.Router {
 	// Court case and session handlers
 	courtCaseDB := databases.NewCourtCaseDatabase(a.dbHelper)
 	courtCaseHandler := CourtCase{
-		DB:  courtCaseDB,
-		CDB: databases.NewCivilianDatabase(a.dbHelper),
-		ADB: databases.NewArrestReportDatabase(a.dbHelper),
-		SDB: databases.NewCourtSessionDatabase(a.dbHelper),
-		UDB: databases.NewUserDatabase(a.dbHelper),
+		DB:     courtCaseDB,
+		CDB:    databases.NewCivilianDatabase(a.dbHelper),
+		ADB:    databases.NewArrestReportDatabase(a.dbHelper),
+		SDB:    databases.NewCourtSessionDatabase(a.dbHelper),
+		UDB:    databases.NewUserDatabase(a.dbHelper),
+		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
 	// Ensure court-case indexes exist (idempotent). Run async so a slow Mongo
 	// doesn't delay startup; log on failure but don't crash.

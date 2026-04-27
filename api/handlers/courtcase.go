@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -23,11 +24,12 @@ import (
 
 // CourtCase exported for testing purposes
 type CourtCase struct {
-	DB  databases.CourtCaseDatabase
-	CDB databases.CivilianDatabase
-	ADB databases.ArrestReportDatabase
-	SDB databases.CourtSessionDatabase // court session DB for updating docket entries on resolve
-	UDB databases.UserDatabase         // for community-membership checks on search
+	DB     databases.CourtCaseDatabase
+	CDB    databases.CivilianDatabase
+	ADB    databases.ArrestReportDatabase
+	SDB    databases.CourtSessionDatabase     // court session DB for updating docket entries on resolve
+	UDB    databases.UserDatabase             // for community-membership checks on search
+	CommDB databases.CommunityDatabase        // for judicial-role checks on delete
 }
 
 // CreateCourtCaseHandler creates a new court case when a civilian contests records
@@ -581,6 +583,18 @@ func (cc CourtCase) DeleteCourtCaseHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Authorization: only the case owner OR a judicial member of the case's community may delete.
+	// Requires `userId` query param to identify the requester.
+	requesterID := strings.TrimSpace(r.URL.Query().Get("userId"))
+	if requesterID == "" {
+		config.ErrorStatus("userId required", http.StatusBadRequest, w, fmt.Errorf("userId query param is empty"))
+		return
+	}
+	if !cc.canDeleteCase(ctx, requesterID, courtCase) {
+		config.ErrorStatus("forbidden", http.StatusForbidden, w, fmt.Errorf("user %s cannot delete this case", requesterID))
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 
 	// Revert contested items only if the case was not yet completed
@@ -886,4 +900,38 @@ func (cc CourtCase) SearchCourtCasesHandler(w http.ResponseWriter, r *http.Reque
 		"totalCount": totalCount,
 		"totalPages": totalPages,
 	})
+}
+
+// canDeleteCase returns true if the requester owns the case or is a judicial-department
+// member of the case's community. Used to authorize DELETE /court-cases/{id}.
+func (cc CourtCase) canDeleteCase(ctx context.Context, requesterID string, courtCase *models.CourtCase) bool {
+	// Owner check first — cheapest and the common civilian path.
+	if courtCase.Details.UserID != "" && requesterID == courtCase.Details.UserID {
+		return true
+	}
+
+	// Otherwise, look up the case's community and check whether the requester is a
+	// member of any department whose template name is "judicial".
+	if courtCase.Details.CommunityID == "" {
+		return false
+	}
+	commOID, err := primitive.ObjectIDFromHex(courtCase.Details.CommunityID)
+	if err != nil {
+		return false
+	}
+	community, err := cc.CommDB.FindOne(ctx, bson.M{"_id": commOID})
+	if err != nil || community == nil {
+		return false
+	}
+	for _, dept := range community.Details.Departments {
+		if !strings.EqualFold(dept.Template.Name, "judicial") {
+			continue
+		}
+		for _, m := range dept.Members {
+			if m.UserID == requesterID {
+				return true
+			}
+		}
+	}
+	return false
 }
