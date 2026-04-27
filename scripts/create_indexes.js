@@ -618,5 +618,20 @@ createIndexSafe(
   }
 );
 
+// ==========================================
+// ADMIN USERS — used by admin-role lookups
+// (e.g. on every feature-request detail load)
+// ==========================================
+
+createIndexSafe(
+  db.admin_users,
+  { email: 1 },
+  {
+    name: "admin_users_email_idx",
+    unique: true,
+    background: true
+  }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

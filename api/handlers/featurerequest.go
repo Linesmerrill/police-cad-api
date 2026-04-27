@@ -370,13 +370,48 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	fr, err := h.DB.FindOne(ctx, bson.M{"_id": frID})
-	if err != nil {
-		config.ErrorStatus("Feature request not found", http.StatusNotFound, w, err)
+	// Phase 1: kick off the feature-request fetch and the vote check in
+	// parallel. The vote check only needs frID + userID, so it doesn't have to
+	// wait for the FR doc.
+	type frResult struct {
+		fr  *models.FeatureRequest
+		err error
+	}
+	frCh := make(chan frResult, 1)
+	go func() {
+		fr, err := h.DB.FindOne(ctx, bson.M{"_id": frID})
+		frCh <- frResult{fr, err}
+	}()
+
+	hasVotedCh := make(chan bool, 1)
+	go func() {
+		if userID == "" {
+			hasVotedCh <- false
+			return
+		}
+		userObjID, err := primitive.ObjectIDFromHex(userID)
+		if err != nil {
+			hasVotedCh <- false
+			return
+		}
+		_, err = h.VDB.FindOne(ctx, bson.M{
+			"featureRequestId": frID,
+			"user":             userObjID,
+		})
+		hasVotedCh <- err == nil
+	}()
+
+	frRes := <-frCh
+	if frRes.err != nil {
+		config.ErrorStatus("Feature request not found", http.StatusNotFound, w, frRes.err)
 		return
 	}
+	fr := frRes.fr
 
-	// Batch-fetch users for author + comment authors
+	// Phase 2: with the FR doc in hand, fan out the dependent queries:
+	//   - batchFetchUsers (author + comment authors)
+	//   - mergedInto lookup (if any)
+	//   - mergedFrom lookup (if any)
 	userIDs := make(map[primitive.ObjectID]bool)
 	userIDs[fr.Author] = true
 	if fr.Comments != nil {
@@ -384,21 +419,66 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 			userIDs[c.User] = true
 		}
 	}
-	userMap := h.batchFetchUsers(ctx, userIDs)
-	adminRoles := h.getAdminRolesForUsers(ctx, userMap)
 
-	// Check if current user has voted
-	hasVoted := false
-	if userID != "" {
-		userObjID, err := primitive.ObjectIDFromHex(userID)
-		if err == nil {
-			_, err := h.VDB.FindOne(ctx, bson.M{
-				"featureRequestId": frID,
-				"user":             userObjID,
-			})
-			hasVoted = err == nil
-		}
+	type userMapResult struct{ m map[primitive.ObjectID]UserDoc }
+	userMapCh := make(chan userMapResult, 1)
+	go func() { userMapCh <- userMapResult{h.batchFetchUsers(ctx, userIDs)} }()
+
+	type mergedIntoResult struct {
+		summary *models.MergedRequestSummary
 	}
+	mergedIntoCh := make(chan mergedIntoResult, 1)
+	go func() {
+		if fr.MergedInto == nil {
+			mergedIntoCh <- mergedIntoResult{nil}
+			return
+		}
+		mi, err := h.DB.FindOne(ctx, bson.M{"_id": *fr.MergedInto})
+		if err != nil {
+			mergedIntoCh <- mergedIntoResult{nil}
+			return
+		}
+		mergedIntoCh <- mergedIntoResult{&models.MergedRequestSummary{
+			ID:    mi.ID,
+			Title: mi.Title,
+		}}
+	}()
+
+	type mergedFromResult struct {
+		summaries []models.MergedRequestSummary
+	}
+	mergedFromCh := make(chan mergedFromResult, 1)
+	go func() {
+		if len(fr.MergedFrom) == 0 {
+			mergedFromCh <- mergedFromResult{nil}
+			return
+		}
+		summaries := make([]models.MergedRequestSummary, 0, len(fr.MergedFrom))
+		cursor, err := h.DB.Find(ctx, bson.M{"_id": bson.M{"$in": fr.MergedFrom}})
+		if err != nil {
+			mergedFromCh <- mergedFromResult{summaries}
+			return
+		}
+		defer cursor.Close(ctx)
+		var mergedFRs []models.FeatureRequest
+		if err := cursor.All(ctx, &mergedFRs); err == nil {
+			for _, mfr := range mergedFRs {
+				summaries = append(summaries, models.MergedRequestSummary{
+					ID:    mfr.ID,
+					Title: mfr.Title,
+				})
+			}
+		}
+		mergedFromCh <- mergedFromResult{summaries}
+	}()
+
+	userMap := (<-userMapCh).m
+	mergedIntoSummary := (<-mergedIntoCh).summary
+	mergedFromSummaries := (<-mergedFromCh).summaries
+	hasVoted := <-hasVotedCh
+
+	// Phase 3: admin-role lookup depends on userMap (we need user emails).
+	adminRoles := h.getAdminRolesForUsers(ctx, userMap)
 
 	// Build author summary
 	authorDoc, exists := userMap[fr.Author]
@@ -461,39 +541,11 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 		UpvoteCount:  fr.UpvoteCount,
 		CommentCount: fr.CommentCount,
 		HasVoted:     hasVoted,
+		MergedInto:   mergedIntoSummary,
+		MergedFrom:   mergedFromSummaries,
 		Comments:     comments,
 		CreatedAt:    fr.CreatedAt,
 		UpdatedAt:    fr.UpdatedAt,
-	}
-
-	// Populate mergedInto if present
-	if fr.MergedInto != nil {
-		mergedIntoFR, err := h.DB.FindOne(ctx, bson.M{"_id": *fr.MergedInto})
-		if err == nil {
-			response.MergedInto = &models.MergedRequestSummary{
-				ID:    mergedIntoFR.ID,
-				Title: mergedIntoFR.Title,
-			}
-		}
-	}
-
-	// Populate mergedFrom if present
-	if len(fr.MergedFrom) > 0 {
-		mergedFromSummaries := make([]models.MergedRequestSummary, 0, len(fr.MergedFrom))
-		mergedCursor, err := h.DB.Find(ctx, bson.M{"_id": bson.M{"$in": fr.MergedFrom}})
-		if err == nil {
-			var mergedFRs []models.FeatureRequest
-			if err := mergedCursor.All(ctx, &mergedFRs); err == nil {
-				for _, mfr := range mergedFRs {
-					mergedFromSummaries = append(mergedFromSummaries, models.MergedRequestSummary{
-						ID:    mfr.ID,
-						Title: mfr.Title,
-					})
-				}
-			}
-			mergedCursor.Close(ctx)
-		}
-		response.MergedFrom = mergedFromSummaries
 	}
 
 	w.Header().Set("Content-Type", "application/json")
