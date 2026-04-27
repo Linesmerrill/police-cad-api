@@ -276,6 +276,15 @@ func (c Call) CreateCallHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fan out a realtime event so every dashboard tab in the community sees
+	// the new call without polling. Background goroutine — broadcast delivery
+	// is progressive-enhancement and shouldn't affect the write response.
+	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	go notifyNodeServer("call_created", requestBody.CommunityID, map[string]interface{}{
+		"call":    newCall,
+		"actorId": actorID,
+	})
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Call created successfully",
@@ -323,6 +332,20 @@ func (c Call) UpdateCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-fetch the post-update doc so the broadcast payload reflects the new
+	// state (consumers diff on assignedTo / status / etc.). If the fetch
+	// fails, skip the broadcast rather than broadcasting stale data — tabs
+	// will pick up the change on their next poll.
+	actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if updatedCall, fetchErr := c.DB.FindOne(ctx, filter); fetchErr == nil && updatedCall != nil {
+		go notifyNodeServer("call_updated", updatedCall.Details.CommunityID, map[string]interface{}{
+			"call":    updatedCall,
+			"actorId": actorID,
+		})
+	} else if fetchErr != nil {
+		zap.S().Warnf("UpdateCallByIDHandler: post-update fetch failed, skipping broadcast: %v", fetchErr)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Call updated successfully",
@@ -344,10 +367,27 @@ func (c Call) DeleteCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	filter := bson.M{"_id": cID}
+
+	// Grab the community id BEFORE deleting so we can address the broadcast
+	// to the right room. If the lookup fails we still delete — worst case is
+	// the delete doesn't fan out live and other tabs pick it up on poll.
+	var deletedCommunityID string
+	if preDel, fetchErr := c.DB.FindOne(ctx, filter); fetchErr == nil && preDel != nil {
+		deletedCommunityID = preDel.Details.CommunityID
+	}
+
 	err = c.DB.DeleteOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to delete call", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	if deletedCommunityID != "" {
+		actorID := api.GetAuthenticatedUserIDFromContext(r.Context())
+		go notifyNodeServer("call_deleted", deletedCommunityID, map[string]interface{}{
+			"callId":  callID,
+			"actorId": actorID,
+		})
 	}
 
 	w.WriteHeader(http.StatusOK)
