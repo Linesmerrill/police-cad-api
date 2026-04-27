@@ -10,7 +10,7 @@ type FeatureRequest struct {
 	Title        string             `json:"title" bson:"title"`
 	Description  string             `json:"description" bson:"description"`
 	Author       primitive.ObjectID `json:"author" bson:"author"`
-	Status       string             `json:"status" bson:"status"` // "open", "under_review", "planned", "in_progress", "released", "declined", "merged"
+	Status       string             `json:"status" bson:"status"` // "open", "planned", "beta_testing", "released", "declined", "merged"
 	ImageURLs    []string           `json:"imageUrls" bson:"imageUrls"`
 	UpvoteCount  int                `json:"upvoteCount" bson:"upvoteCount"`
 	CommentCount int                `json:"commentCount" bson:"commentCount"`
@@ -48,7 +48,7 @@ type UpdateFeatureRequestRequest struct {
 
 // UpdateFeatureRequestStatusRequest holds the structure for updating a feature request status (admin only)
 type UpdateFeatureRequestStatusRequest struct {
-	Status string `json:"status" validate:"required,oneof=open under_review planned in_progress released declined"`
+	Status string `json:"status" validate:"required,oneof=open planned beta_testing released declined"`
 }
 
 // AddFeatureCommentRequest holds the structure for adding a comment to a feature request

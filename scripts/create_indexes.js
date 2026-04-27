@@ -607,12 +607,49 @@ createIndexSafe(
   }
 );
 
+// Compound index for the listing endpoint's "newest" sort and the count
+// on default browse (status filter / $nin filter + sort by createdAt desc).
+createIndexSafe(
+  db.featureRequests,
+  { status: 1, createdAt: -1 },
+  {
+    name: "feature_request_status_created_idx",
+    background: true
+  }
+);
+
+// Compound index for the "top" sort (status filter + sort by upvoteCount desc,
+// tiebreak by createdAt desc).
+createIndexSafe(
+  db.featureRequests,
+  { status: 1, upvoteCount: -1, createdAt: -1 },
+  {
+    name: "feature_request_status_upvotes_idx",
+    background: true
+  }
+);
+
 // Compound unique index on votes to prevent duplicates
 createIndexSafe(
   db.featureRequestVotes,
   { featureRequestId: 1, user: 1 },
   {
     name: "feature_request_vote_unique_idx",
+    unique: true,
+    background: true
+  }
+);
+
+// ==========================================
+// ADMIN USERS — used by admin-role lookups
+// (e.g. on every feature-request detail load)
+// ==========================================
+
+createIndexSafe(
+  db.admin_users,
+  { email: 1 },
+  {
+    name: "admin_users_email_idx",
     unique: true,
     background: true
   }
