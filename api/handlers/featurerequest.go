@@ -45,18 +45,24 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 
 	sortBy := r.URL.Query().Get("sort")
 	status := r.URL.Query().Get("status")
+	excludeStatus := r.URL.Query().Get("excludeStatus")
 	query := r.URL.Query().Get("q")
 	userID := r.URL.Query().Get("userId")
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Build filter — exclude merged tickets by default
+	// Build filter — exclude merged tickets by default; optionally exclude released
+	// from default browsing so the main list stays focused on in-flight work.
 	filter := bson.M{}
 	if status != "" {
 		filter["status"] = status
 	} else {
-		filter["status"] = bson.M{"$ne": "merged"}
+		excluded := []string{"merged"}
+		if excludeStatus != "" {
+			excluded = append(excluded, excludeStatus)
+		}
+		filter["status"] = bson.M{"$nin": excluded}
 	}
 	if query != "" {
 		escaped := regexp.QuoteMeta(query)
@@ -1017,8 +1023,8 @@ func (h FeatureRequestHandler) UpdateStatusHandler(w http.ResponseWriter, r *htt
 	}
 
 	validStatuses := map[string]bool{
-		"open": true, "under_review": true, "planned": true,
-		"in_progress": true, "released": true, "declined": true,
+		"open": true, "planned": true, "beta_testing": true,
+		"released": true, "declined": true,
 	}
 	if !validStatuses[req.Status] {
 		config.ErrorStatus("Invalid status", http.StatusBadRequest, w, fmt.Errorf("invalid status: %s", req.Status))
