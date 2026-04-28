@@ -315,12 +315,14 @@ func (h FormTemplate) HideDefaultFormTemplateHandler(w http.ResponseWriter, r *h
 }
 
 // FormTemplatesByCommunityHandlerV2 returns every template available to a
-// community: stored rows merged with built-in defaults, defaults filtered
-// out when the community has marked them hidden. Each row is hydrated with
-// its current version's sections.
+// community: stored rows merged with built-in defaults. Defaults the
+// community has marked hidden are normally filtered out; ?includeHidden=true
+// surfaces them with IsHidden=true so admin UIs can show a Restore action.
+// Each row is hydrated with its current version's sections.
 func (h FormTemplate) FormTemplatesByCommunityHandlerV2(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["community_id"]
 	includeArchived := r.URL.Query().Get("includeArchived") == "true"
+	includeHidden := r.URL.Query().Get("includeHidden") == "true"
 
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || Limit <= 0 {
@@ -337,7 +339,7 @@ func (h FormTemplate) FormTemplatesByCommunityHandlerV2(w http.ResponseWriter, r
 		return
 	}
 
-	views := h.mergeTemplatesAndDefaults(ctx, stored, includeArchived)
+	views := h.mergeTemplatesAndDefaults(ctx, stored, includeArchived, includeHidden)
 
 	// Pagination over the merged list.
 	totalCount := int64(len(views))
@@ -382,7 +384,7 @@ func (h FormTemplate) FormTemplatesByDepartmentHandlerV2(w http.ResponseWriter, 
 		config.ErrorStatus("failed to fetch templates", http.StatusInternalServerError, w, err)
 		return
 	}
-	views := h.mergeTemplatesAndDefaults(ctx, stored, false)
+	views := h.mergeTemplatesAndDefaults(ctx, stored, false, false)
 
 	toggles, err := h.TDB.Find(ctx, bson.M{
 		"departmentFormToggle.communityID":  communityID,
@@ -416,9 +418,11 @@ func (h FormTemplate) FormTemplatesByDepartmentHandlerV2(w http.ResponseWriter, 
 // --- helpers ---
 
 // mergeTemplatesAndDefaults combines built-in defaults with stored rows
-// for a community, suppressing defaults that have a hide-marker row, and
-// hydrates each entry with its current version's sections.
-func (h FormTemplate) mergeTemplatesAndDefaults(ctx context.Context, stored []models.FormTemplate, includeArchived bool) []models.FormTemplateView {
+// for a community, suppressing defaults that have a hide-marker row
+// (unless includeHidden is true, in which case hidden defaults are
+// surfaced with IsHidden=true so admin UIs can offer a Restore action).
+// Each custom row is hydrated with its current version's sections.
+func (h FormTemplate) mergeTemplatesAndDefaults(ctx context.Context, stored []models.FormTemplate, includeArchived, includeHidden bool) []models.FormTemplateView {
 	hiddenDefaults := map[string]bool{}
 	customRows := make([]models.FormTemplate, 0, len(stored))
 	for _, t := range stored {
@@ -437,6 +441,14 @@ func (h FormTemplate) mergeTemplatesAndDefaults(ctx context.Context, stored []mo
 	// Built-in defaults first (stable order).
 	for slug, def := range formdefaults.All() {
 		if hiddenDefaults[slug] {
+			if !includeHidden {
+				continue
+			}
+			// Surface the hidden default with IsHidden=true set so admin
+			// UIs can render a Restore action against it.
+			hidden := def
+			hidden.IsHidden = true
+			out = append(out, hidden)
 			continue
 		}
 		out = append(out, def)
