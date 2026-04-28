@@ -128,17 +128,22 @@ func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Req
 		config.ErrorStatus("failed to aggregate beta feedback", http.StatusInternalServerError, w, err)
 		return
 	}
-	reasonCounts := map[string]int64{}
-	for cur.Next(ctx) {
-		var row struct {
-			ID    string `bson:"_id"`
-			Count int64  `bson:"count"`
-		}
-		if err := cur.Decode(&row); err == nil {
-			reasonCounts[row.ID] = row.Count
-		}
+	// Custom MongoCursor wrapper: Decode() calls All() under the hood, so we
+	// decode into a slice in one shot rather than iterating with Next/Decode.
+	var rows []struct {
+		ID    string `bson:"_id"`
+		Count int64  `bson:"count"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		_ = cur.Close(ctx)
+		config.ErrorStatus("failed to decode beta feedback aggregation", http.StatusInternalServerError, w, err)
+		return
 	}
 	_ = cur.Close(ctx)
+	reasonCounts := map[string]int64{}
+	for _, row := range rows {
+		reasonCounts[row.ID] = row.Count
+	}
 
 	findOpts := options.Find().
 		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
@@ -152,11 +157,9 @@ func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Req
 	defer cursor.Close(ctx)
 
 	entries := []models.BetaFeedback{}
-	for cursor.Next(ctx) {
-		var doc models.BetaFeedback
-		if err := cursor.Decode(&doc); err == nil {
-			entries = append(entries, doc)
-		}
+	if err := cursor.All(ctx, &entries); err != nil {
+		config.ErrorStatus("failed to decode beta feedback", http.StatusInternalServerError, w, err)
+		return
 	}
 
 	resp := map[string]interface{}{
