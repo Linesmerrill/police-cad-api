@@ -176,11 +176,24 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
-	newVersion := existing.Details.CurrentVersion + 1
+
+	// Only bump the version when sections actually change. Metadata-only
+	// toggles (archive/unarchive, role updates) used to bump too, which
+	// orphaned the version pointer — fetchVersionSections couldn't find
+	// a row at the new number and rendered the template as 0 sections /
+	// 0 fields. Versions are immutable section snapshots; flags don't
+	// create new ones.
+	bumpVersion := body.Sections != nil
+	newVersion := existing.Details.CurrentVersion
+	if bumpVersion {
+		newVersion = existing.Details.CurrentVersion + 1
+	}
 
 	set := bson.M{
-		"formTemplate.currentVersion": newVersion,
-		"formTemplate.updatedAt":      now,
+		"formTemplate.updatedAt": now,
+	}
+	if bumpVersion {
+		set["formTemplate.currentVersion"] = newVersion
 	}
 	if body.Name != nil {
 		set["formTemplate.name"] = *body.Name
@@ -213,7 +226,7 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Append new version row when sections were provided.
-	if body.Sections != nil {
+	if bumpVersion {
 		version := models.FormTemplateVersion{
 			ID: primitive.NewObjectID(),
 			Details: models.FormTemplateVersionDetails{
@@ -470,10 +483,24 @@ func (h FormTemplate) fetchVersionSections(ctx context.Context, formTemplateID s
 		"formTemplateVersion.formTemplateID": formTemplateID,
 		"formTemplateVersion.version":        version,
 	})
+	if err == nil && v != nil {
+		return v.Details.Sections, nil
+	}
+	// Fallback: an older bug bumped formTemplate.currentVersion on
+	// metadata-only updates (archive/unarchive) without writing a matching
+	// version row. Recover by returning the most recent version that does
+	// exist for this template — better than rendering 0 sections.
+	versions, lerr := h.VDB.Find(ctx,
+		bson.M{"formTemplateVersion.formTemplateID": formTemplateID},
+		options.Find().SetSort(bson.M{"formTemplateVersion.version": -1}).SetLimit(1),
+	)
+	if lerr == nil && len(versions) > 0 {
+		return versions[0].Details.Sections, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	return v.Details.Sections, nil
+	return nil, lerr
 }
 
 func storedTemplateToView(t models.FormTemplate) models.FormTemplateView {
