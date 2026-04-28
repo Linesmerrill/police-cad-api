@@ -34,6 +34,8 @@ type FormSubmission struct {
 	CallDB databases.CallDatabase
 	ARDB   databases.ArrestReportDatabase
 	CivDB  databases.CivilianDatabase
+	VehDB  databases.VehicleDatabase
+	FirDB  databases.FirearmDatabase
 }
 
 // SourceRef is a request-side reference to an existing entity used as an
@@ -520,10 +522,49 @@ func (h FormSubmission) fetchSources(ctx context.Context, sources []SourceRef) m
 				}
 			}
 		case "citation":
-			// Citation source auto-fill from embedded civilian.criminalHistory[]
-			// is deferred to a follow-up — clients pass citation values
-			// directly via `data` overrides for v1.
-			zap.S().Debugw("citation source not yet supported server-side", "id", s.ID)
+			// Citations are embedded in civilian.criminalHistory[]. The
+			// client passes ID=<civilianID>, ChildID=<criminalHistoryID>;
+			// we find the matching item and surface a flattened map plus
+			// a nested "civilian" map for cross-field paths.
+			if s.ChildID == "" {
+				zap.S().Debugw("citation source missing childID", "id", s.ID)
+				continue
+			}
+			civID, err := primitive.ObjectIDFromHex(s.ID)
+			if err != nil {
+				zap.S().Debugw("citation source invalid civilian id", "id", s.ID, "err", err)
+				continue
+			}
+			civ, err := h.CivDB.FindOne(ctx, bson.M{"_id": civID})
+			if err != nil || civ == nil {
+				continue
+			}
+			childID, _ := primitive.ObjectIDFromHex(s.ChildID)
+			var match *models.CriminalHistory
+			for i := range civ.Details.CriminalHistory {
+				if civ.Details.CriminalHistory[i].ID == childID {
+					match = &civ.Details.CriminalHistory[i]
+					break
+				}
+			}
+			if match == nil {
+				continue
+			}
+			cit := toMap(match)
+			cit["civilian"] = toMap(civ.Details)
+			out["citation"] = cit
+		case "vehicle":
+			if oid, err := primitive.ObjectIDFromHex(s.ID); err == nil {
+				if veh, err := h.VehDB.FindOne(ctx, bson.M{"_id": oid}); err == nil && veh != nil {
+					out["vehicle"] = toMap(veh.Details)
+				}
+			}
+		case "firearm":
+			if oid, err := primitive.ObjectIDFromHex(s.ID); err == nil {
+				if firearm, err := h.FirDB.FindOne(ctx, bson.M{"_id": oid}); err == nil && firearm != nil {
+					out["firearm"] = toMap(firearm.Details)
+				}
+			}
 		}
 	}
 	return out

@@ -78,6 +78,8 @@ func (a *App) New() *mux.Router {
 		CallDB: databases.NewCallDatabase(a.dbHelper),
 		ARDB:   databases.NewArrestReportDatabase(a.dbHelper),
 		CivDB:  databases.NewCivilianDatabase(a.dbHelper),
+		VehDB:  databases.NewVehicleDatabase(a.dbHelper),
+		FirDB:  databases.NewFirearmDatabase(a.dbHelper),
 	}
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
@@ -571,6 +573,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/arrest-report/{arrest_report_id}", api.Middleware(http.HandlerFunc(arrestReport.DeleteArrestReportHandler))).Methods("DELETE")
 	apiCreate.Handle("/arrest-report", api.Middleware(http.HandlerFunc(arrestReport.CreateArrestReportHandler))).Methods("POST")
 	apiCreate.Handle("/arrest-report/arrestee/{arrestee_id}", api.Middleware(http.HandlerFunc(arrestReport.GetArrestReportsByArresteeIDHandler))).Methods("GET")
+	apiV2.Handle("/arrest-reports/community/{community_id}", api.Middleware(http.HandlerFunc(arrestReport.GetArrestReportsByCommunityHandler))).Methods("GET")
 
 	// Medical Reports routes
 	apiCreate.Handle("/medical-reports", api.Middleware(http.HandlerFunc(medicalReportHandler.GetMedicalReportsHandler))).Methods("GET")

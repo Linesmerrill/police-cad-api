@@ -26,10 +26,18 @@ type FormTemplateVersionDetails struct {
 // FormSection is one section in a template (e.g. "Incident Info"). When
 // Repeatable is true, the section produces an array of row objects in the
 // submission data instead of a single object.
+//
+// BindEntity, when set on a repeatable section, anchors each row to a real
+// entity (civilian | vehicle | firearm). The renderer adds a per-row "Link
+// <entity>" control that fetches the entity and auto-fills any field whose
+// PopulateFrom mapping has Source="bound". The picked entity ID is also
+// added to the submission's Links array so future "all reports involving X"
+// queries can use a single index lookup.
 type FormSection struct {
 	ID         string      `json:"id" bson:"id"`
 	Title      string      `json:"title" bson:"title"`
 	Repeatable bool        `json:"repeatable" bson:"repeatable"`
+	BindEntity string      `json:"bindEntity,omitempty" bson:"bindEntity,omitempty"` // "" | civilian | vehicle | firearm
 	MinRows    int         `json:"minRows,omitempty" bson:"minRows,omitempty"`
 	MaxRows    int         `json:"maxRows,omitempty" bson:"maxRows,omitempty"`
 	Fields     []FormField `json:"fields" bson:"fields"`
@@ -55,7 +63,13 @@ type FormField struct {
 
 // FormFieldPopulate maps a field to a path on a source entity. First match
 // wins when multiple sources are provided.
+//
+// Source="bound" is special: it resolves against the entity linked to the
+// field's row (only valid inside a repeatable section whose BindEntity is
+// set). The renderer applies bound paths client-side after the user picks
+// an entity for that row, and never sends "bound" sources to the
+// server-side prefill resolver.
 type FormFieldPopulate struct {
-	Source string `json:"source" bson:"source"` // call, citation, arrestReport, warrant, bolo, civilian, vehicle, firearm
+	Source string `json:"source" bson:"source"` // call, citation, arrestReport, warrant, bolo, civilian, vehicle, firearm, bound
 	Path   string `json:"path" bson:"path"`     // dotted JSON path on the source entity (or special tokens like "criminalHistory.fines[].fineType")
 }

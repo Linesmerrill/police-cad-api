@@ -104,27 +104,40 @@ func incidentReportSections() []models.FormSection {
 			},
 		},
 		{
-			ID: "suspects", Title: "Suspects", Repeatable: true,
+			ID: "suspects", Title: "Suspects", Repeatable: true, BindEntity: "civilian",
 			Fields: []models.FormField{
 				{ID: "name", Type: "text", Label: "Name",
 					PopulateFrom: []models.FormFieldPopulate{
+						{Source: "bound", Path: "name"},
 						{Source: "arrestReport", Path: "arrestee.name"},
-						{Source: "citation", Path: "civilian.firstName civilian.lastName"},
 					}},
 				{ID: "dob", Type: "date", Label: "DOB",
 					PopulateFrom: []models.FormFieldPopulate{
+						{Source: "bound", Path: "birthday"},
 						{Source: "arrestReport", Path: "arrestee.dob"},
-						{Source: "citation", Path: "civilian.birthday"},
 					}},
-				{ID: "description", Type: "textarea", Label: "Description"},
+				{ID: "address", Type: "text", Label: "Address",
+					PopulateFrom: []models.FormFieldPopulate{
+						{Source: "bound", Path: "address"},
+					}},
+				{ID: "description", Type: "textarea", Label: "Description",
+					PopulateFrom: []models.FormFieldPopulate{
+						{Source: "bound", Path: "@desc:civilian"},
+					}},
 				{ID: "status", Type: "select", Label: "Status", Options: []string{"At Large", "Detained", "Arrested", "Cited", "Released"}},
 			},
 		},
 		{
-			ID: "victims", Title: "Victims", Repeatable: true,
+			ID: "victims", Title: "Victims", Repeatable: true, BindEntity: "civilian",
 			Fields: []models.FormField{
-				{ID: "name", Type: "text", Label: "Name"},
-				{ID: "dob", Type: "date", Label: "DOB"},
+				{ID: "name", Type: "text", Label: "Name",
+					PopulateFrom: []models.FormFieldPopulate{
+						{Source: "bound", Path: "name"},
+					}},
+				{ID: "dob", Type: "date", Label: "DOB",
+					PopulateFrom: []models.FormFieldPopulate{
+						{Source: "bound", Path: "birthday"},
+					}},
 				{ID: "injuryStatus", Type: "select", Label: "Injury Status", Options: []string{"None", "Minor", "Serious", "Critical", "Fatal"}},
 			},
 		},
