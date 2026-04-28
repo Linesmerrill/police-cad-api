@@ -7,8 +7,20 @@
 // Idempotent — safe to run multiple times.
 
 function createIndexSafe(collection, key, options) {
-  const indexes = collection.getIndexes();
   const keyStr = JSON.stringify(key);
+  // getIndexes() throws "ns does not exist" on collections that haven't
+  // been created yet. Treat that as "no indexes exist" and proceed —
+  // createIndex will create the collection.
+  let indexes = [];
+  try {
+    indexes = collection.getIndexes();
+  } catch (e) {
+    if (!(e.code === 26 || e.codeName === "NamespaceNotFound" || (e.message || "").includes("ns does not exist"))) {
+      print(`❌ Could not read existing indexes for ${collection.getName()}: ${e.message}`);
+      return;
+    }
+    // Otherwise: collection doesn't exist yet — fall through and create.
+  }
   const exists = indexes.some(idx => JSON.stringify(idx.key) === keyStr);
   if (exists) {
     const existingIdx = indexes.find(idx => JSON.stringify(idx.key) === keyStr);
@@ -17,7 +29,7 @@ function createIndexSafe(collection, key, options) {
   }
   try {
     collection.createIndex(key, options);
-    print(`✓ Created index: ${options.name || 'unnamed'}`);
+    print(`✓ Created index: ${options.name || 'unnamed'} on ${collection.getName()}`);
   } catch (e) {
     if (e.code === 85 || e.message.includes("already exists") || e.message.includes("IndexOptionsConflict")) {
       print(`⚠️  Index already exists (different name): ${options.name || 'unnamed'} - skipping`);
