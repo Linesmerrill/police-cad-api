@@ -48,6 +48,7 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 	excludeStatus := r.URL.Query().Get("excludeStatus")
 	query := r.URL.Query().Get("q")
 	userID := r.URL.Query().Get("userId")
+	authorID := r.URL.Query().Get("authorId")
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -69,6 +70,11 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 		filter["$or"] = []bson.M{
 			{"title": bson.M{"$regex": escaped, "$options": "i"}},
 			{"description": bson.M{"$regex": escaped, "$options": "i"}},
+		}
+	}
+	if authorID != "" {
+		if authorObjID, err := primitive.ObjectIDFromHex(authorID); err == nil {
+			filter["author"] = authorObjID
 		}
 	}
 

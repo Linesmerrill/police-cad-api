@@ -149,6 +149,53 @@ func (a ArrestReport) DeleteArrestReportHandler(w http.ResponseWriter, r *http.R
 	w.Write([]byte(`{"message": "Arrest report deleted successfully"}`))
 }
 
+// GetArrestReportsByCommunityHandler returns paginated arrest reports for a
+// community, sorted most-recent-first. Used by the configurable forms picker
+// so officers can start a report from an existing arrest record.
+func (a ArrestReport) GetArrestReportsByCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+
+	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || Limit <= 0 {
+		Limit = 50
+	}
+	Page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || Page < 0 {
+		Page = 0
+	}
+	skip := int64(Page * Limit)
+	limit64 := int64(Limit)
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{"arrestReport.activeCommunityID": communityID}
+
+	dbResp, err := a.DB.Find(ctx, filter, &options.FindOptions{
+		Limit: &limit64,
+		Skip:  &skip,
+		Sort:  bson.M{"_id": -1},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to get arrest reports", http.StatusInternalServerError, w, err)
+		return
+	}
+	totalCount, err := a.DB.CountDocuments(ctx, filter)
+	if err != nil {
+		totalCount = int64(len(dbResp))
+	}
+	if dbResp == nil {
+		dbResp = []models.ArrestReport{}
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":       dbResp,
+		"page":       Page,
+		"limit":      Limit,
+		"totalCount": totalCount,
+	})
+}
+
 // GetArrestReportsByArresteeIDHandler retrieves all Arrest reports that contain the given arresteeID
 func (a ArrestReport) GetArrestReportsByArresteeIDHandler(w http.ResponseWriter, r *http.Request) {
 	arresteeID := mux.Vars(r)["arrestee_id"]
