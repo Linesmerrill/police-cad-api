@@ -27,11 +27,21 @@ type FormSubmissionDetails struct {
 
 	Links []FormSubmissionLink `json:"links" bson:"links"`
 
-	SignedBy FormSubmissionSignature `json:"signedBy" bson:"signedBy"`
-	Status   string                  `json:"status" bson:"status"` // "draft", "submitted"
+	SignedBy FormSubmissionSignature      `json:"signedBy" bson:"signedBy"`
+	Status   string                       `json:"status" bson:"status"` // "draft", "submitted"
+	History  []FormSubmissionHistoryEntry `json:"history,omitempty" bson:"history,omitempty"`
 
 	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// FormSubmissionHistoryEntry is one append-only entry in the report's
+// audit trail. Action is one of: "submitted", "reopened", "resubmitted".
+type FormSubmissionHistoryEntry struct {
+	Action   string             `json:"action" bson:"action"`
+	UserID   string             `json:"userID" bson:"userID"`
+	Username string             `json:"username" bson:"username"`
+	At       primitive.DateTime `json:"at" bson:"at"`
 }
 
 // FormSubmissionLink is one cross-link to another entity. ChildID is set

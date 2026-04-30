@@ -26,16 +26,17 @@ import (
 // FormSubmission handles CRUD for filled form instances. It also handles
 // the auto-fill / draft pre-population workflow.
 type FormSubmission struct {
-	DB     databases.FormSubmissionDatabase
-	TDB    databases.FormTemplateDatabase
-	VDB    databases.FormTemplateVersionDatabase
-	CDB    databases.FormCounterDatabase
-	UDB    databases.UserDatabase
-	CallDB databases.CallDatabase
-	ARDB   databases.ArrestReportDatabase
-	CivDB  databases.CivilianDatabase
-	VehDB  databases.VehicleDatabase
-	FirDB  databases.FirearmDatabase
+	DB      databases.FormSubmissionDatabase
+	TDB     databases.FormTemplateDatabase
+	VDB     databases.FormTemplateVersionDatabase
+	CDB     databases.FormCounterDatabase
+	UDB     databases.UserDatabase
+	CommDB  databases.CommunityDatabase
+	CallDB  databases.CallDatabase
+	ARDB    databases.ArrestReportDatabase
+	CivDB   databases.CivilianDatabase
+	VehDB   databases.VehicleDatabase
+	FirDB   databases.FirearmDatabase
 }
 
 // SourceRef is a request-side reference to an existing entity used as an
@@ -122,6 +123,16 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		status = "submitted"
 	}
 
+	var history []models.FormSubmissionHistoryEntry
+	if status == "submitted" {
+		history = []models.FormSubmissionHistoryEntry{{
+			Action:   "submitted",
+			UserID:   signedBy.UserID,
+			Username: signedBy.Username,
+			At:       now,
+		}}
+	}
+
 	sub := models.FormSubmission{
 		ID: primitive.NewObjectID(),
 		Details: models.FormSubmissionDetails{
@@ -135,6 +146,7 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 			Links:               body.Links,
 			SignedBy:            signedBy,
 			Status:              status,
+			History:             history,
 			CreatedAt:           now,
 			UpdatedAt:           now,
 		},
@@ -177,6 +189,10 @@ func (h FormSubmission) FormSubmissionByIDHandler(w http.ResponseWriter, r *http
 
 // UpdateFormSubmissionHandler patches a submission. Officer-editable
 // fields only — formTemplateVersion and signedBy are NOT updatable.
+//
+// Lock rules: while status="submitted", any change requires the actor
+// to be the original signer or a community admin. Status transitions
+// (submitted ↔ draft) append an entry to the history audit trail.
 func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *http.Request) {
 	subID := mux.Vars(r)["submission_id"]
 	objID, err := primitive.ObjectIDFromHex(subID)
@@ -186,10 +202,11 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 	}
 
 	var body struct {
-		Data         map[string]interface{}      `json:"data,omitempty"`
-		Links        []models.FormSubmissionLink `json:"links,omitempty"`
-		Status       *string                     `json:"status,omitempty"`
-		ReportNumber *string                     `json:"reportNumber,omitempty"`
+		Data         map[string]interface{}          `json:"data,omitempty"`
+		Links        []models.FormSubmissionLink     `json:"links,omitempty"`
+		Status       *string                         `json:"status,omitempty"`
+		ReportNumber *string                         `json:"reportNumber,omitempty"`
+		Actor        *models.FormSubmissionSignature `json:"actor,omitempty"` // server-trusted website fallback when no auth context
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -199,7 +216,25 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	existing, err := h.DB.FindOne(ctx, bson.M{"_id": objID})
+	if err != nil || existing == nil {
+		config.ErrorStatus("submission not found", http.StatusNotFound, w, err)
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
+	actor := h.resolveActor(ctx, r, body.Actor, now)
+
+	// Authorization: a submitted report is locked. Any change (data,
+	// links, reopen, etc.) requires the actor to be the original
+	// signer or a community admin.
+	if existing.Details.Status == "submitted" {
+		if !h.canManageSubmission(ctx, actor.UserID, existing.Details) {
+			config.ErrorStatus("only the report's author or a community admin can edit a submitted report", http.StatusForbidden, w, fmt.Errorf("forbidden"))
+			return
+		}
+	}
+
 	set := bson.M{"formSubmission.updatedAt": now}
 	if body.Data != nil {
 		set["formSubmission.data"] = body.Data
@@ -207,19 +242,109 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 	if body.Links != nil {
 		set["formSubmission.links"] = body.Links
 	}
-	if body.Status != nil {
-		set["formSubmission.status"] = *body.Status
-	}
 	if body.ReportNumber != nil {
 		set["formSubmission.reportNumber"] = *body.ReportNumber
 	}
 
-	if err := h.DB.UpdateOne(ctx, bson.M{"_id": objID}, bson.M{"$set": set}); err != nil {
+	var historyEntry *models.FormSubmissionHistoryEntry
+	if body.Status != nil && *body.Status != existing.Details.Status {
+		set["formSubmission.status"] = *body.Status
+		switch *body.Status {
+		case "draft":
+			if existing.Details.Status == "submitted" {
+				historyEntry = &models.FormSubmissionHistoryEntry{
+					Action:   "reopened",
+					UserID:   actor.UserID,
+					Username: actor.Username,
+					At:       now,
+				}
+			}
+		case "submitted":
+			action := "submitted"
+			if len(existing.Details.History) > 0 {
+				action = "resubmitted"
+			}
+			historyEntry = &models.FormSubmissionHistoryEntry{
+				Action:   action,
+				UserID:   actor.UserID,
+				Username: actor.Username,
+				At:       now,
+			}
+		}
+	}
+
+	update := bson.M{"$set": set}
+	if historyEntry != nil {
+		update["$push"] = bson.M{"formSubmission.history": *historyEntry}
+	}
+
+	if err := h.DB.UpdateOne(ctx, bson.M{"_id": objID}, update); err != nil {
 		config.ErrorStatus("failed to update submission", http.StatusInternalServerError, w, err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "Submission updated"})
+}
+
+// resolveActor returns the user performing this request. Prefers the
+// auth-context user; falls back to a website-supplied actor block when
+// the API is being proxied by a server-token caller.
+func (h FormSubmission) resolveActor(ctx context.Context, r *http.Request, fallback *models.FormSubmissionSignature, now primitive.DateTime) models.FormSubmissionSignature {
+	if uid := api.GetAuthenticatedUserIDFromContext(r.Context()); uid != "" {
+		return h.lookupSignedBy(ctx, uid, now)
+	}
+	if fallback != nil && fallback.UserID != "" {
+		return models.FormSubmissionSignature{
+			UserID:   fallback.UserID,
+			Username: fallback.Username,
+			SignedAt: now,
+		}
+	}
+	return models.FormSubmissionSignature{SignedAt: now}
+}
+
+// canManageSubmission returns true when the user is the original
+// submitter, the community owner, or holds a role with the
+// "administrator" permission in the submission's community.
+func (h FormSubmission) canManageSubmission(ctx context.Context, userID string, sub models.FormSubmissionDetails) bool {
+	if userID == "" {
+		return false
+	}
+	if sub.SignedBy.UserID != "" && sub.SignedBy.UserID == userID {
+		return true
+	}
+	if sub.CommunityID == "" {
+		return false
+	}
+	commID, err := primitive.ObjectIDFromHex(sub.CommunityID)
+	if err != nil {
+		return false
+	}
+	community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil {
+		return false
+	}
+	if community.Details.OwnerID == userID {
+		return true
+	}
+	for _, role := range community.Details.Roles {
+		inRole := false
+		for _, member := range role.Members {
+			if member == userID {
+				inRole = true
+				break
+			}
+		}
+		if !inRole {
+			continue
+		}
+		for _, perm := range role.Permissions {
+			if perm.Enabled && perm.Name == "administrator" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DeleteFormSubmissionHandler hard-deletes a submission.

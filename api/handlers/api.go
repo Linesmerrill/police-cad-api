@@ -75,6 +75,7 @@ func (a *App) New() *mux.Router {
 		VDB:    formTemplateVersionDB,
 		CDB:    formCounterDB,
 		UDB:    databases.NewUserDatabase(a.dbHelper),
+		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 		CallDB: databases.NewCallDatabase(a.dbHelper),
 		ARDB:   databases.NewArrestReportDatabase(a.dbHelper),
 		CivDB:  databases.NewCivilianDatabase(a.dbHelper),
