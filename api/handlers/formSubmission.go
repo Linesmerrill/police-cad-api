@@ -206,6 +206,7 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		Links        []models.FormSubmissionLink     `json:"links,omitempty"`
 		Status       *string                         `json:"status,omitempty"`
 		ReportNumber *string                         `json:"reportNumber,omitempty"`
+		Archived     *bool                           `json:"archived,omitempty"`
 		Actor        *models.FormSubmissionSignature `json:"actor,omitempty"` // server-trusted website fallback when no auth context
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -225,12 +226,12 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 	now := primitive.NewDateTimeFromTime(time.Now())
 	actor := h.resolveActor(ctx, r, body.Actor, now)
 
-	// Authorization: a submitted report is locked. Any change (data,
-	// links, reopen, etc.) requires the actor to be the original
-	// signer or a community admin.
-	if existing.Details.Status == "submitted" {
+	// Authorization: a submitted OR archived report is locked. Any
+	// change (data, links, reopen, archive toggle, etc.) requires the
+	// actor to be the original signer or a community admin.
+	if existing.Details.Status == "submitted" || existing.Details.Archived {
 		if !h.canManageSubmission(ctx, actor.UserID, existing.Details) {
-			config.ErrorStatus("only the report's author or a community admin can edit a submitted report", http.StatusForbidden, w, fmt.Errorf("forbidden"))
+			config.ErrorStatus("only the report's author or a community admin can edit a locked or archived report", http.StatusForbidden, w, fmt.Errorf("forbidden"))
 			return
 		}
 	}
@@ -246,36 +247,58 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		set["formSubmission.reportNumber"] = *body.ReportNumber
 	}
 
-	var historyEntry *models.FormSubmissionHistoryEntry
+	var historyEntries []models.FormSubmissionHistoryEntry
 	if body.Status != nil && *body.Status != existing.Details.Status {
 		set["formSubmission.status"] = *body.Status
 		switch *body.Status {
 		case "draft":
 			if existing.Details.Status == "submitted" {
-				historyEntry = &models.FormSubmissionHistoryEntry{
+				historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
 					Action:   "reopened",
 					UserID:   actor.UserID,
 					Username: actor.Username,
 					At:       now,
-				}
+				})
 			}
 		case "submitted":
 			action := "submitted"
 			if len(existing.Details.History) > 0 {
 				action = "resubmitted"
 			}
-			historyEntry = &models.FormSubmissionHistoryEntry{
+			historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
 				Action:   action,
 				UserID:   actor.UserID,
 				Username: actor.Username,
 				At:       now,
-			}
+			})
+		}
+	}
+
+	if body.Archived != nil && *body.Archived != existing.Details.Archived {
+		set["formSubmission.archived"] = *body.Archived
+		if *body.Archived {
+			sig := models.FormSubmissionSignature{UserID: actor.UserID, Username: actor.Username, SignedAt: now}
+			set["formSubmission.archivedBy"] = sig
+			historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
+				Action:   "archived",
+				UserID:   actor.UserID,
+				Username: actor.Username,
+				At:       now,
+			})
+		} else {
+			set["formSubmission.archivedBy"] = nil
+			historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
+				Action:   "unarchived",
+				UserID:   actor.UserID,
+				Username: actor.Username,
+				At:       now,
+			})
 		}
 	}
 
 	update := bson.M{"$set": set}
-	if historyEntry != nil {
-		update["$push"] = bson.M{"formSubmission.history": *historyEntry}
+	if len(historyEntries) > 0 {
+		update["$push"] = bson.M{"formSubmission.history": bson.M{"$each": historyEntries}}
 	}
 
 	if err := h.DB.UpdateOne(ctx, bson.M{"_id": objID}, update); err != nil {

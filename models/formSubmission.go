@@ -31,6 +31,12 @@ type FormSubmissionDetails struct {
 	Status   string                       `json:"status" bson:"status"` // "draft", "submitted"
 	History  []FormSubmissionHistoryEntry `json:"history,omitempty" bson:"history,omitempty"`
 
+	// Archived is orthogonal to Status. An archived report is locked
+	// from edits regardless of draft/submitted state. Unarchiving
+	// returns it to whatever Status it had before.
+	Archived   bool                     `json:"archived,omitempty" bson:"archived,omitempty"`
+	ArchivedBy *FormSubmissionSignature `json:"archivedBy,omitempty" bson:"archivedBy,omitempty"`
+
 	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
