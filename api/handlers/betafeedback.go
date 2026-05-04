@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -84,16 +85,46 @@ func (b BetaFeedback) CreateBetaFeedbackHandler(w http.ResponseWriter, r *http.R
 }
 
 // ListBetaFeedbackHandler returns feedback entries for the admin console.
-// Supports `flag`, `limit`, and `page` query params. Sorted newest first.
+// Supports `flag`, `status` (open|resolved|all), `limit`, and `page`
+// query params. Sorted newest first. Soft-deleted entries are always
+// excluded.
 func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	filter := bson.M{}
+	// Always exclude soft-deleted entries from the admin list.
+	filter := bson.M{
+		"$or": []bson.M{
+			{"deletedAt": bson.M{"$exists": false}},
+			{"deletedAt": nil},
+		},
+	}
 	if flag := q.Get("flag"); flag != "" {
 		if !validFlags[flag] {
 			config.ErrorStatus("unknown flag", http.StatusBadRequest, w, nil)
 			return
 		}
 		filter["flag"] = flag
+	}
+
+	// Status: open (default) hides resolved entries; resolved shows
+	// only resolved; all shows both. Counts are always computed against
+	// the same status window so the distribution chips reflect the list.
+	status := q.Get("status")
+	if status == "" {
+		status = "open"
+	}
+	switch status {
+	case "open":
+		filter["$and"] = []bson.M{{"$or": []bson.M{
+			{"resolvedAt": bson.M{"$exists": false}},
+			{"resolvedAt": nil},
+		}}}
+	case "resolved":
+		filter["resolvedAt"] = bson.M{"$ne": nil}
+	case "all":
+		// no extra filter
+	default:
+		config.ErrorStatus("unknown status", http.StatusBadRequest, w, nil)
+		return
 	}
 
 	limit := int64(50)
@@ -145,6 +176,57 @@ func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Req
 		reasonCounts[row.ID] = row.Count
 	}
 
+	// Sibling counts so the UI can show "Open (N) · Resolved (M)"
+	// without firing a second request. Only entries with a non-empty
+	// free-form `feedback` are counted — those are the ones the admin
+	// can actually triage. The reason-distribution chips above still
+	// reflect the full opt-out volume.
+	statusBaseFilter := bson.M{
+		"$or": []bson.M{
+			{"deletedAt": bson.M{"$exists": false}},
+			{"deletedAt": nil},
+		},
+		"feedback": bson.M{"$exists": true, "$ne": ""},
+	}
+	if flag, ok := filter["flag"]; ok {
+		statusBaseFilter["flag"] = flag
+	}
+	openFilter := bson.M{}
+	for k, v := range statusBaseFilter {
+		openFilter[k] = v
+	}
+	openFilter["$and"] = []bson.M{{"$or": []bson.M{
+		{"resolvedAt": bson.M{"$exists": false}},
+		{"resolvedAt": nil},
+	}}}
+	openCount, err := b.DB.CountDocuments(ctx, openFilter)
+	if err != nil {
+		config.ErrorStatus("failed to count open beta feedback", http.StatusInternalServerError, w, err)
+		return
+	}
+	resolvedFilter := bson.M{}
+	for k, v := range statusBaseFilter {
+		resolvedFilter[k] = v
+	}
+	resolvedFilter["resolvedAt"] = bson.M{"$ne": nil}
+	resolvedCount, err := b.DB.CountDocuments(ctx, resolvedFilter)
+	if err != nil {
+		config.ErrorStatus("failed to count resolved beta feedback", http.StatusInternalServerError, w, err)
+		return
+	}
+	// Total commentable entries in the current status window — used for
+	// the "X comments" label on the panel. Excludes empty-feedback rows.
+	commentFilter := bson.M{}
+	for k, v := range filter {
+		commentFilter[k] = v
+	}
+	commentFilter["feedback"] = bson.M{"$exists": true, "$ne": ""}
+	commentCount, err := b.DB.CountDocuments(ctx, commentFilter)
+	if err != nil {
+		config.ErrorStatus("failed to count beta feedback comments", http.StatusInternalServerError, w, err)
+		return
+	}
+
 	findOpts := options.Find().
 		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
 		SetSkip(skip).
@@ -163,12 +245,88 @@ func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	resp := map[string]interface{}{
-		"data":         entries,
-		"totalCount":   total,
-		"page":         page,
-		"limit":        limit,
-		"reasonCounts": reasonCounts,
+		"data":          entries,
+		"totalCount":    total,
+		"commentCount":  commentCount,
+		"page":          page,
+		"limit":         limit,
+		"reasonCounts":  reasonCounts,
+		"openCount":     openCount,
+		"resolvedCount": resolvedCount,
+		"status":        status,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// resolveBody is the PATCH body for ResolveBetaFeedbackHandler. Setting
+// resolved=false reopens an entry; resolved=true marks it completed.
+type resolveBody struct {
+	Resolved   bool   `json:"resolved"`
+	ResolvedBy string `json:"resolvedBy"`
+}
+
+// ResolveBetaFeedbackHandler toggles the resolved state of an entry.
+// PATCH /api/v1/admin/beta-feedback/{id}
+func (b BetaFeedback) ResolveBetaFeedbackHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	objID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid id", http.StatusBadRequest, w, err)
+		return
+	}
+	var req resolveBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
+		return
+	}
+	if len(req.ResolvedBy) > 200 {
+		req.ResolvedBy = req.ResolvedBy[:200]
+	}
+
+	var update bson.M
+	if req.Resolved {
+		now := primitive.NewDateTimeFromTime(time.Now())
+		update = bson.M{"$set": bson.M{
+			"resolvedAt": now,
+			"resolvedBy": req.ResolvedBy,
+		}}
+	} else {
+		update = bson.M{"$unset": bson.M{
+			"resolvedAt": "",
+			"resolvedBy": "",
+		}}
+	}
+	if err := b.DB.UpdateOne(context.Background(), bson.M{"_id": objID}, update); err != nil {
+		config.ErrorStatus("failed to update beta feedback", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "resolved": req.Resolved})
+}
+
+// DeleteBetaFeedbackHandler soft-deletes (default) or restores an entry.
+// DELETE /api/v1/admin/beta-feedback/{id}              -> soft-delete
+// DELETE /api/v1/admin/beta-feedback/{id}?undo=true    -> restore
+func (b BetaFeedback) DeleteBetaFeedbackHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	objID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid id", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var update bson.M
+	if r.URL.Query().Get("undo") == "true" {
+		update = bson.M{"$unset": bson.M{"deletedAt": ""}}
+	} else {
+		now := primitive.NewDateTimeFromTime(time.Now())
+		update = bson.M{"$set": bson.M{"deletedAt": now}}
+	}
+	if err := b.DB.UpdateOne(context.Background(), bson.M{"_id": objID}, update); err != nil {
+		config.ErrorStatus("failed to delete beta feedback", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
