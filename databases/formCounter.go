@@ -13,6 +13,12 @@ const formCounterName = "formCounters"
 // used to generate unique form submission report numbers.
 type FormCounterDatabase interface {
 	NextSeq(ctx context.Context, communityID, slug string, year int) (int64, error)
+	// CatchUp bumps the (community, slug, year) counter to at least
+	// minSeq using $max — used to recover from cross-slug collisions
+	// (the unique index on submissions is community-wide while the
+	// counter is per-slug, so a brand-new template starts at seq=1
+	// and collides with the existing template's first reports). Idempotent.
+	CatchUp(ctx context.Context, communityID, slug string, year int, minSeq int64) error
 }
 
 type formCounterDatabase struct {
@@ -55,4 +61,26 @@ func (c *formCounterDatabase) NextSeq(ctx context.Context, communityID, slug str
 		return 0, err
 	}
 	return doc.Seq, nil
+}
+
+// CatchUp ensures the (communityID, slug, year) counter is at or
+// above minSeq. Uses $max so concurrent writes never roll the
+// counter backward. The next NextSeq call returns at least minSeq+1.
+func (c *formCounterDatabase) CatchUp(ctx context.Context, communityID, slug string, year int, minSeq int64) error {
+	filter := bson.M{
+		"communityID": communityID,
+		"slug":        slug,
+		"year":        year,
+	}
+	update := bson.M{
+		"$max": bson.M{"seq": minSeq},
+		"$setOnInsert": bson.M{
+			"communityID": communityID,
+			"slug":        slug,
+			"year":        year,
+		},
+	}
+	opts := options.Update().SetUpsert(true)
+	_, err := c.db.Collection(formCounterName).UpdateOne(ctx, filter, update, opts)
+	return err
 }

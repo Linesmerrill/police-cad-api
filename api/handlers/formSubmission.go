@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
@@ -152,8 +153,47 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		},
 	}
 
-	if _, err := h.DB.InsertOne(ctx, sub); err != nil {
-		config.ErrorStatus("failed to create submission", http.StatusInternalServerError, w, err)
+	// Insert with retry on duplicate-report-number collisions. The
+	// formCounter is keyed by (communityID, slug, year) but the
+	// unique index on submissions is (communityID, reportNumber) —
+	// so a brand-new template starts at seq=1 and collides with the
+	// existing template's first reports. On the first collision,
+	// catch the per-slug counter up to the highest used seq across
+	// all slugs in this community/year, then retry with a small budget
+	// to absorb concurrent-write races.
+	const maxAttempts = 5
+	autoNumber := strings.TrimSpace(body.ReportNumber) == ""
+	year := time.Now().Year()
+	var insertErr error
+	caughtUp := false
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		_, insertErr = h.DB.InsertOne(ctx, sub)
+		if insertErr == nil {
+			break
+		}
+		if !mongo.IsDuplicateKeyError(insertErr) || !autoNumber || attempt == maxAttempts-1 {
+			break
+		}
+		if !caughtUp {
+			// One-shot jump-ahead: find the highest reportNumber
+			// already in use for this community/year and bump our
+			// per-slug counter past it. Bounds the retry depth even
+			// when another template has hundreds of submissions.
+			if maxSeq, ok := h.maxReportNumberSeq(ctx, body.CommunityID, year); ok {
+				_ = h.CDB.CatchUp(ctx, body.CommunityID, body.FormTemplateSlug, year, maxSeq)
+			}
+			caughtUp = true
+		}
+		nextNum := h.nextReportNumber(ctx, body.CommunityID, body.FormTemplateSlug, w, r)
+		if nextNum == "" {
+			return // error already written by nextReportNumber
+		}
+		reportNumber = nextNum
+		sub.Details.ReportNumber = reportNumber
+		sub.ID = primitive.NewObjectID()
+	}
+	if insertErr != nil {
+		config.ErrorStatus("failed to create submission", http.StatusInternalServerError, w, insertErr)
 		return
 	}
 
@@ -852,6 +892,33 @@ func (h FormSubmission) resolveActiveTemplate(ctx context.Context, communityID, 
 		return "", def.Sections, def.CurrentVersion, nil
 	}
 	return "", nil, 0, fmt.Errorf("template %q not found for community %q", slug, communityID)
+}
+
+// maxReportNumberSeq returns the highest numeric tail across all
+// reportNumbers used in this community for the given year, e.g.
+// "RR-2026-000042" → 42. Used to seed a stale per-slug counter that
+// trails the actually-used number space. Returns ok=false when no
+// matching submissions exist.
+func (h FormSubmission) maxReportNumberSeq(ctx context.Context, communityID string, year int) (int64, bool) {
+	yearStr := strconv.Itoa(year)
+	filter := bson.M{
+		"formSubmission.communityID":  communityID,
+		"formSubmission.reportNumber": bson.M{"$regex": "-" + yearStr + "-"},
+	}
+	opts := options.FindOne().SetSort(bson.M{"formSubmission.reportNumber": -1})
+	top, err := h.DB.FindOne(ctx, filter, opts)
+	if err != nil || top == nil {
+		return 0, false
+	}
+	parts := strings.Split(top.Details.ReportNumber, "-")
+	if len(parts) == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // nextReportNumber atomically generates the next sequence and formats it
