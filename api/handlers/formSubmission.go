@@ -124,14 +124,23 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		status = "submitted"
 	}
 
-	var history []models.FormSubmissionHistoryEntry
+	// Always seed history with a "created" entry so the audit trail
+	// records who originated the report — this avoids the "by Unknown"
+	// fallback the clients used to render synthetically. For a direct-
+	// submit (status=submitted on insert), append the submit entry too.
+	history := []models.FormSubmissionHistoryEntry{{
+		Action:   "created",
+		UserID:   signedBy.UserID,
+		Username: signedBy.Username,
+		At:       now,
+	}}
 	if status == "submitted" {
-		history = []models.FormSubmissionHistoryEntry{{
+		history = append(history, models.FormSubmissionHistoryEntry{
 			Action:   "submitted",
 			UserID:   signedBy.UserID,
 			Username: signedBy.Username,
 			At:       now,
-		}}
+		})
 	}
 
 	sub := models.FormSubmission{
@@ -345,6 +354,25 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 			set["formSubmission.archivedBy"] = nil
 			historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
 				Action:   "unarchived",
+				UserID:   actor.UserID,
+				Username: actor.Username,
+				At:       now,
+			})
+		}
+	}
+
+	// Draft-save audit: when a draft is being saved (no status flip,
+	// not archive/unarchive) but data, links, or department changed,
+	// log an "edited" entry so the history reflects every save.
+	// Skipped for submitted/archived writes since those already get
+	// their own action-specific entries above.
+	if len(historyEntries) == 0 && existing.Details.Status == "draft" && !existing.Details.Archived {
+		dataChanged := body.Data != nil
+		linksChanged := body.Links != nil
+		deptChanged := body.DepartmentID != nil && *body.DepartmentID != existing.Details.DepartmentID
+		if dataChanged || linksChanged || deptChanged {
+			historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
+				Action:   "edited",
 				UserID:   actor.UserID,
 				Username: actor.Username,
 				At:       now,
