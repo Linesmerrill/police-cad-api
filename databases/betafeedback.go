@@ -15,6 +15,7 @@ type BetaFeedbackDatabase interface {
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	Aggregate(ctx context.Context, pipeline interface{}) (*MongoCursor, error)
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 }
 
 type betaFeedbackDatabase struct {
@@ -40,4 +41,9 @@ func (b *betaFeedbackDatabase) CountDocuments(ctx context.Context, filter interf
 
 func (b *betaFeedbackDatabase) Aggregate(ctx context.Context, pipeline interface{}) (*MongoCursor, error) {
 	return b.db.Collection(betaFeedbackName).Aggregate(ctx, pipeline)
+}
+
+func (b *betaFeedbackDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := b.db.Collection(betaFeedbackName).UpdateOne(ctx, filter, update, opts...)
+	return err
 }

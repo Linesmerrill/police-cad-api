@@ -7,22 +7,31 @@ import "go.mongodb.org/mongo-driver/bson/primitive"
 // user) — each disable creates a new document. UserID is retained for
 // follow-up but the admin UI surfaces feedback anonymously.
 type BetaFeedback struct {
-	ID        primitive.ObjectID `json:"_id"       bson:"_id"`
-	UserID    string             `json:"userId"    bson:"userId"`
+	ID     primitive.ObjectID `json:"_id"    bson:"_id"`
+	UserID string             `json:"userId" bson:"userId"`
 	// Flag is the user-preferences field name being toggled off, e.g.
 	// "betaCommandDashboard" or "betaCommandDispatch".
-	Flag      string             `json:"flag"      bson:"flag"`
+	Flag string `json:"flag" bson:"flag"`
 	// Reason is one of a small enum surfaced in the disable modal:
 	//   too_buggy | look_and_feel | preferred_old | missing_features |
 	//   performance | other
-	Reason    string             `json:"reason"    bson:"reason"`
+	Reason string `json:"reason" bson:"reason"`
 	// Feedback is an optional free-form comment from the user.
-	Feedback  string             `json:"feedback"  bson:"feedback"`
+	Feedback string `json:"feedback" bson:"feedback"`
 	// Context is the page the user was on when they disabled (e.g.
 	// "/dispatch-dashboard", "/command-dashboard"). Helps triage bug
 	// reports by where the pain happened.
 	Context   string             `json:"context"   bson:"context"`
 	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	// ResolvedAt is set when an admin marks the entry as completed
+	// (e.g. once the reported issue has been fixed). Nil while open.
+	ResolvedAt *primitive.DateTime `json:"resolvedAt,omitempty" bson:"resolvedAt,omitempty"`
+	// ResolvedBy is the admin email/id that marked it resolved.
+	ResolvedBy string `json:"resolvedBy,omitempty" bson:"resolvedBy,omitempty"`
+	// DeletedAt is a soft-delete marker. Entries with a non-nil
+	// DeletedAt are excluded from the admin list view. Kept around so
+	// an accidental delete can be undone.
+	DeletedAt *primitive.DateTime `json:"deletedAt,omitempty" bson:"deletedAt,omitempty"`
 }
 
 // CreateBetaFeedbackRequest is the POST /api/v1/beta-feedback body.
