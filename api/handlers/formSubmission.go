@@ -924,10 +924,26 @@ func (h FormSubmission) resolveActiveTemplate(ctx context.Context, communityID, 
 			"formTemplateVersion.formTemplateID": tpl.ID.Hex(),
 			"formTemplateVersion.version":        tpl.Details.CurrentVersion,
 		})
-		if vErr != nil {
-			return "", nil, 0, vErr
+		if vErr == nil && v != nil {
+			return tpl.ID.Hex(), v.Details.Sections, tpl.Details.CurrentVersion, nil
 		}
-		return tpl.ID.Hex(), v.Details.Sections, tpl.Details.CurrentVersion, nil
+		// Recovery: an older bug bumped formTemplate.currentVersion on
+		// metadata-only updates (archive/unarchive) without writing a
+		// matching version row. Without this fallback, a save against
+		// such a template fails with 404 ("no documents in result").
+		// Use the most recent version that does exist instead — same
+		// strategy as formTemplate.fetchVersionSections.
+		versions, lerr := h.VDB.Find(
+			ctx,
+			bson.M{"formTemplateVersion.formTemplateID": tpl.ID.Hex()},
+			options.Find().SetSort(bson.M{"formTemplateVersion.version": -1}).SetLimit(1),
+		)
+		if lerr == nil && len(versions) > 0 {
+			latest := versions[0]
+			return tpl.ID.Hex(), latest.Details.Sections, latest.Details.Version, nil
+		}
+		// Last-ditch: if the slug matches a built-in default, fall through
+		// to the defaults branch below so the user can still file a report.
 	}
 
 	// Fall back to built-in defaults.
