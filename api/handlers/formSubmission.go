@@ -207,6 +207,7 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		Status       *string                         `json:"status,omitempty"`
 		ReportNumber *string                         `json:"reportNumber,omitempty"`
 		Archived     *bool                           `json:"archived,omitempty"`
+		DepartmentID *string                         `json:"departmentId,omitempty"`
 		Actor        *models.FormSubmissionSignature `json:"actor,omitempty"` // server-trusted website fallback when no auth context
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -272,6 +273,22 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 				At:       now,
 			})
 		}
+	}
+
+	// Department reassignment: only allowed while the submission's
+	// effective status is draft. This keeps a submitted report's audit
+	// trail anchored to the department it was filed against; reopening
+	// it to draft is the legitimate way to re-target.
+	if body.DepartmentID != nil && *body.DepartmentID != existing.Details.DepartmentID {
+		effectiveStatus := existing.Details.Status
+		if body.Status != nil {
+			effectiveStatus = *body.Status
+		}
+		if effectiveStatus != "draft" {
+			config.ErrorStatus("department can only be changed while the report is a draft", http.StatusBadRequest, w, fmt.Errorf("department locked"))
+			return
+		}
+		set["formSubmission.departmentId"] = *body.DepartmentID
 	}
 
 	if body.Archived != nil && *body.Archived != existing.Details.Archived {
