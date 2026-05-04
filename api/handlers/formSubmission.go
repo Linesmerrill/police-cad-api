@@ -978,12 +978,24 @@ func (h FormSubmission) nextReportNumber(ctx context.Context, communityID, slug 
 
 // lookupSignedBy resolves the username for the auth-context user ID and
 // returns a stamped signature struct.
+//
+// The users collection stores _id as ObjectID in Mongo (the Go model
+// decodes it into a string field, but the stored type is still
+// ObjectID). Querying by the raw string never matches, so we try the
+// ObjectID-cast first and fall back to the string form for any legacy
+// users whose _id was stored as a string.
 func (h FormSubmission) lookupSignedBy(ctx context.Context, userID string, now primitive.DateTime) models.FormSubmissionSignature {
 	sig := models.FormSubmissionSignature{UserID: userID, SignedAt: now}
 	if userID == "" {
 		return sig
 	}
 	var user models.User
+	if oid, err := primitive.ObjectIDFromHex(userID); err == nil {
+		if err := h.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&user); err == nil {
+			sig.Username = user.Details.Username
+			return sig
+		}
+	}
 	if err := h.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user); err == nil {
 		sig.Username = user.Details.Username
 	}
@@ -1108,8 +1120,16 @@ func (h FormSubmission) buildAuthContext(ctx context.Context, r *http.Request) m
 		return out
 	}
 	var user models.User
-	if err := h.UDB.FindOne(ctx, bson.M{"_id": uid}).Decode(&user); err != nil {
-		return out
+	found := false
+	if oid, err := primitive.ObjectIDFromHex(uid); err == nil {
+		if err := h.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&user); err == nil {
+			found = true
+		}
+	}
+	if !found {
+		if err := h.UDB.FindOne(ctx, bson.M{"_id": uid}).Decode(&user); err != nil {
+			return out
+		}
 	}
 	out["username"] = user.Details.Username
 	return out
