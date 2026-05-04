@@ -118,6 +118,14 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		signedBy.Username = body.SignedBy.Username
 		signedBy.SignedAt = now
 	}
+	// Defense in depth: if auth context resolved a userID but the user
+	// lookup couldn't fetch a username (e.g. legacy _id shape, db hiccup),
+	// trust a client-supplied username from body.SignedBy when it's
+	// available. Without this the report renders as "Unsigned" / "by
+	// Unknown" even though we know who created it.
+	if signedBy.Username == "" && body.SignedBy != nil && body.SignedBy.Username != "" {
+		signedBy.Username = body.SignedBy.Username
+	}
 
 	status := body.Status
 	if status == "" {
@@ -398,7 +406,14 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 // the API is being proxied by a server-token caller.
 func (h FormSubmission) resolveActor(ctx context.Context, r *http.Request, fallback *models.FormSubmissionSignature, now primitive.DateTime) models.FormSubmissionSignature {
 	if uid := api.GetAuthenticatedUserIDFromContext(r.Context()); uid != "" {
-		return h.lookupSignedBy(ctx, uid, now)
+		sig := h.lookupSignedBy(ctx, uid, now)
+		// Defense in depth: if the user lookup couldn't resolve a
+		// username, accept a client-supplied one so history entries
+		// don't get stamped with an empty actor.
+		if sig.Username == "" && fallback != nil && fallback.Username != "" {
+			sig.Username = fallback.Username
+		}
+		return sig
 	}
 	if fallback != nil && fallback.UserID != "" {
 		return models.FormSubmissionSignature{
