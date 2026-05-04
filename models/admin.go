@@ -21,6 +21,53 @@ type AdminUser struct {
 	CreatedBy      string             `bson:"createdBy" json:"createdBy"`
 	LastLoginAt    *time.Time         `bson:"lastLoginAt,omitempty" json:"lastLoginAt,omitempty"`
 	LastAccessedAt *time.Time         `bson:"lastAccessedAt,omitempty" json:"lastAccessedAt,omitempty"`
+
+	// Linked LPC account fields. When LinkedUserID is set, this admin's elevated
+	// access on user-facing features (e.g. feature requests) applies to that user
+	// only — the admin's own email no longer confers elevated access.
+	LinkedUserID          *primitive.ObjectID `bson:"linkedUserId,omitempty" json:"linkedUserId,omitempty"`
+	LinkedUserEmail       string              `bson:"linkedUserEmail,omitempty" json:"linkedUserEmail,omitempty"`
+	LinkedUsername        string              `bson:"linkedUsername,omitempty" json:"linkedUsername,omitempty"`
+	LinkedAt              *time.Time          `bson:"linkedAt,omitempty" json:"linkedAt,omitempty"`
+	LinkedTermsAcceptedAt *time.Time          `bson:"linkedTermsAcceptedAt,omitempty" json:"linkedTermsAcceptedAt,omitempty"`
+	LinkedTermsVersion    string              `bson:"linkedTermsVersion,omitempty" json:"linkedTermsVersion,omitempty"`
+}
+
+// LinkLPCAccountRequest is the payload to link an admin to an LPC user.
+type LinkLPCAccountRequest struct {
+	LPCUserID      string                 `json:"lpcUserId" validate:"required"`
+	TermsAccepted  bool                   `json:"termsAccepted" validate:"required"`
+	TermsVersion   string                 `json:"termsVersion"`
+	CurrentUser    map[string]interface{} `json:"currentUser,omitempty"`
+}
+
+// LinkLPCAccountResponse is the response after linking/relinking.
+type LinkLPCAccountResponse struct {
+	Success bool             `json:"success"`
+	Message string           `json:"message"`
+	Linked  *LinkedLPCAccount `json:"linked,omitempty"`
+}
+
+// UnlinkLPCAccountRequest is the payload to unlink an admin's LPC account.
+type UnlinkLPCAccountRequest struct {
+	CurrentUser map[string]interface{} `json:"currentUser,omitempty"`
+}
+
+// LinkedLPCAccount is a lightweight summary of a linked LPC user for display.
+type LinkedLPCAccount struct {
+	UserID            string     `json:"userId"`
+	Email             string     `json:"email"`
+	Username          string     `json:"username,omitempty"`
+	ProfilePicture    string     `json:"profilePicture,omitempty"`
+	LinkedAt          *time.Time `json:"linkedAt,omitempty"`
+	TermsAcceptedAt   *time.Time `json:"termsAcceptedAt,omitempty"`
+	TermsVersion      string     `json:"termsVersion,omitempty"`
+}
+
+// LinkedLPCAccountResponse is the response from GET linked-lpc.
+type LinkedLPCAccountResponse struct {
+	Success bool              `json:"success"`
+	Linked  *LinkedLPCAccount `json:"linked,omitempty"`
 }
 
 // CreateAdminUserRequest represents the request to create a new admin user
