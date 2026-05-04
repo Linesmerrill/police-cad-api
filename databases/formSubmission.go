@@ -15,8 +15,11 @@ type FormSubmissionDatabase interface {
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.FormSubmission, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	DeleteMany(context.Context, interface{}, ...*options.DeleteOptions) (int64, error)
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
+	UpdateMany(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (int64, error)
 	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
+	Aggregate(context.Context, interface{}, ...*options.AggregateOptions) (*MongoCursor, error)
 }
 
 type formSubmissionDatabase struct {
@@ -57,11 +60,30 @@ func (c *formSubmissionDatabase) DeleteOne(ctx context.Context, filter interface
 	return c.db.Collection(formSubmissionName).DeleteOne(ctx, filter, opts...)
 }
 
+func (c *formSubmissionDatabase) DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error) {
+	return c.db.Collection(formSubmissionName).DeleteMany(ctx, filter, opts...)
+}
+
 func (c *formSubmissionDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
 	_, err := c.db.Collection(formSubmissionName).UpdateOne(ctx, filter, update, opts...)
 	return err
 }
 
+func (c *formSubmissionDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (int64, error) {
+	res, err := c.db.Collection(formSubmissionName).UpdateMany(ctx, filter, update, opts...)
+	if err != nil {
+		return 0, err
+	}
+	if res == nil {
+		return 0, nil
+	}
+	return res.ModifiedCount, nil
+}
+
 func (c *formSubmissionDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	return c.db.Collection(formSubmissionName).CountDocuments(ctx, filter, opts...)
+}
+
+func (c *formSubmissionDatabase) Aggregate(ctx context.Context, pipeline interface{}, opts ...*options.AggregateOptions) (*MongoCursor, error) {
+	return c.db.Collection(formSubmissionName).Aggregate(ctx, pipeline, opts...)
 }

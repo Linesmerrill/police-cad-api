@@ -427,12 +427,21 @@ func (h FormSubmission) FormSubmissionDraftHandler(w http.ResponseWriter, r *htt
 }
 
 // FormSubmissionsByCommunityHandlerV2 returns paginated submissions for a community.
+//
+// Filters via query params:
+//
+//	templateSlug, departmentID, officerID, status — equality filters
+//	createdFrom, createdTo                         — RFC3339 timestamps; both inclusive
+//	archived                                       — "true" | "false" | "all"; default "false"
 func (h FormSubmission) FormSubmissionsByCommunityHandlerV2(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["community_id"]
 	templateSlug := r.URL.Query().Get("templateSlug")
 	departmentID := r.URL.Query().Get("departmentID")
 	officerID := r.URL.Query().Get("officerID")
 	status := r.URL.Query().Get("status")
+	createdFromRaw := r.URL.Query().Get("createdFrom")
+	createdToRaw := r.URL.Query().Get("createdTo")
+	archivedRaw := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("archived")))
 
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || Limit <= 0 {
@@ -457,6 +466,33 @@ func (h FormSubmission) FormSubmissionsByCommunityHandlerV2(w http.ResponseWrite
 	}
 	if status != "" {
 		filter["formSubmission.status"] = status
+	}
+
+	// Default behaviour pre-feature was to return everything regardless of
+	// archived state. Preserve that default — only apply the filter when
+	// the caller explicitly asks for "true" or "false".
+	switch archivedRaw {
+	case "true":
+		filter["formSubmission.archived"] = true
+	case "false":
+		filter["formSubmission.archived"] = bson.M{"$ne": true}
+	case "", "all":
+		// no filter
+	}
+
+	createdRange := bson.M{}
+	if createdFromRaw != "" {
+		if t, err := time.Parse(time.RFC3339, createdFromRaw); err == nil {
+			createdRange["$gte"] = primitive.NewDateTimeFromTime(t)
+		}
+	}
+	if createdToRaw != "" {
+		if t, err := time.Parse(time.RFC3339, createdToRaw); err == nil {
+			createdRange["$lte"] = primitive.NewDateTimeFromTime(t)
+		}
+	}
+	if len(createdRange) > 0 {
+		filter["formSubmission.createdAt"] = createdRange
 	}
 
 	subs, err := h.DB.Find(ctx, filter, &options.FindOptions{
@@ -536,6 +572,240 @@ func (h FormSubmission) FormSubmissionsByLinkHandlerV2(w http.ResponseWriter, r 
 		"limit":      Limit,
 		"totalCount": totalCount,
 		"totalPages": totalPages,
+	})
+}
+
+// FormSubmissionsDepartmentsHandler returns the distinct (departmentId,
+// departmentName) tuples that have at least one submission in the
+// community. Backs the website/mobile department-filter dropdown.
+func (h FormSubmission) FormSubmissionsDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	if communityID == "" {
+		config.ErrorStatus("communityID is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	pipeline := []bson.M{
+		{"$match": bson.M{
+			"formSubmission.communityID":  communityID,
+			"formSubmission.departmentId": bson.M{"$ne": ""},
+		}},
+		{"$group": bson.M{"_id": "$formSubmission.departmentId", "count": bson.M{"$sum": 1}}},
+		{"$limit": 200},
+	}
+	cur, err := h.DB.Aggregate(ctx, pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to aggregate departments", http.StatusInternalServerError, w, err)
+		return
+	}
+	var rows []struct {
+		ID    string `bson:"_id"`
+		Count int    `bson:"count"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		config.ErrorStatus("failed to read departments", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Resolve department names from the community document.
+	commID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community id", http.StatusBadRequest, w, err)
+		return
+	}
+	community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	nameByID := map[string]string{}
+	if err == nil && community != nil {
+		for _, d := range community.Details.Departments {
+			nameByID[d.ID.Hex()] = d.Name
+		}
+	}
+
+	type deptOut struct {
+		ID    string `json:"departmentId"`
+		Name  string `json:"departmentName"`
+		Count int    `json:"count"`
+	}
+	out := make([]deptOut, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, deptOut{
+			ID:    row.ID,
+			Name:  nameByID[row.ID],
+			Count: row.Count,
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"data": out})
+}
+
+// BulkArchiveFormSubmissionsHandler soft-archives submissions in a
+// community matching a date range and optional department filter. Admin
+// gated by the website proxy (the route is registered on apiCreate which
+// already requires a server token); the actor block is required for the
+// audit trail.
+func (h FormSubmission) BulkArchiveFormSubmissionsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	if communityID == "" {
+		config.ErrorStatus("communityID is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
+		return
+	}
+
+	var body struct {
+		CreatedFrom  string                          `json:"createdFrom"`
+		CreatedTo    string                          `json:"createdTo"`
+		DepartmentID string                          `json:"departmentId,omitempty"`
+		Actor        *models.FormSubmissionSignature `json:"actor,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if body.CreatedFrom == "" || body.CreatedTo == "" {
+		config.ErrorStatus("createdFrom and createdTo are required", http.StatusBadRequest, w, fmt.Errorf("missing date range"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	actor := h.resolveActor(ctx, r, body.Actor, now)
+	if actor.UserID == "" {
+		config.ErrorStatus("actor is required", http.StatusBadRequest, w, fmt.Errorf("missing actor"))
+		return
+	}
+
+	from, ferr := time.Parse(time.RFC3339, body.CreatedFrom)
+	to, terr := time.Parse(time.RFC3339, body.CreatedTo)
+	if ferr != nil || terr != nil {
+		config.ErrorStatus("createdFrom and createdTo must be RFC3339 timestamps", http.StatusBadRequest, w, fmt.Errorf("bad date format"))
+		return
+	}
+
+	filter := bson.M{
+		"formSubmission.communityID": communityID,
+		"formSubmission.archived":    bson.M{"$ne": true},
+		"formSubmission.createdAt": bson.M{
+			"$gte": primitive.NewDateTimeFromTime(from),
+			"$lte": primitive.NewDateTimeFromTime(to),
+		},
+	}
+	if body.DepartmentID != "" {
+		filter["formSubmission.departmentId"] = body.DepartmentID
+	}
+
+	const bulkArchiveCap = 1000
+	count, err := h.DB.CountDocuments(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to count submissions", http.StatusInternalServerError, w, err)
+		return
+	}
+	if count > bulkArchiveCap {
+		config.ErrorStatus(fmt.Sprintf("too many submissions to archive in one call (%d > %d). Narrow the date range and try again.", count, bulkArchiveCap), http.StatusUnprocessableEntity, w, fmt.Errorf("over cap"))
+		return
+	}
+
+	historyEntry := models.FormSubmissionHistoryEntry{
+		Action:   "archived",
+		UserID:   actor.UserID,
+		Username: actor.Username,
+		At:       now,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"formSubmission.archived":   true,
+			"formSubmission.archivedBy": actor,
+			"formSubmission.updatedAt":  now,
+		},
+		"$push": bson.M{"formSubmission.history": historyEntry},
+	}
+	modified, err := h.DB.UpdateMany(ctx, filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to archive submissions", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":  "Submissions archived",
+		"archived": modified,
+	})
+}
+
+// PurgeFormSubmissionsHandler hard-deletes submissions by ID. Refuses
+// unless EVERY target is already archived — preventing accidental
+// destruction of unarchived audit data.
+func (h FormSubmission) PurgeFormSubmissionsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	if communityID == "" {
+		config.ErrorStatus("communityID is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
+		return
+	}
+
+	var body struct {
+		IDs   []string                        `json:"ids"`
+		Actor *models.FormSubmissionSignature `json:"actor,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if len(body.IDs) == 0 {
+		config.ErrorStatus("ids is required", http.StatusBadRequest, w, fmt.Errorf("missing ids"))
+		return
+	}
+	if len(body.IDs) > 500 {
+		config.ErrorStatus("too many ids in one call (max 500)", http.StatusUnprocessableEntity, w, fmt.Errorf("over cap"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	objIDs := make([]primitive.ObjectID, 0, len(body.IDs))
+	for _, id := range body.IDs {
+		oid, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			config.ErrorStatus(fmt.Sprintf("invalid submission id: %s", id), http.StatusBadRequest, w, err)
+			return
+		}
+		objIDs = append(objIDs, oid)
+	}
+
+	// Refuse if any target is not archived in the requested community.
+	notArchivedFilter := bson.M{
+		"_id":                        bson.M{"$in": objIDs},
+		"formSubmission.communityID": communityID,
+		"formSubmission.archived":    bson.M{"$ne": true},
+	}
+	bad, err := h.DB.CountDocuments(ctx, notArchivedFilter)
+	if err != nil {
+		config.ErrorStatus("failed to verify archived state", http.StatusInternalServerError, w, err)
+		return
+	}
+	if bad > 0 {
+		config.ErrorStatus("some submissions are not archived; archive them first", http.StatusConflict, w, fmt.Errorf("%d unarchived in target set", bad))
+		return
+	}
+
+	deleted, err := h.DB.DeleteMany(ctx, bson.M{
+		"_id":                        bson.M{"$in": objIDs},
+		"formSubmission.communityID": communityID,
+		"formSubmission.archived":    true,
+	})
+	if err != nil {
+		config.ErrorStatus("failed to purge submissions", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Submissions purged",
+		"deleted": deleted,
 	})
 }
 
