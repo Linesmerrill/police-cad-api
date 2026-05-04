@@ -275,16 +275,15 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		}
 	}
 
-	// Department reassignment: only allowed while the submission's
-	// effective status is draft. This keeps a submitted report's audit
-	// trail anchored to the department it was filed against; reopening
-	// it to draft is the legitimate way to re-target.
+	// Department reassignment: allowed when the report is a draft going
+	// into this write (so the dept gets stamped before any submit/lock
+	// happens), OR when this same write is reopening a submitted report
+	// back to draft. The order is conceptually: dept change → status
+	// flip, so a draft-then-submit-with-new-dept is valid.
 	if body.DepartmentID != nil && *body.DepartmentID != existing.Details.DepartmentID {
-		effectiveStatus := existing.Details.Status
-		if body.Status != nil {
-			effectiveStatus = *body.Status
-		}
-		if effectiveStatus != "draft" {
+		wasEditable := existing.Details.Status == "draft" && !existing.Details.Archived
+		isReopening := body.Status != nil && *body.Status == "draft"
+		if !wasEditable && !isReopening {
 			config.ErrorStatus("department can only be changed while the report is a draft", http.StatusBadRequest, w, fmt.Errorf("department locked"))
 			return
 		}
