@@ -2438,7 +2438,7 @@ func (h Admin) AdminLinkLPCAccountHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	_, adminObjectID, ok := h.resolveAdminAndAuthorize(w, r, adminID, req.CurrentUser)
+	admin, adminObjectID, ok := h.resolveAdminAndAuthorize(w, r, adminID, req.CurrentUser)
 	if !ok {
 		return
 	}
@@ -2447,6 +2447,19 @@ func (h Admin) AdminLinkLPCAccountHandler(w http.ResponseWriter, r *http.Request
 	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "LPC user not found", Code: "NOT_FOUND"})
+		return
+	}
+
+	// Reject linking to an LPC user whose email matches the admin's own email.
+	// Email-match already grants elevated access by default when no link exists,
+	// so linking to the same email is redundant and confusing.
+	if email != "" && admin.Email != "" && strings.EqualFold(email, admin.Email) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "This LPC account uses your admin email. Elevated access is already granted by default — no link needed. Disconnect any existing link to revert to email-match behavior.",
+			Code:    "SAME_EMAIL_NO_LINK_NEEDED",
+		})
 		return
 	}
 
