@@ -177,12 +177,16 @@ func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// Sibling counts so the UI can show "Open (N) · Resolved (M)"
-	// without firing a second request.
+	// without firing a second request. Only entries with a non-empty
+	// free-form `feedback` are counted — those are the ones the admin
+	// can actually triage. The reason-distribution chips above still
+	// reflect the full opt-out volume.
 	statusBaseFilter := bson.M{
 		"$or": []bson.M{
 			{"deletedAt": bson.M{"$exists": false}},
 			{"deletedAt": nil},
 		},
+		"feedback": bson.M{"$exists": true, "$ne": ""},
 	}
 	if flag, ok := filter["flag"]; ok {
 		statusBaseFilter["flag"] = flag
@@ -210,6 +214,18 @@ func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Req
 		config.ErrorStatus("failed to count resolved beta feedback", http.StatusInternalServerError, w, err)
 		return
 	}
+	// Total commentable entries in the current status window — used for
+	// the "X comments" label on the panel. Excludes empty-feedback rows.
+	commentFilter := bson.M{}
+	for k, v := range filter {
+		commentFilter[k] = v
+	}
+	commentFilter["feedback"] = bson.M{"$exists": true, "$ne": ""}
+	commentCount, err := b.DB.CountDocuments(ctx, commentFilter)
+	if err != nil {
+		config.ErrorStatus("failed to count beta feedback comments", http.StatusInternalServerError, w, err)
+		return
+	}
 
 	findOpts := options.Find().
 		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
@@ -231,6 +247,7 @@ func (b BetaFeedback) ListBetaFeedbackHandler(w http.ResponseWriter, r *http.Req
 	resp := map[string]interface{}{
 		"data":          entries,
 		"totalCount":    total,
+		"commentCount":  commentCount,
 		"page":          page,
 		"limit":         limit,
 		"reasonCounts":  reasonCounts,
