@@ -602,11 +602,12 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	var results []models.AdminUserResult
 	for _, user := range users {
 		result := models.AdminUserResult{
-			ID:            user.ID,
-			Email:         user.Details.Email,
-			Username:      user.Details.Username,
-			IsDeactivated: user.Details.IsDeactivated,
-			CreatedAt:     user.Details.CreatedAt,
+			ID:             user.ID,
+			Email:          user.Details.Email,
+			Username:       user.Details.Username,
+			ProfilePicture: user.Details.ProfilePicture,
+			IsDeactivated:  user.Details.IsDeactivated,
+			CreatedAt:      user.Details.CreatedAt,
 		}
 		results = append(results, result)
 	}
