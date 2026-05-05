@@ -1382,21 +1382,64 @@ func (h FeatureRequestHandler) getUserSummary(ctx context.Context, userID primit
 	}
 }
 
-// checkIsAdmin checks if a user is a site admin
+// checkIsAdmin checks if a user is a site admin. Mirrors the resolution rules
+// in getAdminRolesForUsers: a Linked LPC Account inherits its admin's role,
+// and unlinked admins fall back to email matching. An admin's own email no
+// longer confers privileges on a different LPC account once the admin has
+// linked elsewhere.
+//
+// userID may be either an LPC user's hex ObjectID (e.g. delete handler) or
+// the user's email (e.g. status / merge handlers).
 func (h FeatureRequestHandler) checkIsAdmin(ctx context.Context, userID string) bool {
-	if h.AdminDB == nil {
+	if h.AdminDB == nil || userID == "" {
 		return false
 	}
-	// Check admin database for this user
-	admin, err := h.AdminDB.FindOne(ctx, bson.M{"email": userID})
-	if err == nil && admin != nil {
+
+	unlinked := bson.M{"$or": []bson.M{
+		{"linkedUserId": bson.M{"$exists": false}},
+		{"linkedUserId": nil},
+	}}
+
+	// Path 1: userID is a hex ObjectID — a user._id.
+	if userObjID, err := primitive.ObjectIDFromHex(userID); err == nil {
+		if admin, err := h.AdminDB.FindOne(ctx, bson.M{"linkedUserId": userObjID}); err == nil && admin != nil {
+			return true
+		}
+		// Fallback: resolve the user's email, then look up an unlinked admin
+		// by that email.
+		if h.UDB != nil {
+			var userDoc UserDoc
+			if err := h.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&userDoc); err == nil && userDoc.User.Email != "" {
+				filter := bson.M{
+					"email": bson.M{"$regex": "^" + regexp.QuoteMeta(userDoc.User.Email) + "$", "$options": "i"},
+					"$and":  []bson.M{unlinked},
+				}
+				if admin, err := h.AdminDB.FindOne(ctx, filter); err == nil && admin != nil {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Path 2: userID is an email.
+	email := userID
+	if h.UDB != nil {
+		var userDoc UserDoc
+		if err := h.UDB.FindOne(ctx, bson.M{
+			"user.email": bson.M{"$regex": "^" + regexp.QuoteMeta(email) + "$", "$options": "i"},
+		}).Decode(&userDoc); err == nil {
+			if admin, err := h.AdminDB.FindOne(ctx, bson.M{"linkedUserId": userDoc.ID}); err == nil && admin != nil {
+				return true
+			}
+		}
+	}
+	filter := bson.M{
+		"email": bson.M{"$regex": "^" + regexp.QuoteMeta(email) + "$", "$options": "i"},
+		"$and":  []bson.M{unlinked},
+	}
+	if admin, err := h.AdminDB.FindOne(ctx, filter); err == nil && admin != nil {
 		return true
 	}
-	// Also try by ID
-	userObjID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return false
-	}
-	admin, err = h.AdminDB.FindOne(ctx, bson.M{"_id": userObjID})
-	return err == nil && admin != nil
+	return false
 }
