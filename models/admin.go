@@ -410,13 +410,15 @@ type AdminCaseStepTransferOwnership struct {
 	NewOwner         *AdminCasePersonRef `bson:"newOwner,omitempty" json:"newOwner,omitempty"`
 	AddedToHeadAdmin bool                `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
 	CompletedAt      *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy      *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepHeadAdmin stores step 2 result
 type AdminCaseStepHeadAdmin struct {
-	Completed        bool       `bson:"completed" json:"completed"`
-	AddedToHeadAdmin bool       `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
-	CompletedAt      *time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	Completed        bool                `bson:"completed" json:"completed"`
+	AddedToHeadAdmin bool                `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
+	CompletedAt      *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy      *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepRoleAudit stores step 3 result
@@ -424,6 +426,7 @@ type AdminCaseStepRoleAudit struct {
 	Completed      bool                   `bson:"completed" json:"completed"`
 	DangerousRoles []AdminRoleWithMembers `bson:"dangerousRoles,omitempty" json:"dangerousRoles,omitempty"`
 	CompletedAt    *time.Time             `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy    *AdminCaseCreatedBy    `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepRemoveBadActor stores step 4 result
@@ -433,12 +436,14 @@ type AdminCaseStepRemoveBadActor struct {
 	BadActor    *AdminCasePersonRef `bson:"badActor,omitempty" json:"badActor,omitempty"`
 	Banned      bool                `bson:"banned" json:"banned"`
 	CompletedAt *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepSummary stores step 5 result
 type AdminCaseStepSummary struct {
-	Completed   bool       `bson:"completed" json:"completed"`
-	CompletedAt *time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	Completed   bool                `bson:"completed" json:"completed"`
+	CompletedAt *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseSteps holds all step data for a case

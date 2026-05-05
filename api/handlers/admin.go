@@ -3889,10 +3889,10 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Check admin permissions
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	// Check admin permissions (owner OR admin — case workflow is open to staff)
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions to transfer ownership (requires owner or admin role)"})
 		return
 	}
 
@@ -4203,9 +4203,9 @@ func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions to remove member (requires owner or admin role)"})
 		return
 	}
 
