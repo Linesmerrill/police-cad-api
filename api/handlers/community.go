@@ -266,6 +266,10 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.Fines = defaultCommunityFines()
 	newCommunity.Details.PenalCodes = defaultCommunityPenalCodes()
 	newCommunity.Details.MembersCount = 1
+	// Default-on: civilian-initiated record deletion is restricted, so civilians
+	// cannot remove their own citations/warnings/arrest reports without help from
+	// a community admin or someone with the manage-records permission.
+	newCommunity.Details.RestrictCivilianRecordDeletion = true
 
 	// Initialize the events slice if it is null
 	if newCommunity.Details.Events == nil {
@@ -2676,6 +2680,36 @@ func (c Community) GetDepartmentCallSignsHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"departmentCallSigns": callSigns,
 	})
+}
+
+// userCanBypassRecordDeleteRestriction returns true when the given user is
+// allowed to delete civilian records (citations, written warnings, arrest
+// reports) on a community that has RestrictCivilianRecordDeletion enabled.
+//
+// Bypass is granted if the user is the community owner, holds a role with the
+// "administrator" permission enabled, or holds a role with the
+// "manage records" permission enabled. The check reuses
+// userHasCommunityPermission so role/permission lookup stays in one place.
+//
+// commDB is the community database used to resolve the community by ID. It is
+// passed in (rather than captured by a method receiver) so callers in other
+// handler structs can reuse this helper without sharing a receiver.
+func userCanBypassRecordDeleteRestriction(ctx context.Context, commDB databases.CommunityDatabase, userID string, communityID string) (bool, error) {
+	if userID == "" || communityID == "" {
+		return false, nil
+	}
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return false, err
+	}
+	community, err := commDB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		return false, err
+	}
+	if community == nil {
+		return false, nil
+	}
+	return userHasCommunityPermission(community, userID, "manage records"), nil
 }
 
 // userHasCommunityPermission checks if a user is the community owner or has a role

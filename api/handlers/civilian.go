@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,8 +28,9 @@ import (
 
 // Civilian exported for testing purposes
 type Civilian struct {
-	DB  databases.CivilianDatabase
-	UDB databases.UserDatabase
+	DB     databases.CivilianDatabase
+	UDB    databases.UserDatabase
+	CommDB databases.CommunityDatabase
 }
 
 // CivilianHandler returns all civilians
@@ -602,6 +604,13 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Gate: if the community has RestrictCivilianRecordDeletion enabled and the
+	// requester is the civilian's owner (i.e. a civilian deleting their own
+	// citation/warning), require admin/owner/manage-records bypass.
+	if denied, derr := c.checkCivilianRecordDeleteRestriction(ctx, w, r, cID); derr != nil || denied {
+		return
+	}
+
 	// Define the filter and update for removing the citation
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$pull": bson.M{"civilian.criminalHistory": bson.M{"_id": citID}}}
@@ -616,6 +625,73 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	// Respond with success
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Criminal history deleted successfully"}`))
+}
+
+// checkCivilianRecordDeleteRestriction enforces the per-community
+// RestrictCivilianRecordDeletion gate for record-deletion endpoints that
+// operate on a specific civilian. Returns denied=true if a 403 was already
+// written to w, in which case the caller should return immediately. err is
+// non-nil on internal failures (also written to w as 500/etc).
+//
+// The gate only fires when the requester is the civilian's owner; staff/
+// officers deleting records on civilians they don't own are unaffected.
+func (c Civilian) checkCivilianRecordDeleteRestriction(ctx context.Context, w http.ResponseWriter, r *http.Request, civilianObjectID primitive.ObjectID) (denied bool, err error) {
+	civ, err := c.DB.FindOne(ctx, bson.M{"_id": civilianObjectID})
+	if err != nil {
+		config.ErrorStatus("failed to look up civilian for delete-restriction check", http.StatusNotFound, w, err)
+		return true, err
+	}
+	if civ == nil {
+		// No civilian found — let the underlying handler proceed; it will surface its own error.
+		return false, nil
+	}
+	communityID := civ.Details.ActiveCommunityID
+	civilianOwnerID := civ.Details.UserID
+	requesterID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	return enforceRecordDeleteRestriction(ctx, w, c.CommDB, communityID, civilianOwnerID, requesterID)
+}
+
+// enforceRecordDeleteRestriction is the shared gate used by civilian and
+// arrest-report delete handlers. It writes a 403 JSON response and returns
+// denied=true when the requester is the record's civilian owner and lacks a
+// bypass on a community that has RestrictCivilianRecordDeletion enabled.
+func enforceRecordDeleteRestriction(ctx context.Context, w http.ResponseWriter, commDB databases.CommunityDatabase, communityID, civilianOwnerID, requesterID string) (denied bool, err error) {
+	// If we don't know the community, we cannot evaluate the toggle — proceed
+	// (the underlying delete will still respect any other authz the caller has).
+	if communityID == "" || civilianOwnerID == "" || requesterID == "" {
+		return false, nil
+	}
+	// Only fire when the requester is the civilian's owner.
+	if requesterID != civilianOwnerID {
+		return false, nil
+	}
+	cID, oerr := primitive.ObjectIDFromHex(communityID)
+	if oerr != nil {
+		// Bad community ID on the record — don't block the delete.
+		return false, nil
+	}
+	community, ferr := commDB.FindOne(ctx, bson.M{"_id": cID})
+	if ferr != nil || community == nil {
+		// Community lookup failed — fail open rather than locking the user out.
+		return false, nil
+	}
+	if !community.Details.RestrictCivilianRecordDeletion {
+		return false, nil
+	}
+	bypass, berr := userCanBypassRecordDeleteRestriction(ctx, commDB, requesterID, communityID)
+	if berr != nil {
+		config.ErrorStatus("failed to evaluate record-delete bypass", http.StatusInternalServerError, w, berr)
+		return true, berr
+	}
+	if bypass {
+		return false, nil
+	}
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":   "record_deletion_restricted",
+		"message": "Record deletion is restricted in this community. Contact a community admin or supervisor.",
+	})
+	return true, nil
 }
 
 // CivilianApprovalHandler handles civilian sent-for-approval workflow actions

@@ -68,6 +68,7 @@ type CommunityDetails struct {
 	MostWantedSidebarName   string                 `json:"mostWantedSidebarName" bson:"mostWantedSidebarName"`
 	MostWantedVisibleFields []string               `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
 	MostWantedCustomFields  []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
+	RestrictCivilianRecordDeletion bool             `json:"restrictCivilianRecordDeletion" bson:"restrictCivilianRecordDeletion,omitempty"`
 	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
 }

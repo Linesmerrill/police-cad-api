@@ -44,7 +44,7 @@ func (a *App) New() *mux.Router {
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB}
-	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
+	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
 	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper)}
@@ -55,7 +55,7 @@ func (a *App) New() *mux.Router {
 	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
 	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
 	bolo := Bolo{DB: databases.NewBoloDatabase(a.dbHelper)}
-	arrestReport := ArrestReport{DB: databases.NewArrestReportDatabase(a.dbHelper)}
+	arrestReport := ArrestReport{DB: databases.NewArrestReportDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 
 	// Configurable forms (form templates, versions, department toggles, submissions)
 	formTemplateDB := databases.NewFormTemplateDatabase(a.dbHelper)
