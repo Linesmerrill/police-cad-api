@@ -18,14 +18,16 @@ import (
 	"github.com/linesmerrill/police-cad-api/api/handlers/formdefaults"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/helpers"
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
 // FormTemplate exposes endpoints for managing community-scoped form templates.
 type FormTemplate struct {
-	DB  databases.FormTemplateDatabase
-	VDB databases.FormTemplateVersionDatabase
-	TDB databases.DepartmentFormToggleDatabase
+	DB     databases.FormTemplateDatabase
+	VDB    databases.FormTemplateVersionDatabase
+	TDB    databases.DepartmentFormToggleDatabase
+	CommDB databases.CommunityDatabase
 }
 
 // CreateFormTemplateHandler creates a new community-scoped form template
@@ -65,10 +67,12 @@ func (h FormTemplate) CreateFormTemplateHandler(w http.ResponseWriter, r *http.R
 			Description:      body.Description,
 			Icon:             body.Icon,
 			CurrentVersion:   1,
-			NumberFormat:     defaultIfBlank(body.NumberFormat, "RR-{YYYY}-{NNNNNN}"),
-			VisibleToRoles:   body.VisibleToRoles,
-			EditableByRoles:  body.EditableByRoles,
-			LinkableEntities: body.LinkableEntities,
+			NumberFormat:       defaultIfBlank(body.NumberFormat, "RR-{YYYY}-{NNNNNN}"),
+			VisibleToRoles:     body.VisibleToRoles,
+			EditableByRoles:    body.EditableByRoles,
+			VisibleToRankRule:  body.VisibleToRankRule,
+			EditableByRankRule: body.EditableByRankRule,
+			LinkableEntities:   body.LinkableEntities,
 			IsHidden:         false,
 			DefaultSlug:      "",
 			IsArchived:       false,
@@ -151,15 +155,19 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	}
 
 	var body struct {
-		Name             *string              `json:"name,omitempty"`
-		Description      *string              `json:"description,omitempty"`
-		Icon             *string              `json:"icon,omitempty"`
-		NumberFormat     *string              `json:"numberFormat,omitempty"`
-		VisibleToRoles   *[]string            `json:"visibleToRoles,omitempty"`
-		EditableByRoles  *[]string            `json:"editableByRoles,omitempty"`
-		LinkableEntities *[]string            `json:"linkableEntities,omitempty"`
-		IsArchived       *bool                `json:"isArchived,omitempty"`
-		Sections         []models.FormSection `json:"sections"`
+		Name               *string              `json:"name,omitempty"`
+		Description        *string              `json:"description,omitempty"`
+		Icon               *string              `json:"icon,omitempty"`
+		NumberFormat       *string              `json:"numberFormat,omitempty"`
+		VisibleToRoles     *[]string            `json:"visibleToRoles,omitempty"`
+		EditableByRoles    *[]string            `json:"editableByRoles,omitempty"`
+		VisibleToRankRule  *models.RankRule     `json:"visibleToRankRule,omitempty"`
+		EditableByRankRule *models.RankRule     `json:"editableByRankRule,omitempty"`
+		ClearVisibleRank   *bool                `json:"clearVisibleRankRule,omitempty"`
+		ClearEditableRank  *bool                `json:"clearEditableRankRule,omitempty"`
+		LinkableEntities   *[]string            `json:"linkableEntities,omitempty"`
+		IsArchived         *bool                `json:"isArchived,omitempty"`
+		Sections           []models.FormSection `json:"sections"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -213,6 +221,19 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	if body.EditableByRoles != nil {
 		set["formTemplate.editableByRoles"] = *body.EditableByRoles
 	}
+	if body.VisibleToRankRule != nil {
+		set["formTemplate.visibleToRankRule"] = body.VisibleToRankRule
+	}
+	if body.EditableByRankRule != nil {
+		set["formTemplate.editableByRankRule"] = body.EditableByRankRule
+	}
+	unset := bson.M{}
+	if body.ClearVisibleRank != nil && *body.ClearVisibleRank {
+		unset["formTemplate.visibleToRankRule"] = ""
+	}
+	if body.ClearEditableRank != nil && *body.ClearEditableRank {
+		unset["formTemplate.editableByRankRule"] = ""
+	}
 	if body.LinkableEntities != nil {
 		set["formTemplate.linkableEntities"] = *body.LinkableEntities
 	}
@@ -220,7 +241,11 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 		set["formTemplate.isArchived"] = *body.IsArchived
 	}
 
-	if err := h.DB.UpdateOne(ctx, bson.M{"_id": objID}, bson.M{"$set": set}); err != nil {
+	updateDoc := bson.M{"$set": set}
+	if len(unset) > 0 {
+		updateDoc["$unset"] = unset
+	}
+	if err := h.DB.UpdateOne(ctx, bson.M{"_id": objID}, updateDoc); err != nil {
 		config.ErrorStatus("failed to update form template", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -505,23 +530,25 @@ func (h FormTemplate) fetchVersionSections(ctx context.Context, formTemplateID s
 
 func storedTemplateToView(t models.FormTemplate) models.FormTemplateView {
 	return models.FormTemplateView{
-		ID:               t.ID.Hex(),
-		CommunityID:      t.Details.CommunityID,
-		DepartmentID:     t.Details.DepartmentID,
-		Name:             t.Details.Name,
-		Slug:             t.Details.Slug,
-		Description:      t.Details.Description,
-		Icon:             t.Details.Icon,
-		CurrentVersion:   t.Details.CurrentVersion,
-		NumberFormat:     t.Details.NumberFormat,
-		VisibleToRoles:   t.Details.VisibleToRoles,
-		EditableByRoles:  t.Details.EditableByRoles,
-		LinkableEntities: t.Details.LinkableEntities,
-		IsDefault:        false,
-		IsHidden:         t.Details.IsHidden,
-		IsArchived:       t.Details.IsArchived,
-		CreatedAt:        t.Details.CreatedAt,
-		UpdatedAt:        t.Details.UpdatedAt,
+		ID:                 t.ID.Hex(),
+		CommunityID:        t.Details.CommunityID,
+		DepartmentID:       t.Details.DepartmentID,
+		Name:               t.Details.Name,
+		Slug:               t.Details.Slug,
+		Description:        t.Details.Description,
+		Icon:               t.Details.Icon,
+		CurrentVersion:     t.Details.CurrentVersion,
+		NumberFormat:       t.Details.NumberFormat,
+		VisibleToRoles:     t.Details.VisibleToRoles,
+		EditableByRoles:    t.Details.EditableByRoles,
+		VisibleToRankRule:  t.Details.VisibleToRankRule,
+		EditableByRankRule: t.Details.EditableByRankRule,
+		LinkableEntities:   t.Details.LinkableEntities,
+		IsDefault:          false,
+		IsHidden:           t.Details.IsHidden,
+		IsArchived:         t.Details.IsArchived,
+		CreatedAt:          t.Details.CreatedAt,
+		UpdatedAt:          t.Details.UpdatedAt,
 	}
 }
 
@@ -530,4 +557,52 @@ func defaultIfBlank(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// PreviewRankRuleHandler resolves a rank rule against a community's
+// department ranks and returns the rank IDs + names that satisfy the rule.
+// Backs the form-template editor's live "Available to:" preview.
+func (h FormTemplate) PreviewRankRuleHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	if communityID == "" {
+		config.ErrorStatus("communityID is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
+		return
+	}
+
+	var body struct {
+		DepartmentID  string   `json:"departmentId"`
+		Mode          string   `json:"mode"`
+		AnchorRankIDs []string `json:"anchorRankIDs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	commID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community id", http.StatusBadRequest, w, err)
+		return
+	}
+	if h.CommDB == nil {
+		config.ErrorStatus("community DB not available", http.StatusInternalServerError, w, fmt.Errorf("comm db nil"))
+		return
+	}
+	community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	ids := helpers.ResolveRankRule(community, body.DepartmentID, body.Mode, body.AnchorRankIDs)
+	names := helpers.ResolveRankRuleNames(community, body.DepartmentID, body.Mode, body.AnchorRankIDs)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"rankIDs":   ids,
+		"rankNames": names,
+	})
 }

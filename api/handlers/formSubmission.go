@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
@@ -117,20 +118,37 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		signedBy.Username = body.SignedBy.Username
 		signedBy.SignedAt = now
 	}
+	// Defense in depth: if auth context resolved a userID but the user
+	// lookup couldn't fetch a username (e.g. legacy _id shape, db hiccup),
+	// trust a client-supplied username from body.SignedBy when it's
+	// available. Without this the report renders as "Unsigned" / "by
+	// Unknown" even though we know who created it.
+	if signedBy.Username == "" && body.SignedBy != nil && body.SignedBy.Username != "" {
+		signedBy.Username = body.SignedBy.Username
+	}
 
 	status := body.Status
 	if status == "" {
 		status = "submitted"
 	}
 
-	var history []models.FormSubmissionHistoryEntry
+	// Always seed history with a "created" entry so the audit trail
+	// records who originated the report — this avoids the "by Unknown"
+	// fallback the clients used to render synthetically. For a direct-
+	// submit (status=submitted on insert), append the submit entry too.
+	history := []models.FormSubmissionHistoryEntry{{
+		Action:   "created",
+		UserID:   signedBy.UserID,
+		Username: signedBy.Username,
+		At:       now,
+	}}
 	if status == "submitted" {
-		history = []models.FormSubmissionHistoryEntry{{
+		history = append(history, models.FormSubmissionHistoryEntry{
 			Action:   "submitted",
 			UserID:   signedBy.UserID,
 			Username: signedBy.Username,
 			At:       now,
-		}}
+		})
 	}
 
 	sub := models.FormSubmission{
@@ -152,8 +170,47 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		},
 	}
 
-	if _, err := h.DB.InsertOne(ctx, sub); err != nil {
-		config.ErrorStatus("failed to create submission", http.StatusInternalServerError, w, err)
+	// Insert with retry on duplicate-report-number collisions. The
+	// formCounter is keyed by (communityID, slug, year) but the
+	// unique index on submissions is (communityID, reportNumber) —
+	// so a brand-new template starts at seq=1 and collides with the
+	// existing template's first reports. On the first collision,
+	// catch the per-slug counter up to the highest used seq across
+	// all slugs in this community/year, then retry with a small budget
+	// to absorb concurrent-write races.
+	const maxAttempts = 5
+	autoNumber := strings.TrimSpace(body.ReportNumber) == ""
+	year := time.Now().Year()
+	var insertErr error
+	caughtUp := false
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		_, insertErr = h.DB.InsertOne(ctx, sub)
+		if insertErr == nil {
+			break
+		}
+		if !mongo.IsDuplicateKeyError(insertErr) || !autoNumber || attempt == maxAttempts-1 {
+			break
+		}
+		if !caughtUp {
+			// One-shot jump-ahead: find the highest reportNumber
+			// already in use for this community/year and bump our
+			// per-slug counter past it. Bounds the retry depth even
+			// when another template has hundreds of submissions.
+			if maxSeq, ok := h.maxReportNumberSeq(ctx, body.CommunityID, year); ok {
+				_ = h.CDB.CatchUp(ctx, body.CommunityID, body.FormTemplateSlug, year, maxSeq)
+			}
+			caughtUp = true
+		}
+		nextNum := h.nextReportNumber(ctx, body.CommunityID, body.FormTemplateSlug, w, r)
+		if nextNum == "" {
+			return // error already written by nextReportNumber
+		}
+		reportNumber = nextNum
+		sub.Details.ReportNumber = reportNumber
+		sub.ID = primitive.NewObjectID()
+	}
+	if insertErr != nil {
+		config.ErrorStatus("failed to create submission", http.StatusInternalServerError, w, insertErr)
 		return
 	}
 
@@ -207,6 +264,7 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		Status       *string                         `json:"status,omitempty"`
 		ReportNumber *string                         `json:"reportNumber,omitempty"`
 		Archived     *bool                           `json:"archived,omitempty"`
+		DepartmentID *string                         `json:"departmentId,omitempty"`
 		Actor        *models.FormSubmissionSignature `json:"actor,omitempty"` // server-trusted website fallback when no auth context
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -274,6 +332,21 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		}
 	}
 
+	// Department reassignment: allowed when the report is a draft going
+	// into this write (so the dept gets stamped before any submit/lock
+	// happens), OR when this same write is reopening a submitted report
+	// back to draft. The order is conceptually: dept change → status
+	// flip, so a draft-then-submit-with-new-dept is valid.
+	if body.DepartmentID != nil && *body.DepartmentID != existing.Details.DepartmentID {
+		wasEditable := existing.Details.Status == "draft" && !existing.Details.Archived
+		isReopening := body.Status != nil && *body.Status == "draft"
+		if !wasEditable && !isReopening {
+			config.ErrorStatus("department can only be changed while the report is a draft", http.StatusBadRequest, w, fmt.Errorf("department locked"))
+			return
+		}
+		set["formSubmission.departmentId"] = *body.DepartmentID
+	}
+
 	if body.Archived != nil && *body.Archived != existing.Details.Archived {
 		set["formSubmission.archived"] = *body.Archived
 		if *body.Archived {
@@ -289,6 +362,25 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 			set["formSubmission.archivedBy"] = nil
 			historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
 				Action:   "unarchived",
+				UserID:   actor.UserID,
+				Username: actor.Username,
+				At:       now,
+			})
+		}
+	}
+
+	// Draft-save audit: when a draft is being saved (no status flip,
+	// not archive/unarchive) but data, links, or department changed,
+	// log an "edited" entry so the history reflects every save.
+	// Skipped for submitted/archived writes since those already get
+	// their own action-specific entries above.
+	if len(historyEntries) == 0 && existing.Details.Status == "draft" && !existing.Details.Archived {
+		dataChanged := body.Data != nil
+		linksChanged := body.Links != nil
+		deptChanged := body.DepartmentID != nil && *body.DepartmentID != existing.Details.DepartmentID
+		if dataChanged || linksChanged || deptChanged {
+			historyEntries = append(historyEntries, models.FormSubmissionHistoryEntry{
+				Action:   "edited",
 				UserID:   actor.UserID,
 				Username: actor.Username,
 				At:       now,
@@ -314,7 +406,14 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 // the API is being proxied by a server-token caller.
 func (h FormSubmission) resolveActor(ctx context.Context, r *http.Request, fallback *models.FormSubmissionSignature, now primitive.DateTime) models.FormSubmissionSignature {
 	if uid := api.GetAuthenticatedUserIDFromContext(r.Context()); uid != "" {
-		return h.lookupSignedBy(ctx, uid, now)
+		sig := h.lookupSignedBy(ctx, uid, now)
+		// Defense in depth: if the user lookup couldn't resolve a
+		// username, accept a client-supplied one so history entries
+		// don't get stamped with an empty actor.
+		if sig.Username == "" && fallback != nil && fallback.Username != "" {
+			sig.Username = fallback.Username
+		}
+		return sig
 	}
 	if fallback != nil && fallback.UserID != "" {
 		return models.FormSubmissionSignature{
@@ -427,12 +526,21 @@ func (h FormSubmission) FormSubmissionDraftHandler(w http.ResponseWriter, r *htt
 }
 
 // FormSubmissionsByCommunityHandlerV2 returns paginated submissions for a community.
+//
+// Filters via query params:
+//
+//	templateSlug, departmentID, officerID, status — equality filters
+//	createdFrom, createdTo                         — RFC3339 timestamps; both inclusive
+//	archived                                       — "true" | "false" | "all"; default "false"
 func (h FormSubmission) FormSubmissionsByCommunityHandlerV2(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["community_id"]
 	templateSlug := r.URL.Query().Get("templateSlug")
 	departmentID := r.URL.Query().Get("departmentID")
 	officerID := r.URL.Query().Get("officerID")
 	status := r.URL.Query().Get("status")
+	createdFromRaw := r.URL.Query().Get("createdFrom")
+	createdToRaw := r.URL.Query().Get("createdTo")
+	archivedRaw := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("archived")))
 
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || Limit <= 0 {
@@ -457,6 +565,33 @@ func (h FormSubmission) FormSubmissionsByCommunityHandlerV2(w http.ResponseWrite
 	}
 	if status != "" {
 		filter["formSubmission.status"] = status
+	}
+
+	// Default behaviour pre-feature was to return everything regardless of
+	// archived state. Preserve that default — only apply the filter when
+	// the caller explicitly asks for "true" or "false".
+	switch archivedRaw {
+	case "true":
+		filter["formSubmission.archived"] = true
+	case "false":
+		filter["formSubmission.archived"] = bson.M{"$ne": true}
+	case "", "all":
+		// no filter
+	}
+
+	createdRange := bson.M{}
+	if createdFromRaw != "" {
+		if t, err := time.Parse(time.RFC3339, createdFromRaw); err == nil {
+			createdRange["$gte"] = primitive.NewDateTimeFromTime(t)
+		}
+	}
+	if createdToRaw != "" {
+		if t, err := time.Parse(time.RFC3339, createdToRaw); err == nil {
+			createdRange["$lte"] = primitive.NewDateTimeFromTime(t)
+		}
+	}
+	if len(createdRange) > 0 {
+		filter["formSubmission.createdAt"] = createdRange
 	}
 
 	subs, err := h.DB.Find(ctx, filter, &options.FindOptions{
@@ -539,6 +674,240 @@ func (h FormSubmission) FormSubmissionsByLinkHandlerV2(w http.ResponseWriter, r 
 	})
 }
 
+// FormSubmissionsDepartmentsHandler returns the distinct (departmentId,
+// departmentName) tuples that have at least one submission in the
+// community. Backs the website/mobile department-filter dropdown.
+func (h FormSubmission) FormSubmissionsDepartmentsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	if communityID == "" {
+		config.ErrorStatus("communityID is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	pipeline := []bson.M{
+		{"$match": bson.M{
+			"formSubmission.communityID":  communityID,
+			"formSubmission.departmentId": bson.M{"$ne": ""},
+		}},
+		{"$group": bson.M{"_id": "$formSubmission.departmentId", "count": bson.M{"$sum": 1}}},
+		{"$limit": 200},
+	}
+	cur, err := h.DB.Aggregate(ctx, pipeline)
+	if err != nil {
+		config.ErrorStatus("failed to aggregate departments", http.StatusInternalServerError, w, err)
+		return
+	}
+	var rows []struct {
+		ID    string `bson:"_id"`
+		Count int    `bson:"count"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		config.ErrorStatus("failed to read departments", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Resolve department names from the community document.
+	commID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community id", http.StatusBadRequest, w, err)
+		return
+	}
+	community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	nameByID := map[string]string{}
+	if err == nil && community != nil {
+		for _, d := range community.Details.Departments {
+			nameByID[d.ID.Hex()] = d.Name
+		}
+	}
+
+	type deptOut struct {
+		ID    string `json:"departmentId"`
+		Name  string `json:"departmentName"`
+		Count int    `json:"count"`
+	}
+	out := make([]deptOut, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, deptOut{
+			ID:    row.ID,
+			Name:  nameByID[row.ID],
+			Count: row.Count,
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"data": out})
+}
+
+// BulkArchiveFormSubmissionsHandler soft-archives submissions in a
+// community matching a date range and optional department filter. Admin
+// gated by the website proxy (the route is registered on apiCreate which
+// already requires a server token); the actor block is required for the
+// audit trail.
+func (h FormSubmission) BulkArchiveFormSubmissionsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	if communityID == "" {
+		config.ErrorStatus("communityID is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
+		return
+	}
+
+	var body struct {
+		CreatedFrom  string                          `json:"createdFrom"`
+		CreatedTo    string                          `json:"createdTo"`
+		DepartmentID string                          `json:"departmentId,omitempty"`
+		Actor        *models.FormSubmissionSignature `json:"actor,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if body.CreatedFrom == "" || body.CreatedTo == "" {
+		config.ErrorStatus("createdFrom and createdTo are required", http.StatusBadRequest, w, fmt.Errorf("missing date range"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	actor := h.resolveActor(ctx, r, body.Actor, now)
+	if actor.UserID == "" {
+		config.ErrorStatus("actor is required", http.StatusBadRequest, w, fmt.Errorf("missing actor"))
+		return
+	}
+
+	from, ferr := time.Parse(time.RFC3339, body.CreatedFrom)
+	to, terr := time.Parse(time.RFC3339, body.CreatedTo)
+	if ferr != nil || terr != nil {
+		config.ErrorStatus("createdFrom and createdTo must be RFC3339 timestamps", http.StatusBadRequest, w, fmt.Errorf("bad date format"))
+		return
+	}
+
+	filter := bson.M{
+		"formSubmission.communityID": communityID,
+		"formSubmission.archived":    bson.M{"$ne": true},
+		"formSubmission.createdAt": bson.M{
+			"$gte": primitive.NewDateTimeFromTime(from),
+			"$lte": primitive.NewDateTimeFromTime(to),
+		},
+	}
+	if body.DepartmentID != "" {
+		filter["formSubmission.departmentId"] = body.DepartmentID
+	}
+
+	const bulkArchiveCap = 1000
+	count, err := h.DB.CountDocuments(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to count submissions", http.StatusInternalServerError, w, err)
+		return
+	}
+	if count > bulkArchiveCap {
+		config.ErrorStatus(fmt.Sprintf("too many submissions to archive in one call (%d > %d). Narrow the date range and try again.", count, bulkArchiveCap), http.StatusUnprocessableEntity, w, fmt.Errorf("over cap"))
+		return
+	}
+
+	historyEntry := models.FormSubmissionHistoryEntry{
+		Action:   "archived",
+		UserID:   actor.UserID,
+		Username: actor.Username,
+		At:       now,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"formSubmission.archived":   true,
+			"formSubmission.archivedBy": actor,
+			"formSubmission.updatedAt":  now,
+		},
+		"$push": bson.M{"formSubmission.history": historyEntry},
+	}
+	modified, err := h.DB.UpdateMany(ctx, filter, update)
+	if err != nil {
+		config.ErrorStatus("failed to archive submissions", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":  "Submissions archived",
+		"archived": modified,
+	})
+}
+
+// PurgeFormSubmissionsHandler hard-deletes submissions by ID. Refuses
+// unless EVERY target is already archived — preventing accidental
+// destruction of unarchived audit data.
+func (h FormSubmission) PurgeFormSubmissionsHandler(w http.ResponseWriter, r *http.Request) {
+	communityID := mux.Vars(r)["community_id"]
+	if communityID == "" {
+		config.ErrorStatus("communityID is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
+		return
+	}
+
+	var body struct {
+		IDs   []string                        `json:"ids"`
+		Actor *models.FormSubmissionSignature `json:"actor,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if len(body.IDs) == 0 {
+		config.ErrorStatus("ids is required", http.StatusBadRequest, w, fmt.Errorf("missing ids"))
+		return
+	}
+	if len(body.IDs) > 500 {
+		config.ErrorStatus("too many ids in one call (max 500)", http.StatusUnprocessableEntity, w, fmt.Errorf("over cap"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	objIDs := make([]primitive.ObjectID, 0, len(body.IDs))
+	for _, id := range body.IDs {
+		oid, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			config.ErrorStatus(fmt.Sprintf("invalid submission id: %s", id), http.StatusBadRequest, w, err)
+			return
+		}
+		objIDs = append(objIDs, oid)
+	}
+
+	// Refuse if any target is not archived in the requested community.
+	notArchivedFilter := bson.M{
+		"_id":                        bson.M{"$in": objIDs},
+		"formSubmission.communityID": communityID,
+		"formSubmission.archived":    bson.M{"$ne": true},
+	}
+	bad, err := h.DB.CountDocuments(ctx, notArchivedFilter)
+	if err != nil {
+		config.ErrorStatus("failed to verify archived state", http.StatusInternalServerError, w, err)
+		return
+	}
+	if bad > 0 {
+		config.ErrorStatus("some submissions are not archived; archive them first", http.StatusConflict, w, fmt.Errorf("%d unarchived in target set", bad))
+		return
+	}
+
+	deleted, err := h.DB.DeleteMany(ctx, bson.M{
+		"_id":                        bson.M{"$in": objIDs},
+		"formSubmission.communityID": communityID,
+		"formSubmission.archived":    true,
+	})
+	if err != nil {
+		config.ErrorStatus("failed to purge submissions", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Submissions purged",
+		"deleted": deleted,
+	})
+}
+
 // --- helpers ---
 
 // resolveActiveTemplate looks up either a stored template by (communityID,
@@ -555,10 +924,26 @@ func (h FormSubmission) resolveActiveTemplate(ctx context.Context, communityID, 
 			"formTemplateVersion.formTemplateID": tpl.ID.Hex(),
 			"formTemplateVersion.version":        tpl.Details.CurrentVersion,
 		})
-		if vErr != nil {
-			return "", nil, 0, vErr
+		if vErr == nil && v != nil {
+			return tpl.ID.Hex(), v.Details.Sections, tpl.Details.CurrentVersion, nil
 		}
-		return tpl.ID.Hex(), v.Details.Sections, tpl.Details.CurrentVersion, nil
+		// Recovery: an older bug bumped formTemplate.currentVersion on
+		// metadata-only updates (archive/unarchive) without writing a
+		// matching version row. Without this fallback, a save against
+		// such a template fails with 404 ("no documents in result").
+		// Use the most recent version that does exist instead — same
+		// strategy as formTemplate.fetchVersionSections.
+		versions, lerr := h.VDB.Find(
+			ctx,
+			bson.M{"formTemplateVersion.formTemplateID": tpl.ID.Hex()},
+			options.Find().SetSort(bson.M{"formTemplateVersion.version": -1}).SetLimit(1),
+		)
+		if lerr == nil && len(versions) > 0 {
+			latest := versions[0]
+			return tpl.ID.Hex(), latest.Details.Sections, latest.Details.Version, nil
+		}
+		// Last-ditch: if the slug matches a built-in default, fall through
+		// to the defaults branch below so the user can still file a report.
 	}
 
 	// Fall back to built-in defaults.
@@ -566,6 +951,33 @@ func (h FormSubmission) resolveActiveTemplate(ctx context.Context, communityID, 
 		return "", def.Sections, def.CurrentVersion, nil
 	}
 	return "", nil, 0, fmt.Errorf("template %q not found for community %q", slug, communityID)
+}
+
+// maxReportNumberSeq returns the highest numeric tail across all
+// reportNumbers used in this community for the given year, e.g.
+// "RR-2026-000042" → 42. Used to seed a stale per-slug counter that
+// trails the actually-used number space. Returns ok=false when no
+// matching submissions exist.
+func (h FormSubmission) maxReportNumberSeq(ctx context.Context, communityID string, year int) (int64, bool) {
+	yearStr := strconv.Itoa(year)
+	filter := bson.M{
+		"formSubmission.communityID":  communityID,
+		"formSubmission.reportNumber": bson.M{"$regex": "-" + yearStr + "-"},
+	}
+	opts := options.FindOne().SetSort(bson.M{"formSubmission.reportNumber": -1})
+	top, err := h.DB.FindOne(ctx, filter, opts)
+	if err != nil || top == nil {
+		return 0, false
+	}
+	parts := strings.Split(top.Details.ReportNumber, "-")
+	if len(parts) == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // nextReportNumber atomically generates the next sequence and formats it
@@ -597,12 +1009,24 @@ func (h FormSubmission) nextReportNumber(ctx context.Context, communityID, slug 
 
 // lookupSignedBy resolves the username for the auth-context user ID and
 // returns a stamped signature struct.
+//
+// The users collection stores _id as ObjectID in Mongo (the Go model
+// decodes it into a string field, but the stored type is still
+// ObjectID). Querying by the raw string never matches, so we try the
+// ObjectID-cast first and fall back to the string form for any legacy
+// users whose _id was stored as a string.
 func (h FormSubmission) lookupSignedBy(ctx context.Context, userID string, now primitive.DateTime) models.FormSubmissionSignature {
 	sig := models.FormSubmissionSignature{UserID: userID, SignedAt: now}
 	if userID == "" {
 		return sig
 	}
 	var user models.User
+	if oid, err := primitive.ObjectIDFromHex(userID); err == nil {
+		if err := h.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&user); err == nil {
+			sig.Username = user.Details.Username
+			return sig
+		}
+	}
 	if err := h.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user); err == nil {
 		sig.Username = user.Details.Username
 	}
@@ -727,8 +1151,16 @@ func (h FormSubmission) buildAuthContext(ctx context.Context, r *http.Request) m
 		return out
 	}
 	var user models.User
-	if err := h.UDB.FindOne(ctx, bson.M{"_id": uid}).Decode(&user); err != nil {
-		return out
+	found := false
+	if oid, err := primitive.ObjectIDFromHex(uid); err == nil {
+		if err := h.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&user); err == nil {
+			found = true
+		}
+	}
+	if !found {
+		if err := h.UDB.FindOne(ctx, bson.M{"_id": uid}).Decode(&user); err != nil {
+			return out
+		}
 	}
 	out["username"] = user.Details.Username
 	return out

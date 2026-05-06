@@ -1291,18 +1291,26 @@ func (h FeatureRequestHandler) batchFetchUsers(ctx context.Context, userIDs map[
 	return userMap
 }
 
-// getAdminRolesForUsers looks up admin roles for users based on their emails.
-// Returns a map of userID → admin role ("owner" or "admin").
+// getAdminRolesForUsers resolves which users in userMap have elevated admin
+// access. Resolution order per admin:
+//  1. If the admin has a linked LPC account (LinkedUserID), the admin's role
+//     applies to that linked user only — not the admin's own email match.
+//  2. If the admin has no linked LPC account, the admin's role applies to any
+//     user whose email matches the admin's email (legacy behavior).
+//
+// This means once an admin links an LPC account, creating a new LPC account
+// with the admin's email no longer confers elevated access.
 func (h FeatureRequestHandler) getAdminRolesForUsers(ctx context.Context, userMap map[primitive.ObjectID]UserDoc) map[primitive.ObjectID]string {
 	adminRoles := make(map[primitive.ObjectID]string)
 	if h.AdminDB == nil || len(userMap) == 0 {
 		return adminRoles
 	}
 
-	// Build email → userID mapping
 	emailToUserID := make(map[string]primitive.ObjectID)
+	userIDs := make(map[primitive.ObjectID]bool)
 	emails := make([]string, 0)
 	for id, doc := range userMap {
+		userIDs[id] = true
 		if doc.User.Email != "" {
 			lower := strings.ToLower(doc.User.Email)
 			emailToUserID[lower] = id
@@ -1310,20 +1318,45 @@ func (h FeatureRequestHandler) getAdminRolesForUsers(ctx context.Context, userMa
 		}
 	}
 
-	if len(emails) == 0 {
+	// Fetch any admins whose email or linkedUserId matches a user in scope.
+	or := []bson.M{}
+	if len(emails) > 0 {
+		or = append(or, bson.M{"email": bson.M{"$in": emails}})
+	}
+	if len(userIDs) > 0 {
+		ids := make([]primitive.ObjectID, 0, len(userIDs))
+		for id := range userIDs {
+			ids = append(ids, id)
+		}
+		or = append(or, bson.M{"linkedUserId": bson.M{"$in": ids}})
+	}
+	if len(or) == 0 {
 		return adminRoles
 	}
 
-	cursor, err := h.AdminDB.Find(ctx, bson.M{"email": bson.M{"$in": emails}})
+	cursor, err := h.AdminDB.Find(ctx, bson.M{"$or": or})
 	if err != nil {
 		return adminRoles
 	}
 	defer cursor.Close(ctx)
 
 	var admins []models.AdminUser
-	if err := cursor.All(ctx, &admins); err == nil {
-		for _, admin := range admins {
-			if userID, ok := emailToUserID[strings.ToLower(admin.Email)]; ok {
+	if err := cursor.All(ctx, &admins); err != nil {
+		return adminRoles
+	}
+
+	for _, admin := range admins {
+		if admin.LinkedUserID != nil {
+			// Linked admins attribute their role only to the linked user.
+			if userIDs[*admin.LinkedUserID] {
+				adminRoles[*admin.LinkedUserID] = admin.Role
+			}
+			continue
+		}
+		// Unlinked admins fall back to email matching.
+		if userID, ok := emailToUserID[strings.ToLower(admin.Email)]; ok {
+			// Don't override a role already attributed via a link.
+			if _, exists := adminRoles[userID]; !exists {
 				adminRoles[userID] = admin.Role
 			}
 		}
@@ -1349,21 +1382,64 @@ func (h FeatureRequestHandler) getUserSummary(ctx context.Context, userID primit
 	}
 }
 
-// checkIsAdmin checks if a user is a site admin
+// checkIsAdmin checks if a user is a site admin. Mirrors the resolution rules
+// in getAdminRolesForUsers: a Linked LPC Account inherits its admin's role,
+// and unlinked admins fall back to email matching. An admin's own email no
+// longer confers privileges on a different LPC account once the admin has
+// linked elsewhere.
+//
+// userID may be either an LPC user's hex ObjectID (e.g. delete handler) or
+// the user's email (e.g. status / merge handlers).
 func (h FeatureRequestHandler) checkIsAdmin(ctx context.Context, userID string) bool {
-	if h.AdminDB == nil {
+	if h.AdminDB == nil || userID == "" {
 		return false
 	}
-	// Check admin database for this user
-	admin, err := h.AdminDB.FindOne(ctx, bson.M{"email": userID})
-	if err == nil && admin != nil {
+
+	unlinked := bson.M{"$or": []bson.M{
+		{"linkedUserId": bson.M{"$exists": false}},
+		{"linkedUserId": nil},
+	}}
+
+	// Path 1: userID is a hex ObjectID — a user._id.
+	if userObjID, err := primitive.ObjectIDFromHex(userID); err == nil {
+		if admin, err := h.AdminDB.FindOne(ctx, bson.M{"linkedUserId": userObjID}); err == nil && admin != nil {
+			return true
+		}
+		// Fallback: resolve the user's email, then look up an unlinked admin
+		// by that email.
+		if h.UDB != nil {
+			var userDoc UserDoc
+			if err := h.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&userDoc); err == nil && userDoc.User.Email != "" {
+				filter := bson.M{
+					"email": bson.M{"$regex": "^" + regexp.QuoteMeta(userDoc.User.Email) + "$", "$options": "i"},
+					"$and":  []bson.M{unlinked},
+				}
+				if admin, err := h.AdminDB.FindOne(ctx, filter); err == nil && admin != nil {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Path 2: userID is an email.
+	email := userID
+	if h.UDB != nil {
+		var userDoc UserDoc
+		if err := h.UDB.FindOne(ctx, bson.M{
+			"user.email": bson.M{"$regex": "^" + regexp.QuoteMeta(email) + "$", "$options": "i"},
+		}).Decode(&userDoc); err == nil {
+			if admin, err := h.AdminDB.FindOne(ctx, bson.M{"linkedUserId": userDoc.ID}); err == nil && admin != nil {
+				return true
+			}
+		}
+	}
+	filter := bson.M{
+		"email": bson.M{"$regex": "^" + regexp.QuoteMeta(email) + "$", "$options": "i"},
+		"$and":  []bson.M{unlinked},
+	}
+	if admin, err := h.AdminDB.FindOne(ctx, filter); err == nil && admin != nil {
 		return true
 	}
-	// Also try by ID
-	userObjID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return false
-	}
-	admin, err = h.AdminDB.FindOne(ctx, bson.M{"_id": userObjID})
-	return err == nil && admin != nil
+	return false
 }

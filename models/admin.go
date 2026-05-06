@@ -21,6 +21,53 @@ type AdminUser struct {
 	CreatedBy      string             `bson:"createdBy" json:"createdBy"`
 	LastLoginAt    *time.Time         `bson:"lastLoginAt,omitempty" json:"lastLoginAt,omitempty"`
 	LastAccessedAt *time.Time         `bson:"lastAccessedAt,omitempty" json:"lastAccessedAt,omitempty"`
+
+	// Linked LPC account fields. When LinkedUserID is set, this admin's elevated
+	// access on user-facing features (e.g. feature requests) applies to that user
+	// only — the admin's own email no longer confers elevated access.
+	LinkedUserID          *primitive.ObjectID `bson:"linkedUserId,omitempty" json:"linkedUserId,omitempty"`
+	LinkedUserEmail       string              `bson:"linkedUserEmail,omitempty" json:"linkedUserEmail,omitempty"`
+	LinkedUsername        string              `bson:"linkedUsername,omitempty" json:"linkedUsername,omitempty"`
+	LinkedAt              *time.Time          `bson:"linkedAt,omitempty" json:"linkedAt,omitempty"`
+	LinkedTermsAcceptedAt *time.Time          `bson:"linkedTermsAcceptedAt,omitempty" json:"linkedTermsAcceptedAt,omitempty"`
+	LinkedTermsVersion    string              `bson:"linkedTermsVersion,omitempty" json:"linkedTermsVersion,omitempty"`
+}
+
+// LinkLPCAccountRequest is the payload to link an admin to an LPC user.
+type LinkLPCAccountRequest struct {
+	LPCUserID      string                 `json:"lpcUserId" validate:"required"`
+	TermsAccepted  bool                   `json:"termsAccepted" validate:"required"`
+	TermsVersion   string                 `json:"termsVersion"`
+	CurrentUser    map[string]interface{} `json:"currentUser,omitempty"`
+}
+
+// LinkLPCAccountResponse is the response after linking/relinking.
+type LinkLPCAccountResponse struct {
+	Success bool             `json:"success"`
+	Message string           `json:"message"`
+	Linked  *LinkedLPCAccount `json:"linked,omitempty"`
+}
+
+// UnlinkLPCAccountRequest is the payload to unlink an admin's LPC account.
+type UnlinkLPCAccountRequest struct {
+	CurrentUser map[string]interface{} `json:"currentUser,omitempty"`
+}
+
+// LinkedLPCAccount is a lightweight summary of a linked LPC user for display.
+type LinkedLPCAccount struct {
+	UserID            string     `json:"userId"`
+	Email             string     `json:"email"`
+	Username          string     `json:"username,omitempty"`
+	ProfilePicture    string     `json:"profilePicture,omitempty"`
+	LinkedAt          *time.Time `json:"linkedAt,omitempty"`
+	TermsAcceptedAt   *time.Time `json:"termsAcceptedAt,omitempty"`
+	TermsVersion      string     `json:"termsVersion,omitempty"`
+}
+
+// LinkedLPCAccountResponse is the response from GET linked-lpc.
+type LinkedLPCAccountResponse struct {
+	Success bool              `json:"success"`
+	Linked  *LinkedLPCAccount `json:"linked,omitempty"`
 }
 
 // CreateAdminUserRequest represents the request to create a new admin user
@@ -223,12 +270,13 @@ type AdminPasswordReset struct {
 
 // Admin response models
 type AdminUserResult struct {
-	ID            string      `json:"id"`
-	Email         string      `json:"email"`
-	Username      string      `json:"username,omitempty"`
-	IsDeactivated bool        `json:"isDeactivated"`
-	CreatedAt     interface{} `json:"createdAt"`
-	LastLoginAt   interface{} `json:"lastLoginAt,omitempty"`
+	ID             string      `json:"id"`
+	Email          string      `json:"email"`
+	Username       string      `json:"username,omitempty"`
+	ProfilePicture string      `json:"profilePicture,omitempty"`
+	IsDeactivated  bool        `json:"isDeactivated"`
+	CreatedAt      interface{} `json:"createdAt"`
+	LastLoginAt    interface{} `json:"lastLoginAt,omitempty"`
 }
 
 type AdminCommunityResult struct {
@@ -362,13 +410,15 @@ type AdminCaseStepTransferOwnership struct {
 	NewOwner         *AdminCasePersonRef `bson:"newOwner,omitempty" json:"newOwner,omitempty"`
 	AddedToHeadAdmin bool                `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
 	CompletedAt      *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy      *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepHeadAdmin stores step 2 result
 type AdminCaseStepHeadAdmin struct {
-	Completed        bool       `bson:"completed" json:"completed"`
-	AddedToHeadAdmin bool       `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
-	CompletedAt      *time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	Completed        bool                `bson:"completed" json:"completed"`
+	AddedToHeadAdmin bool                `bson:"addedToHeadAdmin" json:"addedToHeadAdmin"`
+	CompletedAt      *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy      *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepRoleAudit stores step 3 result
@@ -376,6 +426,7 @@ type AdminCaseStepRoleAudit struct {
 	Completed      bool                   `bson:"completed" json:"completed"`
 	DangerousRoles []AdminRoleWithMembers `bson:"dangerousRoles,omitempty" json:"dangerousRoles,omitempty"`
 	CompletedAt    *time.Time             `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy    *AdminCaseCreatedBy    `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepRemoveBadActor stores step 4 result
@@ -385,12 +436,14 @@ type AdminCaseStepRemoveBadActor struct {
 	BadActor    *AdminCasePersonRef `bson:"badActor,omitempty" json:"badActor,omitempty"`
 	Banned      bool                `bson:"banned" json:"banned"`
 	CompletedAt *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseStepSummary stores step 5 result
 type AdminCaseStepSummary struct {
-	Completed   bool       `bson:"completed" json:"completed"`
-	CompletedAt *time.Time `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	Completed   bool                `bson:"completed" json:"completed"`
+	CompletedAt *time.Time          `bson:"completedAt,omitempty" json:"completedAt,omitempty"`
+	PerformedBy *AdminCaseCreatedBy `bson:"performedBy,omitempty" json:"performedBy,omitempty"`
 }
 
 // AdminCaseSteps holds all step data for a case

@@ -602,11 +602,12 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	var results []models.AdminUserResult
 	for _, user := range users {
 		result := models.AdminUserResult{
-			ID:            user.ID,
-			Email:         user.Details.Email,
-			Username:      user.Details.Username,
-			IsDeactivated: user.Details.IsDeactivated,
-			CreatedAt:     user.Details.CreatedAt,
+			ID:             user.ID,
+			Email:          user.Details.Email,
+			Username:       user.Details.Username,
+			ProfilePicture: user.Details.ProfilePicture,
+			IsDeactivated:  user.Details.IsDeactivated,
+			CreatedAt:      user.Details.CreatedAt,
 		}
 		results = append(results, result)
 	}
@@ -2341,6 +2342,280 @@ func (h Admin) AdminUpdateProfileHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// resolveAdminAndAuthorize loads the admin by id and verifies the requesting
+// admin is either the same admin or an owner. Returns the admin or writes the
+// error response and returns nil.
+func (h Admin) resolveAdminAndAuthorize(w http.ResponseWriter, r *http.Request, adminID string, currentUser map[string]interface{}) (*models.AdminUser, primitive.ObjectID, bool) {
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Invalid admin ID format", Code: "VALIDATION_ERROR"})
+		return nil, primitive.NilObjectID, false
+	}
+	currentUserID, _ := currentUser["id"].(string)
+	currentUserRoles, _ := currentUser["roles"].([]interface{})
+	isOwner := false
+	for _, role := range currentUserRoles {
+		if roleStr, ok := role.(string); ok && roleStr == "owner" {
+			isOwner = true
+			break
+		}
+	}
+	if currentUserID != adminID && !isOwner {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "You can only modify your own linked account", Code: "FORBIDDEN"})
+		return nil, primitive.NilObjectID, false
+	}
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Admin not found", Code: "NOT_FOUND"})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Failed to fetch admin", Code: "DATABASE_ERROR"})
+		}
+		return nil, primitive.NilObjectID, false
+	}
+	return admin, objectID, true
+}
+
+// findUserByAnyID resolves an LPC user by either string _id or ObjectID hex.
+// Returns the resolved ObjectID, normalized email/username/profilePicture and ok.
+func (h Admin) findUserByAnyID(ctx context.Context, userID string) (primitive.ObjectID, string, string, string, bool) {
+	// Try string ID first (legacy users have string _id)
+	var user models.User
+	if err := h.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user); err == nil {
+		// String ID — try to convert to ObjectID for storage; if not possible, fall through to oid path.
+		if oid, oerr := primitive.ObjectIDFromHex(user.ID); oerr == nil {
+			return oid, strings.ToLower(strings.TrimSpace(user.Details.Email)), user.Details.Username, user.Details.ProfilePicture, true
+		}
+		// User exists but _id is a non-ObjectID string — we cannot store as ObjectID.
+		return primitive.NilObjectID, "", "", "", false
+	}
+	// Try ObjectID form
+	oid, oerr := primitive.ObjectIDFromHex(userID)
+	if oerr != nil {
+		return primitive.NilObjectID, "", "", "", false
+	}
+	var userObj struct {
+		ID      primitive.ObjectID `bson:"_id"`
+		Details models.UserDetails `bson:"user"`
+	}
+	if err := h.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&userObj); err != nil {
+		return primitive.NilObjectID, "", "", "", false
+	}
+	return userObj.ID, strings.ToLower(strings.TrimSpace(userObj.Details.Email)), userObj.Details.Username, userObj.Details.ProfilePicture, true
+}
+
+// AdminLinkLPCAccountHandler links (or relinks) an admin to an LPC user.
+// POST /api/v1/admin/admins/{id}/link-lpc
+func (h Admin) AdminLinkLPCAccountHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	adminID := vars["id"]
+	if adminID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Invalid admin ID", Code: "VALIDATION_ERROR"})
+		return
+	}
+
+	var req models.LinkLPCAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Invalid request body", Code: "VALIDATION_ERROR"})
+		return
+	}
+	if !req.TermsAccepted {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "You must accept the linking terms to continue", Code: "TERMS_NOT_ACCEPTED"})
+		return
+	}
+	if strings.TrimSpace(req.LPCUserID) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "LPC user ID is required", Code: "VALIDATION_ERROR"})
+		return
+	}
+
+	admin, adminObjectID, ok := h.resolveAdminAndAuthorize(w, r, adminID, req.CurrentUser)
+	if !ok {
+		return
+	}
+
+	resolvedOID, email, username, profilePicture, found := h.findUserByAnyID(r.Context(), req.LPCUserID)
+	if !found {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "LPC user not found", Code: "NOT_FOUND"})
+		return
+	}
+
+	// Reject linking to an LPC user whose email matches the admin's own email.
+	// Email-match already grants elevated access by default when no link exists,
+	// so linking to the same email is redundant and confusing.
+	if email != "" && admin.Email != "" && strings.EqualFold(email, admin.Email) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "This LPC account uses your admin email. Elevated access is already granted by default — no link needed. Disconnect any existing link to revert to email-match behavior.",
+			Code:    "SAME_EMAIL_NO_LINK_NEEDED",
+		})
+		return
+	}
+
+	// Uniqueness: another admin must not already be linked to this LPC user.
+	existing, err := h.ADB.FindOne(r.Context(), bson.M{"linkedUserId": resolvedOID, "_id": bson.M{"$ne": adminObjectID}})
+	if err == nil && existing != nil {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "This LPC user is already linked to another admin account", Code: "ALREADY_LINKED"})
+		return
+	}
+
+	now := time.Now().UTC()
+	termsVersion := strings.TrimSpace(req.TermsVersion)
+	if termsVersion == "" {
+		termsVersion = "v1"
+	}
+
+	updateFields := bson.M{
+		"linkedUserId":          resolvedOID,
+		"linkedUserEmail":       email,
+		"linkedUsername":        username,
+		"linkedAt":              now,
+		"linkedTermsAcceptedAt": now,
+		"linkedTermsVersion":    termsVersion,
+	}
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": adminObjectID}, bson.M{"$set": updateFields})
+	if err != nil {
+		log.Printf("AdminLinkLPCAccountHandler update error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Failed to link LPC account", Code: "DATABASE_ERROR"})
+		return
+	}
+
+	userIDStr := resolvedOID.Hex()
+	resp := models.LinkLPCAccountResponse{
+		Success: true,
+		Message: "LPC account linked successfully",
+		Linked: &models.LinkedLPCAccount{
+			UserID:          userIDStr,
+			Email:           email,
+			Username:        username,
+			ProfilePicture:  profilePicture,
+			LinkedAt:        &now,
+			TermsAcceptedAt: &now,
+			TermsVersion:    termsVersion,
+		},
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// AdminUnlinkLPCAccountHandler clears the admin's linked LPC account.
+// POST /api/v1/admin/admins/{id}/unlink-lpc
+func (h Admin) AdminUnlinkLPCAccountHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	adminID := vars["id"]
+	if adminID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Invalid admin ID", Code: "VALIDATION_ERROR"})
+		return
+	}
+
+	var req models.UnlinkLPCAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Body is optional for unlink, but currentUser is required for authorization.
+		req = models.UnlinkLPCAccountRequest{}
+	}
+
+	_, adminObjectID, ok := h.resolveAdminAndAuthorize(w, r, adminID, req.CurrentUser)
+	if !ok {
+		return
+	}
+
+	_, err := h.ADB.UpdateOne(r.Context(), bson.M{"_id": adminObjectID}, bson.M{"$unset": bson.M{
+		"linkedUserId":          "",
+		"linkedUserEmail":       "",
+		"linkedUsername":        "",
+		"linkedAt":              "",
+		"linkedTermsAcceptedAt": "",
+		"linkedTermsVersion":    "",
+	}})
+	if err != nil {
+		log.Printf("AdminUnlinkLPCAccountHandler update error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Failed to unlink LPC account", Code: "DATABASE_ERROR"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.LinkLPCAccountResponse{Success: true, Message: "LPC account unlinked"})
+}
+
+// AdminGetLinkedLPCAccountHandler returns the current linked LPC account for an admin.
+// GET /api/v1/admin/admins/{id}/linked-lpc
+func (h Admin) AdminGetLinkedLPCAccountHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	adminID := vars["id"]
+	objectID, err := primitive.ObjectIDFromHex(adminID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Invalid admin ID format", Code: "VALIDATION_ERROR"})
+		return
+	}
+
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": objectID})
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Admin not found", Code: "NOT_FOUND"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Success: false, Error: "Failed to fetch admin", Code: "DATABASE_ERROR"})
+		return
+	}
+
+	if admin.LinkedUserID == nil {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(models.LinkedLPCAccountResponse{Success: true, Linked: nil})
+		return
+	}
+
+	// Re-fetch the user to keep username/profilePicture fresh in case they changed.
+	_, freshEmail, freshUsername, freshProfilePicture, found := h.findUserByAnyID(r.Context(), admin.LinkedUserID.Hex())
+	email := admin.LinkedUserEmail
+	username := admin.LinkedUsername
+	profilePicture := ""
+	if found {
+		if freshEmail != "" {
+			email = freshEmail
+		}
+		if freshUsername != "" {
+			username = freshUsername
+		}
+		profilePicture = freshProfilePicture
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(models.LinkedLPCAccountResponse{
+		Success: true,
+		Linked: &models.LinkedLPCAccount{
+			UserID:          admin.LinkedUserID.Hex(),
+			Email:           email,
+			Username:        username,
+			ProfilePicture:  profilePicture,
+			LinkedAt:        admin.LinkedAt,
+			TermsAcceptedAt: admin.LinkedTermsAcceptedAt,
+			TermsVersion:    admin.LinkedTermsVersion,
+		},
+	})
+}
+
 // AdminChangeRoleHandler changes an admin's role
 func (h Admin) AdminChangeRoleHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -3614,10 +3889,10 @@ func (h Admin) AdminTransferOwnershipHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Check admin permissions
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	// Check admin permissions (owner OR admin — case workflow is open to staff)
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions to transfer ownership (requires owner or admin role)"})
 		return
 	}
 
@@ -3928,9 +4203,9 @@ func (h Admin) AdminRemoveMemberHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions to remove member (requires owner or admin role)"})
 		return
 	}
 

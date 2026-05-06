@@ -38,11 +38,29 @@ type FormTemplateDetails struct {
 	NumberFormat      string   `json:"numberFormat" bson:"numberFormat"` // tokens: {YYYY}, {NNNNNN}, custom prefix
 	VisibleToRoles    []string `json:"visibleToRoles" bson:"visibleToRoles"`
 	EditableByRoles   []string `json:"editableByRoles" bson:"editableByRoles"`
+	// Rank-based gating, ANDed with the role-based gating above. When a
+	// rule is nil/empty, that scope has no rank gate.
+	VisibleToRankRule  *RankRule `json:"visibleToRankRule,omitempty" bson:"visibleToRankRule,omitempty"`
+	EditableByRankRule *RankRule `json:"editableByRankRule,omitempty" bson:"editableByRankRule,omitempty"`
 	LinkableEntities  []string `json:"linkableEntities" bson:"linkableEntities"` // civilian, vehicle, firearm, call, citation, arrestReport, warrant, bolo
 
 	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 	CreatedBy string             `json:"createdBy" bson:"createdBy"`
+}
+
+// RankRule expresses a rank-based gating rule used by FormTemplate's
+// visibleToRankRule / editableByRankRule. Mode is one of:
+//
+//   - "exact":     match only the listed anchor ranks
+//   - "atOrAbove": match ranks at or above the highest anchor (lowest displayOrder)
+//   - "atOrBelow": match ranks at or below the lowest anchor (highest displayOrder)
+//
+// AnchorRankIDs are rank ObjectID hex strings inside the form's department.
+// A nil/empty rule (or an unknown mode) is treated as "no rank gate".
+type RankRule struct {
+	Mode          string   `json:"mode" bson:"mode"`
+	AnchorRankIDs []string `json:"anchorRankIDs" bson:"anchorRankIDs"`
 }
 
 // FormTemplateView is the merged representation returned to clients —
@@ -58,10 +76,12 @@ type FormTemplateView struct {
 	Description      string             `json:"description"`
 	Icon             string             `json:"icon"`
 	CurrentVersion   int32              `json:"currentVersion"`
-	NumberFormat     string             `json:"numberFormat"`
-	VisibleToRoles   []string           `json:"visibleToRoles"`
-	EditableByRoles  []string           `json:"editableByRoles"`
-	LinkableEntities []string           `json:"linkableEntities"`
+	NumberFormat       string             `json:"numberFormat"`
+	VisibleToRoles     []string           `json:"visibleToRoles"`
+	EditableByRoles    []string           `json:"editableByRoles"`
+	VisibleToRankRule  *RankRule          `json:"visibleToRankRule,omitempty"`
+	EditableByRankRule *RankRule          `json:"editableByRankRule,omitempty"`
+	LinkableEntities   []string           `json:"linkableEntities"`
 	IsDefault        bool               `json:"isDefault"`
 	IsHidden         bool               `json:"isHidden"`
 	IsArchived       bool               `json:"isArchived"`

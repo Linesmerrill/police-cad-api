@@ -64,9 +64,10 @@ func (a *App) New() *mux.Router {
 	formSubmissionDB := databases.NewFormSubmissionDatabase(a.dbHelper)
 	formCounterDB := databases.NewFormCounterDatabase(a.dbHelper)
 	formTemplate := FormTemplate{
-		DB:  formTemplateDB,
-		VDB: formTemplateVersionDB,
-		TDB: departmentFormToggleDB,
+		DB:     formTemplateDB,
+		VDB:    formTemplateVersionDB,
+		TDB:    departmentFormToggleDB,
+		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
 	departmentFormToggle := DepartmentFormToggle{DB: departmentFormToggleDB}
 	formSubmission := FormSubmission{
@@ -200,6 +201,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/admins/count", http.HandlerFunc(adminHandler.AdminGetAdminCountHandler)).Methods("GET")
 	apiCreate.Handle("/admin/admins/{id}/activity", http.HandlerFunc(adminHandler.AdminGetActivityHandler)).Methods("POST")
 	apiCreate.Handle("/admin/admins/{id}/profile", http.HandlerFunc(adminHandler.AdminUpdateProfileHandler)).Methods("PATCH")
+	apiCreate.Handle("/admin/admins/{id}/link-lpc", http.HandlerFunc(adminHandler.AdminLinkLPCAccountHandler)).Methods("POST")
+	apiCreate.Handle("/admin/admins/{id}/unlink-lpc", http.HandlerFunc(adminHandler.AdminUnlinkLPCAccountHandler)).Methods("POST")
+	apiCreate.Handle("/admin/admins/{id}/linked-lpc", http.HandlerFunc(adminHandler.AdminGetLinkedLPCAccountHandler)).Methods("GET")
 	apiCreate.Handle("/admin/admins/{id}/roles", http.HandlerFunc(adminHandler.AdminChangeRolesHandler)).Methods("PUT")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminUpdateLastLoginHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminGetAdminDetailsHandler)).Methods("GET")
@@ -504,7 +508,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/form-submission/{submission_id}", api.Middleware(http.HandlerFunc(formSubmission.DeleteFormSubmissionHandler))).Methods("DELETE")
 	apiCreate.Handle("/form-submission", api.Middleware(http.HandlerFunc(formSubmission.CreateFormSubmissionHandler))).Methods("POST")
 	apiV2.Handle("/form-submissions/community/{community_id}", api.Middleware(http.HandlerFunc(formSubmission.FormSubmissionsByCommunityHandlerV2))).Methods("GET")
+	apiV2.Handle("/form-submissions/community/{community_id}/departments", api.Middleware(http.HandlerFunc(formSubmission.FormSubmissionsDepartmentsHandler))).Methods("GET")
+	apiV2.Handle("/form-submissions/community/{community_id}/bulk-archive", api.Middleware(http.HandlerFunc(formSubmission.BulkArchiveFormSubmissionsHandler))).Methods("POST")
+	apiV2.Handle("/form-submissions/community/{community_id}/purge", api.Middleware(http.HandlerFunc(formSubmission.PurgeFormSubmissionsHandler))).Methods("DELETE")
 	apiV2.Handle("/form-submissions/by-link/{link_type}/{link_id}", api.Middleware(http.HandlerFunc(formSubmission.FormSubmissionsByLinkHandlerV2))).Methods("GET")
+	apiV2.Handle("/form-templates/community/{community_id}/preview-rank-rule", api.Middleware(http.HandlerFunc(formTemplate.PreviewRankRuleHandler))).Methods("POST")
 
 	// Court case routes
 	apiV2.Handle("/court-cases/{case_id}/assign", api.Middleware(http.HandlerFunc(courtCaseHandler.AssignCourtCaseHandler))).Methods("PUT")
