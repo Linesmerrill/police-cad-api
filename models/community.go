@@ -223,6 +223,13 @@ type Department struct {
 	Template          Template           `json:"template" bson:"template"` // Legacy embedded template (for backward compatibility)
 	TemplateRef       *TemplateReference `json:"templateRef" bson:"templateRef"` // New template reference system
 	ToneSound         string             `json:"toneSound,omitempty" bson:"toneSound,omitempty"` // "leo", "fd", "ems", or "" (uses template default)
+	// RestrictCivilianRecordDeletion gates civilian-initiated deletion of records
+	// (citations, written warnings, arrest reports) issued by this department.
+	// When true, only community owner / "administrator" / "manage records" can delete.
+	// Stored as a pointer so we can distinguish "explicitly false" (allow) from
+	// "missing on a legacy department" (also treated as allow, preserves prior behavior).
+	// New departments are created with this set to true.
+	RestrictCivilianRecordDeletion *bool              `json:"restrictCivilianRecordDeletion,omitempty" bson:"restrictCivilianRecordDeletion,omitempty"`
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt         primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 	OnlineMemberCount int                `json:"onlineMemberCount" bson:"onlineMemberCount"`

@@ -102,7 +102,9 @@ func (dt *DepartmentTemplate) CreateDepartmentWithTemplateHandler(w http.Respons
 		}
 	}
 
-	// Create the department
+	// Create the department. New departments default to restricting civilian
+	// record deletion; admins can flip this off per-department in community settings.
+	restrictRecordDeletionDefault := true
 	department := models.Department{
 		ID:               primitive.NewObjectID(),
 		Name:             request.Name,
@@ -116,9 +118,10 @@ func (dt *DepartmentTemplate) CreateDepartmentWithTemplateHandler(w http.Respons
 			Customizations: make(map[string]models.ComponentOverride),
 			IsActive:       true,
 		},
-		CreatedAt:         primitive.NewDateTimeFromTime(time.Now()),
-		UpdatedAt:         primitive.NewDateTimeFromTime(time.Now()),
-		OnlineMemberCount: 0,
+		RestrictCivilianRecordDeletion: &restrictRecordDeletionDefault,
+		CreatedAt:                      primitive.NewDateTimeFromTime(time.Now()),
+		UpdatedAt:                      primitive.NewDateTimeFromTime(time.Now()),
+		OnlineMemberCount:              0,
 	}
 
 	// Set up default component customizations based on template component references

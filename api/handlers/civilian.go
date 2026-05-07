@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,8 +28,9 @@ import (
 
 // Civilian exported for testing purposes
 type Civilian struct {
-	DB  databases.CivilianDatabase
-	UDB databases.UserDatabase
+	DB     databases.CivilianDatabase
+	UDB    databases.UserDatabase
+	CommDB databases.CommunityDatabase
 }
 
 // CivilianHandler returns all civilians
@@ -602,6 +604,13 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Gate: per-issuing-department RestrictCivilianRecordDeletion. If the
+	// criminal-history record's department has the toggle on, require
+	// owner/administrator/manage-records bypass at the community level.
+	if denied, derr := c.checkCivilianRecordDeleteRestriction(ctx, w, r, cID, citID); derr != nil || denied {
+		return
+	}
+
 	// Define the filter and update for removing the citation
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$pull": bson.M{"civilian.criminalHistory": bson.M{"_id": citID}}}
@@ -616,6 +625,81 @@ func (c Civilian) DeleteCriminalHistoryHandler(w http.ResponseWriter, r *http.Re
 	// Respond with success
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Criminal history deleted successfully"}`))
+}
+
+// checkCivilianRecordDeleteRestriction enforces the per-department
+// RestrictCivilianRecordDeletion gate for criminal-history deletes. It looks
+// up the citation on the civilian, reads its issuing DepartmentID, finds the
+// owning community for that department, and delegates to
+// enforceRecordDeleteRestriction. Returns denied=true if a 403/error was
+// already written to w; the caller should return immediately in that case.
+func (c Civilian) checkCivilianRecordDeleteRestriction(ctx context.Context, w http.ResponseWriter, r *http.Request, civilianObjectID, citationID primitive.ObjectID) (denied bool, err error) {
+	civ, err := c.DB.FindOne(ctx, bson.M{"_id": civilianObjectID})
+	if err != nil {
+		config.ErrorStatus("failed to look up civilian for delete-restriction check", http.StatusNotFound, w, err)
+		return true, err
+	}
+	if civ == nil {
+		// No civilian found — let the underlying handler proceed; it will surface its own error.
+		return false, nil
+	}
+	// Find the matching criminal-history entry to read its issuing DepartmentID.
+	var departmentID string
+	for _, ch := range civ.Details.CriminalHistory {
+		if ch.ID == citationID {
+			departmentID = ch.DepartmentID
+			break
+		}
+	}
+	requesterID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	return enforceRecordDeleteRestriction(ctx, w, c.CommDB, departmentID, requesterID)
+}
+
+// enforceRecordDeleteRestriction is the shared gate used by civilian and
+// arrest-report delete handlers. It looks up the issuing department's
+// RestrictCivilianRecordDeletion toggle and, when on, blocks the delete unless
+// the requester has community-level bypass (owner / administrator /
+// manage-records).
+//
+// Records without a DepartmentID (legacy data) fail open — preserving prior
+// behavior so we don't break working flows on unmigrated records.
+func enforceRecordDeleteRestriction(ctx context.Context, w http.ResponseWriter, commDB databases.CommunityDatabase, departmentID, requesterID string) (denied bool, err error) {
+	if departmentID == "" || requesterID == "" {
+		return false, nil
+	}
+	deptID, oerr := primitive.ObjectIDFromHex(departmentID)
+	if oerr != nil {
+		return false, nil
+	}
+	community, ferr := commDB.FindOne(ctx, bson.M{"community.departments._id": deptID})
+	if ferr != nil || community == nil {
+		// Department's parent community can't be located — fail open.
+		return false, nil
+	}
+	var dept *models.Department
+	for i := range community.Details.Departments {
+		if community.Details.Departments[i].ID == deptID {
+			dept = &community.Details.Departments[i]
+			break
+		}
+	}
+	if dept == nil {
+		return false, nil
+	}
+	// Legacy semantics: nil pointer = unset = treat as allow (preserves behavior
+	// on existing departments). Only block when explicitly set to true.
+	if dept.RestrictCivilianRecordDeletion == nil || !*dept.RestrictCivilianRecordDeletion {
+		return false, nil
+	}
+	if userHasCommunityPermission(community, requesterID, "manage records") {
+		return false, nil
+	}
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":   "record_deletion_restricted",
+		"message": "Record deletion is restricted for this department. Contact a community admin or a user with the 'manage records' permission.",
+	})
+	return true, nil
 }
 
 // CivilianApprovalHandler handles civilian sent-for-approval workflow actions

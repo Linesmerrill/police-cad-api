@@ -19,7 +19,9 @@ import (
 
 // ArrestReport exported for testing purposes
 type ArrestReport struct {
-	DB databases.ArrestReportDatabase
+	DB     databases.ArrestReportDatabase
+	CDB    databases.CivilianDatabase
+	CommDB databases.CommunityDatabase
 }
 
 // PaginatedDataResponse holds the structure for paginated responses
@@ -134,11 +136,28 @@ func (a ArrestReport) DeleteArrestReportHandler(w http.ResponseWriter, r *http.R
 	}
 
 	filter := bson.M{"_id": bID}
-	
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
-	
+
+	// Gate: per-issuing-department RestrictCivilianRecordDeletion. Block the
+	// delete unless the requester has community-level bypass (owner /
+	// administrator / manage-records).
+	if a.CommDB != nil {
+		report, ferr := a.DB.FindOne(ctx, filter)
+		if ferr != nil {
+			config.ErrorStatus("failed to find Arrest report", http.StatusNotFound, w, ferr)
+			return
+		}
+		if report != nil {
+			requesterID := api.GetAuthenticatedUserIDFromContext(r.Context())
+			if denied, derr := enforceRecordDeleteRestriction(ctx, w, a.CommDB, report.Details.DepartmentID, requesterID); derr != nil || denied {
+				return
+			}
+		}
+	}
+
 	err = a.DB.DeleteOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to delete Arrest report", http.StatusInternalServerError, w, err)
