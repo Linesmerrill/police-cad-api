@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/linesmerrill/police-cad-api/api"
@@ -131,6 +133,23 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 	}
 	offset := (page - 1) * limit
 
+	// Optional case-insensitive username substring search. Trimmed, capped to
+	// 100 chars to mirror the community-members search endpoint, and escaped
+	// so user-supplied regex metacharacters can't blow up the Mongo query.
+	searchTerm := strings.TrimSpace(r.URL.Query().Get("search"))
+	if len(searchTerm) > 100 {
+		searchTerm = searchTerm[:100]
+	}
+	hasSearch := searchTerm != ""
+	searchLower := strings.ToLower(searchTerm)
+	var usernameRegex bson.M
+	if hasSearch {
+		usernameRegex = bson.M{
+			"$regex":   regexp.QuoteMeta(searchTerm),
+			"$options": "i",
+		}
+	}
+
 	// Convert communityID and departmentID to ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
@@ -188,6 +207,9 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 				},
 			},
 		}
+		if hasSearch {
+			filter["user.username"] = usernameRegex
+		}
 
 		// Count total community members
 		total, err := c.UDB.CountDocuments(ctx, filter)
@@ -238,9 +260,45 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 			}
 		}
 
+		// When a search is provided, intersect the dept's approved member IDs
+		// with users whose username matches. Filtering happens in Mongo so we
+		// don't have to load every member's full user record just to filter.
+		if hasSearch && len(approvedMembers) > 0 {
+			memberIDs := make([]primitive.ObjectID, 0, len(approvedMembers))
+			for _, m := range approvedMembers {
+				if oid, oerr := primitive.ObjectIDFromHex(m.UserID); oerr == nil {
+					memberIDs = append(memberIDs, oid)
+				}
+			}
+			matchedSet := make(map[string]bool)
+			if len(memberIDs) > 0 {
+				cursor, ferr := c.UDB.Find(ctx, bson.M{
+					"_id":           bson.M{"$in": memberIDs},
+					"user.username": usernameRegex,
+				}, options.Find().SetProjection(bson.M{"_id": 1}))
+				if ferr == nil {
+					defer cursor.Close(ctx)
+					var idDocs []struct {
+						ID primitive.ObjectID `bson:"_id"`
+					}
+					_ = cursor.All(ctx, &idDocs)
+					for _, d := range idDocs {
+						matchedSet[d.ID.Hex()] = true
+					}
+				}
+			}
+			filtered := approvedMembers[:0]
+			for _, m := range approvedMembers {
+				if matchedSet[m.UserID] {
+					filtered = append(filtered, m)
+				}
+			}
+			approvedMembers = filtered
+		}
+
 		totalCount = len(approvedMembers)
 
-		// Paginate the approved members
+		// Paginate the (optionally filtered) approved members
 		start := offset
 		end := offset + limit
 		if start > totalCount {
@@ -251,7 +309,7 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 		}
 		paginatedMembers := approvedMembers[start:end]
 
-		// Batch fetch all users in a single query
+		// Batch fetch users for the page
 		userIDs := make([]primitive.ObjectID, 0, len(paginatedMembers))
 		for _, member := range paginatedMembers {
 			userID, err := primitive.ObjectIDFromHex(member.UserID)
@@ -278,6 +336,11 @@ func (c Community) GetDepartmentMembersHandler(w http.ResponseWriter, r *http.Re
 		for _, member := range paginatedMembers {
 			user, exists := userMap[member.UserID]
 			if !exists {
+				continue
+			}
+			// Defensive: skip users whose username no longer matches the search
+			// (e.g. a stale write between the matched-id query and the user fetch).
+			if hasSearch && !strings.Contains(strings.ToLower(user.Details.Username), searchLower) {
 				continue
 			}
 
