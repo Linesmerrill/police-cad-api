@@ -141,28 +141,18 @@ func (a ArrestReport) DeleteArrestReportHandler(w http.ResponseWriter, r *http.R
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Gate: enforce per-community RestrictCivilianRecordDeletion when the
-	// requester owns the civilian (arrestee) on this report. Staff/officers
-	// deleting reports on civilians they don't own are unaffected.
-	if a.CDB != nil && a.CommDB != nil {
+	// Gate: per-issuing-department RestrictCivilianRecordDeletion. Block the
+	// delete unless the requester has community-level bypass (owner /
+	// administrator / manage-records).
+	if a.CommDB != nil {
 		report, ferr := a.DB.FindOne(ctx, filter)
 		if ferr != nil {
 			config.ErrorStatus("failed to find Arrest report", http.StatusNotFound, w, ferr)
 			return
 		}
 		if report != nil {
-			communityID := report.Details.ActiveCommunityID
-			arresteeID := report.Details.Arrestee.ID
-			var civilianOwnerID string
-			if arresteeID != "" {
-				if civID, perr := primitive.ObjectIDFromHex(arresteeID); perr == nil {
-					if civ, cerr := a.CDB.FindOne(ctx, bson.M{"_id": civID}); cerr == nil && civ != nil {
-						civilianOwnerID = civ.Details.UserID
-					}
-				}
-			}
 			requesterID := api.GetAuthenticatedUserIDFromContext(r.Context())
-			if denied, derr := enforceRecordDeleteRestriction(ctx, w, a.CommDB, communityID, civilianOwnerID, requesterID); derr != nil || denied {
+			if denied, derr := enforceRecordDeleteRestriction(ctx, w, a.CommDB, report.Details.DepartmentID, requesterID); derr != nil || denied {
 				return
 			}
 		}
