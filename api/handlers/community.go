@@ -74,6 +74,48 @@ var defaultPermissionDefs = []struct {
 	{"administrator", "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant."},
 }
 
+// getDepartmentMemberObjectIDs returns the ObjectIDs of users currently in
+// the given department. Used by the community-members and members/search
+// endpoints to optionally exclude users already in a department (so the
+// "Add Members" screen on mobile/web doesn't have to filter client-side and
+// shrink each page below the requested limit). Returns nil on any lookup
+// failure — callers should treat that as "no exclusion".
+func getDepartmentMemberObjectIDs(ctx context.Context, commDB databases.CommunityDatabase, communityID, departmentID string) []primitive.ObjectID {
+	if communityID == "" || departmentID == "" {
+		return nil
+	}
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return nil
+	}
+	dID, err := primitive.ObjectIDFromHex(departmentID)
+	if err != nil {
+		return nil
+	}
+	community, err := commDB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil || community == nil {
+		return nil
+	}
+	for _, dept := range community.Details.Departments {
+		if dept.ID != dID {
+			continue
+		}
+		seen := make(map[string]bool, len(dept.Members))
+		ids := make([]primitive.ObjectID, 0, len(dept.Members))
+		for _, m := range dept.Members {
+			if m.UserID == "" || seen[m.UserID] {
+				continue
+			}
+			seen[m.UserID] = true
+			if oid, oerr := primitive.ObjectIDFromHex(m.UserID); oerr == nil {
+				ids = append(ids, oid)
+			}
+		}
+		return ids
+	}
+	return nil
+}
+
 // backfillPermissions adds any missing default permissions to a role's permission list.
 // Missing permissions are added with Enabled: false.
 func backfillPermissions(roles []models.Role) []models.Role {
@@ -480,23 +522,32 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 	// Calculate the offset for pagination
 	offset := (page - 1) * limit
 
-	// Find all users that belong to the community with pagination
-	filter := bson.M{
-		"$and": []bson.M{
-			{"user.communities": bson.M{"$exists": true}},
-			{"user.communities": bson.M{"$ne": nil}},
-			{"user.communities": bson.M{
-				"$elemMatch": bson.M{
-					"communityId": communityID,
-					"status":      "approved",
-				},
-			}},
-		},
-	}
-
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Find all users that belong to the community with pagination
+	andClauses := []bson.M{
+		{"user.communities": bson.M{"$exists": true}},
+		{"user.communities": bson.M{"$ne": nil}},
+		{"user.communities": bson.M{
+			"$elemMatch": bson.M{
+				"communityId": communityID,
+				"status":      "approved",
+			},
+		}},
+	}
+
+	// Optional: exclude users already in a given department.
+	if excludeDeptID := r.URL.Query().Get("exclude_dept_id"); excludeDeptID != "" {
+		if excluded := getDepartmentMemberObjectIDs(ctx, c.DB, communityID, excludeDeptID); len(excluded) > 0 {
+			andClauses = append(andClauses, bson.M{
+				"_id": bson.M{"$nin": excluded},
+			})
+		}
+	}
+
+	filter := bson.M{"$and": andClauses}
 
 	// Count the total number of users
 	totalUsers, err := c.UDB.CountDocuments(ctx, filter)
@@ -6502,32 +6553,44 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	// 1. Have the community in their communities array with status "approved"
 	// 2. Match the search query in their callSign or username
 	//
-	// NOTE: We use regex for all query lengths. $text search was previously used for
-	// queries >=3 chars, but it does whole-word tokenized matching which doesn't work
-	// for partial username searches (e.g. "side" wouldn't match "SideWayzBuddha").
+	// Substring match (no leading anchor) so e.g. "whit" finds "OperatorWhit"
+	// as well as "Whitman" — matches user expectations from messengers like
+	// Discord/Slack. Case-insensitive, regex.QuoteMeta'd to neutralize regex
+	// metacharacters in user input.
 	escapedQuery := regexp.QuoteMeta(query)
 	searchCondition := bson.M{
 		"$or": []bson.M{
-			{"user.callSign": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
-			{"user.username": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}},
+			{"user.callSign": bson.M{"$regex": escapedQuery, "$options": "i"}},
+			{"user.username": bson.M{"$regex": escapedQuery, "$options": "i"}},
 		},
 	}
-	
-	filter := bson.M{
-		"$and": []bson.M{
-			// User must be a member of the community with status "approved"
-			{
-				"user.communities": bson.M{
-					"$elemMatch": bson.M{
-						"communityId": communityID,
-						"status":      "approved",
-					},
+
+	andClauses := []bson.M{
+		// User must be a member of the community with status "approved"
+		{
+			"user.communities": bson.M{
+				"$elemMatch": bson.M{
+					"communityId": communityID,
+					"status":      "approved",
 				},
 			},
-			// User must match the search query
-			searchCondition,
 		},
+		// User must match the search query
+		searchCondition,
 	}
+
+	// Optional: exclude users already in a given department so callers like
+	// the mobile "Add Members" screen don't have to filter client-side and
+	// shrink each page below the requested limit.
+	if excludeDeptID := r.URL.Query().Get("exclude_dept_id"); excludeDeptID != "" {
+		if excluded := getDepartmentMemberObjectIDs(ctx, c.DB, communityID, excludeDeptID); len(excluded) > 0 {
+			andClauses = append(andClauses, bson.M{
+				"_id": bson.M{"$nin": excluded},
+			})
+		}
+	}
+
+	filter := bson.M{"$and": andClauses}
 
 	// Count total matching users
 	totalCount, err := c.UDB.CountDocuments(ctx, filter)
