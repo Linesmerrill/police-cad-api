@@ -177,6 +177,40 @@ func (m MetricsHandler) GetRouteMetrics(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(routeData)
 }
 
+// GetMetricsCharts returns pre-aggregated chart data for the dashboard's
+// visualizations panel: time-series buckets, status/method distributions,
+// latency histogram, DB-collection stats, and top routes by errors / volume.
+func (m MetricsHandler) GetMetricsCharts(w http.ResponseWriter, r *http.Request) {
+	metrics := api.GetMetrics()
+
+	since := time.Now().Add(-1 * time.Hour)
+	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+		if parsed, err := time.ParseDuration(sinceStr); err == nil {
+			since = time.Now().Add(-parsed)
+		}
+	}
+
+	buckets := 30
+	if bStr := r.URL.Query().Get("buckets"); bStr != "" {
+		if parsed, err := strconv.Atoi(bStr); err == nil && parsed >= 5 && parsed <= 120 {
+			buckets = parsed
+		}
+	}
+
+	topN := 10
+	if tStr := r.URL.Query().Get("topN"); tStr != "" {
+		if parsed, err := strconv.Atoi(tStr); err == nil && parsed >= 1 && parsed <= 50 {
+			topN = parsed
+		}
+	}
+
+	data := metrics.GetChartsData(since, buckets, topN)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(data)
+}
+
 // GetSlowQueries returns slow database queries
 func (m MetricsHandler) GetSlowQueries(w http.ResponseWriter, r *http.Request) {
 	metrics := api.GetMetrics()
