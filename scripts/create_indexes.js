@@ -497,6 +497,34 @@ createIndexSafe(
   }
 );
 
+// Verified email/password change flow — lookups by (userID, purpose) on every
+// request-change and confirm call. Without this, every code submission scans
+// the collection.
+createIndexSafe(
+  db.pendingVerifications,
+  { "userID": 1, "purpose": 1 },
+  {
+    name: "pending_verifications_user_purpose_idx",
+    background: true
+  }
+);
+
+// TTL on expiresAt: auto-removes expired email_change/password_change rows
+// after their 15-minute window (signup rows don't set expiresAt and are
+// skipped — TTL only applies to docs whose indexed field is a Date).
+// expireAfterSeconds: 0 means "delete when the stored Date value is in the
+// past"; MongoDB's TTL monitor runs every ~60s, so cleanup can lag a minute.
+createIndexSafe(
+  db.pendingVerifications,
+  { "expiresAt": 1 },
+  {
+    name: "pending_verifications_expires_at_ttl",
+    expireAfterSeconds: 0,
+    partialFilterExpression: { expiresAt: { $exists: true } },
+    background: true
+  }
+);
+
 // MEDIUM PRIORITY: Invite Code + Remaining Uses Index (Performance Advisor)
 // Expected Impact: 0.71 queries/hour
 // Avg Execution Time: 1047 ms, Avg Docs Scanned: 6680
