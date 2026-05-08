@@ -19,8 +19,9 @@ type PendingVerification struct {
 	CreatedAt interface{}        `json:"createdAt" bson:"createdAt"`
 
 	// Sensitive-change fields. Empty on legacy signup rows.
-	Purpose   string             `json:"purpose,omitempty" bson:"purpose,omitempty"`
-	UserID    primitive.ObjectID `json:"userID,omitempty" bson:"userID,omitempty"`
-	NewEmail  string             `json:"newEmail,omitempty" bson:"newEmail,omitempty"`
-	ExpiresAt interface{}        `json:"expiresAt,omitempty" bson:"expiresAt,omitempty"`
+	Purpose      string             `json:"purpose,omitempty" bson:"purpose,omitempty"`
+	UserID       primitive.ObjectID `json:"userID,omitempty" bson:"userID,omitempty"`
+	NewEmail     string             `json:"newEmail,omitempty" bson:"newEmail,omitempty"`
+	ExpiresAt    interface{}        `json:"expiresAt,omitempty" bson:"expiresAt,omitempty"`
+	RequestCount int                `json:"requestCount,omitempty" bson:"requestCount,omitempty"`
 }

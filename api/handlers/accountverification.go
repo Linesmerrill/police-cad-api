@@ -57,8 +57,11 @@ func timeFromBSON(v interface{}) time.Time {
 	return time.Time{}
 }
 
-// checkSensitiveCodeRateLimit enforces a 60-second gap between consecutive code requests for the
-// same (userID, purpose). Returns nil when a new code may be issued.
+// checkSensitiveCodeRateLimit gives the user one free resend (in case the first email got lost
+// in spam, was sent to a typo, etc.) and enforces a 60-second gap on every resend after that.
+// First send: row doesn't exist yet, returns nil.
+// Second send (first resend): existing.RequestCount == 1, returns nil.
+// Third+ send: enforces the 60s gap from the most recent createdAt.
 func checkSensitiveCodeRateLimit(ctx context.Context, pvdb databases.PendingVerificationDatabase, userID primitive.ObjectID, purpose string) error {
 	existing, err := pvdb.FindOne(ctx, bson.M{"userID": userID, "purpose": purpose})
 	if err == mongo.ErrNoDocuments {
@@ -66,6 +69,9 @@ func checkSensitiveCodeRateLimit(ctx context.Context, pvdb databases.PendingVeri
 	}
 	if err != nil {
 		return err
+	}
+	if existing.RequestCount < 2 {
+		return nil
 	}
 	last := timeFromBSON(existing.CreatedAt)
 	if !last.IsZero() && time.Since(last) < sensitiveResendGap {
@@ -96,19 +102,21 @@ func upsertSensitiveCode(ctx context.Context, pvdb databases.PendingVerification
 	}
 
 	if existing != nil {
-		return pvdb.UpdateOne(ctx, filter, bson.M{"$set": setFields})
+		// $inc creates the field if missing — handles legacy rows written before RequestCount existed.
+		return pvdb.UpdateOne(ctx, filter, bson.M{"$set": setFields, "$inc": bson.M{"requestCount": 1}})
 	}
 
 	row := models.PendingVerification{
-		ID:        primitive.NewObjectID(),
-		Email:     currentEmail,
-		Code:      code,
-		Attempts:  0,
-		CreatedAt: primitive.NewDateTimeFromTime(now),
-		Purpose:   purpose,
-		UserID:    userID,
-		NewEmail:  newEmail,
-		ExpiresAt: primitive.NewDateTimeFromTime(expires),
+		ID:           primitive.NewObjectID(),
+		Email:        currentEmail,
+		Code:         code,
+		Attempts:     0,
+		CreatedAt:    primitive.NewDateTimeFromTime(now),
+		Purpose:      purpose,
+		UserID:       userID,
+		NewEmail:     newEmail,
+		ExpiresAt:    primitive.NewDateTimeFromTime(expires),
+		RequestCount: 1,
 	}
 	_, insertErr := pvdb.InsertOne(ctx, row)
 	return insertErr
