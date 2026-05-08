@@ -18,7 +18,7 @@ import (
 	templates "github.com/linesmerrill/police-cad-api/templates/html"
 )
 
-const minPasswordLength = 8
+const minPasswordLength = 6
 
 // RequestEmailChangeHandler starts a verified email change. After validating the user's current
 // password, it issues a 6-digit code to the user's CURRENT email address and stores a
@@ -288,7 +288,7 @@ func (pv PendingVerification) ConfirmPasswordChangeHandler(w http.ResponseWriter
 		return
 	}
 	if len(body.NewPassword) < minPasswordLength {
-		writeJSONError(w, http.StatusBadRequest, "New password must be at least 8 characters")
+		writeJSONError(w, http.StatusBadRequest, "New password must be at least 6 characters")
 		return
 	}
 
