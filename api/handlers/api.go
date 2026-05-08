@@ -159,6 +159,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/metrics/summary", http.HandlerFunc(metricsHandler.GetMetricsSummary)).Methods("GET")
 	apiV2.Handle("/metrics/route", http.HandlerFunc(metricsHandler.GetRouteMetrics)).Methods("GET")
 	apiV2.Handle("/metrics/slow-queries", http.HandlerFunc(metricsHandler.GetSlowQueries)).Methods("GET")
+	apiV2.Handle("/metrics/charts", http.HandlerFunc(metricsHandler.GetMetricsCharts)).Methods("GET")
 	ws := r.PathPrefix("/ws").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")

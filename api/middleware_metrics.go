@@ -20,6 +20,7 @@ func MetricsMiddleware(next http.Handler) http.Handler {
 		   path == "/api/v2/metrics/summary" || 
 		   path == "/api/v2/metrics/route" || 
 		   path == "/api/v2/metrics/slow-queries" ||
+		   path == "/api/v2/metrics/charts" ||
 		   path == "/metrics-dashboard" ||
 		   path == "/health" ||
 		   path == "/ws/notifications" {
