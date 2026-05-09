@@ -130,6 +130,53 @@ func TestRequestEmailChange_HappyPath_StoresCodeAndReturns200(t *testing.T) {
 	mockPVDB.AssertCalled(t, "InsertOne", mock.Anything, mock.AnythingOfType("models.PendingVerification"))
 }
 
+// When a user comes back after the rate-limit window has passed, the upsert resets
+// requestCount to 1 — without this, a stale row from a prior session (requestCount=2+)
+// would deny the user their free resend immediately on the next attempt.
+func TestRequestEmailChange_StaleRow_ResetsRequestCount(t *testing.T) {
+	uID := primitive.NewObjectID()
+	rowID := primitive.NewObjectID()
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+
+	stubPVUserFindOne(mockUDB, uID, &models.User{
+		Details: models.UserDetails{Email: "old@example.com", Password: hashPassword(t, "pw")},
+	})
+	stubPVUniquenessNoConflict(mockUDB, "new@example.com", uID)
+
+	staleCreatedAt := primitive.NewDateTimeFromTime(time.Now().Add(-5 * time.Minute))
+	mockPVDB.On("FindOne", mock.Anything, bson.M{"userID": uID, "purpose": models.PurposeEmailChange}).
+		Return(&models.PendingVerification{
+			ID: rowID, UserID: uID, Purpose: models.PurposeEmailChange,
+			CreatedAt: staleCreatedAt, RequestCount: 3,
+		}, nil)
+	mockPVDB.On("UpdateOne", mock.Anything,
+		bson.M{"userID": uID, "purpose": models.PurposeEmailChange},
+		mock.MatchedBy(func(u interface{}) bool {
+			update, ok := u.(bson.M)
+			if !ok {
+				return false
+			}
+			if _, hasInc := update["$inc"]; hasInc {
+				return false
+			}
+			set, ok := update["$set"].(bson.M)
+			if !ok {
+				return false
+			}
+			rc, ok := set["requestCount"].(int)
+			return ok && rc == 1
+		}),
+	).Return(nil)
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"newEmail":"new@example.com","currentPassword":"pw"}`, map[string]string{"user_id": uID.Hex()})
+	http.HandlerFunc(pv.RequestEmailChangeHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
 // -----------------------------------------------------------------------------
 // ConfirmEmailChangeHandler
 // -----------------------------------------------------------------------------

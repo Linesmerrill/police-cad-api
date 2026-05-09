@@ -25,6 +25,11 @@ const (
 	sensitiveCodeTTL    = 15 * time.Minute
 	sensitiveMaxRetries = 5
 	sensitiveResendGap  = 60 * time.Second
+
+	// signupCodeTTL bounds how long an unverified signup pending row sits in the DB.
+	// Pairs with the TTL index on expiresAt — without this, abandoned signup rows
+	// accumulate forever and trip the "verification already in progress" path on retry.
+	signupCodeTTL = 24 * time.Hour
 )
 
 // generateNumericCode returns a zero-padded 6-digit code drawn from crypto/rand.
@@ -102,6 +107,14 @@ func upsertSensitiveCode(ctx context.Context, pvdb databases.PendingVerification
 	}
 
 	if existing != nil {
+		// If the previous send was outside the rate-limit window, treat this as a fresh
+		// session — reset requestCount so the user gets their free resend back. Otherwise
+		// keep $inc-ing so spam within the window still trips the gate.
+		last := timeFromBSON(existing.CreatedAt)
+		if !last.IsZero() && time.Since(last) >= sensitiveResendGap {
+			setFields["requestCount"] = 1
+			return pvdb.UpdateOne(ctx, filter, bson.M{"$set": setFields})
+		}
 		// $inc creates the field if missing — handles legacy rows written before RequestCount existed.
 		return pvdb.UpdateOne(ctx, filter, bson.M{"$set": setFields, "$inc": bson.M{"requestCount": 1}})
 	}

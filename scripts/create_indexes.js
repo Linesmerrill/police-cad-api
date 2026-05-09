@@ -509,9 +509,11 @@ createIndexSafe(
   }
 );
 
-// TTL on expiresAt: auto-removes expired email_change/password_change rows
-// after their 15-minute window (signup rows don't set expiresAt and are
-// skipped — TTL only applies to docs whose indexed field is a Date).
+// TTL on expiresAt: auto-removes pending verification rows after their window.
+// Sensitive-change rows (email_change/password_change) live 15 minutes; signup
+// rows live 24 hours. Legacy signup rows written before signup-TTL was wired
+// have no expiresAt and stay until cleaned up manually — partialFilter skips
+// them so they don't get instantly deleted by the index.
 // expireAfterSeconds: 0 means "delete when the stored Date value is in the
 // past"; MongoDB's TTL monitor runs every ~60s, so cleanup can lag a minute.
 createIndexSafe(
