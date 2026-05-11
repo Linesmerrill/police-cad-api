@@ -549,6 +549,257 @@
         .value-updated { animation: val-flash 0.4s ease-out; }
 
         .refreshing { opacity: 0.65; transition: opacity 0.2s; }
+
+        /* ─── CHARTS SECTION ─── */
+        .charts-section {
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-surface);
+        }
+
+        .charts-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            gap: 10px;
+        }
+
+        .charts-strip-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--text-dim);
+        }
+
+        .charts-strip-meta {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1px;
+            background: var(--border);
+        }
+
+        @media (min-width: 720px) {
+            .charts-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (min-width: 1100px) {
+            .charts-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+
+        .chart-card {
+            background: var(--bg-surface);
+            padding: 14px 16px 16px;
+            display: flex;
+            flex-direction: column;
+            min-height: 220px;
+            position: relative;
+            transition: background 0.15s;
+        }
+
+        .chart-card:hover { background: var(--bg-elevated); }
+
+        .chart-card.span-2 { grid-column: span 1; }
+        .chart-card.span-3 { grid-column: span 1; }
+
+        @media (min-width: 720px) {
+            .chart-card.span-2 { grid-column: span 2; }
+            .chart-card.span-3 { grid-column: span 2; }
+        }
+
+        @media (min-width: 1100px) {
+            .chart-card.span-2 { grid-column: span 2; }
+            .chart-card.span-3 { grid-column: span 3; }
+        }
+
+        .chart-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .chart-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+        }
+
+        .chart-meta {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .chart-body {
+            position: relative;
+            flex: 1;
+            width: 100%;
+            min-height: 160px;
+        }
+
+        .chart-body svg {
+            display: block;
+            width: 100%;
+            height: auto;
+            overflow: visible;
+        }
+
+        .chart-legend {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 10px;
+            line-height: 1;
+        }
+
+        .chart-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+
+        .chart-legend .swatch {
+            display: inline-block;
+            width: 9px;
+            height: 2px;
+            border-radius: 1px;
+        }
+
+        .chart-legend .swatch-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .chart-legend .swatch-dash {
+            background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px);
+            height: 2px;
+            width: 12px;
+        }
+
+        /* SVG primitives */
+        .chart-grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 1 3; }
+
+        .chart-axis-tick {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            fill: var(--text-dim);
+        }
+
+        .chart-bar-top {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            font-weight: 600;
+            fill: var(--text-muted);
+            text-anchor: middle;
+        }
+
+        .chart-hbar-label {
+            font-family: 'Figtree', sans-serif;
+            font-size: 11px;
+            font-weight: 500;
+            fill: var(--text);
+            dominant-baseline: middle;
+        }
+
+        .chart-hbar-sub {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            fill: var(--text-dim);
+            dominant-baseline: middle;
+        }
+
+        .chart-hbar-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 600;
+            fill: var(--text);
+            dominant-baseline: middle;
+        }
+
+        .chart-donut-big {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 22px;
+            font-weight: 600;
+            fill: var(--text);
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+
+        .chart-donut-small {
+            font-family: 'Figtree', sans-serif;
+            font-size: 9px;
+            font-weight: 700;
+            fill: var(--text-dim);
+            text-anchor: middle;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .chart-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 160px;
+            color: var(--text-dim);
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Tooltip — single shared element */
+        .chart-tip {
+            position: fixed;
+            top: 0; left: 0;
+            pointer-events: none;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 6px 9px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            line-height: 1.45;
+            color: var(--text);
+            white-space: pre;
+            z-index: 200;
+            opacity: 0;
+            transform: translate3d(0, 0, 0);
+            transition: opacity 0.1s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+            max-width: 240px;
+        }
+
+        .chart-tip.show { opacity: 1; }
+
+        .chart-tip .tip-key {
+            color: var(--text-dim);
+            font-weight: 500;
+        }
+
+        /* Hover dot for line tooltips */
+        .chart-cursor-dot { fill: var(--text); stroke: var(--bg-surface); stroke-width: 1.5; }
+        .chart-cursor-line { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
+
+        /* Bar segment hover (slight brighten via filter) */
+        .chart-hover-target { transition: opacity 0.12s; cursor: default; }
+        .chart-hover-target:hover { opacity: 0.78; }
+
+        @media (max-width: 599px) {
+            .chart-card { padding: 12px 14px 14px; min-height: 200px; }
+            .chart-donut-big { font-size: 18px; }
+            .chart-hbar-label { font-size: 10px; }
+        }
     </style>
 </head>
 <body>
@@ -612,6 +863,110 @@
 
 <!-- ─── ERROR BANNER ─── -->
 <div id="errorBanner" class="error-banner" style="display:none;"></div>
+
+<!-- ─── ANALYTICS / CHARTS ─── -->
+<section class="charts-section" id="chartsSection">
+    <div class="charts-strip">
+        <span class="charts-strip-label">Analytics</span>
+        <span class="charts-strip-meta" id="charts-window-meta">—</span>
+    </div>
+    <div class="charts-grid">
+
+        <div class="chart-card span-3">
+            <div class="chart-head">
+                <span class="chart-label">Request Rate Over Time</span>
+                <span class="chart-meta" id="meta-request-rate">—</span>
+            </div>
+            <div class="chart-body" id="cb-request-rate">
+                <div class="chart-empty">—</div>
+            </div>
+            <div class="chart-legend">
+                <span><span class="swatch" style="background:var(--green)"></span>Requests</span>
+                <span><span class="swatch swatch-dash" style="color:var(--red)"></span>Errors</span>
+            </div>
+        </div>
+
+        <div class="chart-card span-3">
+            <div class="chart-head">
+                <span class="chart-label">Latency Over Time</span>
+                <span class="chart-meta" id="meta-latency-time">—</span>
+            </div>
+            <div class="chart-body" id="cb-latency-time">
+                <div class="chart-empty">—</div>
+            </div>
+            <div class="chart-legend">
+                <span><span class="swatch" style="background:var(--blue)"></span>P50</span>
+                <span><span class="swatch" style="background:var(--purple)"></span>P95</span>
+                <span><span class="swatch" style="background:var(--red)"></span>P99</span>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-head">
+                <span class="chart-label">Status Codes</span>
+                <span class="chart-meta" id="meta-status">—</span>
+            </div>
+            <div class="chart-body" id="cb-status">
+                <div class="chart-empty">—</div>
+            </div>
+            <div class="chart-legend" id="legend-status"></div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-head">
+                <span class="chart-label">HTTP Methods</span>
+                <span class="chart-meta" id="meta-method">—</span>
+            </div>
+            <div class="chart-body" id="cb-method">
+                <div class="chart-empty">—</div>
+            </div>
+            <div class="chart-legend" id="legend-method"></div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-head">
+                <span class="chart-label">Latency Distribution</span>
+                <span class="chart-meta" id="meta-histogram">—</span>
+            </div>
+            <div class="chart-body" id="cb-histogram">
+                <div class="chart-empty">—</div>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-head">
+                <span class="chart-label">DB Queries by Collection</span>
+                <span class="chart-meta" id="meta-collections">—</span>
+            </div>
+            <div class="chart-body" id="cb-collections">
+                <div class="chart-empty">—</div>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-head">
+                <span class="chart-label">Top Routes — Errors</span>
+                <span class="chart-meta" id="meta-top-errors">—</span>
+            </div>
+            <div class="chart-body" id="cb-top-errors">
+                <div class="chart-empty">—</div>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-head">
+                <span class="chart-label">Top Routes — Volume</span>
+                <span class="chart-meta" id="meta-top-volume">—</span>
+            </div>
+            <div class="chart-body" id="cb-top-volume">
+                <div class="chart-empty">—</div>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<div class="chart-tip" id="chartTip"></div>
 
 <!-- ─── TABS ─── -->
 <nav class="tabs">
@@ -1017,6 +1372,9 @@
 
             document.getElementById('slowestContent').classList.remove('refreshing');
             document.getElementById('frequentContent').classList.remove('refreshing');
+
+            // Charts refresh in lockstep with the rest of the dashboard
+            loadCharts();
         } catch (err) {
             document.getElementById('slowestContent').classList.remove('refreshing');
             document.getElementById('frequentContent').classList.remove('refreshing');
@@ -1040,6 +1398,658 @@
                 '<div class="state-box" style="color:var(--red)">Error: ' + err.message + '</div>';
         }
     }
+
+    // ─── CHARTS ──────────────────────────────────────────────────────────
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const CHARTS_API = '/api/v2/metrics/charts';
+    let lastChartsData = null;
+
+    function svgEl(name, attrs, parent) {
+        var e = document.createElementNS(SVG_NS, name);
+        if (attrs) {
+            for (var k in attrs) {
+                if (attrs[k] === null || attrs[k] === undefined) continue;
+                e.setAttribute(k, attrs[k]);
+            }
+        }
+        if (parent) parent.appendChild(e);
+        return e;
+    }
+
+    function clearNode(node) {
+        if (!node) return;
+        while (node.firstChild) node.removeChild(node.firstChild);
+    }
+
+    function emptyState(container, msg) {
+        clearNode(container);
+        var d = document.createElement('div');
+        d.className = 'chart-empty';
+        d.textContent = msg || 'No data';
+        container.appendChild(d);
+    }
+
+    function fmtCompact(n) {
+        if (n == null) return '—';
+        if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+        return String(n);
+    }
+
+    function fmtBucketTime(iso, bucketSec) {
+        var d = new Date(iso);
+        if (bucketSec >= 3600) return d.toLocaleTimeString([], { hour: '2-digit' });
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Compute "nice" axis ticks. Returns array of values from 0 to a clean max.
+    function niceTicks(max, count) {
+        if (max <= 0) return [0, 1];
+        count = count || 4;
+        var rough = max / count;
+        var pow = Math.pow(10, Math.floor(Math.log10(rough)));
+        var bases = [1, 2, 2.5, 5, 10];
+        var step = pow;
+        for (var i = 0; i < bases.length; i++) {
+            if (bases[i] * pow >= rough) { step = bases[i] * pow; break; }
+        }
+        var top = Math.ceil(max / step) * step;
+        var ticks = [];
+        for (var v = 0; v <= top + 1e-9; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+        return ticks;
+    }
+
+    // Tooltip API
+    var tipEl;
+    function tip() { tipEl = tipEl || document.getElementById('chartTip'); return tipEl; }
+    function showTip(html, evt) {
+        var t = tip();
+        t.innerHTML = html;
+        t.classList.add('show');
+        moveTip(evt);
+    }
+    function moveTip(evt) {
+        var t = tip();
+        var x = evt.clientX, y = evt.clientY;
+        var pad = 12;
+        var rect = t.getBoundingClientRect();
+        var vw = window.innerWidth, vh = window.innerHeight;
+        var px = x + pad;
+        var py = y - rect.height - pad;
+        if (px + rect.width > vw - 6) px = x - rect.width - pad;
+        if (py < 6) py = y + pad + 14;
+        if (py + rect.height > vh - 6) py = vh - rect.height - 6;
+        t.style.transform = 'translate3d(' + px + 'px,' + py + 'px,0)';
+    }
+    function hideTip() {
+        var t = tip();
+        t.classList.remove('show');
+    }
+
+    function tipRow(key, val, accentVar) {
+        var dot = accentVar ? '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(' + accentVar + ');margin-right:6px;vertical-align:1px"></span>' : '';
+        return '<div>' + dot + '<span class="tip-key">' + key + '</span>  ' + val + '</div>';
+    }
+
+    // Truncate an SVG <text> element with ellipsis when it overflows maxW.
+    // Element must already be attached to the DOM (so getComputedTextLength works).
+    function fitText(textEl, maxW) {
+        if (!textEl || maxW <= 0) return;
+        var len;
+        try { len = textEl.getComputedTextLength(); } catch (e) { return; }
+        if (len <= maxW) return;
+        var orig = textEl.textContent;
+        // Binary search the longest prefix that fits with an ellipsis suffix
+        var lo = 1, hi = orig.length;
+        while (lo < hi) {
+            var mid = (lo + hi + 1) >> 1;
+            textEl.textContent = orig.slice(0, mid) + '…';
+            if (textEl.getComputedTextLength() <= maxW) lo = mid; else hi = mid - 1;
+        }
+        textEl.textContent = orig.slice(0, lo) + '…';
+    }
+
+    // ── REQUEST RATE OVER TIME ───────────────────────────────────────────
+    function renderRequestRate(data) {
+        var box = document.getElementById('cb-request-rate');
+        var buckets = (data && data.timeSeries) || [];
+        var hasData = buckets.some(function(b) { return b.requests > 0; });
+        if (!hasData) { emptyState(box, 'No requests in window'); return; }
+
+        clearNode(box);
+        var W = box.clientWidth || 320;
+        var H = 220;
+        var P = { t: 18, r: 16, b: 24, l: 40 };
+        var iw = W - P.l - P.r;
+        var ih = H - P.t - P.b;
+
+        var maxReq = Math.max.apply(null, buckets.map(function(b) { return Math.max(b.requests, b.errors); }));
+        var ticks = niceTicks(maxReq, 4);
+        var top = ticks[ticks.length - 1] || 1;
+
+        var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none' }, box);
+
+        // Gridlines + Y ticks
+        ticks.forEach(function(t) {
+            var y = P.t + ih - (t / top) * ih;
+            svgEl('line', { class: 'chart-grid-line', x1: P.l, x2: P.l + iw, y1: y, y2: y }, svg);
+            var tx = svgEl('text', { class: 'chart-axis-tick', x: P.l - 7, y: y + 3, 'text-anchor': 'end' }, svg);
+            tx.textContent = fmtCompact(t);
+        });
+
+        // X-axis tick labels (4 labels, evenly spaced)
+        var labelCount = Math.min(4, buckets.length);
+        for (var i = 0; i < labelCount; i++) {
+            var idx = Math.floor(i * (buckets.length - 1) / Math.max(labelCount - 1, 1));
+            var lx = P.l + (idx / Math.max(buckets.length - 1, 1)) * iw;
+            var lt = svgEl('text', { class: 'chart-axis-tick', x: lx, y: H - 6, 'text-anchor': 'middle' }, svg);
+            lt.textContent = fmtBucketTime(buckets[idx].time, data.bucketSeconds || 60);
+        }
+
+        // Coordinate fns
+        function bx(i) { return P.l + (i / Math.max(buckets.length - 1, 1)) * iw; }
+        function by(v) { return P.t + ih - (v / top) * ih; }
+
+        // Area fill under requests
+        var areaD = 'M ' + bx(0) + ' ' + by(0);
+        for (var i = 0; i < buckets.length; i++) areaD += ' L ' + bx(i) + ' ' + by(buckets[i].requests);
+        areaD += ' L ' + bx(buckets.length - 1) + ' ' + by(0) + ' Z';
+        svgEl('path', { d: areaD, fill: 'var(--green-dim)' }, svg);
+
+        // Requests line
+        var lineD = 'M ' + bx(0) + ' ' + by(buckets[0].requests);
+        for (var i = 1; i < buckets.length; i++) lineD += ' L ' + bx(i) + ' ' + by(buckets[i].requests);
+        svgEl('path', {
+            d: lineD, fill: 'none', stroke: 'var(--green)', 'stroke-width': 1.75,
+            'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+            'vector-effect': 'non-scaling-stroke'
+        }, svg);
+
+        // Errors line (dashed red), only if any
+        if (buckets.some(function(b) { return b.errors > 0; })) {
+            var errD = 'M ' + bx(0) + ' ' + by(buckets[0].errors);
+            for (var i = 1; i < buckets.length; i++) errD += ' L ' + bx(i) + ' ' + by(buckets[i].errors);
+            svgEl('path', {
+                d: errD, fill: 'none', stroke: 'var(--red)', 'stroke-width': 1.5,
+                'stroke-dasharray': '4 3',
+                'vector-effect': 'non-scaling-stroke'
+            }, svg);
+        }
+
+        // Cursor + dot for hover
+        var cursor = svgEl('line', { class: 'chart-cursor-line', x1: 0, x2: 0, y1: P.t, y2: P.t + ih, opacity: 0 }, svg);
+        var dot = svgEl('circle', { class: 'chart-cursor-dot', cx: 0, cy: 0, r: 3.5, opacity: 0 }, svg);
+
+        // Hover layer
+        var hover = svgEl('rect', { x: P.l, y: P.t, width: iw, height: ih, fill: 'transparent' }, svg);
+        hover.addEventListener('mousemove', function(e) {
+            var rect = svg.getBoundingClientRect();
+            var sx = (e.clientX - rect.left) * (W / rect.width);
+            var idx = Math.round(((sx - P.l) / iw) * (buckets.length - 1));
+            if (idx < 0) idx = 0; if (idx > buckets.length - 1) idx = buckets.length - 1;
+            var b = buckets[idx];
+            cursor.setAttribute('x1', bx(idx));
+            cursor.setAttribute('x2', bx(idx));
+            cursor.setAttribute('opacity', 1);
+            dot.setAttribute('cx', bx(idx));
+            dot.setAttribute('cy', by(b.requests));
+            dot.setAttribute('opacity', 1);
+            var bucketLabel = new Date(b.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            showTip(
+                tipRow('Time', bucketLabel) +
+                tipRow('Requests', fmtNum(b.requests), '--green') +
+                tipRow('Errors', fmtNum(b.errors), '--red'),
+                e
+            );
+        });
+        hover.addEventListener('mouseleave', function() {
+            cursor.setAttribute('opacity', 0);
+            dot.setAttribute('opacity', 0);
+            hideTip();
+        });
+
+        document.getElementById('meta-request-rate').textContent =
+            fmtNum(data.totalInWindow || 0) + ' total · ' + (data.bucketSeconds || 60) + 's buckets';
+    }
+
+    // ── LATENCY OVER TIME (P50/P95/P99) ──────────────────────────────────
+    function renderLatencyTime(data) {
+        var box = document.getElementById('cb-latency-time');
+        var buckets = (data && data.timeSeries) || [];
+        var hasData = buckets.some(function(b) { return b.p99Ms > 0 || b.p95Ms > 0 || b.p50Ms > 0; });
+        if (!hasData) { emptyState(box, 'No latency samples in window'); return; }
+
+        clearNode(box);
+        var W = box.clientWidth || 320;
+        var H = 220;
+        var P = { t: 18, r: 16, b: 24, l: 44 };
+        var iw = W - P.l - P.r;
+        var ih = H - P.t - P.b;
+
+        var maxMs = 0;
+        buckets.forEach(function(b) { maxMs = Math.max(maxMs, b.p99Ms || 0, b.p95Ms || 0, b.p50Ms || 0); });
+        var ticks = niceTicks(maxMs, 4);
+        var top = ticks[ticks.length - 1] || 1;
+
+        var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none' }, box);
+
+        ticks.forEach(function(t) {
+            var y = P.t + ih - (t / top) * ih;
+            svgEl('line', { class: 'chart-grid-line', x1: P.l, x2: P.l + iw, y1: y, y2: y }, svg);
+            var tx = svgEl('text', { class: 'chart-axis-tick', x: P.l - 7, y: y + 3, 'text-anchor': 'end' }, svg);
+            tx.textContent = fmtMs(t);
+        });
+
+        var labelCount = Math.min(4, buckets.length);
+        for (var i = 0; i < labelCount; i++) {
+            var idx = Math.floor(i * (buckets.length - 1) / Math.max(labelCount - 1, 1));
+            var lx = P.l + (idx / Math.max(buckets.length - 1, 1)) * iw;
+            var lt = svgEl('text', { class: 'chart-axis-tick', x: lx, y: H - 6, 'text-anchor': 'middle' }, svg);
+            lt.textContent = fmtBucketTime(buckets[idx].time, data.bucketSeconds || 60);
+        }
+
+        function bx(i) { return P.l + (i / Math.max(buckets.length - 1, 1)) * iw; }
+        function by(v) { return P.t + ih - (v / top) * ih; }
+
+        function drawSeries(getter, color, lw) {
+            var d = '';
+            var started = false;
+            for (var i = 0; i < buckets.length; i++) {
+                var v = getter(buckets[i]);
+                if (v == null || (v === 0 && buckets[i].requests === 0)) {
+                    started = false; continue; // gap on empty buckets
+                }
+                d += (started ? ' L ' : 'M ') + bx(i) + ' ' + by(v);
+                started = true;
+            }
+            if (d) {
+                svgEl('path', {
+                    d: d, fill: 'none', stroke: 'var(' + color + ')', 'stroke-width': lw,
+                    'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+                    'vector-effect': 'non-scaling-stroke'
+                }, svg);
+            }
+        }
+
+        drawSeries(function(b) { return b.p50Ms; }, '--blue', 1.5);
+        drawSeries(function(b) { return b.p95Ms; }, '--purple', 1.5);
+        drawSeries(function(b) { return b.p99Ms; }, '--red', 1.75);
+
+        var cursor = svgEl('line', { class: 'chart-cursor-line', x1: 0, x2: 0, y1: P.t, y2: P.t + ih, opacity: 0 }, svg);
+
+        var hover = svgEl('rect', { x: P.l, y: P.t, width: iw, height: ih, fill: 'transparent' }, svg);
+        hover.addEventListener('mousemove', function(e) {
+            var rect = svg.getBoundingClientRect();
+            var sx = (e.clientX - rect.left) * (W / rect.width);
+            var idx = Math.round(((sx - P.l) / iw) * (buckets.length - 1));
+            if (idx < 0) idx = 0; if (idx > buckets.length - 1) idx = buckets.length - 1;
+            var b = buckets[idx];
+            cursor.setAttribute('x1', bx(idx));
+            cursor.setAttribute('x2', bx(idx));
+            cursor.setAttribute('opacity', 1);
+            var bucketLabel = new Date(b.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            showTip(
+                tipRow('Time', bucketLabel) +
+                tipRow('P50', fmtMs(b.p50Ms), '--blue') +
+                tipRow('P95', fmtMs(b.p95Ms), '--purple') +
+                tipRow('P99', fmtMs(b.p99Ms), '--red') +
+                tipRow('Samples', fmtNum(b.requests)),
+                e
+            );
+        });
+        hover.addEventListener('mouseleave', function() {
+            cursor.setAttribute('opacity', 0);
+            hideTip();
+        });
+
+        var avgP95 = 0, n = 0;
+        buckets.forEach(function(b) { if (b.p95Ms > 0) { avgP95 += b.p95Ms; n++; } });
+        document.getElementById('meta-latency-time').textContent =
+            n ? ('avg p95 ' + fmtMs(Math.round(avgP95 / n))) : '—';
+    }
+
+    // ── DONUT (status / method) ──────────────────────────────────────────
+    function renderDonut(boxId, segments, centerSmall, metaId, legendId) {
+        var box = document.getElementById(boxId);
+        var total = segments.reduce(function(a, s) { return a + s.value; }, 0);
+        if (!total) { emptyState(box, 'No data'); document.getElementById(metaId).textContent = '—'; if (legendId) document.getElementById(legendId).innerHTML = ''; return; }
+
+        clearNode(box);
+        var W = box.clientWidth || 240;
+        var H = 200;
+        var cx = W / 2;
+        var cy = H / 2;
+        var rOuter = Math.min(W, H) * 0.40;
+        var rInner = rOuter * 0.62;
+
+        var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'xMidYMid meet' }, box);
+
+        // Faint backing ring
+        svgEl('circle', { cx: cx, cy: cy, r: (rOuter + rInner) / 2, fill: 'none', stroke: 'var(--border)', 'stroke-width': rOuter - rInner, opacity: 0.35 }, svg);
+
+        var angle = -Math.PI / 2;
+        segments.forEach(function(seg) {
+            if (!seg.value) return;
+            var sweep = (seg.value / total) * Math.PI * 2;
+            // Tiny sliver — draw a 1px stroked arc instead of a degenerate sector
+            var a1 = angle, a2 = angle + sweep;
+            var large = (sweep > Math.PI) ? 1 : 0;
+
+            var x1o = cx + rOuter * Math.cos(a1);
+            var y1o = cy + rOuter * Math.sin(a1);
+            var x2o = cx + rOuter * Math.cos(a2);
+            var y2o = cy + rOuter * Math.sin(a2);
+            var x1i = cx + rInner * Math.cos(a2);
+            var y1i = cy + rInner * Math.sin(a2);
+            var x2i = cx + rInner * Math.cos(a1);
+            var y2i = cy + rInner * Math.sin(a1);
+
+            var d = 'M ' + x1o + ' ' + y1o +
+                    ' A ' + rOuter + ' ' + rOuter + ' 0 ' + large + ' 1 ' + x2o + ' ' + y2o +
+                    ' L ' + x1i + ' ' + y1i +
+                    ' A ' + rInner + ' ' + rInner + ' 0 ' + large + ' 0 ' + x2i + ' ' + y2i +
+                    ' Z';
+
+            var path = svgEl('path', {
+                d: d, fill: 'var(' + seg.color + ')', class: 'chart-hover-target'
+            }, svg);
+            path.addEventListener('mousemove', function(e) {
+                var pct = (seg.value / total * 100).toFixed(1);
+                showTip(
+                    tipRow(seg.label, fmtNum(seg.value) + '  ' + pct + '%', seg.color),
+                    e
+                );
+            });
+            path.addEventListener('mouseleave', hideTip);
+            angle = a2;
+        });
+
+        // Center label
+        var bigEl = svgEl('text', { class: 'chart-donut-big', x: cx, y: cy - 4 }, svg);
+        bigEl.textContent = fmtCompact(total);
+        var smEl = svgEl('text', { class: 'chart-donut-small', x: cx, y: cy + 14 }, svg);
+        smEl.textContent = centerSmall;
+
+        document.getElementById(metaId).textContent = segments.filter(function(s) { return s.value > 0; }).length + ' classes';
+
+        // Build legend
+        if (legendId) {
+            var legend = document.getElementById(legendId);
+            legend.innerHTML = segments.filter(function(s) { return s.value > 0; }).map(function(s) {
+                var pct = (s.value / total * 100).toFixed(1);
+                return '<span><span class="swatch swatch-dot" style="background:var(' + s.color + ')"></span>' +
+                    s.label + '<span style="color:var(--text-dim);margin-left:5px">' + pct + '%</span></span>';
+            }).join('');
+        }
+    }
+
+    function renderStatusDonut(data) {
+        var d = (data && data.statusDistribution) || {};
+        var segs = [
+            { label: '2xx', value: d['2xx'] || 0, color: '--green' },
+            { label: '3xx', value: d['3xx'] || 0, color: '--blue' },
+            { label: '4xx', value: d['4xx'] || 0, color: '--amber' },
+            { label: '5xx', value: d['5xx'] || 0, color: '--red' }
+        ];
+        renderDonut('cb-status', segs, 'Responses', 'meta-status', 'legend-status');
+    }
+
+    function renderMethodDonut(data) {
+        var d = (data && data.methodDistribution) || {};
+        var palette = {
+            GET:    '--blue',
+            POST:   '--purple',
+            PUT:    '--amber',
+            DELETE: '--red',
+            PATCH:  '--cyan'
+        };
+        var segs = Object.keys(d)
+            .filter(function(k) { return d[k] > 0; })
+            .map(function(k) { return { label: k, value: d[k], color: palette[k] || '--text-muted' }; })
+            .sort(function(a, b) { return b.value - a.value; });
+        renderDonut('cb-method', segs, 'Calls', 'meta-method', 'legend-method');
+    }
+
+    // ── LATENCY HISTOGRAM (vertical bars) ────────────────────────────────
+    function renderHistogram(data) {
+        var box = document.getElementById('cb-histogram');
+        var bins = (data && data.latencyHistogram) || [];
+        var totalCount = bins.reduce(function(a, b) { return a + b.count; }, 0);
+        if (!totalCount) { emptyState(box, 'No samples in window'); document.getElementById('meta-histogram').textContent = '—'; return; }
+
+        clearNode(box);
+        var W = box.clientWidth || 320;
+        var H = 200;
+        var P = { t: 18, r: 8, b: 32, l: 8 };
+        var iw = W - P.l - P.r;
+        var ih = H - P.t - P.b;
+        var maxV = Math.max.apply(null, bins.map(function(b) { return b.count; }));
+
+        var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none' }, box);
+
+        // Bottom rule
+        svgEl('line', { class: 'chart-grid-line', x1: P.l, x2: P.l + iw, y1: P.t + ih, y2: P.t + ih }, svg);
+
+        var bw = iw / bins.length;
+        var gap = Math.min(8, bw * 0.16);
+        bins.forEach(function(bin, i) {
+            var x = P.l + i * bw + gap / 2;
+            var w = bw - gap;
+            var h = (bin.count / Math.max(maxV, 1)) * ih;
+            var y = P.t + ih - h;
+
+            // Color escalates with latency tier
+            var color = '--green';
+            if (i >= 3) color = '--amber';
+            if (i >= 5) color = '--red';
+
+            var rect = svgEl('rect', {
+                x: x, y: y, width: w, height: Math.max(h, 0.5),
+                fill: 'var(' + color + '-dim)',
+                stroke: 'var(' + color + ')',
+                'stroke-width': 1, rx: 2,
+                class: 'chart-hover-target'
+            }, svg);
+            var pct = (bin.count / totalCount * 100).toFixed(1);
+            rect.addEventListener('mousemove', function(e) {
+                showTip(
+                    tipRow('Bucket', bin.label) +
+                    tipRow('Count', fmtNum(bin.count) + '  ' + pct + '%', color),
+                    e
+                );
+            });
+            rect.addEventListener('mouseleave', hideTip);
+
+            // Top value
+            if (bin.count > 0) {
+                var top = svgEl('text', { class: 'chart-bar-top', x: x + w / 2, y: y - 4 }, svg);
+                top.textContent = fmtCompact(bin.count);
+            }
+
+            // X label
+            var lt = svgEl('text', { class: 'chart-axis-tick', x: x + w / 2, y: P.t + ih + 14, 'text-anchor': 'middle' }, svg);
+            lt.textContent = bin.label;
+        });
+
+        document.getElementById('meta-histogram').textContent = fmtNum(totalCount) + ' samples';
+    }
+
+    // ── HORIZONTAL BAR — generic helper ──────────────────────────────────
+    // bars: [{ label, sub, value, valueLabel, color }]
+    function renderHBar(boxId, bars, opts) {
+        var box = document.getElementById(boxId);
+        if (!bars || !bars.length) { emptyState(box, opts && opts.empty || 'No data'); return; }
+        clearNode(box);
+
+        var W = box.clientWidth || 320;
+        var rowH = 26;
+        var H = bars.length * rowH + 12;
+
+        // Reserve space for labels (left) and value text (right)
+        var labelW = Math.min(Math.max(W * 0.32, 90), 200);
+        var valueW = 56;
+        var trackX = labelW;
+        var trackW = W - labelW - valueW - 8;
+        if (trackW < 60) {  // very narrow — give the label less room
+            labelW = Math.max(72, W * 0.42);
+            trackX = labelW;
+            trackW = W - labelW - valueW - 8;
+        }
+
+        var max = Math.max.apply(null, bars.map(function(b) { return b.value; })) || 1;
+
+        var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none' }, box);
+
+        var labelEls = [];
+        var subEls = [];
+
+        bars.forEach(function(b, i) {
+            var y = 6 + i * rowH;
+            var color = b.color || '--green';
+
+            // Label
+            var lbl = svgEl('text', { class: 'chart-hbar-label', x: 4, y: y + rowH / 2 - 2 }, svg);
+            lbl.textContent = b.label;
+            labelEls.push(lbl);
+            if (b.sub) {
+                var sub = svgEl('text', { class: 'chart-hbar-sub', x: 4, y: y + rowH / 2 + 9 }, svg);
+                sub.textContent = b.sub;
+                subEls.push(sub);
+            }
+
+            // Track (subtle)
+            svgEl('rect', {
+                x: trackX, y: y + 5, width: trackW, height: rowH - 12,
+                fill: 'var(--border)', opacity: 0.4, rx: 1.5
+            }, svg);
+
+            // Bar
+            var bw = (b.value / max) * trackW;
+            var rect = svgEl('rect', {
+                x: trackX, y: y + 5, width: Math.max(bw, 1.5), height: rowH - 12,
+                fill: 'var(' + color + '-dim)',
+                stroke: 'var(' + color + ')',
+                'stroke-width': 1, rx: 1.5,
+                class: 'chart-hover-target'
+            }, svg);
+            rect.addEventListener('mousemove', function(e) {
+                showTip(
+                    tipRow(b.label, b.tipValue || (b.valueLabel || fmtNum(b.value)), color) +
+                    (b.tipExtra || ''),
+                    e
+                );
+            });
+            rect.addEventListener('mouseleave', hideTip);
+
+            // Value
+            var v = svgEl('text', { class: 'chart-hbar-value', x: W - 4, y: y + rowH / 2 + 1, 'text-anchor': 'end' }, svg);
+            v.textContent = b.valueLabel || fmtCompact(b.value);
+        });
+
+        // Now that everything is in the DOM, ellipsize any oversized labels
+        var labelMaxW = labelW - 8;
+        labelEls.forEach(function(el) { fitText(el, labelMaxW); });
+        subEls.forEach(function(el) { fitText(el, labelMaxW); });
+    }
+
+    function renderDBCollections(data) {
+        var rows = (data && data.dbCollections) || [];
+        var bars = rows.map(function(c) {
+            return {
+                label: c.collection,
+                sub: fmtMs(c.totalMs) + ' total',
+                value: c.count,
+                valueLabel: fmtCompact(c.count),
+                color: '--cyan',
+                tipValue: fmtNum(c.count) + ' queries',
+                tipExtra: tipRow('Total time', fmtMs(c.totalMs))
+            };
+        });
+        renderHBar('cb-collections', bars, { empty: 'No DB queries traced' });
+        document.getElementById('meta-collections').textContent = bars.length ? bars.length + ' collections' : '—';
+    }
+
+    function renderTopErrors(data) {
+        var rows = (data && data.topErrors) || [];
+        var bars = rows.map(function(r) {
+            var rate = (r.errorRate * 100).toFixed(1) + '%';
+            // Color by error rate: low=amber, high=red
+            var color = r.errorRate >= 0.05 ? '--red' : '--amber';
+            return {
+                label: r.path,
+                sub: r.method + ' · ' + rate + ' of ' + fmtCompact(r.count),
+                value: r.errorCount,
+                valueLabel: fmtCompact(r.errorCount),
+                color: color,
+                tipValue: fmtNum(r.errorCount) + ' errors',
+                tipExtra: tipRow('Method', r.method) + tipRow('Total', fmtNum(r.count)) + tipRow('Rate', rate)
+            };
+        });
+        renderHBar('cb-top-errors', bars, { empty: 'No errors in window' });
+        document.getElementById('meta-top-errors').textContent = bars.length ? bars.length + ' routes' : '—';
+    }
+
+    function renderTopVolume(data) {
+        var rows = (data && data.topVolume) || [];
+        var bars = rows.map(function(r) {
+            return {
+                label: r.path,
+                sub: r.method + ' · avg ' + fmtMs(r.avgMs),
+                value: r.count,
+                valueLabel: fmtCompact(r.count),
+                color: '--green',
+                tipValue: fmtNum(r.count) + ' requests',
+                tipExtra: tipRow('Method', r.method) + tipRow('Avg', fmtMs(r.avgMs)) + tipRow('Errors', fmtNum(r.errorCount))
+            };
+        });
+        renderHBar('cb-top-volume', bars, { empty: 'No traffic in window' });
+        document.getElementById('meta-top-volume').textContent = bars.length ? bars.length + ' routes' : '—';
+    }
+
+    // ── MASTER RENDER ────────────────────────────────────────────────────
+    function renderAllCharts(data) {
+        if (!data) return;
+        lastChartsData = data;
+        renderRequestRate(data);
+        renderLatencyTime(data);
+        renderStatusDonut(data);
+        renderMethodDonut(data);
+        renderHistogram(data);
+        renderDBCollections(data);
+        renderTopErrors(data);
+        renderTopVolume(data);
+
+        // Window meta line
+        var since = new Date(data.since), until = new Date(data.until);
+        var s = since.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        var u = until.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('charts-window-meta').textContent =
+            s + '  →  ' + u + '  ·  ' + (data.bucketSeconds || 60) + 's buckets  ·  ' +
+            fmtNum(data.totalInWindow || 0) + ' requests';
+    }
+
+    async function loadCharts() {
+        var since = document.getElementById('timeRange').value;
+        try {
+            var res = await fetch(CHARTS_API + '?since=' + since + '&buckets=30&topN=10');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var data = await res.json();
+            renderAllCharts(data);
+        } catch (err) {
+            // Fail silently for charts — KPI banner already shows main errors
+            // But surface a small note in the strip meta
+            document.getElementById('charts-window-meta').textContent = 'charts failed: ' + err.message;
+        }
+    }
+
+    // Re-render on resize (debounced)
+    var resizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            if (lastChartsData) renderAllCharts(lastChartsData);
+        }, 120);
+    });
 
     // ─── AUTO REFRESH ────────────────────────────────────────────────────
     function startAutoRefresh() {

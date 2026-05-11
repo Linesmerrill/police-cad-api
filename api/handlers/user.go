@@ -5418,18 +5418,18 @@ func (u User) DismissTutorialHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
-// ChangeEmailHandler changes a user's email address after verifying their current password.
+// ChangeEmailHandler is the legacy v1 email-change endpoint (password-only verification). Kept
+// in place for backward compatibility while clients migrate to the verified v2 flow on
+// PendingVerification.{Request,Confirm}EmailChangeHandler. Plan to delete after migration.
 func (u User) ChangeEmailHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 
-	// Convert the user ID to a primitive.ObjectID
 	uID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 		return
 	}
 
-	// Parse the request body
 	var req struct {
 		NewEmail        string `json:"newEmail"`
 		CurrentPassword string `json:"currentPassword"`
@@ -5439,7 +5439,6 @@ func (u User) ChangeEmailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
 	newEmail := strings.TrimSpace(strings.ToLower(req.NewEmail))
 	currentPassword := req.CurrentPassword
 	if newEmail == "" || currentPassword == "" {
@@ -5448,11 +5447,9 @@ func (u User) ChangeEmailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Find the user by ID
 	existingUser := models.User{}
 	err = u.DB.FindOne(ctx, bson.M{"_id": uID}).Decode(&existingUser)
 	if err != nil {
@@ -5465,42 +5462,33 @@ func (u User) ChangeEmailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify current password against stored bcrypt hash
-	err = bcrypt.CompareHashAndPassword([]byte(existingUser.Details.Password), []byte(currentPassword))
-	if err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.Details.Password), []byte(currentPassword)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid password"})
 		return
 	}
 
-	// Check if the new email is already in use by another user (case-insensitive)
 	var conflictUser models.User
 	err = u.DB.FindOne(ctx, bson.M{
 		"user.email": newEmail,
 		"_id":        bson.M{"$ne": uID},
 	}).Decode(&conflictUser)
 	if err == nil {
-		// Found another user with this email
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Email already in use"})
 		return
 	}
 	if err != mongo.ErrNoDocuments {
-		// An actual error occurred (not just "no documents found")
 		config.ErrorStatus("failed to check email uniqueness", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Update the user's email and updatedAt timestamp
-	filter := bson.M{"_id": uID}
-	update := bson.M{
+	if _, err := u.DB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
 		"$set": bson.M{
 			"user.email":     newEmail,
 			"user.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
-	}
-	_, err = u.DB.UpdateOne(ctx, filter, update)
-	if err != nil {
+	}); err != nil {
 		config.ErrorStatus("failed to update email", http.StatusInternalServerError, w, err)
 		return
 	}

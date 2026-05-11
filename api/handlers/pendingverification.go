@@ -72,12 +72,15 @@ func (pv PendingVerification) CreatePendingVerificationHandler(w http.ResponseWr
 	// Generate a 6-digit code
 	code := fmt.Sprintf("%06d", 100000+rand.Intn(900000))
 
-	// Store in pendingVerifications
+	// Store in pendingVerifications. expiresAt lets the TTL index sweep abandoned rows
+	// after 24h so they don't accumulate and trip "verification already in progress" on retry.
+	now := time.Now()
 	newPending := models.PendingVerification{
 		ID:        primitive.NewObjectID(),
 		Email:     requestBody.Email,
 		Code:      code,
-		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+		CreatedAt: primitive.NewDateTimeFromTime(now),
+		ExpiresAt: primitive.NewDateTimeFromTime(now.Add(signupCodeTTL)),
 	}
 	_, err = pv.PVDB.InsertOne(ctx, newPending)
 	if err != nil {
@@ -268,11 +271,13 @@ func (pv PendingVerification) ResendVerificationCodeHandler(w http.ResponseWrite
 	// If we need to create a new pending verification, do it
 	if shouldCreateNew {
 		code := fmt.Sprintf("%06d", 100000+rand.Intn(900000))
+		now := time.Now()
 		newPending := models.PendingVerification{
 			ID:        primitive.NewObjectID(),
 			Email:     requestBody.Email,
 			Code:      code,
-			CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+			CreatedAt: primitive.NewDateTimeFromTime(now),
+			ExpiresAt: primitive.NewDateTimeFromTime(now.Add(signupCodeTTL)),
 		}
 		_, err = pv.PVDB.InsertOne(ctx, newPending)
 		if err != nil {
@@ -327,10 +332,12 @@ func (pv PendingVerification) ResendVerificationCodeHandler(w http.ResponseWrite
 
 	// Update the pendingVerification record in the database
 	// Use upsert pattern for resilience - if update fails, try insert
+	now := time.Now()
 	update := bson.M{
 		"$set": bson.M{
 			"code":      code,
-			"createdAt": primitive.NewDateTimeFromTime(time.Now()),
+			"createdAt": primitive.NewDateTimeFromTime(now),
+			"expiresAt": primitive.NewDateTimeFromTime(now.Add(signupCodeTTL)),
 			"attempts":  0,
 		},
 	}
@@ -342,7 +349,8 @@ func (pv PendingVerification) ResendVerificationCodeHandler(w http.ResponseWrite
 			ID:        primitive.NewObjectID(),
 			Email:     requestBody.Email,
 			Code:      code,
-			CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+			CreatedAt: primitive.NewDateTimeFromTime(now),
+			ExpiresAt: primitive.NewDateTimeFromTime(now.Add(signupCodeTTL)),
 		}
 		_, insertErr := pv.PVDB.InsertOne(ctx, newPending)
 		if insertErr != nil {

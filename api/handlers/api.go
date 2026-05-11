@@ -159,6 +159,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/metrics/summary", http.HandlerFunc(metricsHandler.GetMetricsSummary)).Methods("GET")
 	apiV2.Handle("/metrics/route", http.HandlerFunc(metricsHandler.GetRouteMetrics)).Methods("GET")
 	apiV2.Handle("/metrics/slow-queries", http.HandlerFunc(metricsHandler.GetSlowQueries)).Methods("GET")
+	apiV2.Handle("/metrics/charts", http.HandlerFunc(metricsHandler.GetMetricsCharts)).Methods("GET")
 	ws := r.PathPrefix("/ws").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
@@ -401,7 +402,15 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{user_id}/deactivate", api.Middleware(http.HandlerFunc(u.DeactivateUserHandler))).Methods("DELETE")
 	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}/read", api.Middleware(http.HandlerFunc(u.MarkNotificationAsReadHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}/notifications/{notification_id}", api.Middleware(http.HandlerFunc(u.DeleteNotificationHandler))).Methods("DELETE")
+	// Legacy v1 email change (password-only). Retained for backward compatibility while
+	// clients migrate to the verified v2 flow below — plan to delete after migration.
 	apiCreate.Handle("/user/{user_id}/email", api.Middleware(http.HandlerFunc(u.ChangeEmailHandler))).Methods("PUT")
+	// Verified v2 email + password change. Step 1 mails a 6-digit code to the user's CURRENT
+	// address; step 2 submits the code and applies the change. See accountchange.go.
+	apiV2.Handle("/user/{user_id}/email/request-change", api.Middleware(http.HandlerFunc(pv.RequestEmailChangeHandler))).Methods("POST")
+	apiV2.Handle("/user/{user_id}/email", api.Middleware(http.HandlerFunc(pv.ConfirmEmailChangeHandler))).Methods("PUT")
+	apiV2.Handle("/user/{user_id}/password/request-change", api.Middleware(http.HandlerFunc(pv.RequestPasswordChangeHandler))).Methods("POST")
+	apiV2.Handle("/user/{user_id}/password", api.Middleware(http.HandlerFunc(pv.ConfirmPasswordChangeHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UpdateUserByIDHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}", api.Middleware(http.HandlerFunc(u.UserHandler))).Methods("GET")
 	apiCreate.Handle("/users/discover-people", api.Middleware(http.HandlerFunc(u.UsersDiscoverPeopleHandler))).Methods("GET")

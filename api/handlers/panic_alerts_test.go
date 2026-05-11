@@ -38,6 +38,10 @@ func TestCreatePanicAlertHandler(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			mockSetup: func(mockDB *mocks.CommunityDatabase) {
 				mockDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+				// Handler does a post-create FindOne to resolve the community's
+				// custom panic-sound URL — return an empty community so that
+				// lookup is a safe no-op.
+				mockDB.On("FindOne", mock.Anything, mock.Anything).Return(&models.Community{}, nil)
 			},
 		},
 		{
