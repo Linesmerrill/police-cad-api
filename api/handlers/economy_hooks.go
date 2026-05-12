@@ -79,14 +79,21 @@ func dropCitationInboxItem(deps inboxHookDeps, civilianID primitive.ObjectID, hi
 			title = history.Type
 		}
 		fineNames := make([]string, 0, len(history.Fines))
+		charges := make([]models.InboxCharge, 0, len(history.Fines))
 		for _, f := range history.Fines {
 			if f.FineType != "" {
 				fineNames = append(fineNames, f.FineType)
 			}
+			charges = append(charges, models.InboxCharge{
+				Label:  f.FineType,
+				Amount: int64(f.FineAmount) * 100,
+				Status: "pending",
+			})
 		}
 		body := strings.Join(fineNames, ", ")
 
 		item := models.InboxItem{
+			Charges:     charges,
 			ID:          primitive.NewObjectID(),
 			CommunityID: civ.Details.ActiveCommunityID,
 			UserID:      civ.Details.UserID,

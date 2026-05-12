@@ -1138,43 +1138,80 @@ func settleLinkedInboxItems(idb databases.InboxItemDatabase, cdb databases.Civil
 			upheldLabels    []string
 			dismissedLabels []string
 		}
-		if res.Verdict == "partial" && len(items) > 0 && len(res.ChargeResolutions) > 0 {
+		// Look up the civilian's criminal-history entry once so we can also
+		// rebuild the per-charge `charges` slice for every verdict type, not
+		// just partial. Cheap because we already need it for partial anyway.
+		var historyFines []models.Fine
+		if len(items) > 0 {
 			it := items[0]
 			if it.CivilianID != "" {
 				if cID, perr := primitive.ObjectIDFromHex(it.CivilianID); perr == nil {
 					if civ, ferr := cdb.FindOne(ctx, bson.M{"_id": cID}); ferr == nil && civ != nil {
 						for _, entry := range civ.Details.CriminalHistory {
-							if entry.ID.Hex() != res.ItemID {
-								continue
+							if entry.ID.Hex() == res.ItemID {
+								historyFines = entry.Fines
+								break
 							}
-							verdictByIdx := make(map[int]string, len(res.ChargeResolutions))
-							for _, cr := range res.ChargeResolutions {
-								verdictByIdx[cr.FineIndex] = cr.Verdict
-							}
-							p := &struct {
-								amountCents     int64
-								upheldLabels    []string
-								dismissedLabels []string
-							}{}
-							for i, f := range entry.Fines {
-								v := verdictByIdx[i]
-								if v == "dismissed" {
-									if f.FineType != "" {
-										p.dismissedLabels = append(p.dismissedLabels, f.FineType)
-									}
-									continue
-								}
-								// upheld or unset (defensive — treat as still owed)
-								p.amountCents += int64(f.FineAmount) * 100
-								if f.FineType != "" {
-									p.upheldLabels = append(p.upheldLabels, f.FineType)
-								}
-							}
-							partial = p
-							break
 						}
 					}
 				}
+			}
+		}
+		if res.Verdict == "partial" && len(historyFines) > 0 && len(res.ChargeResolutions) > 0 {
+			verdictByIdx := make(map[int]string, len(res.ChargeResolutions))
+			for _, cr := range res.ChargeResolutions {
+				verdictByIdx[cr.FineIndex] = cr.Verdict
+			}
+			p := &struct {
+				amountCents     int64
+				upheldLabels    []string
+				dismissedLabels []string
+			}{}
+			for i, f := range historyFines {
+				v := verdictByIdx[i]
+				if v == "dismissed" {
+					if f.FineType != "" {
+						p.dismissedLabels = append(p.dismissedLabels, f.FineType)
+					}
+					continue
+				}
+				// upheld or unset (defensive — treat as still owed)
+				p.amountCents += int64(f.FineAmount) * 100
+				if f.FineType != "" {
+					p.upheldLabels = append(p.upheldLabels, f.FineType)
+				}
+			}
+			partial = p
+		}
+
+		// Build the per-charge slice (also useful for the inbox UI). Maps the
+		// original fines to {label, amount, status} based on the verdict.
+		var chargesAfter []models.InboxCharge
+		if len(historyFines) > 0 {
+			verdictByIdx := make(map[int]string, len(res.ChargeResolutions))
+			for _, cr := range res.ChargeResolutions {
+				verdictByIdx[cr.FineIndex] = cr.Verdict
+			}
+			chargesAfter = make([]models.InboxCharge, 0, len(historyFines))
+			for i, f := range historyFines {
+				st := ""
+				switch res.Verdict {
+				case "dismissed":
+					st = "dismissed"
+				case "upheld":
+					st = "upheld"
+				case "partial":
+					if v, ok := verdictByIdx[i]; ok && v == "dismissed" {
+						st = "dismissed"
+					} else {
+						st = "upheld"
+					}
+				}
+				chargesAfter = append(chargesAfter, models.InboxCharge{
+					Label:  f.FineType,
+					Amount: int64(f.FineAmount) * 100,
+					Status: st,
+				})
 			}
 		}
 
@@ -1232,6 +1269,9 @@ func settleLinkedInboxItems(idb databases.InboxItemDatabase, cdb databases.Civil
 			}
 		default:
 			continue
+		}
+		if len(chargesAfter) > 0 {
+			set["charges"] = chargesAfter
 		}
 		for _, it := range items {
 			if err := idb.UpdateOne(ctx, bson.M{"_id": it.ID}, bson.M{"$set": set}); err != nil {

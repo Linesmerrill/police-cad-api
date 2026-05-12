@@ -30,7 +30,20 @@ type InboxItem struct {
 	OriginalDueAt primitive.DateTime `json:"originalDueAt,omitempty" bson:"originalDueAt,omitempty"`
 	ResolvedAt    primitive.DateTime `json:"resolvedAt,omitempty" bson:"resolvedAt,omitempty"`
 	ResolvedBy    string             `json:"resolvedBy,omitempty" bson:"resolvedBy,omitempty"`
-	Resolution    string             `json:"resolution,omitempty" bson:"resolution,omitempty"` // "upheld" | "dismissed"
-	CreatedAt     primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt     primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	Resolution    string             `json:"resolution,omitempty" bson:"resolution,omitempty"` // "upheld" | "dismissed" | "partial"
+	// Charges, when present, enumerates the individual citations that make up
+	// this inbox item along with their per-charge status. Omitted for non-
+	// citation items (admin fees, payroll, etc.) so legacy callers stay clean.
+	Charges   []InboxCharge      `json:"charges,omitempty" bson:"charges,omitempty"`
+	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// InboxCharge represents a single charge inside a citation-style inbox item.
+// Amount is stored in cents and matches the contribution to the parent item's
+// Amount (sum of non-dismissed charge amounts).
+type InboxCharge struct {
+	Label  string `json:"label" bson:"label"`
+	Amount int64  `json:"amount" bson:"amount"`           // cents
+	Status string `json:"status" bson:"status"`           // "pending" | "upheld" | "dismissed"
 }
