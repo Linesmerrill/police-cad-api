@@ -26,6 +26,10 @@ type Scheduler struct {
 	UDB     databases.UserDatabase
 	CDB        databases.CommunityDatabase
 	LockDB     databases.SchedulerLockDatabase
+	// Economy
+	SessionDB  databases.ClockSessionDatabase
+	InboxDB    databases.InboxItemDatabase
+	CivDB      databases.CivilianDatabase
 	instanceID string
 }
 
@@ -37,6 +41,9 @@ func NewScheduler(
 	uDB databases.UserDatabase,
 	cDB databases.CommunityDatabase,
 	lockDB databases.SchedulerLockDatabase,
+	sessionDB databases.ClockSessionDatabase,
+	inboxDB databases.InboxItemDatabase,
+	civDB databases.CivilianDatabase,
 ) *Scheduler {
 	// Generate a unique instance ID for this pod
 	instanceID := os.Getenv("DYNO") // Heroku sets this to "web.1", "web.2", etc.
@@ -52,6 +59,9 @@ func NewScheduler(
 		UDB:        uDB,
 		CDB:        cDB,
 		LockDB:     lockDB,
+		SessionDB:  sessionDB,
+		InboxDB:    inboxDB,
+		CivDB:      civDB,
 		instanceID: instanceID,
 	}
 }
@@ -69,6 +79,19 @@ func (s *Scheduler) Start() {
 	_, err = s.cron.AddFunc("0 2 */3 * *", s.checkAllCreators)
 	if err != nil {
 		zap.S().Errorw("failed to register creator check job", "error", err)
+	}
+
+	// Economy: sweep stale clock sessions every minute (only registers if DB present)
+	if s.SessionDB != nil {
+		if _, err = s.cron.AddFunc("@every 1m", s.staleSessionSweep); err != nil {
+			zap.S().Errorw("failed to register stale session sweep", "error", err)
+		}
+	}
+	// Economy: flip overdue inbox items to delinquent every 5 minutes
+	if s.InboxDB != nil {
+		if _, err = s.cron.AddFunc("@every 5m", s.inboxDelinquencyTick); err != nil {
+			zap.S().Errorw("failed to register inbox delinquency tick", "error", err)
+		}
 	}
 
 	s.cron.Start()

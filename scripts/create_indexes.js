@@ -685,5 +685,67 @@ createIndexSafe(
   }
 );
 
+// ==========================================
+// ECONOMY — clock_sessions
+// ==========================================
+
+createIndexSafe(
+  db.clock_sessions,
+  { civilianId: 1, status: 1 },
+  { name: "clock_sessions_civilian_status_idx", background: true }
+);
+
+createIndexSafe(
+  db.clock_sessions,
+  { userId: 1, status: 1 },
+  { name: "clock_sessions_user_status_idx", background: true }
+);
+
+createIndexSafe(
+  db.clock_sessions,
+  { communityId: 1, status: 1 },
+  { name: "clock_sessions_community_status_idx", background: true }
+);
+
+// Partial unique: only one active session per civilian.
+createIndexSafe(
+  db.clock_sessions,
+  { civilianId: 1 },
+  {
+    name: "clock_sessions_civilian_unique_active_idx",
+    unique: true,
+    background: true,
+    partialFilterExpression: { status: "active", civilianId: { $ne: "" } }
+  }
+);
+
+// ==========================================
+// ECONOMY — inbox_items
+// ==========================================
+
+createIndexSafe(
+  db.inbox_items,
+  { userId: 1, status: 1, createdAt: -1 },
+  { name: "inbox_items_user_status_created_idx", background: true }
+);
+
+createIndexSafe(
+  db.inbox_items,
+  { civilianId: 1, status: 1, createdAt: -1 },
+  { name: "inbox_items_civilian_status_created_idx", background: true }
+);
+
+createIndexSafe(
+  db.inbox_items,
+  { communityId: 1, status: 1 },
+  { name: "inbox_items_community_status_idx", background: true }
+);
+
+createIndexSafe(
+  db.inbox_items,
+  { status: 1, dueAt: 1 },
+  { name: "inbox_items_status_due_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

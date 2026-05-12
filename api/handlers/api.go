@@ -147,6 +147,14 @@ func (a *App) New() *mux.Router {
 		UDB:  databases.NewUserDatabase(a.dbHelper),
 	}
 
+	// Economy handler (clock-in/out, heartbeat, wallet, inbox)
+	economy := Economy{
+		SDB:    databases.NewClockSessionDatabase(a.dbHelper),
+		IDB:    databases.NewInboxItemDatabase(a.dbHelper),
+		CivDB:  databases.NewCivilianDatabase(a.dbHelper),
+		CommDB: databases.NewCommunityDatabase(a.dbHelper),
+	}
+
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
 
@@ -160,6 +168,18 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/metrics/route", http.HandlerFunc(metricsHandler.GetRouteMetrics)).Methods("GET")
 	apiV2.Handle("/metrics/slow-queries", http.HandlerFunc(metricsHandler.GetSlowQueries)).Methods("GET")
 	apiV2.Handle("/metrics/charts", http.HandlerFunc(metricsHandler.GetMetricsCharts)).Methods("GET")
+
+	// Economy v2 routes
+	apiV2.Handle("/economy/clock-in", api.Middleware(http.HandlerFunc(economy.ClockInHandler))).Methods("POST")
+	apiV2.Handle("/economy/clock-out", api.Middleware(http.HandlerFunc(economy.ClockOutHandler))).Methods("POST")
+	apiV2.Handle("/economy/heartbeat", api.Middleware(http.HandlerFunc(economy.HeartbeatHandler))).Methods("POST")
+	apiV2.Handle("/economy/session/active", api.Middleware(http.HandlerFunc(economy.GetActiveSessionHandler))).Methods("GET")
+	apiV2.Handle("/economy/wallet/{civilianId}", api.Middleware(http.HandlerFunc(economy.GetWalletHandler))).Methods("GET")
+	apiV2.Handle("/economy/inbox", api.Middleware(http.HandlerFunc(economy.ListInboxHandler))).Methods("GET")
+	apiV2.Handle("/economy/inbox", api.Middleware(http.HandlerFunc(economy.CreateInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/pay", api.Middleware(http.HandlerFunc(economy.PayInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/dismiss", api.Middleware(http.HandlerFunc(economy.DismissInboxItemHandler))).Methods("POST")
+
 	ws := r.PathPrefix("/ws").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
@@ -762,6 +782,9 @@ func (a *App) New() *mux.Router {
 		contentCreator.UDB,
 		contentCreator.CDB,
 		databases.NewSchedulerLockDatabase(a.dbHelper),
+		economy.SDB,
+		economy.IDB,
+		economy.CivDB,
 	)
 
 	// Metrics dashboard

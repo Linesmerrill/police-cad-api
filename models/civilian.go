@@ -46,6 +46,8 @@ type CivilianDetails struct {
 	ActiveCommunityID    string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	Deceased              bool              `json:"deceased" bson:"deceased"`
 	UserID               string             `json:"userID" bson:"userID"`
+	Balance              int64              `json:"balance" bson:"balance"`                         // Economy: balance in cents
+	BalanceInitialized   bool               `json:"balanceInitialized" bson:"balanceInitialized"`   // Economy: true once lazy-backfilled
 	CreatedAt            primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
