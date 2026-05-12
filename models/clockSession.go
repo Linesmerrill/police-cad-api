@@ -7,8 +7,10 @@ import "go.mongodb.org/mongo-driver/bson/primitive"
 type ClockSession struct {
 	ID               primitive.ObjectID `json:"_id" bson:"_id,omitempty"`
 	CommunityID      string             `json:"communityId" bson:"communityId"`
-	DepartmentID     string             `json:"departmentId" bson:"departmentId"`
-	DepartmentName   string             `json:"departmentName" bson:"departmentName"`
+	DepartmentID     string             `json:"departmentId,omitempty" bson:"departmentId,omitempty"`
+	DepartmentName   string             `json:"departmentName,omitempty" bson:"departmentName,omitempty"`
+	JobID            string             `json:"jobId,omitempty" bson:"jobId,omitempty"`     // set when the session is against a community Job instead of a Department
+	JobName          string             `json:"jobName,omitempty" bson:"jobName,omitempty"` // snapshot of job.Name at clock-in
 	UserID           string             `json:"userId" bson:"userId"`
 	CivilianID       string             `json:"civilianId,omitempty" bson:"civilianId,omitempty"` // empty for user-scoped jobs (LEO/EMS/...)
 	RankID           string             `json:"rankId,omitempty" bson:"rankId,omitempty"`
