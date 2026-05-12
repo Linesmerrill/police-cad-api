@@ -70,7 +70,8 @@ type CriminalHistory struct {
 
 // Fine holds the structure for the fine
 type Fine struct {
-	FineType   string `json:"fineType" bson:"fineType"`     // Speeding, Public Intoxication, etc.
-	FineAmount int    `json:"fineAmount" bson:"fineAmount"` // 125, 150, etc.
-	Category   string `json:"category" bson:"category"`     // Misdemeanor, Felony, etc.
+	FineType   string `json:"fineType" bson:"fineType"`           // Speeding, Public Intoxication, etc.
+	FineAmount int    `json:"fineAmount" bson:"fineAmount"`       // 125, 150, etc.
+	Category   string `json:"category" bson:"category"`           // Misdemeanor, Felony, etc.
+	Status     string `json:"status,omitempty" bson:"status,omitempty"` // "" (open) | "upheld" | "dismissed" — set by judge per-charge resolution
 }
