@@ -745,6 +745,12 @@ func (e Economy) ContestInboxItemHandler(w http.ResponseWriter, r *http.Request)
 		config.ErrorStatus("only pending fines can be contested", http.StatusBadRequest, w, fmt.Errorf("status=%s", item.Status))
 		return
 	}
+	// Once a verdict has been entered (resolution set) the case is closed;
+	// re-contesting would loop the civilian back through the judicial queue.
+	if item.Resolution != "" {
+		config.ErrorStatus("this fine has already been ruled on and cannot be contested again", http.StatusBadRequest, w, fmt.Errorf("resolution=%s", item.Resolution))
+		return
+	}
 
 	// Resolve extension days from community settings.
 	days := 30
