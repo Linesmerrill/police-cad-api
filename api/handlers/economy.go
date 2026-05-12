@@ -451,6 +451,62 @@ func (e Economy) GetActiveSessionHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(sess)
 }
 
+// ListSessionsByCivilianHandler returns paginated shift history for a
+// civilian. Newest-first, ended sessions only (active sessions are still
+// running and surfaced through GetActiveSession).
+//
+//   GET /api/v2/economy/sessions/civilian/{civilianId}?page=1&limit=20
+//
+// Response: { data: []ClockSession, totalCount, page, limit }
+func (e Economy) ListSessionsByCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	civilianID := mux.Vars(r)["civilianId"]
+	if civilianID == "" {
+		config.ErrorStatus("civilianId required", http.StatusBadRequest, w, nil)
+		return
+	}
+	page, limit := 1, 20
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			page = v
+		}
+	}
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100 {
+			limit = v
+		}
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{
+		"civilianId": civilianID,
+		"status":     bson.M{"$in": []string{"ended", "expired", "abandoned"}},
+	}
+	totalCount, _ := e.SDB.CountDocuments(ctx, filter)
+
+	skip := int64((page - 1) * limit)
+	lim := int64(limit)
+	opts := options.Find().
+		SetSort(bson.D{{Key: "startedAt", Value: -1}}).
+		SetSkip(skip).
+		SetLimit(lim)
+	sessions, err := e.SDB.Find(ctx, filter, opts)
+	if err != nil {
+		config.ErrorStatus("failed to list sessions", http.StatusInternalServerError, w, err)
+		return
+	}
+	if sessions == nil {
+		sessions = []models.ClockSession{}
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":       sessions,
+		"totalCount": totalCount,
+		"page":       page,
+		"limit":      limit,
+	})
+}
+
 // GetWalletHandler returns a civilian's wallet (balance + recent inbox items).
 func (e Economy) GetWalletHandler(w http.ResponseWriter, r *http.Request) {
 	civilianID := mux.Vars(r)["civilianId"]
