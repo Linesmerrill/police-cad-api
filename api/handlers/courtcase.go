@@ -1032,15 +1032,21 @@ func settleLinkedInboxItems(idb databases.InboxItemDatabase, cdb databases.Civil
 			continue
 		}
 
-		// Per-charge resolution → compute reduced amount from upheld fines.
-		// Loads the linked criminal-history entry to read fine amounts and
-		// dismissed-charge labels for an updated body string.
+		// Per-charge resolution → compute the reduced amount and updated body
+		// from the resolution's ChargeResolutions list (the source of truth
+		// the judge just submitted), paired with the original Fines slice on
+		// the civilian's criminalHistory entry (for amounts + labels).
+		//
+		// Reading verdicts from res.ChargeResolutions instead of from
+		// fine.Status decouples this from the order in which the resolve
+		// handler writes statuses back to the civilian — so settle no
+		// longer needs to run after that loop.
 		var partial *struct {
 			amountCents     int64
 			upheldLabels    []string
 			dismissedLabels []string
 		}
-		if res.Verdict == "partial" && len(items) > 0 {
+		if res.Verdict == "partial" && len(items) > 0 && len(res.ChargeResolutions) > 0 {
 			it := items[0]
 			if it.CivilianID != "" {
 				if cID, perr := primitive.ObjectIDFromHex(it.CivilianID); perr == nil {
@@ -1049,13 +1055,18 @@ func settleLinkedInboxItems(idb databases.InboxItemDatabase, cdb databases.Civil
 							if entry.ID.Hex() != res.ItemID {
 								continue
 							}
+							verdictByIdx := make(map[int]string, len(res.ChargeResolutions))
+							for _, cr := range res.ChargeResolutions {
+								verdictByIdx[cr.FineIndex] = cr.Verdict
+							}
 							p := &struct {
 								amountCents     int64
 								upheldLabels    []string
 								dismissedLabels []string
 							}{}
-							for _, f := range entry.Fines {
-								if f.Status == "dismissed" {
+							for i, f := range entry.Fines {
+								v := verdictByIdx[i]
+								if v == "dismissed" {
 									if f.FineType != "" {
 										p.dismissedLabels = append(p.dismissedLabels, f.FineType)
 									}
