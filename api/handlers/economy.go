@@ -672,6 +672,8 @@ func (e Economy) PayInboxItemHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // DismissInboxItemHandler marks an inbox item dismissed. Admin-only is enforced at route level.
+// When used to resolve a contested fine, sets resolution="dismissed" so the
+// civilian's inbox UI can render the "Dismissed" state distinctly.
 func (e Economy) DismissInboxItemHandler(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	itemID, err := primitive.ObjectIDFromHex(id)
@@ -685,15 +687,129 @@ func (e Economy) DismissInboxItemHandler(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	existing, _ := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
 	now := primitive.NewDateTimeFromTime(time.Now())
-	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": bson.M{
+	updates := bson.M{
 		"status":      "dismissed",
 		"dismissedAt": now,
 		"dismissedBy": uid,
 		"updatedAt":   now,
-	}}); err != nil {
+	}
+	if existing != nil && existing.Status == "contested" {
+		updates["resolvedAt"] = now
+		updates["resolvedBy"] = uid
+		updates["resolution"] = "dismissed"
+	}
+	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": updates}); err != nil {
 		config.ErrorStatus("failed to dismiss inbox item", http.StatusInternalServerError, w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ContestInboxItemHandler lets a civilian (or the authenticated user owning
+// the inbox item) contest a pending fine. Status moves to "contested", the
+// original due date is preserved, and the active due date is extended by
+// community.economy.contestExtensionDays (default 30).
+func (e Economy) ContestInboxItemHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	itemID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid item id", http.StatusBadRequest, w, err)
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err.Error() != "EOF" {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	item, err := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	if err != nil || item == nil {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	if item.Status != "pending" && item.Status != "delinquent" {
+		config.ErrorStatus("only pending fines can be contested", http.StatusBadRequest, w, fmt.Errorf("status=%s", item.Status))
+		return
+	}
+
+	// Resolve extension days from community settings.
+	days := 30
+	if commID, perr := primitive.ObjectIDFromHex(item.CommunityID); perr == nil {
+		if community, cerr := e.CommDB.FindOne(ctx, bson.M{"_id": commID}); cerr == nil {
+			if d := community.Details.Economy.ContestExtensionDays; d > 0 {
+				days = d
+			}
+		}
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	newDue := primitive.NewDateTimeFromTime(time.Now().AddDate(0, 0, days))
+	updates := bson.M{
+		"status":        "contested",
+		"contestedAt":   now,
+		"contestReason": body.Reason,
+		"dueAt":         newDue,
+		"updatedAt":     now,
+	}
+	// Preserve the original due date so we can show it alongside the extension.
+	if item.OriginalDueAt == 0 && item.DueAt != 0 {
+		updates["originalDueAt"] = item.DueAt
+	}
+	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": updates}); err != nil {
+		config.ErrorStatus("failed to contest inbox item", http.StatusInternalServerError, w, err)
+		return
+	}
+	updated, _ := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updated)
+}
+
+// UpholdInboxItemHandler resolves a contested fine in favor of the issuer:
+// the fine reverts to "pending" with the extended due date preserved (so the
+// civilian still has time to pay after losing the contest).
+func (e Economy) UpholdInboxItemHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	itemID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid item id", http.StatusBadRequest, w, err)
+		return
+	}
+	uid := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if uid == "" {
+		uid = r.URL.Query().Get("userId")
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	item, err := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	if err != nil || item == nil {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	if item.Status != "contested" {
+		config.ErrorStatus("only contested fines can be upheld", http.StatusBadRequest, w, fmt.Errorf("status=%s", item.Status))
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": bson.M{
+		"status":     "pending",
+		"resolvedAt": now,
+		"resolvedBy": uid,
+		"resolution": "upheld",
+		"updatedAt":  now,
+	}}); err != nil {
+		config.ErrorStatus("failed to uphold inbox item", http.StatusInternalServerError, w, err)
+		return
+	}
+	updated, _ := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updated)
 }

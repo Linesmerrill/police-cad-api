@@ -180,6 +180,8 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/economy/inbox", api.Middleware(http.HandlerFunc(economy.CreateInboxItemHandler))).Methods("POST")
 	apiV2.Handle("/economy/inbox/{id}/pay", api.Middleware(http.HandlerFunc(economy.PayInboxItemHandler))).Methods("POST")
 	apiV2.Handle("/economy/inbox/{id}/dismiss", api.Middleware(http.HandlerFunc(economy.DismissInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/contest", api.Middleware(http.HandlerFunc(economy.ContestInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/uphold", api.Middleware(http.HandlerFunc(economy.UpholdInboxItemHandler))).Methods("POST")
 
 	ws := r.PathPrefix("/ws").Subrouter()
 

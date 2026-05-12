@@ -251,6 +251,7 @@ type EconomySettings struct {
 	FineMode               string `json:"fineMode" bson:"fineMode"`                             // "inbox" | "auto_debit"
 	AllowNegativeBalance   bool   `json:"allowNegativeBalance" bson:"allowNegativeBalance"`
 	DefaultDueDays         int    `json:"defaultDueDays" bson:"defaultDueDays"` // days before inbox item flips delinquent
+	ContestExtensionDays   int    `json:"contestExtensionDays" bson:"contestExtensionDays"` // days the due date is pushed when a civilian contests a fine
 }
 
 // TenCodes holds the structure for ten-codes used in departments

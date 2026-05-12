@@ -14,7 +14,7 @@ type InboxItem struct {
 	Title       string             `json:"title" bson:"title"`
 	Body        string             `json:"body,omitempty" bson:"body,omitempty"`
 	Amount      int64              `json:"amount" bson:"amount"` // signed cents; positive = owed, negative = credit
-	Status      string             `json:"status" bson:"status"` // "pending" | "paid" | "dismissed" | "delinquent"
+	Status      string             `json:"status" bson:"status"` // "pending" | "paid" | "dismissed" | "delinquent" | "contested"
 	IssuedBy    string             `json:"issuedBy,omitempty" bson:"issuedBy,omitempty"`
 	RefType     string             `json:"refType,omitempty" bson:"refType,omitempty"` // e.g. "criminalHistoryId" | "courtCaseId"
 	RefID       string             `json:"refId,omitempty" bson:"refId,omitempty"`
@@ -22,6 +22,15 @@ type InboxItem struct {
 	PaidAt      primitive.DateTime `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
 	DismissedAt primitive.DateTime `json:"dismissedAt,omitempty" bson:"dismissedAt,omitempty"`
 	DismissedBy string             `json:"dismissedBy,omitempty" bson:"dismissedBy,omitempty"`
-	CreatedAt   primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	// Contest workflow: a civilian can contest a pending fine to push it
+	// before a judge. The original due date is preserved and the active
+	// due date is pushed out by community.economy.contestExtensionDays.
+	ContestedAt   primitive.DateTime `json:"contestedAt,omitempty" bson:"contestedAt,omitempty"`
+	ContestReason string             `json:"contestReason,omitempty" bson:"contestReason,omitempty"`
+	OriginalDueAt primitive.DateTime `json:"originalDueAt,omitempty" bson:"originalDueAt,omitempty"`
+	ResolvedAt    primitive.DateTime `json:"resolvedAt,omitempty" bson:"resolvedAt,omitempty"`
+	ResolvedBy    string             `json:"resolvedBy,omitempty" bson:"resolvedBy,omitempty"`
+	Resolution    string             `json:"resolution,omitempty" bson:"resolution,omitempty"` // "upheld" | "dismissed"
+	CreatedAt     primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
