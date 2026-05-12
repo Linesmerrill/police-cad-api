@@ -508,6 +508,13 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 			courtCaseForHook.Details.CaseNumber,
 			hookRes,
 		)
+
+		// Settle the ORIGINAL fine inbox item that was contested (if any).
+		// Without this the civilian's row stays "Contested — awaiting judge
+		// review" forever even after the judge resolves the case. We resolve
+		// items in contested|pending|delinquent state — paid items are left
+		// alone since a refund flow isn't built yet.
+		settleLinkedInboxItems(cc.IDB, ctx, resolveData.Resolutions, resolveData.JudgeID, now)
 	}
 
 	// Mark the docket entry as "completed" in the court session (if linked)
@@ -955,4 +962,66 @@ func (cc CourtCase) canDeleteCase(ctx context.Context, requesterID string, court
 		}
 	}
 	return false
+}
+
+// settleLinkedInboxItems updates any pending/contested fine inbox items that
+// were linked to the criminal-history entries a judge just ruled on. Without
+// this the civilian's inbox + wallet would keep showing the fine as
+// "contested" indefinitely even after the case is resolved.
+//
+//   - verdict="dismissed" → mark the inbox item dismissed (with resolution flag)
+//   - verdict="upheld"    → flip the item back to pending with resolution=upheld
+//
+// Items already paid are left alone — a refund flow isn't built yet, and
+// silently changing the status of a paid item would obscure history. Items in
+// any other status (dismissed already, paid, etc.) are also skipped.
+//
+// Each successful update broadcasts inbox.updated so subscribed clients
+// (inbox page, civ-card badge) refresh in place.
+func settleLinkedInboxItems(idb databases.InboxItemDatabase, ctx context.Context, resolutions []models.CaseResolution, judgeID string, now primitive.DateTime) {
+	for _, res := range resolutions {
+		if res.ItemID == "" {
+			continue
+		}
+		filter := bson.M{
+			"refType": "criminalHistoryId",
+			"refId":   res.ItemID,
+			"status":  bson.M{"$in": []string{"contested", "pending", "delinquent"}},
+		}
+		items, err := idb.Find(ctx, filter)
+		if err != nil || len(items) == 0 {
+			continue
+		}
+		var set bson.M
+		switch res.Verdict {
+		case "dismissed":
+			set = bson.M{
+				"status":      "dismissed",
+				"dismissedAt": now,
+				"dismissedBy": judgeID,
+				"resolvedAt":  now,
+				"resolvedBy":  judgeID,
+				"resolution":  "dismissed",
+				"updatedAt":   now,
+			}
+		case "upheld":
+			set = bson.M{
+				"status":     "pending",
+				"resolvedAt": now,
+				"resolvedBy": judgeID,
+				"resolution": "upheld",
+				"updatedAt":  now,
+			}
+		default:
+			continue
+		}
+		for _, it := range items {
+			if err := idb.UpdateOne(ctx, bson.M{"_id": it.ID}, bson.M{"$set": set}); err != nil {
+				continue
+			}
+			if updated, _ := idb.FindOne(ctx, bson.M{"_id": it.ID}); updated != nil {
+				go BroadcastInboxEvent("inbox.updated", updated.CommunityID, updated)
+			}
+		}
+	}
 }
