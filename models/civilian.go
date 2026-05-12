@@ -42,7 +42,6 @@ type CivilianDetails struct {
 	ApprovalNotes        string             `json:"approvalNotes" bson:"approvalNotes"`   // Admin notes for approval decisions
 	Image                string             `json:"image" bson:"image"`
 	Occupation           string             `json:"occupation" bson:"occupation"`
-	JobID                string             `json:"jobId" bson:"jobId"` // Economy: optional active Job (community.jobs[].id)
 	FirearmLicense       string             `json:"firearmLicense" bson:"firearmLicense"`
 	ActiveCommunityID    string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	Deceased              bool              `json:"deceased" bson:"deceased"`

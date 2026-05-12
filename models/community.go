@@ -42,7 +42,6 @@ type CommunityDetails struct {
 	TenCodes               []TenCodes              `json:"tenCodes" bson:"tenCodes"`
 	Fines                  CommunityFine           `json:"fines" bson:"fines"`
 	PenalCodes             CommunityPenalCode      `json:"penalCodes" bson:"penalCodes"`
-	Jobs                   []Job                   `json:"jobs" bson:"jobs"`
 	Templates              []Template              `json:"templates" bson:"templates"`
 	Subscription           Subscription            `json:"subscription" bson:"subscription"`
 	SubscriptionCreatedBy  string                  `json:"subscriptionCreatedBy" bson:"subscriptionCreatedBy"`
@@ -243,28 +242,6 @@ type Department struct {
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt         primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 	OnlineMemberCount int                `json:"onlineMemberCount" bson:"onlineMemberCount"`
-}
-
-// Job is a community-level RP occupation (Sanitation, Mechanic, Lawyer, etc.).
-// Civilians can pick one job at a time; clocking in pays at job.PayPerHour.
-// Distinct from Department, which models CAD structures (LEO/EMS/...).
-type Job struct {
-	ID                        primitive.ObjectID `json:"_id" bson:"_id"`
-	Name                      string             `json:"name" bson:"name"`
-	Description               string             `json:"description,omitempty" bson:"description,omitempty"`
-	Icon                      string             `json:"icon,omitempty" bson:"icon,omitempty"`
-	Color                     string             `json:"color,omitempty" bson:"color,omitempty"`
-	PayPerHour                int64              `json:"payPerHour" bson:"payPerHour"` // cents
-	MaxSessionMinutes         int                `json:"maxSessionMinutes" bson:"maxSessionMinutes"`
-	AfkPromptIntervalSeconds  int                `json:"afkPromptIntervalSeconds" bson:"afkPromptIntervalSeconds"`
-	AfkGraceSeconds           int                `json:"afkGraceSeconds" bson:"afkGraceSeconds"`
-	PayoutMode                string             `json:"payoutMode" bson:"payoutMode"` // "on_heartbeat" | "on_clockout"
-	RequiresFirearmLicense    bool               `json:"requiresFirearmLicense" bson:"requiresFirearmLicense"`
-	RequiresDriversLicense    bool               `json:"requiresDriversLicense" bson:"requiresDriversLicense"`
-	Archived                  bool               `json:"archived" bson:"archived"`
-	SortOrder                 int                `json:"sortOrder" bson:"sortOrder"`
-	CreatedAt                 primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt                 primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
 
 // EconomySettings holds community-wide economy config.

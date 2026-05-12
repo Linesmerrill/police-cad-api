@@ -719,7 +719,7 @@ createIndexSafe(
   { name: "clock_sessions_community_status_idx", background: true }
 );
 
-// Partial unique: only one active session per civilian (regardless of dept vs job).
+// Partial unique: only one active session per civilian.
 createIndexSafe(
   db.clock_sessions,
   { civilianId: 1 },
@@ -730,16 +730,6 @@ createIndexSafe(
     // Partial filter operators are restricted to $eq/$exists/$gt/$gte/$lt/$lte/$type/$and/$or/$in.
     // $gt: "" matches any non-empty string and skips user-scoped sessions (which have civilianId="").
     partialFilterExpression: { status: "active", civilianId: { $gt: "" } }
-  }
-);
-
-// Job-keyed lookups (e.g. "who is currently working as Sanitation?").
-createIndexSafe(
-  db.clock_sessions,
-  { jobId: 1, status: 1 },
-  {
-    name: "clock_sessions_job_status_idx",
-    background: true,
   }
 );
 

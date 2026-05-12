@@ -86,37 +86,6 @@ func findUserMembership(dept *models.Department, userID string) (rankID string, 
 	return "", false
 }
 
-// resolveJob returns the named job from a community plus its effective economy settings
-// (with sensible defaults applied for missing values).
-func resolveJob(community *models.Community, jobID string) (job *models.Job, payRate int64, payoutMode string, maxSessionMin, afkGrace int, ok bool) {
-	if community == nil || jobID == "" {
-		return nil, 0, "", 0, 0, false
-	}
-	for i := range community.Details.Jobs {
-		j := &community.Details.Jobs[i]
-		if j.ID.Hex() == jobID {
-			job = j
-			break
-		}
-	}
-	if job == nil || job.Archived {
-		return nil, 0, "", 0, 0, false
-	}
-	payRate = job.PayPerHour
-	payoutMode = job.PayoutMode
-	if payoutMode == "" {
-		payoutMode = "on_heartbeat"
-	}
-	maxSessionMin = job.MaxSessionMinutes
-	if maxSessionMin <= 0 {
-		maxSessionMin = 120
-	}
-	afkGrace = job.AfkGraceSeconds
-	if afkGrace <= 0 {
-		afkGrace = 60
-	}
-	return job, payRate, payoutMode, maxSessionMin, afkGrace, true
-}
 
 // paySession computes earnings to credit from session.LastPayoutAt (or StartedAt) up to `now`,
 // capped at the session's MaxSession window. Updates the session document and the civilian balance.
@@ -227,29 +196,23 @@ func (e Economy) ensureBalanceInitialized(ctx context.Context, civ *models.Civil
 // ---- handlers ----
 
 // clockInRequest is the body for POST /api/v2/economy/clock-in.
-// Exactly one of DepartmentID or JobID must be set:
-//   - DepartmentID + (optional civilianId) → user clocks in to a CAD department (police, EMS, ...)
-//   - JobID + civilianId → civilian clocks in to a community Job (Sanitation, Mechanic, ...)
 type clockInRequest struct {
 	CommunityID  string `json:"communityId"`
-	DepartmentID string `json:"departmentId,omitempty"`
-	JobID        string `json:"jobId,omitempty"`
+	DepartmentID string `json:"departmentId"`
 	CivilianID   string `json:"civilianId,omitempty"`
 }
 
-// ClockInHandler starts a clock session against either a department or a job.
+// ClockInHandler starts a clock session for a user against a department.
+// Pay rate comes from rank.payRatePerHour if the user has a rank assigned,
+// otherwise from department.basePayPerHour.
 func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 	var req clockInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	if req.CommunityID == "" {
-		config.ErrorStatus("communityId required", http.StatusBadRequest, w, nil)
-		return
-	}
-	if (req.DepartmentID == "" && req.JobID == "") || (req.DepartmentID != "" && req.JobID != "") {
-		config.ErrorStatus("exactly one of departmentId or jobId required", http.StatusBadRequest, w, nil)
+	if req.CommunityID == "" || req.DepartmentID == "" {
+		config.ErrorStatus("communityId and departmentId required", http.StatusBadRequest, w, nil)
 		return
 	}
 	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
@@ -279,95 +242,37 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nowDT := primitive.NewDateTimeFromTime(time.Now())
-	sess := models.ClockSession{
-		ID:              primitive.NewObjectID(),
-		CommunityID:     req.CommunityID,
-		UserID:          userID,
-		CivilianID:      req.CivilianID,
-		Status:          "active",
-		StartedAt:       nowDT,
-		LastHeartbeatAt: nowDT,
-		LastPayoutAt:    nowDT,
-		CreatedAt:       nowDT,
-		UpdatedAt:       nowDT,
+	dept, payRate, payoutMode, maxSession, afkGrace, ok := resolveDepartmentEconomy(community, req.DepartmentID, "")
+	if !ok {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, nil)
+		return
+	}
+	if !dept.EconomyEnabled {
+		config.ErrorStatus("economy is disabled for this department", http.StatusForbidden, w, nil)
+		return
 	}
 
-	if req.JobID != "" {
-		// ---- Job clock-in ----
-		if req.CivilianID == "" {
-			config.ErrorStatus("civilianId required for job clock-in", http.StatusBadRequest, w, nil)
-			return
+	rankID, found := findUserMembership(dept, userID)
+	// Public departments (approvalRequired=false) treat any community member
+	// as implicitly eligible — no explicit join required.
+	if !found && !dept.ApprovalRequired {
+		if _, inCommunity := community.Details.Members[userID]; inCommunity {
+			found = true
 		}
-		civOID, err := primitive.ObjectIDFromHex(req.CivilianID)
-		if err != nil {
-			config.ErrorStatus("invalid civilianId", http.StatusBadRequest, w, err)
-			return
-		}
-		civ, err := e.CivDB.FindOne(ctx, bson.M{"_id": civOID})
-		if err != nil || civ == nil {
-			config.ErrorStatus("civilian not found", http.StatusNotFound, w, err)
-			return
-		}
-		if civ.Details.UserID != userID {
-			config.ErrorStatus("you don't own this civilian", http.StatusForbidden, w, nil)
-			return
-		}
-		if civ.Details.JobID != req.JobID {
-			config.ErrorStatus("this civilian isn't assigned to that job", http.StatusForbidden, w, nil)
-			return
-		}
-		job, payRate, payoutMode, maxSession, afkGrace, ok := resolveJob(community, req.JobID)
-		if !ok {
-			config.ErrorStatus("job not found or archived", http.StatusNotFound, w, nil)
-			return
-		}
-		sess.JobID = job.ID.Hex()
-		sess.JobName = job.Name
-		sess.PayRateSnapshot = payRate
-		sess.PayoutMode = payoutMode
-		sess.MaxSessionMinutes = maxSession
-		sess.AfkGraceSeconds = afkGrace
-	} else {
-		// ---- Department clock-in ----
-		dept, payRate, payoutMode, maxSession, afkGrace, ok := resolveDepartmentEconomy(community, req.DepartmentID, "")
-		if !ok {
-			config.ErrorStatus("department not found", http.StatusNotFound, w, nil)
-			return
-		}
-		if !dept.EconomyEnabled {
-			config.ErrorStatus("economy is disabled for this department", http.StatusForbidden, w, nil)
-			return
-		}
-		rankID, found := findUserMembership(dept, userID)
-		// Public departments (approvalRequired=false) treat any community member
-		// as implicitly eligible — no explicit join required.
-		if !found && !dept.ApprovalRequired {
-			if _, inCommunity := community.Details.Members[userID]; inCommunity {
-				found = true
-			}
-		}
-		if !found {
-			config.ErrorStatus("user is not a member of this department", http.StatusForbidden, w, nil)
-			return
-		}
-		// Re-resolve with rankID for accurate pay rate.
-		if rankID != "" {
-			_, payRate, _, _, _, _ = resolveDepartmentEconomy(community, req.DepartmentID, rankID)
-		}
-		sess.DepartmentID = dept.ID.Hex()
-		sess.DepartmentName = dept.Name
-		sess.RankID = rankID
-		sess.PayRateSnapshot = payRate
-		sess.PayoutMode = payoutMode
-		sess.MaxSessionMinutes = maxSession
-		sess.AfkGraceSeconds = afkGrace
+	}
+	if !found {
+		config.ErrorStatus("user is not a member of this department", http.StatusForbidden, w, nil)
+		return
+	}
+	// Re-resolve with rankID for accurate pay rate.
+	if rankID != "" {
+		_, payRate, _, _, _, _ = resolveDepartmentEconomy(community, req.DepartmentID, rankID)
 	}
 
-	// Enforce one active session per civilian, and one active dept-session per user.
+	// Enforce one active session per civilian (or per user when civilianId is empty).
 	activeFilter := bson.M{"status": "active", "communityId": req.CommunityID}
-	if sess.CivilianID != "" {
-		activeFilter["civilianId"] = sess.CivilianID
+	if req.CivilianID != "" {
+		activeFilter["civilianId"] = req.CivilianID
 	} else {
 		activeFilter["userId"] = userID
 		activeFilter["civilianId"] = ""
@@ -378,6 +283,26 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nowDT := primitive.NewDateTimeFromTime(time.Now())
+	sess := models.ClockSession{
+		ID:                primitive.NewObjectID(),
+		CommunityID:       req.CommunityID,
+		DepartmentID:      dept.ID.Hex(),
+		DepartmentName:    dept.Name,
+		UserID:            userID,
+		CivilianID:        req.CivilianID,
+		RankID:            rankID,
+		PayRateSnapshot:   payRate,
+		PayoutMode:        payoutMode,
+		Status:            "active",
+		StartedAt:         nowDT,
+		LastHeartbeatAt:   nowDT,
+		LastPayoutAt:      nowDT,
+		MaxSessionMinutes: maxSession,
+		AfkGraceSeconds:   afkGrace,
+		CreatedAt:         nowDT,
+		UpdatedAt:         nowDT,
+	}
 	if _, err := e.SDB.InsertOne(ctx, sess); err != nil {
 		config.ErrorStatus("failed to create clock session", http.StatusInternalServerError, w, err)
 		return
