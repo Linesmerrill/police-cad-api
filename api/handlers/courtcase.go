@@ -30,6 +30,7 @@ type CourtCase struct {
 	SDB    databases.CourtSessionDatabase     // court session DB for updating docket entries on resolve
 	UDB    databases.UserDatabase             // for community-membership checks on search
 	CommDB databases.CommunityDatabase        // for judicial-role checks on delete
+	IDB    databases.InboxItemDatabase        // economy inbox; nil-safe (hook no-ops when nil)
 }
 
 // CreateCourtCaseHandler creates a new court case when a civilian contests records
@@ -487,6 +488,26 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		config.ErrorStatus("failed to resolve court case", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Economy: drop verdict-driven inbox items for upheld resolutions.
+	// Fire-and-forget; never blocks the response.
+	if courtCaseForHook, _ := cc.DB.FindOne(ctx, bson.M{"_id": bID}); courtCaseForHook != nil {
+		hookRes := make([]judicialResolution, 0, len(resolveData.Resolutions))
+		for _, r := range resolveData.Resolutions {
+			hookRes = append(hookRes, judicialResolution{
+				ItemID: r.ItemID, ItemType: r.ItemType, Verdict: r.Verdict, JudgeNotes: resolveData.JudgeNotes,
+			})
+		}
+		dropJudicialInboxItem(
+			inboxHookDeps{IDB: cc.IDB, CivDB: cc.CDB, CommDB: cc.CommDB},
+			caseID,
+			courtCaseForHook.Details.CommunityID,
+			courtCaseForHook.Details.CivilianID,
+			courtCaseForHook.Details.UserID,
+			courtCaseForHook.Details.CaseNumber,
+			hookRes,
+		)
 	}
 
 	// Mark the docket entry as "completed" in the court session (if linked)
