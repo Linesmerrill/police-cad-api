@@ -58,13 +58,27 @@ type ContestedItem struct {
 	Summary  string `json:"summary" bson:"summary"`   // human-readable summary of the charge
 }
 
-// CaseResolution holds the judge's resolution for a single contested item
+// CaseResolution holds the judge's resolution for a single contested item.
+//
+// For citations/warnings with multiple charges, ChargeResolutions carries
+// the per-fine verdict; Verdict is the derived top-level outcome ("upheld",
+// "dismissed", or "partial" when the charges are mixed). For arrests (and
+// citations without charges) ChargeResolutions is nil and Verdict is the
+// only thing that matters.
 type CaseResolution struct {
-	ItemID     string             `json:"itemID" bson:"itemID"`         // matches ContestedItem.ItemID
-	ItemType   string             `json:"itemType" bson:"itemType"`     // "citation", "warning", "arrest"
-	Verdict    string             `json:"verdict" bson:"verdict"`       // "dismissed", "upheld"
-	JudgeNotes string             `json:"judgeNotes" bson:"judgeNotes"` // judge's notes for this resolution
-	ResolvedAt primitive.DateTime `json:"resolvedAt" bson:"resolvedAt"`
+	ItemID            string             `json:"itemID" bson:"itemID"`         // matches ContestedItem.ItemID
+	ItemType          string             `json:"itemType" bson:"itemType"`     // "citation", "warning", "arrest"
+	Verdict           string             `json:"verdict" bson:"verdict"`       // "dismissed", "upheld", "partial"
+	JudgeNotes        string             `json:"judgeNotes" bson:"judgeNotes"` // judge's notes for this resolution
+	ChargeResolutions []ChargeResolution `json:"chargeResolutions,omitempty" bson:"chargeResolutions,omitempty"`
+	ResolvedAt        primitive.DateTime `json:"resolvedAt" bson:"resolvedAt"`
+}
+
+// ChargeResolution holds the verdict for a single fine within a citation /
+// warning. FineIndex references the position in CriminalHistory.Fines.
+type ChargeResolution struct {
+	FineIndex int    `json:"fineIndex" bson:"fineIndex"`
+	Verdict   string `json:"verdict" bson:"verdict"` // "upheld" | "dismissed"
 }
 
 // CourtCaseHistoryEntry records a single event in the court case lifecycle
