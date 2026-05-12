@@ -232,8 +232,9 @@ func (c Community) UpdateRankHandler(w http.ResponseWriter, r *http.Request) {
 		"prefix":       prefix + "prefix",
 		"requirements": prefix + "requirements",
 		"autoPromote":  prefix + "autoPromote",
-		"canViewStats": prefix + "canViewStats",
-		"isDefault":    prefix + "isDefault",
+		"canViewStats":   prefix + "canViewStats",
+		"isDefault":      prefix + "isDefault",
+		"payRatePerHour": prefix + "payRatePerHour",
 	}
 
 	for field, bsonPath := range allowedFields {
