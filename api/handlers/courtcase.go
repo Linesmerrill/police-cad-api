@@ -1042,6 +1042,59 @@ func (cc CourtCase) ResettleInboxHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// ResettleInboxByItemHandler resettles a stuck inbox item by looking up the
+// court case that ruled on its underlying criminal-history entry, then re-
+// running settleLinkedInboxItems against the case's stored resolutions.
+//
+//   POST /api/v2/inbox/{id}/resettle
+//
+// Convenience wrapper around ResettleInboxHandler for callers that only have
+// the inbox item ID at hand (e.g. fixing a row directly from /inbox).
+func (cc CourtCase) ResettleInboxByItemHandler(w http.ResponseWriter, r *http.Request) {
+	itemID := mux.Vars(r)["id"]
+	bID, err := primitive.ObjectIDFromHex(itemID)
+	if err != nil {
+		config.ErrorStatus("invalid inbox item ID", http.StatusBadRequest, w, err)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	if cc.IDB == nil {
+		config.ErrorStatus("inbox database not configured", http.StatusInternalServerError, w, nil)
+		return
+	}
+	item, err := cc.IDB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil || item == nil {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	if item.RefType != "criminalHistoryId" || item.RefID == "" {
+		config.ErrorStatus("inbox item has no linked criminal history", http.StatusBadRequest, w, nil)
+		return
+	}
+	cases, err := cc.DB.Find(ctx, bson.M{"courtCase.resolutions.itemID": item.RefID})
+	if err != nil || len(cases) == 0 {
+		config.ErrorStatus("no resolved court case found for this inbox item", http.StatusNotFound, w, err)
+		return
+	}
+	// Pick the most-recently updated case in case there are multiples.
+	target := cases[0]
+	for _, c := range cases[1:] {
+		if c.Details.UpdatedAt > target.Details.UpdatedAt {
+			target = c
+		}
+	}
+	judgeID := target.Details.JudgeID
+	now := primitive.NewDateTimeFromTime(time.Now())
+	settleLinkedInboxItems(cc.IDB, cc.CDB, ctx, target.Details.Resolutions, judgeID, now)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Re-settle invoked",
+		"itemID":  itemID,
+		"caseID":  target.ID.Hex(),
+	})
+}
+
 // settleLinkedInboxItems updates any pending/contested fine inbox items that
 // were linked to the criminal-history entries a judge just ruled on. Without
 // this the civilian's inbox + wallet would keep showing the fine as

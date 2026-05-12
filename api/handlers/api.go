@@ -552,6 +552,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/court-cases/{case_id}/schedule", api.Middleware(http.HandlerFunc(courtCaseHandler.ScheduleCourtCaseHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}/resolve", api.Middleware(http.HandlerFunc(courtCaseHandler.ResolveCourtCaseHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}/resettle-inbox", api.Middleware(http.HandlerFunc(courtCaseHandler.ResettleInboxHandler))).Methods("POST")
+	apiV2.Handle("/inbox/{id}/resettle", api.Middleware(http.HandlerFunc(courtCaseHandler.ResettleInboxByItemHandler))).Methods("POST")
 	apiV2.Handle("/court-cases/{case_id}/status", api.Middleware(http.HandlerFunc(courtCaseHandler.UpdateCourtCaseStatusHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCaseByIDHandler))).Methods("GET")
 	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.DeleteCourtCaseHandler))).Methods("DELETE")
