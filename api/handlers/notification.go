@@ -119,6 +119,39 @@ func sendNotificationToUser(userId string, notification interface{}) {
 	}
 }
 
+// BroadcastInboxEvent broadcasts an inbox item create/update to every user
+// currently connected for the item's community. Exported so the economy
+// handlers can call it after mutating an item.
+//   - eventType: "inbox.created" | "inbox.updated"
+//   - item: the marshaled inbox item (sent as event.data on the wire)
+//   - communityId: scope; if empty the event is dropped.
+func BroadcastInboxEvent(eventType, communityId string, item interface{}) {
+	if communityId == "" {
+		return
+	}
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+	userIds := hub.communityClients[communityId]
+	if len(userIds) == 0 {
+		return
+	}
+	payload := map[string]interface{}{
+		"event": eventType,
+		"data":  item,
+	}
+	for userId := range userIds {
+		conn, exists := hub.clients[userId]
+		if !exists {
+			continue
+		}
+		if err := conn.WriteJSON(payload); err != nil {
+			log.Printf("Error sending inbox event to user %s: %v", userId, err)
+			removeUserFromHub(userId)
+			conn.Close()
+		}
+	}
+}
+
 // broadcastPanicAlertEvent broadcasts a panic alert event.
 // If communityId is provided, only users in that community receive the event.
 // If communityId is empty, all connected users receive it (backward compatibility).

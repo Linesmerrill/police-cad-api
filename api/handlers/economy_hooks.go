@@ -143,7 +143,9 @@ func dropCitationInboxItem(deps inboxHookDeps, civilianID primitive.ObjectID, hi
 
 		if _, err := deps.IDB.InsertOne(ctx, item); err != nil {
 			zap.S().Errorw("failed to insert citation inbox item", "civilianId", civilianID.Hex(), "error", err)
+			return
 		}
+		BroadcastInboxEvent("inbox.created", item.CommunityID, item)
 	}()
 }
 
@@ -240,7 +242,9 @@ func dropJudicialInboxItem(deps inboxHookDeps, caseID, communityID, civilianID, 
 			}
 			if _, err := deps.IDB.InsertOne(ctx, item); err != nil {
 				zap.S().Errorw("failed to insert judicial inbox item", "caseId", caseID, "civilianId", civilianID, "error", err)
+				continue
 			}
+			BroadcastInboxEvent("inbox.created", item.CommunityID, item)
 		}
 	}()
 }

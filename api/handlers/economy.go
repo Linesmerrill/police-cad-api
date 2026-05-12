@@ -588,6 +588,7 @@ func (e Economy) CreateInboxItemHandler(w http.ResponseWriter, r *http.Request) 
 		config.ErrorStatus("failed to create inbox item", http.StatusInternalServerError, w, err)
 		return
 	}
+	go BroadcastInboxEvent("inbox.created", item.CommunityID, item)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(item)
 }
@@ -667,6 +668,9 @@ func (e Economy) PayInboxItemHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated, _ := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	if updated != nil {
+		go BroadcastInboxEvent("inbox.updated", updated.CommunityID, updated)
+	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(updated)
 }
@@ -704,6 +708,9 @@ func (e Economy) DismissInboxItemHandler(w http.ResponseWriter, r *http.Request)
 	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": updates}); err != nil {
 		config.ErrorStatus("failed to dismiss inbox item", http.StatusInternalServerError, w, err)
 		return
+	}
+	if updated, _ := e.IDB.FindOne(ctx, bson.M{"_id": itemID}); updated != nil {
+		go BroadcastInboxEvent("inbox.updated", updated.CommunityID, updated)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -767,6 +774,9 @@ func (e Economy) ContestInboxItemHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	updated, _ := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	if updated != nil {
+		go BroadcastInboxEvent("inbox.updated", updated.CommunityID, updated)
+	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(updated)
 }
@@ -810,6 +820,45 @@ func (e Economy) UpholdInboxItemHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	updated, _ := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	if updated != nil {
+		go BroadcastInboxEvent("inbox.updated", updated.CommunityID, updated)
+	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(updated)
+}
+
+// GetInboxPendingCountsHandler returns the count of "needs attention"
+// (pending + delinquent + contested) inbox items per civilian for a given
+// owning user, scoped to a community. Used by the dept-dashboard civilian
+// grid to badge each card with the number of unhandled items.
+//   GET /api/v2/economy/inbox/pending-counts?userId=X&communityId=Y
+// Response: { "counts": { "<civilianId>": <number>, ... } }
+func (e Economy) GetInboxPendingCountsHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	userID := q.Get("userId")
+	commID := q.Get("communityId")
+	if userID == "" || commID == "" {
+		config.ErrorStatus("userId and communityId required", http.StatusBadRequest, w, nil)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	items, err := e.IDB.Find(ctx, bson.M{
+		"userId":      userID,
+		"communityId": commID,
+		"status":      bson.M{"$in": []string{"pending", "delinquent", "contested"}},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to count inbox items", http.StatusInternalServerError, w, err)
+		return
+	}
+	counts := map[string]int{}
+	for _, it := range items {
+		if it.CivilianID == "" {
+			continue
+		}
+		counts[it.CivilianID]++
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"counts": counts})
 }
