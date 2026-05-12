@@ -279,6 +279,14 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		var found bool
 		rankID, found = findUserMembership(dept, userID)
+		// Public departments (approvalRequired=false) treat any community member
+		// as implicitly eligible — no explicit join required. Private departments
+		// still require an explicit member entry.
+		if !found && !dept.ApprovalRequired {
+			if _, inCommunity := community.Details.Members[userID]; inCommunity {
+				found = true
+			}
+		}
 		if !found {
 			config.ErrorStatus("user is not a member of this department", http.StatusForbidden, w, nil)
 			return
