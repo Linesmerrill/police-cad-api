@@ -1003,6 +1003,45 @@ func (cc CourtCase) canDeleteCase(ctx context.Context, requesterID string, court
 	return false
 }
 
+// ResettleInboxHandler re-runs settleLinkedInboxItems for a previously
+// completed court case. Useful for one-off reconciliation when settle was
+// broken at the time the case was resolved (e.g. the pre-fix ordering bug
+// where partial amounts were never reduced).
+//
+//   POST /api/v2/court-cases/{case_id}/resettle-inbox
+//
+// Idempotent — running it more than once on an already-correct item just
+// overwrites the same fields. Only touches items still in
+// {pending, delinquent, contested} state, so paid items are never disturbed.
+func (cc CourtCase) ResettleInboxHandler(w http.ResponseWriter, r *http.Request) {
+	caseID := mux.Vars(r)["case_id"]
+	bID, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		config.ErrorStatus("invalid court case ID", http.StatusBadRequest, w, err)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	courtCase, err := cc.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil || courtCase == nil {
+		config.ErrorStatus("court case not found", http.StatusNotFound, w, err)
+		return
+	}
+	if len(courtCase.Details.Resolutions) == 0 {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"message": "no resolutions to settle", "settled": 0})
+		return
+	}
+	judgeID := courtCase.Details.JudgeID
+	now := primitive.NewDateTimeFromTime(time.Now())
+	settleLinkedInboxItems(cc.IDB, cc.CDB, ctx, courtCase.Details.Resolutions, judgeID, now)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Re-settle invoked",
+		"caseID":  caseID,
+	})
+}
+
 // settleLinkedInboxItems updates any pending/contested fine inbox items that
 // were linked to the criminal-history entries a judge just ruled on. Without
 // this the civilian's inbox + wallet would keep showing the fine as
