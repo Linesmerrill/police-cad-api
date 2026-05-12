@@ -727,7 +727,9 @@ createIndexSafe(
     name: "clock_sessions_civilian_unique_active_idx",
     unique: true,
     background: true,
-    partialFilterExpression: { status: "active", civilianId: { $ne: "" } }
+    // Partial filter operators are restricted to $eq/$exists/$gt/$gte/$lt/$lte/$type/$and/$or/$in.
+    // $gt: "" matches any non-empty string and skips user-scoped sessions (which have civilianId="").
+    partialFilterExpression: { status: "active", civilianId: { $gt: "" } }
   }
 );
 
