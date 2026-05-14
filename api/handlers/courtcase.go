@@ -30,6 +30,7 @@ type CourtCase struct {
 	SDB    databases.CourtSessionDatabase     // court session DB for updating docket entries on resolve
 	UDB    databases.UserDatabase             // for community-membership checks on search
 	CommDB databases.CommunityDatabase        // for judicial-role checks on delete
+	IDB    databases.InboxItemDatabase        // economy inbox; nil-safe (hook no-ops when nil)
 }
 
 // CreateCourtCaseHandler creates a new court case when a civilian contests records
@@ -489,6 +490,33 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Economy: drop verdict-driven inbox items for upheld resolutions.
+	// Fire-and-forget; never blocks the response.
+	if courtCaseForHook, _ := cc.DB.FindOne(ctx, bson.M{"_id": bID}); courtCaseForHook != nil {
+		hookRes := make([]judicialResolution, 0, len(resolveData.Resolutions))
+		for _, r := range resolveData.Resolutions {
+			hookRes = append(hookRes, judicialResolution{
+				ItemID: r.ItemID, ItemType: r.ItemType, Verdict: r.Verdict, JudgeNotes: resolveData.JudgeNotes,
+			})
+		}
+		dropJudicialInboxItem(
+			inboxHookDeps{IDB: cc.IDB, CivDB: cc.CDB, CommDB: cc.CommDB},
+			caseID,
+			courtCaseForHook.Details.CommunityID,
+			courtCaseForHook.Details.CivilianID,
+			courtCaseForHook.Details.UserID,
+			courtCaseForHook.Details.CaseNumber,
+			hookRes,
+		)
+
+		// Settle the ORIGINAL fine inbox item that was contested (if any).
+		// Without this the civilian's row stays "Contested — awaiting judge
+		// review" forever even after the judge resolves the case. We resolve
+		// items in contested|pending|delinquent state — paid items are left
+		// alone since a refund flow isn't built yet.
+		settleLinkedInboxItems(cc.IDB, cc.CDB, ctx, resolveData.Resolutions, resolveData.JudgeID, now)
+	}
+
 	// Mark the docket entry as "completed" in the court session (if linked)
 	courtCase, _ := cc.DB.FindOne(ctx, bson.M{"_id": bID})
 	if courtCase != nil && courtCase.Details.CourtSessionID != "" {
@@ -513,9 +541,18 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// Derive top-level verdict on resolutions that carry per-charge rulings so
+	// downstream callers (settle hook, drop hook, civilian record update) all
+	// see a coherent "partial" / "upheld" / "dismissed" outcome.
+	for i := range resolveData.Resolutions {
+		if len(resolveData.Resolutions[i].ChargeResolutions) > 0 {
+			resolveData.Resolutions[i].Verdict = deriveTopVerdict(resolveData.Resolutions[i].ChargeResolutions)
+		}
+	}
+
 	// Apply resolutions to the original records
 	for _, resolution := range resolveData.Resolutions {
-		if resolution.Verdict == "dismissed" || resolution.Verdict == "upheld" {
+		if resolution.Verdict == "dismissed" || resolution.Verdict == "upheld" || resolution.Verdict == "partial" {
 			if resolution.ItemType == "citation" || resolution.ItemType == "warning" {
 				itemID, err := primitive.ObjectIDFromHex(resolution.ItemID)
 				if err != nil {
@@ -530,14 +567,44 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 				if err != nil {
 					continue
 				}
-				_ = cc.CDB.UpdateOne(ctx,
-					bson.M{"_id": civID, "civilian.criminalHistory._id": itemID},
-					bson.M{"$set": bson.M{
-						"civilian.criminalHistory.$.status":      resolution.Verdict,
-						"civilian.criminalHistory.$.dismissedBy": resolveData.JudgeName,
-						"civilian.criminalHistory.$.updatedAt":   now,
-					}},
-				)
+				// If the judge ruled per-charge, write the per-fine statuses
+				// back to the criminalHistory entry. We do this by reading the
+				// civilian, mutating the matching entry's Fines slice, and
+				// writing the whole entry back — fines have no IDs so this is
+				// the cleanest path.
+				if len(resolution.ChargeResolutions) > 0 {
+					civ, err := cc.CDB.FindOne(ctx, bson.M{"_id": civID})
+					if err == nil && civ != nil {
+						for chIdx, entry := range civ.Details.CriminalHistory {
+							if entry.ID != itemID {
+								continue
+							}
+							for _, cr := range resolution.ChargeResolutions {
+								if cr.FineIndex < 0 || cr.FineIndex >= len(civ.Details.CriminalHistory[chIdx].Fines) {
+									continue
+								}
+								if cr.Verdict == "upheld" || cr.Verdict == "dismissed" {
+									civ.Details.CriminalHistory[chIdx].Fines[cr.FineIndex].Status = cr.Verdict
+								}
+							}
+							civ.Details.CriminalHistory[chIdx].Status = resolution.Verdict
+							civ.Details.CriminalHistory[chIdx].DismissedBy = resolveData.JudgeName
+							civ.Details.CriminalHistory[chIdx].UpdatedAt = now
+							path := fmt.Sprintf("civilian.criminalHistory.%d", chIdx)
+							_ = cc.CDB.UpdateOne(ctx, bson.M{"_id": civID}, bson.M{"$set": bson.M{path: civ.Details.CriminalHistory[chIdx]}})
+							break
+						}
+					}
+				} else {
+					_ = cc.CDB.UpdateOne(ctx,
+						bson.M{"_id": civID, "civilian.criminalHistory._id": itemID},
+						bson.M{"$set": bson.M{
+							"civilian.criminalHistory.$.status":      resolution.Verdict,
+							"civilian.criminalHistory.$.dismissedBy": resolveData.JudgeName,
+							"civilian.criminalHistory.$.updatedAt":   now,
+						}},
+					)
+				}
 			} else if resolution.ItemType == "arrest" {
 				itemID, err := primitive.ObjectIDFromHex(resolution.ItemID)
 				if err != nil {
@@ -934,4 +1001,314 @@ func (cc CourtCase) canDeleteCase(ctx context.Context, requesterID string, court
 		}
 	}
 	return false
+}
+
+// ResettleInboxHandler re-runs settleLinkedInboxItems for a previously
+// completed court case. Useful for one-off reconciliation when settle was
+// broken at the time the case was resolved (e.g. the pre-fix ordering bug
+// where partial amounts were never reduced).
+//
+//   POST /api/v2/court-cases/{case_id}/resettle-inbox
+//
+// Idempotent — running it more than once on an already-correct item just
+// overwrites the same fields. Only touches items still in
+// {pending, delinquent, contested} state, so paid items are never disturbed.
+func (cc CourtCase) ResettleInboxHandler(w http.ResponseWriter, r *http.Request) {
+	caseID := mux.Vars(r)["case_id"]
+	bID, err := primitive.ObjectIDFromHex(caseID)
+	if err != nil {
+		config.ErrorStatus("invalid court case ID", http.StatusBadRequest, w, err)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	courtCase, err := cc.DB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil || courtCase == nil {
+		config.ErrorStatus("court case not found", http.StatusNotFound, w, err)
+		return
+	}
+	if len(courtCase.Details.Resolutions) == 0 {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"message": "no resolutions to settle", "settled": 0})
+		return
+	}
+	judgeID := courtCase.Details.JudgeID
+	now := primitive.NewDateTimeFromTime(time.Now())
+	settleLinkedInboxItems(cc.IDB, cc.CDB, ctx, courtCase.Details.Resolutions, judgeID, now)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Re-settle invoked",
+		"caseID":  caseID,
+	})
+}
+
+// ResettleInboxByItemHandler resettles a stuck inbox item by looking up the
+// court case that ruled on its underlying criminal-history entry, then re-
+// running settleLinkedInboxItems against the case's stored resolutions.
+//
+//   POST /api/v2/inbox/{id}/resettle
+//
+// Convenience wrapper around ResettleInboxHandler for callers that only have
+// the inbox item ID at hand (e.g. fixing a row directly from /inbox).
+func (cc CourtCase) ResettleInboxByItemHandler(w http.ResponseWriter, r *http.Request) {
+	itemID := mux.Vars(r)["id"]
+	bID, err := primitive.ObjectIDFromHex(itemID)
+	if err != nil {
+		config.ErrorStatus("invalid inbox item ID", http.StatusBadRequest, w, err)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	if cc.IDB == nil {
+		config.ErrorStatus("inbox database not configured", http.StatusInternalServerError, w, nil)
+		return
+	}
+	item, err := cc.IDB.FindOne(ctx, bson.M{"_id": bID})
+	if err != nil || item == nil {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	if item.RefType != "criminalHistoryId" || item.RefID == "" {
+		config.ErrorStatus("inbox item has no linked criminal history", http.StatusBadRequest, w, nil)
+		return
+	}
+	cases, err := cc.DB.Find(ctx, bson.M{"courtCase.resolutions.itemID": item.RefID})
+	if err != nil || len(cases) == 0 {
+		config.ErrorStatus("no resolved court case found for this inbox item", http.StatusNotFound, w, err)
+		return
+	}
+	// Pick the most-recently updated case in case there are multiples.
+	target := cases[0]
+	for _, c := range cases[1:] {
+		if c.Details.UpdatedAt > target.Details.UpdatedAt {
+			target = c
+		}
+	}
+	judgeID := target.Details.JudgeID
+	now := primitive.NewDateTimeFromTime(time.Now())
+	settleLinkedInboxItems(cc.IDB, cc.CDB, ctx, target.Details.Resolutions, judgeID, now)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Re-settle invoked",
+		"itemID":  itemID,
+		"caseID":  target.ID.Hex(),
+	})
+}
+
+// settleLinkedInboxItems updates any pending/contested fine inbox items that
+// were linked to the criminal-history entries a judge just ruled on. Without
+// this the civilian's inbox + wallet would keep showing the fine as
+// "contested" indefinitely even after the case is resolved.
+//
+//   - verdict="dismissed" → mark the inbox item dismissed (with resolution flag)
+//   - verdict="upheld"    → flip the item back to pending with resolution=upheld
+//
+// Items already paid are left alone — a refund flow isn't built yet, and
+// silently changing the status of a paid item would obscure history. Items in
+// any other status (dismissed already, paid, etc.) are also skipped.
+//
+// Each successful update broadcasts inbox.updated so subscribed clients
+// (inbox page, civ-card badge) refresh in place.
+func settleLinkedInboxItems(idb databases.InboxItemDatabase, cdb databases.CivilianDatabase, ctx context.Context, resolutions []models.CaseResolution, judgeID string, now primitive.DateTime) {
+	for _, res := range resolutions {
+		if res.ItemID == "" {
+			continue
+		}
+		filter := bson.M{
+			"refType": "criminalHistoryId",
+			"refId":   res.ItemID,
+			"status":  bson.M{"$in": []string{"contested", "pending", "delinquent"}},
+		}
+		items, err := idb.Find(ctx, filter)
+		if err != nil || len(items) == 0 {
+			continue
+		}
+
+		// Per-charge resolution → compute the reduced amount and updated body
+		// from the resolution's ChargeResolutions list (the source of truth
+		// the judge just submitted), paired with the original Fines slice on
+		// the civilian's criminalHistory entry (for amounts + labels).
+		//
+		// Reading verdicts from res.ChargeResolutions instead of from
+		// fine.Status decouples this from the order in which the resolve
+		// handler writes statuses back to the civilian — so settle no
+		// longer needs to run after that loop.
+		var partial *struct {
+			amountCents     int64
+			upheldLabels    []string
+			dismissedLabels []string
+		}
+		// Look up the civilian's criminal-history entry once so we can also
+		// rebuild the per-charge `charges` slice for every verdict type, not
+		// just partial. Cheap because we already need it for partial anyway.
+		var historyFines []models.Fine
+		if len(items) > 0 {
+			it := items[0]
+			if it.CivilianID != "" {
+				if cID, perr := primitive.ObjectIDFromHex(it.CivilianID); perr == nil {
+					if civ, ferr := cdb.FindOne(ctx, bson.M{"_id": cID}); ferr == nil && civ != nil {
+						for _, entry := range civ.Details.CriminalHistory {
+							if entry.ID.Hex() == res.ItemID {
+								historyFines = entry.Fines
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		if res.Verdict == "partial" && len(historyFines) > 0 && len(res.ChargeResolutions) > 0 {
+			verdictByIdx := make(map[int]string, len(res.ChargeResolutions))
+			for _, cr := range res.ChargeResolutions {
+				verdictByIdx[cr.FineIndex] = cr.Verdict
+			}
+			p := &struct {
+				amountCents     int64
+				upheldLabels    []string
+				dismissedLabels []string
+			}{}
+			for i, f := range historyFines {
+				v := verdictByIdx[i]
+				if v == "dismissed" {
+					if f.FineType != "" {
+						p.dismissedLabels = append(p.dismissedLabels, f.FineType)
+					}
+					continue
+				}
+				// upheld or unset (defensive — treat as still owed)
+				p.amountCents += int64(f.FineAmount) * 100
+				if f.FineType != "" {
+					p.upheldLabels = append(p.upheldLabels, f.FineType)
+				}
+			}
+			partial = p
+		}
+
+		// Build the per-charge slice (also useful for the inbox UI). Maps the
+		// original fines to {label, amount, status} based on the verdict.
+		var chargesAfter []models.InboxCharge
+		if len(historyFines) > 0 {
+			verdictByIdx := make(map[int]string, len(res.ChargeResolutions))
+			for _, cr := range res.ChargeResolutions {
+				verdictByIdx[cr.FineIndex] = cr.Verdict
+			}
+			chargesAfter = make([]models.InboxCharge, 0, len(historyFines))
+			for i, f := range historyFines {
+				st := ""
+				switch res.Verdict {
+				case "dismissed":
+					st = "dismissed"
+				case "upheld":
+					st = "upheld"
+				case "partial":
+					if v, ok := verdictByIdx[i]; ok && v == "dismissed" {
+						st = "dismissed"
+					} else {
+						st = "upheld"
+					}
+				}
+				chargesAfter = append(chargesAfter, models.InboxCharge{
+					Label:  f.FineType,
+					Amount: int64(f.FineAmount) * 100,
+					Status: st,
+				})
+			}
+		}
+
+		var set bson.M
+		switch res.Verdict {
+		case "dismissed":
+			set = bson.M{
+				"status":      "dismissed",
+				"dismissedAt": now,
+				"dismissedBy": judgeID,
+				"resolvedAt":  now,
+				"resolvedBy":  judgeID,
+				"resolution":  "dismissed",
+				"updatedAt":   now,
+			}
+		case "upheld":
+			set = bson.M{
+				"status":     "pending",
+				"resolvedAt": now,
+				"resolvedBy": judgeID,
+				"resolution": "upheld",
+				"updatedAt":  now,
+			}
+		case "partial":
+			set = bson.M{
+				"status":     "pending",
+				"resolvedAt": now,
+				"resolvedBy": judgeID,
+				"resolution": "partial",
+				"updatedAt":  now,
+			}
+			if partial != nil {
+				if partial.amountCents == 0 {
+					// Every charge ended up dismissed — same as a full dismiss.
+					set["status"] = "dismissed"
+					set["dismissedAt"] = now
+					set["dismissedBy"] = judgeID
+					set["resolution"] = "dismissed"
+				} else {
+					set["amount"] = partial.amountCents
+					body := ""
+					if len(partial.upheldLabels) > 0 {
+						body = strings.Join(partial.upheldLabels, ", ")
+					}
+					if len(partial.dismissedLabels) > 0 {
+						if body != "" {
+							body += " — "
+						}
+						body += "dismissed: " + strings.Join(partial.dismissedLabels, ", ")
+					}
+					if body != "" {
+						set["body"] = body
+					}
+				}
+			}
+		default:
+			continue
+		}
+		if len(chargesAfter) > 0 {
+			set["charges"] = chargesAfter
+		}
+		for _, it := range items {
+			if err := idb.UpdateOne(ctx, bson.M{"_id": it.ID}, bson.M{"$set": set}); err != nil {
+				continue
+			}
+			if updated, _ := idb.FindOne(ctx, bson.M{"_id": it.ID}); updated != nil {
+				go BroadcastInboxEvent("inbox.updated", updated.CommunityID, updated)
+			}
+		}
+	}
+}
+
+// deriveTopVerdict returns the top-level outcome of a per-charge resolution:
+// "upheld" if every charge was upheld, "dismissed" if every charge was
+// dismissed, "partial" when the rulings are mixed. Returns "" when the
+// resolution carries no per-charge rulings.
+func deriveTopVerdict(charges []models.ChargeResolution) string {
+	if len(charges) == 0 {
+		return ""
+	}
+	upheld, dismissed := 0, 0
+	for _, c := range charges {
+		switch c.Verdict {
+		case "upheld":
+			upheld++
+		case "dismissed":
+			dismissed++
+		}
+	}
+	if upheld > 0 && dismissed == 0 {
+		return "upheld"
+	}
+	if dismissed > 0 && upheld == 0 {
+		return "dismissed"
+	}
+	if upheld > 0 && dismissed > 0 {
+		return "partial"
+	}
+	return ""
 }

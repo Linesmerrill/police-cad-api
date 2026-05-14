@@ -68,6 +68,7 @@ type CommunityDetails struct {
 	MostWantedSidebarName   string                 `json:"mostWantedSidebarName" bson:"mostWantedSidebarName"`
 	MostWantedVisibleFields []string               `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
 	MostWantedCustomFields  []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
+	Economy                EconomySettings         `json:"economy" bson:"economy"`
 	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
 }
@@ -209,6 +210,7 @@ type Rank struct {
 	AutoPromote  bool               `json:"autoPromote" bson:"autoPromote"`
 	CanViewStats bool               `json:"canViewStats" bson:"canViewStats"` // can view department metrics
 	IsDefault    bool               `json:"isDefault" bson:"isDefault"`       // unranked members get this rank
+	PayRatePerHour int64            `json:"payRatePerHour" bson:"payRatePerHour"` // Economy: hourly pay in cents; 0 falls back to Department.BasePayPerHour
 }
 
 // Department holds the structure for a department
@@ -230,9 +232,26 @@ type Department struct {
 	// "missing on a legacy department" (also treated as allow, preserves prior behavior).
 	// New departments are created with this set to true.
 	RestrictCivilianRecordDeletion *bool              `json:"restrictCivilianRecordDeletion,omitempty" bson:"restrictCivilianRecordDeletion,omitempty"`
+	// Economy fields
+	EconomyEnabled           bool                     `json:"economyEnabled" bson:"economyEnabled"`
+	BasePayPerHour           int64                    `json:"basePayPerHour" bson:"basePayPerHour"`                     // cents/hr, fallback if rank pay is 0
+	MaxSessionMinutes        int                      `json:"maxSessionMinutes" bson:"maxSessionMinutes"`               // default 120
+	AfkPromptIntervalSeconds int                      `json:"afkPromptIntervalSeconds" bson:"afkPromptIntervalSeconds"` // e.g. 600
+	AfkGraceSeconds          int                      `json:"afkGraceSeconds" bson:"afkGraceSeconds"`                   // e.g. 60
+	PayoutMode               string                   `json:"payoutMode" bson:"payoutMode"`                             // "on_heartbeat" | "on_clockout"
 	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt         primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 	OnlineMemberCount int                `json:"onlineMemberCount" bson:"onlineMemberCount"`
+}
+
+// EconomySettings holds community-wide economy config.
+type EconomySettings struct {
+	Enabled                bool   `json:"enabled" bson:"enabled"`
+	DefaultStartingBalance int64  `json:"defaultStartingBalance" bson:"defaultStartingBalance"` // cents
+	FineMode               string `json:"fineMode" bson:"fineMode"`                             // "inbox" | "auto_debit"
+	AllowNegativeBalance   bool   `json:"allowNegativeBalance" bson:"allowNegativeBalance"`
+	DefaultDueDays         int    `json:"defaultDueDays" bson:"defaultDueDays"` // days before inbox item flips delinquent
+	ContestExtensionDays   int    `json:"contestExtensionDays" bson:"contestExtensionDays"` // days the due date is pushed when a civilian contests a fine
 }
 
 // TenCodes holds the structure for ten-codes used in departments

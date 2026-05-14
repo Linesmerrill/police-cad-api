@@ -31,6 +31,7 @@ type Civilian struct {
 	DB     databases.CivilianDatabase
 	UDB    databases.UserDatabase
 	CommDB databases.CommunityDatabase
+	IDB    databases.InboxItemDatabase // Economy inbox; nil-safe (hooks no-op when nil).
 }
 
 // CivilianHandler returns all civilians
@@ -527,6 +528,10 @@ func (c Civilian) AddCriminalHistoryHandler(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
+
+	// Economy: drop a fine into the civilian's inbox (no-op when economy is off
+	// or the entry isn't a citation). Fire-and-forget; never blocks the response.
+	dropCitationInboxItem(inboxHookDeps{IDB: c.IDB, CivDB: c.DB, CommDB: c.CommDB}, cID, newHistory)
 
 	// Respond with success
 	w.WriteHeader(http.StatusOK)

@@ -46,6 +46,8 @@ type CivilianDetails struct {
 	ActiveCommunityID    string             `json:"activeCommunityID" bson:"activeCommunityID"`
 	Deceased              bool              `json:"deceased" bson:"deceased"`
 	UserID               string             `json:"userID" bson:"userID"`
+	Balance              int64              `json:"balance" bson:"balance"`                         // Economy: balance in cents
+	BalanceInitialized   bool               `json:"balanceInitialized" bson:"balanceInitialized"`   // Economy: true once lazy-backfilled
 	CreatedAt            primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
@@ -68,7 +70,8 @@ type CriminalHistory struct {
 
 // Fine holds the structure for the fine
 type Fine struct {
-	FineType   string `json:"fineType" bson:"fineType"`     // Speeding, Public Intoxication, etc.
-	FineAmount int    `json:"fineAmount" bson:"fineAmount"` // 125, 150, etc.
-	Category   string `json:"category" bson:"category"`     // Misdemeanor, Felony, etc.
+	FineType   string `json:"fineType" bson:"fineType"`           // Speeding, Public Intoxication, etc.
+	FineAmount int    `json:"fineAmount" bson:"fineAmount"`       // 125, 150, etc.
+	Category   string `json:"category" bson:"category"`           // Misdemeanor, Felony, etc.
+	Status     string `json:"status,omitempty" bson:"status,omitempty"` // "" (open) | "upheld" | "dismissed" — set by judge per-charge resolution
 }
