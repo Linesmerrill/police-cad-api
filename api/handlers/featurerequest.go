@@ -45,7 +45,7 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 
 	sortBy := r.URL.Query().Get("sort")
 	status := r.URL.Query().Get("status")
-	excludeStatus := r.URL.Query().Get("excludeStatus")
+	excludeStatuses := r.URL.Query()["excludeStatus"]
 	query := r.URL.Query().Get("q")
 	userID := r.URL.Query().Get("userId")
 	authorID := r.URL.Query().Get("authorId")
@@ -53,15 +53,18 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Build filter — exclude merged tickets by default; optionally exclude released
-	// from default browsing so the main list stays focused on in-flight work.
+	// Build filter — exclude merged tickets by default; callers may additionally
+	// exclude released/declined from default browsing so the main list stays
+	// focused on in-flight work.
 	filter := bson.M{}
 	if status != "" {
 		filter["status"] = status
 	} else {
 		excluded := []string{"merged"}
-		if excludeStatus != "" {
-			excluded = append(excluded, excludeStatus)
+		for _, s := range excludeStatuses {
+			if s != "" {
+				excluded = append(excluded, s)
+			}
 		}
 		filter["status"] = bson.M{"$nin": excluded}
 	}
