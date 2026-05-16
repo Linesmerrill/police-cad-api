@@ -4,18 +4,30 @@
 
 // Helper function to safely create index (skips if index with same key pattern exists)
 function createIndexSafe(collection, key, options) {
-  const indexes = collection.getIndexes();
   const keyStr = JSON.stringify(key);
-  
+
+  // getIndexes() throws "ns does not exist" on collections that haven't been
+  // created yet. Treat that as "no existing indexes, just create it" — Mongo
+  // will implicitly create the collection on createIndex().
+  let indexes = [];
+  try {
+    indexes = collection.getIndexes();
+  } catch (e) {
+    if (!(e.message && e.message.includes("ns does not exist"))) {
+      print(`❌ Error reading indexes for ${options.name || 'unnamed'}: ${e.message}`);
+      return;
+    }
+  }
+
   // Check if index with same key pattern already exists
   const exists = indexes.some(idx => JSON.stringify(idx.key) === keyStr);
-  
+
   if (exists) {
     const existingIdx = indexes.find(idx => JSON.stringify(idx.key) === keyStr);
     print(`⚠️  Index already exists: ${existingIdx.name} (skipping ${options.name || 'unnamed'})`);
     return;
   }
-  
+
   try {
     collection.createIndex(key, options);
     print(`✓ Created index: ${options.name || 'unnamed'}`);
@@ -683,6 +695,70 @@ createIndexSafe(
     unique: true,
     background: true
   }
+);
+
+// ==========================================
+// ECONOMY — clock_sessions
+// ==========================================
+
+createIndexSafe(
+  db.clock_sessions,
+  { civilianId: 1, status: 1 },
+  { name: "clock_sessions_civilian_status_idx", background: true }
+);
+
+createIndexSafe(
+  db.clock_sessions,
+  { userId: 1, status: 1 },
+  { name: "clock_sessions_user_status_idx", background: true }
+);
+
+createIndexSafe(
+  db.clock_sessions,
+  { communityId: 1, status: 1 },
+  { name: "clock_sessions_community_status_idx", background: true }
+);
+
+// Partial unique: only one active session per civilian.
+createIndexSafe(
+  db.clock_sessions,
+  { civilianId: 1 },
+  {
+    name: "clock_sessions_civilian_unique_active_idx",
+    unique: true,
+    background: true,
+    // Partial filter operators are restricted to $eq/$exists/$gt/$gte/$lt/$lte/$type/$and/$or/$in.
+    // $gt: "" matches any non-empty string and skips user-scoped sessions (which have civilianId="").
+    partialFilterExpression: { status: "active", civilianId: { $gt: "" } }
+  }
+);
+
+// ==========================================
+// ECONOMY — inbox_items
+// ==========================================
+
+createIndexSafe(
+  db.inbox_items,
+  { userId: 1, status: 1, createdAt: -1 },
+  { name: "inbox_items_user_status_created_idx", background: true }
+);
+
+createIndexSafe(
+  db.inbox_items,
+  { civilianId: 1, status: 1, createdAt: -1 },
+  { name: "inbox_items_civilian_status_created_idx", background: true }
+);
+
+createIndexSafe(
+  db.inbox_items,
+  { communityId: 1, status: 1 },
+  { name: "inbox_items_community_status_idx", background: true }
+);
+
+createIndexSafe(
+  db.inbox_items,
+  { status: 1, dueAt: 1 },
+  { name: "inbox_items_status_due_idx", background: true }
 );
 
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");

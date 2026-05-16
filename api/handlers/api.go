@@ -44,7 +44,7 @@ func (a *App) New() *mux.Router {
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB}
-	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
+	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper)}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
 	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper)}
@@ -130,6 +130,7 @@ func (a *App) New() *mux.Router {
 		SDB:    databases.NewCourtSessionDatabase(a.dbHelper),
 		UDB:    databases.NewUserDatabase(a.dbHelper),
 		CommDB: databases.NewCommunityDatabase(a.dbHelper),
+		IDB:    databases.NewInboxItemDatabase(a.dbHelper),
 	}
 	// Ensure court-case indexes exist (idempotent). Run async so a slow Mongo
 	// doesn't delay startup; log on failure but don't crash.
@@ -147,6 +148,14 @@ func (a *App) New() *mux.Router {
 		UDB:  databases.NewUserDatabase(a.dbHelper),
 	}
 
+	// Economy handler (clock-in/out, heartbeat, wallet, inbox)
+	economy := Economy{
+		SDB:    databases.NewClockSessionDatabase(a.dbHelper),
+		IDB:    databases.NewInboxItemDatabase(a.dbHelper),
+		CivDB:  databases.NewCivilianDatabase(a.dbHelper),
+		CommDB: databases.NewCommunityDatabase(a.dbHelper),
+	}
+
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
 
@@ -160,6 +169,22 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/metrics/route", http.HandlerFunc(metricsHandler.GetRouteMetrics)).Methods("GET")
 	apiV2.Handle("/metrics/slow-queries", http.HandlerFunc(metricsHandler.GetSlowQueries)).Methods("GET")
 	apiV2.Handle("/metrics/charts", http.HandlerFunc(metricsHandler.GetMetricsCharts)).Methods("GET")
+
+	// Economy v2 routes
+	apiV2.Handle("/economy/clock-in", api.Middleware(http.HandlerFunc(economy.ClockInHandler))).Methods("POST")
+	apiV2.Handle("/economy/clock-out", api.Middleware(http.HandlerFunc(economy.ClockOutHandler))).Methods("POST")
+	apiV2.Handle("/economy/heartbeat", api.Middleware(http.HandlerFunc(economy.HeartbeatHandler))).Methods("POST")
+	apiV2.Handle("/economy/session/active", api.Middleware(http.HandlerFunc(economy.GetActiveSessionHandler))).Methods("GET")
+	apiV2.Handle("/economy/sessions/civilian/{civilianId}", api.Middleware(http.HandlerFunc(economy.ListSessionsByCivilianHandler))).Methods("GET")
+	apiV2.Handle("/economy/wallet/{civilianId}", api.Middleware(http.HandlerFunc(economy.GetWalletHandler))).Methods("GET")
+	apiV2.Handle("/economy/inbox", api.Middleware(http.HandlerFunc(economy.ListInboxHandler))).Methods("GET")
+	apiV2.Handle("/economy/inbox", api.Middleware(http.HandlerFunc(economy.CreateInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/pay", api.Middleware(http.HandlerFunc(economy.PayInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/dismiss", api.Middleware(http.HandlerFunc(economy.DismissInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/contest", api.Middleware(http.HandlerFunc(economy.ContestInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/{id}/uphold", api.Middleware(http.HandlerFunc(economy.UpholdInboxItemHandler))).Methods("POST")
+	apiV2.Handle("/economy/inbox/pending-counts", api.Middleware(http.HandlerFunc(economy.GetInboxPendingCountsHandler))).Methods("GET")
+
 	ws := r.PathPrefix("/ws").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
@@ -527,6 +552,8 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/court-cases/{case_id}/assign", api.Middleware(http.HandlerFunc(courtCaseHandler.AssignCourtCaseHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}/schedule", api.Middleware(http.HandlerFunc(courtCaseHandler.ScheduleCourtCaseHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}/resolve", api.Middleware(http.HandlerFunc(courtCaseHandler.ResolveCourtCaseHandler))).Methods("PUT")
+	apiV2.Handle("/court-cases/{case_id}/resettle-inbox", api.Middleware(http.HandlerFunc(courtCaseHandler.ResettleInboxHandler))).Methods("POST")
+	apiV2.Handle("/inbox/{id}/resettle", api.Middleware(http.HandlerFunc(courtCaseHandler.ResettleInboxByItemHandler))).Methods("POST")
 	apiV2.Handle("/court-cases/{case_id}/status", api.Middleware(http.HandlerFunc(courtCaseHandler.UpdateCourtCaseStatusHandler))).Methods("PUT")
 	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.GetCourtCaseByIDHandler))).Methods("GET")
 	apiV2.Handle("/court-cases/{case_id}", api.Middleware(http.HandlerFunc(courtCaseHandler.DeleteCourtCaseHandler))).Methods("DELETE")
@@ -762,6 +789,9 @@ func (a *App) New() *mux.Router {
 		contentCreator.UDB,
 		contentCreator.CDB,
 		databases.NewSchedulerLockDatabase(a.dbHelper),
+		economy.SDB,
+		economy.IDB,
+		economy.CivDB,
 	)
 
 	// Metrics dashboard

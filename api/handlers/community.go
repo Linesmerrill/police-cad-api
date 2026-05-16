@@ -3403,8 +3403,8 @@ func defaultTenCodes() []models.TenCodes {
 	return []models.TenCodes{
 		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
 		{ID: primitive.NewObjectID(), Code: "Signal 60", Description: "Drugs"},
-		{ID: primitive.NewObjectID(), Code: "Signal 41", Description: "Log on to MDT"},
-		{ID: primitive.NewObjectID(), Code: "Signal 42", Description: "Log out of MDT"},
+		{ID: primitive.NewObjectID(), Code: "Signal 41", Description: "Logged on to MDT"},
+		{ID: primitive.NewObjectID(), Code: "Signal 42", Description: "Logged off from MDT"},
 		{ID: primitive.NewObjectID(), Code: "Signal 37", Description: "Meet @ ..."},
 		{ID: primitive.NewObjectID(), Code: "Code 4", Description: "Under Control"},
 		{ID: primitive.NewObjectID(), Code: "Code 5", Description: "Felony Stop/High Risk Stop"},
