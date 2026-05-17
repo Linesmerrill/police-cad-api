@@ -27,6 +27,7 @@ type Economy struct {
 	IDB    databases.InboxItemDatabase
 	CivDB  databases.CivilianDatabase
 	CommDB databases.CommunityDatabase
+	ACDB   databases.UserActiveCivilianDatabase // active-civilian pick; nil-safe — auto-pin on first clock-in is skipped when nil.
 }
 
 // ---- helpers ----
@@ -341,6 +342,33 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 	if _, err := e.SDB.InsertOne(ctx, sess); err != nil {
 		config.ErrorStatus("failed to create clock session", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Auto-pin: if the user hasn't picked an active civilian for this
+	// community yet, pin the one they just clocked in. Makes "first time
+	// you clock in is your default" the implicit behavior so users don't
+	// have to discover the Set-as-active button separately. Idempotent —
+	// when an active civ already exists we leave it alone (e.g. a user
+	// explicitly picked Test Dude then temporarily clocks in Test Fam
+	// shouldn't overwrite their pin). Best-effort — failures here don't
+	// fail the clock-in itself.
+	if e.ACDB != nil && req.CivilianID != "" {
+		filter := bson.M{"userId": userID, "communityId": req.CommunityID}
+		existing, _ := e.ACDB.FindOne(ctx, filter)
+		if existing == nil || existing.CivilianID == "" {
+			if uerr := e.ACDB.UpdateOne(ctx, filter, bson.M{"$set": bson.M{
+				"userId":      userID,
+				"communityId": req.CommunityID,
+				"civilianId":  req.CivilianID,
+				"updatedAt":   nowDT,
+			}}, options.Update().SetUpsert(true)); uerr != nil {
+				zap.S().Warnw("failed to auto-pin active civilian on clock-in",
+					"userId", userID,
+					"communityId", req.CommunityID,
+					"civilianId", req.CivilianID,
+					"error", uerr)
+			}
+		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
