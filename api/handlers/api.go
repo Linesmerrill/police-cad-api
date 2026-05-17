@@ -207,6 +207,10 @@ func (a *App) New() *mux.Router {
 	// Admin user management routes (specific before general)
 	apiCreate.Handle("/admin/subscription-events", http.HandlerFunc(adminHandler.AdminSubscriptionEventsSearchHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users/{id}/subscription-events", http.HandlerFunc(adminHandler.AdminUserSubscriptionEventsHandler)).Methods("GET")
+	// User-centric subscription dashboard (search → detail with live RC + Stripe → 1-button fix).
+	apiCreate.Handle("/admin/subscription/users", http.HandlerFunc(adminHandler.AdminSubscriptionUserSearchHandler)).Methods("GET")
+	apiCreate.Handle("/admin/subscription/users/{user_id}", http.HandlerFunc(adminHandler.AdminSubscriptionUserDetailHandler)).Methods("GET")
+	apiCreate.Handle("/admin/subscription/users/{user_id}/sync", http.HandlerFunc(adminHandler.AdminSubscriptionUserSyncHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/verify-email", http.HandlerFunc(adminHandler.AdminVerifyEmailHandler)).Methods("POST")
