@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/invoice"
@@ -245,6 +246,7 @@ func (h Admin) AdminSubscriptionUserDetailHandler(w http.ResponseWriter, r *http
 
 	rcState, rcRaw, rcStatus := fetchRevenueCatStateForUser(r.Context(), userID)
 	stripeSubs, stripeInvoices, stripeRaw := fetchStripeStateForUser(r.Context(), user.Details.Subscription.StripeCustomerID)
+	subEvents := fetchSubscriptionEventsForUser(r.Context(), h.SEDB, user.ID)
 
 	stripeStatus := "ok"
 	if user.Details.Subscription.StripeCustomerID == "" {
@@ -253,7 +255,7 @@ func (h Admin) AdminSubscriptionUserDetailHandler(w http.ResponseWriter, r *http
 
 	auth := pickAuthoritativeState(rcState, stripeSubs)
 	mm := computeMismatch(user.Details.Subscription, auth)
-	payments := buildPaymentTimeline(rcState, stripeInvoices)
+	payments := buildPaymentTimeline(rcState, stripeInvoices, subEvents)
 
 	diag := liveSourceDiagnostic{RevenueCat: rcStatus, Stripe: stripeStatus}
 	switch rcStatus {
@@ -769,12 +771,132 @@ func computeMismatch(db models.Subscription, auth authoritativeState) mismatchRe
 	}
 }
 
-// buildPaymentTimeline merges Stripe invoices and RC subscription anchors
-// into a single time-sorted list. Stripe is rich (every invoice ever) so
-// it carries most of the load; RC contributes one row per known
-// subscription (purchase_date) since RC's free API doesn't expose
-// individual renewals.
-func buildPaymentTimeline(rc *rcSubscriberRaw, stripeInvoices []*stripe.Invoice) []paymentRow {
+// paymentRowFromEvent converts a single SubscriptionEvent into a
+// payment-history row, classifying it as purchase / refund based on
+// the provider-specific event type. Returns ("", "") for events that
+// shouldn't appear in the timeline (e.g. EXPIRATION, BILLING_ISSUE,
+// admin_unsubscribe — those are state changes, not money movements).
+func paymentRowFromEvent(evt models.SubscriptionEvent) (paymentRow, string) {
+	upper := strings.ToUpper(evt.EventType)
+
+	// Detect refunds. RC sends refunds as either a top-level REFUND event
+	// or a CANCELLATION with cancel_reason indicating refund/support.
+	isRefund := upper == "REFUND" ||
+		upper == "CHARGE.REFUNDED" ||
+		upper == "INVOICE.PAYMENT_REFUNDED"
+	if !isRefund && upper == "CANCELLATION" && evt.RawPayload != "" {
+		var probe struct {
+			Event struct {
+				CancelReason string `json:"cancel_reason"`
+				Type         string `json:"type"`
+			} `json:"event"`
+		}
+		if json.Unmarshal([]byte(evt.RawPayload), &probe) == nil {
+			cr := strings.ToUpper(probe.Event.CancelReason)
+			if cr == "CUSTOMER_SUPPORT" || cr == "REFUND" || strings.ToUpper(probe.Event.Type) == "REFUND" {
+				isRefund = true
+			}
+		}
+	}
+
+	purchaseLike := upper == "INITIAL_PURCHASE" || upper == "RENEWAL" ||
+		upper == "NON_RENEWING_PURCHASE" || upper == "BACKFILL" ||
+		upper == "PRODUCT_CHANGE" ||
+		upper == "INVOICE.PAID" || upper == "CHARGE.SUCCEEDED" ||
+		upper == "CHECKOUT.SESSION.COMPLETED"
+
+	if !purchaseLike && !isRefund {
+		return paymentRow{}, ""
+	}
+
+	// Date: prefer the event-payload PurchasedAt (when the money actually
+	// moved), fall back to the row CreatedAt (when we recorded it).
+	date := evt.CreatedAt
+	if evt.PurchasedAt != nil && !evt.PurchasedAt.IsZero() {
+		date = *evt.PurchasedAt
+	}
+
+	amount := evt.PriceUSD
+	currency := evt.Currency
+	if amount == 0 && evt.ProductID != "" {
+		if p, ok := knownUSDPrice(evt.ProductID); ok {
+			amount = p
+			if currency == "" {
+				currency = "USD"
+			}
+		}
+	}
+
+	source := evt.Provider
+	switch source {
+	case "mobile_app", "admin":
+		source = "revenuecat" // user-facing label — these came from RC ultimately
+	}
+
+	status := "purchase"
+	if isRefund {
+		status = "refunded"
+	}
+
+	row := paymentRow{
+		Date:           date,
+		EffectiveUntil: evt.ExpiresAt,
+		Amount:         amount,
+		Currency:       currency,
+		Status:         status,
+		Source:         source,
+		Reference:      evt.TransactionID,
+		Plan:           evt.Plan,
+		ProductLabel:   evt.ProductID,
+	}
+	if row.Reference == "" {
+		row.Reference = evt.ProductID
+	}
+	kind := "purchase"
+	if isRefund {
+		kind = "refunded"
+	}
+	return row, kind
+}
+
+// fetchSubscriptionEventsForUser pulls up to 200 of the most recent
+// subscription_events rows for a user. Used as a richer source for the
+// payment timeline than the RC subscribers endpoint (which only exposes
+// the latest period per product). Returns nil on any failure — the
+// caller falls back to the RC snapshot.
+func fetchSubscriptionEventsForUser(ctx context.Context, sedb interface {
+	Find(context.Context, interface{}, ...*options.FindOptions) (*databases.MongoCursor, error)
+}, userID string) []models.SubscriptionEvent {
+	if sedb == nil || userID == "" {
+		return nil
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(200)
+	cur, err := sedb.Find(ctx, bson.M{"userId": userID}, opts)
+	if err != nil {
+		zap.S().Warnw("sub_events fetch failed", "userId", userID, "error", err)
+		return nil
+	}
+	defer cur.Close(ctx)
+	out := []models.SubscriptionEvent{}
+	for cur.Next(ctx) {
+		var evt models.SubscriptionEvent
+		if err := cur.DecodeCurrent(&evt); err != nil {
+			continue
+		}
+		out = append(out, evt)
+	}
+	return out
+}
+
+// buildPaymentTimeline merges payment-history rows from three sources:
+//   - Stripe invoices (always — Stripe exposes every invoice)
+//   - Our own subscription_events (every webhook event we've recorded —
+//     includes full RC renewal history & refunds that the v1 RC API
+//     doesn't expose)
+//   - RC subscriber snapshot (only as fallback when we have no events
+//     for this user yet, since the snapshot only shows the latest
+//     period per product)
+func buildPaymentTimeline(rc *rcSubscriberRaw, stripeInvoices []*stripe.Invoice, events []models.SubscriptionEvent) []paymentRow {
 	rows := []paymentRow{}
 
 	for _, inv := range stripeInvoices {
@@ -806,7 +928,24 @@ func buildPaymentTimeline(rc *rcSubscriberRaw, stripeInvoices []*stripe.Invoice)
 		})
 	}
 
-	if rc != nil {
+	// Convert subscription_events into payment-history rows so we capture
+	// the full renewal & refund history that the RC v1 API can't expose.
+	rcEventsFound := false
+	for _, evt := range events {
+		row, kind := paymentRowFromEvent(evt)
+		if kind == "" {
+			continue
+		}
+		if evt.Provider == "revenuecat" && (kind == "purchase" || kind == "refunded") {
+			rcEventsFound = true
+		}
+		rows = append(rows, row)
+	}
+
+	// Only fall through to the RC snapshot when we have no RC events on
+	// file — otherwise the latest-period snapshot would just duplicate
+	// the most recent RENEWAL event row.
+	if rc != nil && !rcEventsFound {
 		for productID, s := range rc.Subscriber.Subscriptions {
 			if s.PurchaseDate == nil {
 				continue
