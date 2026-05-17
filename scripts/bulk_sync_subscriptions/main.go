@@ -111,19 +111,26 @@ func main() {
 	users := client.Database(dbName).Collection("users")
 	events := client.Database(dbName).Collection("subscription_events")
 
-	// Candidates: active=true AND looks like an iOS/Android user.
-	// Three patterns we catch:
+	// Candidates: active=true AND looks like an iOS/Android user
+	// AND no Stripe history. Three patterns we catch:
 	//   1) source explicitly app_store or play_store
 	//   2) source blank but sub.id looks like a non-Stripe transaction
 	//      id (the webhook bug meant source never got written for many
 	//      of these — they were the original purchase doc with id but
 	//      nothing else ever updated)
-	//   3) source blank, sub.id blank, but no Stripe customer (legacy
-	//      mobile users from before the source field existed)
-	// Stripe-source users are deliberately excluded — different webhook
-	// path, didn't have the bug.
+	//   3) source blank, sub.id blank (legacy mobile users from before
+	//      the source field existed)
+	// stripeCustomerId="" is required on EVERY clause as belt-and-
+	// suspenders: the business rule is "one active sub at a time" so a
+	// mobile-source user shouldn't have a stripeCustomerId, but if any
+	// user has a mixed history we skip them and let staff review
+	// manually via the admin dashboard. Stripe-source users are
+	// deliberately excluded — different webhook path, didn't have the
+	// bug.
+	noStripe := bson.M{"user.subscription.stripeCustomerId": bson.M{"$in": []interface{}{"", nil}}}
 	filter := bson.M{
-		"user.subscription.active": true,
+		"user.subscription.active":           true,
+		"user.subscription.stripeCustomerId": noStripe["user.subscription.stripeCustomerId"],
 		"$or": []bson.M{
 			{"user.subscription.source": bson.M{"$in": []string{"app_store", "play_store"}}},
 			{
@@ -131,8 +138,8 @@ func main() {
 				"user.subscription.id":     bson.M{"$exists": true, "$ne": "", "$not": bson.M{"$regex": "^sub_"}},
 			},
 			{
-				"user.subscription.source":           bson.M{"$in": []interface{}{"", nil}},
-				"user.subscription.stripeCustomerId": bson.M{"$in": []interface{}{"", nil}},
+				"user.subscription.source": bson.M{"$in": []interface{}{"", nil}},
+				"user.subscription.id":     bson.M{"$in": []interface{}{"", nil}},
 			},
 		},
 	}
