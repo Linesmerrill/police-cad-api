@@ -42,6 +42,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/stripe/stripe-go/v82"
@@ -83,7 +84,7 @@ func main() {
 	}
 	defer cursor.Close(ctx)
 
-	scanned, backfilled, skippedDup, stripeMisses, stripeErrors := 0, 0, 0, 0, 0
+	scanned, backfilled, skippedDup, stripeMisses, stripeErrors, testModeMisses := 0, 0, 0, 0, 0, 0
 
 	for cursor.Next(ctx) {
 		scanned++
@@ -106,6 +107,16 @@ func main() {
 
 		subs, err := listAllCustomerSubscriptions(customerID)
 		if err != nil {
+			// Test-mode customer ids referenced from a live-mode key are
+			// a known and expected failure mode (old QA accounts that
+			// only ever existed in Stripe test mode). Surface separately
+			// so real errors are easier to spot.
+			if isStripeTestModeMismatch(err) {
+				testModeMisses++
+				fmt.Printf("SKIPPED %s (%s, customer=%s) — test-mode customer referenced from live key, ignoring\n",
+					doc.ID, doc.User.Email, customerID)
+				continue
+			}
 			stripeErrors++
 			fmt.Fprintf(os.Stderr, "  ! Stripe list failed for %s (%s, customer=%s): %v\n",
 				doc.ID, doc.User.Email, customerID, err)
@@ -159,15 +170,27 @@ func main() {
 		}
 
 		if scanned%50 == 0 {
-			fmt.Printf("... scanned %d users, backfilled %d rows, skipped %d dup, %d no Stripe subs, %d Stripe errors\n",
-				scanned, backfilled, skippedDup, stripeMisses, stripeErrors)
+			fmt.Printf("... scanned %d users, backfilled %d rows, skipped %d dup, %d no Stripe subs, %d test-mode skips, %d Stripe errors\n",
+				scanned, backfilled, skippedDup, stripeMisses, testModeMisses, stripeErrors)
 		}
 	}
 	if err := cursor.Err(); err != nil {
 		die("cursor: %v", err)
 	}
-	fmt.Printf("Done. Scanned %d Stripe customers, backfilled %d rows, %d already-backfilled, %d customers had no Stripe subs, %d Stripe errors.\n",
-		scanned, backfilled, skippedDup, stripeMisses, stripeErrors)
+	fmt.Printf("Done. Scanned %d Stripe customers, backfilled %d rows, %d already-backfilled, %d no Stripe subs, %d test-mode skips, %d Stripe errors.\n",
+		scanned, backfilled, skippedDup, stripeMisses, testModeMisses, stripeErrors)
+}
+
+// isStripeTestModeMismatch returns true for the specific Stripe error
+// you get when a test-mode customer id is referenced under a live-mode
+// key. We classify these separately so real errors aren't lost in the noise.
+func isStripeTestModeMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "resource_missing") &&
+		strings.Contains(msg, "similar object exists in test mode")
 }
 
 // listAllCustomerSubscriptions returns every Stripe subscription for a

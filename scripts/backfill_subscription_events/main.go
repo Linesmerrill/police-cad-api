@@ -19,16 +19,21 @@
 //
 // Usage:
 //
-//	DB_URI=mongodb+srv://... \
-//	DB_NAME=lpc \
-//	REVENUECAT_SECRET_API_KEY=sk_xxx \
-//	go run ./scripts/backfill_subscription_events
+//	# Default: anyone we have ANY subscription hint about.
+//	DB_URI=... DB_NAME=... REVENUECAT_SECRET_API_KEY=... \
+//	    go run ./scripts/backfill_subscription_events
+//
+//	# Targeted: pass specific user ids (e.g. from reconciliation_<date>.csv).
+//	go run ./scripts/backfill_subscription_events \
+//	    --user-ids=5e8adfd6...,601d6c68...,68695e49...
 package main
 
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +42,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -69,9 +75,18 @@ type rcResponse struct {
 }
 
 func main() {
+	userIDsFlag := flag.String("user-ids", "", "Comma-separated user ids to target (skips the default broad scan). Useful for backfilling the users flagged by scripts/reconcile_revenuecat/main.go.")
+	usersCSVFlag := flag.String("users-csv", "", "Path to a CSV whose first column is user_id (the reconciliation_<date>.csv format works). Read in addition to --user-ids.")
+	flag.Parse()
+
 	mongoURI := mustEnv("DB_URI")
 	dbName := mustEnv("DB_NAME")
 	rcKey := mustEnv("REVENUECAT_SECRET_API_KEY")
+
+	targetIDs, err := collectTargetUserIDs(*userIDsFlag, *usersCSVFlag)
+	if err != nil {
+		die("read target user ids: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
@@ -85,13 +100,40 @@ func main() {
 	users := client.Database(dbName).Collection("users")
 	events := client.Database(dbName).Collection("subscription_events")
 
-	// Anyone with subscription state we know about. This is the set of
-	// users whose history we can hope to recover from RC.
-	filter := bson.M{
-		"$or": []bson.M{
-			{"user.subscription.id": bson.M{"$nin": []interface{}{"", nil}}},
-			{"user.subscription.source": bson.M{"$nin": []interface{}{"", nil}}},
-		},
+	// Two modes:
+	//   - Targeted: backfill exactly the user ids passed in. Used to fix
+	//     specific reconciliation-flagged accounts whose subscription
+	//     struct is wiped (id="" / source="") and would be missed by
+	//     the broad-scan filter below.
+	//   - Broad: anyone we have ANY subscription hint about. Includes
+	//     createdAt so wiped-state users still get caught — the previous
+	//     filter required id/source which is exactly what gets nulled
+	//     out in the failure mode we're trying to repair.
+	var filter bson.M
+	if len(targetIDs) > 0 {
+		oids := make([]interface{}, 0, len(targetIDs))
+		for _, id := range targetIDs {
+			oid, err := primitiveObjectIDFromHex(id)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! skipping invalid user id %q: %v\n", id, err)
+				continue
+			}
+			oids = append(oids, oid)
+		}
+		if len(oids) == 0 {
+			die("no valid user ids in --user-ids / --users-csv")
+		}
+		filter = bson.M{"_id": bson.M{"$in": oids}}
+		fmt.Printf("Targeted mode: %d user id(s)\n", len(oids))
+	} else {
+		filter = bson.M{
+			"$or": []bson.M{
+				{"user.subscription.id": bson.M{"$nin": []interface{}{"", nil}}},
+				{"user.subscription.source": bson.M{"$nin": []interface{}{"", nil}}},
+				{"user.subscription.stripeCustomerId": bson.M{"$nin": []interface{}{"", nil}}},
+				{"user.subscription.createdAt": bson.M{"$ne": nil}},
+			},
+		}
 	}
 
 	cursor, err := users.Find(ctx, filter, options.Find().SetBatchSize(200))
@@ -245,6 +287,56 @@ func envFromIsSandbox(sandbox bool) string {
 		return "SANDBOX"
 	}
 	return "PRODUCTION"
+}
+
+// collectTargetUserIDs merges --user-ids and the first column of --users-csv
+// (the format the reconciliation script emits). De-dupes, preserves order
+// of first appearance for deterministic logs.
+func collectTargetUserIDs(idsFlag, csvPath string) ([]string, error) {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, id := range strings.Split(idsFlag, ",") {
+		add(id)
+	}
+	if csvPath != "" {
+		f, err := os.Open(csvPath)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		r := csv.NewReader(f)
+		r.FieldsPerRecord = -1 // tolerate ragged rows
+		for i := 0; ; i++ {
+			rec, err := r.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, fmt.Errorf("csv row %d: %v", i+1, err)
+			}
+			if len(rec) == 0 {
+				continue
+			}
+			// Skip the header row written by reconcile_revenuecat.
+			if i == 0 && strings.EqualFold(strings.TrimSpace(rec[0]), "user_id") {
+				continue
+			}
+			add(rec[0])
+		}
+	}
+	return out, nil
+}
+
+func primitiveObjectIDFromHex(s string) (interface{}, error) {
+	return primitive.ObjectIDFromHex(strings.TrimSpace(s))
 }
 
 func mustEnv(k string) string {
