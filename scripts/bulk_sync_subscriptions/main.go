@@ -336,6 +336,24 @@ func pickBestRCState(rc *rcResponse, now time.Time) (plan, status string, expire
 	return
 }
 
+// sourceFromStore mirrors mapStoreToSource from the main API package
+// (intentionally duplicated so this script stays standalone).
+func sourceFromStore(store string) string {
+	switch strings.ToUpper(strings.TrimSpace(store)) {
+	case "PLAY_STORE":
+		return "play_store"
+	case "APP_STORE", "MAC_APP_STORE":
+		return "app_store"
+	case "STRIPE":
+		return "stripe"
+	case "PROMOTIONAL":
+		return "promotional"
+	case "AMAZON":
+		return "amazon"
+	}
+	return ""
+}
+
 func planFromProductID(productID string) string {
 	id := strings.ToLower(strings.TrimSpace(productID))
 	if i := strings.Index(id, ":"); i >= 0 {
@@ -377,6 +395,14 @@ func applyDowngrade(
 		"user.subscription.plan":      "free",
 		"user.subscription.isAnnual":  false,
 		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(now),
+	}
+	// Also write source if we can derive it from the live store — most
+	// of these ghost users have source="" because the webhook bug meant
+	// even the original purchase never recorded source. Filling it now
+	// gives the admin dashboard a clean attribution + keeps future
+	// reconciliation queries accurate.
+	if src := sourceFromStore(c.Store); src != "" {
+		set["user.subscription.source"] = src
 	}
 	if c.ExpiresAt != nil {
 		set["user.subscription.expirationDate"] = c.ExpiresAt.Format(time.RFC3339)
