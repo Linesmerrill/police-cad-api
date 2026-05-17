@@ -66,18 +66,20 @@ type rcResponse struct {
 
 // candidate is the post-classification view of one user.
 type candidate struct {
-	UserID      string
-	Email       string
-	DBPlan      string
-	DBSource    string
-	Verdict     string // "downgrade" | "active_ok" | "no_rc_record" | "rc_error"
-	LivePlan    string // best-known plan from RC
-	LiveStatus  string // "active" | "canceled_in_period" | "expired" | "billing_issue"
-	ExpiresAt   *time.Time
-	CancelAt    *time.Time
-	Store       string
-	NewActive   bool
-	NewPlan     string
+	UserID     string
+	Email      string
+	DBPlan     string
+	DBSource   string
+	Verdict    string // "downgrade" | "active_sync" | "no_rc_record" | "rc_error"
+	LivePlan   string // best-known plan from RC
+	LiveStatus string // "active" | "canceled_in_period" | "expired" | "billing_issue"
+	ProductID  string // raw RC product id (e.g. "premium_annual")
+	ExpiresAt  *time.Time
+	CancelAt   *time.Time
+	Store      string
+	NewActive  bool
+	NewPlan    string
+	IsAnnual   bool
 }
 
 func main() {
@@ -225,17 +227,22 @@ func main() {
 			continue
 		}
 
-		bestPlan, bestStatus, bestExp, bestCancel, bestStore := pickBestRCState(rc, now)
+		bestPlan, bestProductID, bestStatus, bestExp, bestCancel, bestStore, bestAnnual := pickBestRCState(rc, now)
 		c.LivePlan = bestPlan
+		c.ProductID = bestProductID
 		c.LiveStatus = bestStatus
 		c.ExpiresAt = bestExp
 		c.CancelAt = bestCancel
 		c.Store = bestStore
+		c.IsAnnual = bestAnnual
 
 		switch bestStatus {
 		case "active", "canceled_in_period":
-			// Live source still considers them entitled — don't touch them.
-			c.Verdict = "active_ok"
+			// Live source still considers them entitled — keep active,
+			// sync the DB metadata (source, periodEnd, cancelAt, plan)
+			// to match live since most of these have blanks from the
+			// webhook bug era.
+			c.Verdict = "active_sync"
 			c.NewActive = true
 			c.NewPlan = orDefault(bestPlan, c.DBPlan)
 		default:
@@ -246,8 +253,8 @@ func main() {
 		}
 
 		didApply := false
-		if c.Verdict == "downgrade" && !*dryRun {
-			if err := applyDowngrade(ctx, users, events, doc.ID, doc.User.Email, c); err != nil {
+		if (c.Verdict == "downgrade" || c.Verdict == "active_sync") && !*dryRun {
+			if err := applySync(ctx, users, events, doc.ID, doc.User.Email, c); err != nil {
 				fmt.Fprintf(os.Stderr, "  ! apply failed for %s: %v\n", userID, err)
 			} else {
 				didApply = true
@@ -282,10 +289,11 @@ func main() {
 
 // pickBestRCState mirrors summarizeRCToAuthoritative from the admin
 // handler, condensed: pick the most-relevant subscription entry and
-// classify it. Returns ("", "none", nil, nil, "") if RC has no subs.
-func pickBestRCState(rc *rcResponse, now time.Time) (plan, status string, expiresAt, cancelAt *time.Time, store string) {
+// classify it. Returns ("", "", "none", nil, nil, "", false) if RC
+// has no subs.
+func pickBestRCState(rc *rcResponse, now time.Time) (plan, productID, status string, expiresAt, cancelAt *time.Time, store string, isAnnual bool) {
 	if rc == nil || len(rc.Subscriber.Subscriptions) == 0 {
-		return "", "none", nil, nil, ""
+		return "", "", "none", nil, nil, "", false
 	}
 	var bestActive, bestNonActive *rcSubscription
 	var bestActiveKey, bestNonActiveKey string
@@ -305,7 +313,6 @@ func pickBestRCState(rc *rcResponse, now time.Time) (plan, status string, expire
 		}
 	}
 	var sub *rcSubscription
-	var productID string
 	if bestActive != nil {
 		sub = bestActive
 		productID = bestActiveKey
@@ -313,10 +320,10 @@ func pickBestRCState(rc *rcResponse, now time.Time) (plan, status string, expire
 		sub = bestNonActive
 		productID = bestNonActiveKey
 	} else {
-		return "", "none", nil, nil, ""
+		return "", "", "none", nil, nil, "", false
 	}
 
-	plan = planFromProductID(productID)
+	plan, isAnnual = planAndCadenceFromProductID(productID)
 	store = strings.ToUpper(sub.Store)
 	expiresAt = sub.ExpiresDate
 	if sub.UnsubscribeDetectedAt != nil {
@@ -334,6 +341,32 @@ func pickBestRCState(rc *rcResponse, now time.Time) (plan, status string, expire
 		status = "expired"
 	}
 	return
+}
+
+// planAndCadenceFromProductID returns both the plan name and whether
+// the cadence is annual, in one parse of the product id suffix.
+func planAndCadenceFromProductID(productID string) (plan string, isAnnual bool) {
+	id := strings.ToLower(strings.TrimSpace(productID))
+	if i := strings.Index(id, ":"); i >= 0 {
+		id = id[:i]
+	}
+	if i := strings.LastIndex(id, "."); i >= 0 {
+		id = id[i+1:]
+	}
+	switch {
+	case strings.HasSuffix(id, "_annual"):
+		isAnnual = true
+		plan = strings.TrimSuffix(id, "_annual")
+	case strings.HasSuffix(id, "_monthly"):
+		plan = strings.TrimSuffix(id, "_monthly")
+	default:
+		return "", false
+	}
+	switch plan {
+	case "base", "premium", "premium_plus":
+		return plan, isAnnual
+	}
+	return "", false
 }
 
 // sourceFromStore mirrors mapStoreToSource from the main API package
@@ -354,27 +387,8 @@ func sourceFromStore(store string) string {
 	return ""
 }
 
-func planFromProductID(productID string) string {
-	id := strings.ToLower(strings.TrimSpace(productID))
-	if i := strings.Index(id, ":"); i >= 0 {
-		id = id[:i]
-	}
-	if i := strings.LastIndex(id, "."); i >= 0 {
-		id = id[i+1:]
-	}
-	for _, suffix := range []string{"_annual", "_monthly"} {
-		if strings.HasSuffix(id, suffix) {
-			plan := strings.TrimSuffix(id, suffix)
-			switch plan {
-			case "base", "premium", "premium_plus":
-				return plan
-			}
-		}
-	}
-	return ""
-}
 
-func applyDowngrade(
+func applySync(
 	ctx context.Context,
 	users, events *mongo.Collection,
 	userOID primitive.ObjectID,
@@ -391,16 +405,18 @@ func applyDowngrade(
 
 	now := time.Now().UTC()
 	set := bson.M{
-		"user.subscription.active":    false,
-		"user.subscription.plan":      "free",
-		"user.subscription.isAnnual":  false,
+		"user.subscription.active":    c.NewActive,
+		"user.subscription.plan":      c.NewPlan,
 		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(now),
 	}
-	// Also write source if we can derive it from the live store — most
-	// of these ghost users have source="" because the webhook bug meant
-	// even the original purchase never recorded source. Filling it now
-	// gives the admin dashboard a clean attribution + keeps future
-	// reconciliation queries accurate.
+	if c.NewActive {
+		set["user.subscription.isAnnual"] = c.IsAnnual
+	} else {
+		set["user.subscription.isAnnual"] = false
+	}
+	// Always write source when we can derive it — most of these users
+	// have source="" because the webhook bug meant even the original
+	// purchase never recorded source.
 	if src := sourceFromStore(c.Store); src != "" {
 		set["user.subscription.source"] = src
 	}
@@ -415,18 +431,18 @@ func applyDowngrade(
 		return fmt.Errorf("user update: %v", err)
 	}
 
-	// Audit row so the downgrade is permanently traceable & reversible.
+	// Audit row so every write is permanently traceable & reversible.
 	evt := bson.M{
 		"userId":               userOID.Hex(),
 		"userEmail":            email,
 		"provider":             "admin",
 		"store":                c.Store,
 		"eventType":            "admin_bulk_sync",
-		"plan":                 "free",
-		"isAnnual":             false,
+		"plan":                 c.NewPlan,
+		"isAnnual":             set["user.subscription.isAnnual"],
 		"expiresAt":            c.ExpiresAt,
 		"previousSubscription": pre.User.Subscription,
-		"rawPayload":           fmt.Sprintf(`{"verdict":"%s","liveStatus":"%s","livePlan":"%s","dbPlanBefore":"%s","dbSourceBefore":"%s"}`,
+		"rawPayload": fmt.Sprintf(`{"verdict":"%s","liveStatus":"%s","livePlan":"%s","dbPlanBefore":"%s","dbSourceBefore":"%s"}`,
 			c.Verdict, c.LiveStatus, c.LivePlan, c.DBPlan, c.DBSource),
 		"processingStatus": "ok",
 		"createdAt":        now,
