@@ -41,7 +41,8 @@ func (a *App) New() *mux.Router {
 	alDB := databases.NewAuditLogDatabase(a.dbHelper)
 	tlDB := databases.NewToneLogDatabase(a.dbHelper)
 	upDB := databases.NewUserPreferencesDatabase(a.dbHelper)
-	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB}
+	seDB := databases.NewSubscriptionEventDatabase(a.dbHelper)
+	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper)}
@@ -104,6 +105,7 @@ func (a *App) New() *mux.Router {
 		PVDB:    databases.NewPendingVerificationDatabase(a.dbHelper),
 		AuditDB: databases.NewAdminAuditDatabase(a.dbHelper),
 		CaseDB:  databases.NewAdminCaseDatabase(a.dbHelper),
+		SEDB:    seDB,
 	}
 
 	medicalReportHandler := MedicalReport{DB: databases.NewMedicalReportDatabase(a.dbHelper)}
@@ -203,6 +205,12 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/search/admins", http.HandlerFunc(adminHandler.AdminSearchAdminsHandler)).Methods("POST")
 
 	// Admin user management routes (specific before general)
+	apiCreate.Handle("/admin/subscription-events", http.HandlerFunc(adminHandler.AdminSubscriptionEventsSearchHandler)).Methods("GET")
+	apiCreate.Handle("/admin/users/{id}/subscription-events", http.HandlerFunc(adminHandler.AdminUserSubscriptionEventsHandler)).Methods("GET")
+	// User-centric subscription dashboard (search → detail with live RC + Stripe → 1-button fix).
+	apiCreate.Handle("/admin/subscription/users", http.HandlerFunc(adminHandler.AdminSubscriptionUserSearchHandler)).Methods("GET")
+	apiCreate.Handle("/admin/subscription/users/{user_id}", http.HandlerFunc(adminHandler.AdminSubscriptionUserDetailHandler)).Methods("GET")
+	apiCreate.Handle("/admin/subscription/users/{user_id}/sync", http.HandlerFunc(adminHandler.AdminSubscriptionUserSyncHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/verify-email", http.HandlerFunc(adminHandler.AdminVerifyEmailHandler)).Methods("POST")

@@ -56,6 +56,7 @@ type Admin struct {
 	PVDB    databases.PendingVerificationDatabase
 	AuditDB databases.AdminAuditDatabase
 	CaseDB  databases.AdminCaseDatabase
+	SEDB    databases.SubscriptionEventDatabase
 }
 
 // checkAdminPermissions validates if the current user has sufficient permissions
