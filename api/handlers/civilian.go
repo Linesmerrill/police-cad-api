@@ -31,7 +31,8 @@ type Civilian struct {
 	DB     databases.CivilianDatabase
 	UDB    databases.UserDatabase
 	CommDB databases.CommunityDatabase
-	IDB    databases.InboxItemDatabase // Economy inbox; nil-safe (hooks no-op when nil).
+	IDB    databases.InboxItemDatabase     // Economy inbox; nil-safe (hooks no-op when nil).
+	SDB    databases.ClockSessionDatabase  // Clock sessions; nil-safe (delete falls back to plain remove).
 }
 
 // CivilianHandler returns all civilians
@@ -434,7 +435,11 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// DeleteCivilianHandler deletes a civilian by ID
+// DeleteCivilianHandler deletes a civilian by ID. Any active clock-in session
+// tied to this civilian is finalized first so accrued earnings are credited
+// and the session row is marked ended — without this the session keeps
+// accruing time/money forever on the server, and the client can't clock out
+// because the civilian it points at is gone.
 func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) {
 	civID := mux.Vars(r)["civilian_id"]
 
@@ -447,6 +452,20 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// End any active clock-in sessions before deleting. Best-effort: a
+	// failure here logs and continues so a transient economy outage can't
+	// block a destructive operation the user explicitly requested.
+	if c.SDB != nil {
+		eco := Economy{SDB: c.SDB, CivDB: c.DB}
+		if ended, eerr := eco.EndActiveSessionsForCivilian(ctx, cID.Hex()); eerr != nil {
+			zap.S().Warnw("failed to end active sessions before civilian delete",
+				"civilianId", cID.Hex(), "error", eerr)
+		} else if ended > 0 {
+			zap.S().Infow("ended active sessions before civilian delete",
+				"civilianId", cID.Hex(), "endedCount", ended)
+		}
+	}
 
 	err = c.DB.DeleteOne(ctx, bson.M{"_id": cID})
 	if err != nil {

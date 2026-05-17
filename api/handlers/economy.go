@@ -171,6 +171,43 @@ func (e Economy) paySession(ctx context.Context, sess *models.ClockSession, now 
 	return credit, endT, nil
 }
 
+// EndActiveSessionsForCivilian finalizes every active clock-in session attached
+// to the given civilian: pays out accrued earnings up to now and marks the
+// session ended. Returns the number of sessions that were ended.
+//
+// Call this before any operation that would orphan the session — most notably
+// deleting the civilian. Without it, the active session keeps accruing
+// time/earnings forever on the server while the client has no way to clock
+// out (the civilian it points at is gone). Idempotent: if no sessions match,
+// returns (0, nil) without error.
+func (e Economy) EndActiveSessionsForCivilian(ctx context.Context, civilianID string) (int, error) {
+	if civilianID == "" {
+		return 0, nil
+	}
+	sessions, err := e.SDB.Find(ctx, bson.M{"civilianId": civilianID, "status": "active"})
+	if err != nil {
+		return 0, fmt.Errorf("list active sessions: %w", err)
+	}
+	if len(sessions) == 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	ended := 0
+	for i := range sessions {
+		if _, _, perr := e.paySession(ctx, &sessions[i], now, "ended"); perr != nil {
+			// Log and keep going — a single failure shouldn't block the
+			// caller from finishing destructive work like a delete.
+			zap.S().Warnw("failed to end active session before civilian cleanup",
+				"sessionId", sessions[i].ID.Hex(),
+				"civilianId", civilianID,
+				"error", perr)
+			continue
+		}
+		ended++
+	}
+	return ended, nil
+}
+
 // ensureBalanceInitialized lazy-backfills a civilian's balance from the community default
 // on the first economy-aware read.
 func (e Economy) ensureBalanceInitialized(ctx context.Context, civ *models.Civilian, community *models.Community) {
@@ -269,15 +306,13 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		_, payRate, _, _, _, _ = resolveDepartmentEconomy(community, req.DepartmentID, rankID)
 	}
 
-	// Enforce one active session per civilian (or per user when civilianId is empty).
-	activeFilter := bson.M{"status": "active", "communityId": req.CommunityID}
-	if req.CivilianID != "" {
-		activeFilter["civilianId"] = req.CivilianID
-	} else {
-		activeFilter["userId"] = userID
-		activeFilter["civilianId"] = ""
-	}
-	if existing, _ := e.SDB.FindOne(ctx, activeFilter); existing != nil {
+	// Enforce one active session per USER. The previous check scoped by
+	// civilianId, which let a single user clock in N civilians at once and
+	// accrue parallel earnings — clearly not the intent. A user can only
+	// physically be at one job at a time, so any pre-existing active
+	// session (any civilian, any community) blocks a new clock-in. The
+	// client is expected to clock out the existing session first.
+	if existing, _ := e.SDB.FindOne(ctx, bson.M{"status": "active", "userId": userID}); existing != nil {
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(existing)
 		return
