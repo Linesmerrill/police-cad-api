@@ -138,35 +138,55 @@ func (e Economy) paySession(ctx context.Context, sess *models.ClockSession, now 
 	nowDT := primitive.NewDateTimeFromTime(now)
 	endDT := primitive.NewDateTimeFromTime(endT)
 
+	// Apply the credit to the civilian first so we can capture the
+	// post-credit balance and write it onto the session as balanceAfter.
+	// This makes the unified transactions feed possible without recomputing
+	// a running balance from the ledger every request.
+	var balanceAfter int64
+	balanceAfterSet := false
+	if credit > 0 && sess.CivilianID != "" {
+		if civID, perr := primitive.ObjectIDFromHex(sess.CivilianID); perr == nil {
+			res := e.CivDB.FindOneAndUpdate(ctx,
+				bson.M{"_id": civID},
+				bson.M{
+					"$inc": bson.M{"civilian.balance": credit},
+					"$set": bson.M{
+						"civilian.balanceInitialized": true,
+						"civilian.updatedAt":          nowDT,
+					},
+				},
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			)
+			if res.Err() == nil {
+				var updated models.Civilian
+				if derr := res.Decode(&updated); derr == nil {
+					balanceAfter = updated.Details.Balance
+					balanceAfterSet = true
+				}
+			}
+		}
+	}
+
+	sessSet := bson.M{
+		"lastPayoutAt": endDT,
+		"updatedAt":    nowDT,
+	}
+	if balanceAfterSet {
+		sessSet["balanceAfter"] = balanceAfter
+	}
+	if terminalStatus != "" {
+		sessSet["status"] = terminalStatus
+		sessSet["endedAt"] = nowDT
+	}
 	sessUpdate := bson.M{
 		"$inc": bson.M{
 			"paidSeconds": durationSec,
 			"earnings":    credit,
 		},
-		"$set": bson.M{
-			"lastPayoutAt": endDT,
-			"updatedAt":    nowDT,
-		},
-	}
-	if terminalStatus != "" {
-		sessUpdate["$set"].(bson.M)["status"] = terminalStatus
-		sessUpdate["$set"].(bson.M)["endedAt"] = nowDT
+		"$set": sessSet,
 	}
 	if err := e.SDB.UpdateOne(ctx, bson.M{"_id": sess.ID}, sessUpdate); err != nil {
 		return 0, endT, err
-	}
-
-	if credit > 0 && sess.CivilianID != "" {
-		civID, err := primitive.ObjectIDFromHex(sess.CivilianID)
-		if err == nil {
-			_ = e.CivDB.UpdateOne(ctx, bson.M{"_id": civID}, bson.M{
-				"$inc": bson.M{"civilian.balance": credit},
-				"$set": bson.M{
-					"civilian.balanceInitialized": true,
-					"civilian.updatedAt":          nowDT,
-				},
-			})
-		}
 	}
 
 	return credit, endT, nil
@@ -579,6 +599,182 @@ func (e Economy) ListSessionsByCivilianHandler(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// Transaction is a unified ledger entry surfaced by ListTransactionsHandler.
+// Shifts and paid inbox items both contribute rows; future systems (shop
+// purchases, judicial verdicts, admin grants) can extend the union by adding
+// new ref types without changing the wire shape.
+type Transaction struct {
+	Type              string             `json:"type"`               // "shift" | "fine" | "fee" | "verdict" | "payroll" | "other"
+	Direction         string             `json:"direction"`          // "credit" | "debit"
+	Amount            int64              `json:"amount"`             // unsigned cents
+	BalanceAfter      int64              `json:"balanceAfter"`       // 0 if unknown (legacy row)
+	BalanceAfterKnown bool               `json:"balanceAfterKnown"`  // explicit so 0 isn't ambiguous
+	Title             string             `json:"title"`
+	Subtitle          string             `json:"subtitle,omitempty"`
+	OccurredAt        primitive.DateTime `json:"occurredAt"`
+	RefType           string             `json:"refType"` // "clockSession" | "inboxItem"
+	RefID             string             `json:"refId"`
+	// Shift-specific extras (omitted for non-shift rows).
+	DepartmentName string `json:"departmentName,omitempty"`
+	PaidSeconds    int64  `json:"paidSeconds,omitempty"`
+	Status         string `json:"status,omitempty"`
+}
+
+// ListTransactionsHandler returns a unified, newest-first feed of every
+// balance-affecting event for a civilian: ended clock sessions (credits) and
+// paid inbox items (debits). Pagination merges both collections in memory —
+// safe because each side is bounded to skip+limit before merge.
+//
+//	GET /api/v2/economy/transactions/civilian/{civilianId}?page=1&limit=20
+//
+// Response: { data: []Transaction, totalCount, page, limit }
+func (e Economy) ListTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+	civilianID := mux.Vars(r)["civilianId"]
+	if civilianID == "" {
+		config.ErrorStatus("civilianId required", http.StatusBadRequest, w, nil)
+		return
+	}
+	page, limit := 1, 20
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			page = v
+		}
+	}
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100 {
+			limit = v
+		}
+	}
+	skip := (page - 1) * limit
+	window := int64(skip + limit)
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	shiftFilter := bson.M{
+		"civilianId": civilianID,
+		"status":     bson.M{"$in": []string{"ended", "expired", "abandoned"}},
+	}
+	inboxFilter := bson.M{
+		"civilianId": civilianID,
+		"status":     "paid",
+	}
+
+	shiftTotal, _ := e.SDB.CountDocuments(ctx, shiftFilter)
+	inboxTotal, _ := e.IDB.CountDocuments(ctx, inboxFilter)
+	totalCount := shiftTotal + inboxTotal
+
+	shifts, err := e.SDB.Find(ctx, shiftFilter,
+		options.Find().SetSort(bson.D{{Key: "endedAt", Value: -1}}).SetLimit(window))
+	if err != nil {
+		config.ErrorStatus("failed to list shift transactions", http.StatusInternalServerError, w, err)
+		return
+	}
+	inboxItems, err := e.IDB.Find(ctx, inboxFilter,
+		options.Find().SetSort(bson.D{{Key: "paidAt", Value: -1}}).SetLimit(window))
+	if err != nil {
+		config.ErrorStatus("failed to list inbox transactions", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	merged := make([]Transaction, 0, len(shifts)+len(inboxItems))
+	for i := range shifts {
+		s := &shifts[i]
+		occurredAt := s.EndedAt
+		if occurredAt == 0 {
+			occurredAt = s.UpdatedAt
+		}
+		merged = append(merged, Transaction{
+			Type:              "shift",
+			Direction:         "credit",
+			Amount:            s.Earnings,
+			BalanceAfter:      s.BalanceAfter,
+			BalanceAfterKnown: s.BalanceAfter != 0,
+			Title:             s.DepartmentName,
+			Subtitle:          s.Status,
+			OccurredAt:        occurredAt,
+			RefType:           "clockSession",
+			RefID:             s.ID.Hex(),
+			DepartmentName:    s.DepartmentName,
+			PaidSeconds:       s.PaidSeconds,
+			Status:            s.Status,
+		})
+	}
+	for i := range inboxItems {
+		it := &inboxItems[i]
+		occurredAt := it.PaidAt
+		if occurredAt == 0 {
+			occurredAt = it.UpdatedAt
+		}
+		txType := it.Type
+		if txType == "" {
+			txType = "other"
+		}
+		// InboxItem.Amount is signed: positive = owed (debit on pay),
+		// negative = credit on pay (payroll, refund). Normalize to an
+		// unsigned amount + an explicit direction so the UI can render
+		// the +/- sign without re-checking the sign convention.
+		direction := "debit"
+		amt := it.Amount
+		if amt < 0 {
+			direction = "credit"
+			amt = -amt
+		}
+		merged = append(merged, Transaction{
+			Type:              txType,
+			Direction:         direction,
+			Amount:            amt,
+			BalanceAfter:      it.BalanceAfter,
+			BalanceAfterKnown: it.BalanceAfter != 0,
+			Title:             it.Title,
+			Subtitle:          it.Source,
+			OccurredAt:        occurredAt,
+			RefType:           "inboxItem",
+			RefID:             it.ID.Hex(),
+		})
+	}
+
+	// Newest-first by occurredAt; tie-break on RefID to make pagination stable.
+	sortTransactionsDesc(merged)
+
+	start := skip
+	if start > len(merged) {
+		start = len(merged)
+	}
+	end := start + limit
+	if end > len(merged) {
+		end = len(merged)
+	}
+	pageData := merged[start:end]
+	if pageData == nil {
+		pageData = []Transaction{}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":       pageData,
+		"totalCount": totalCount,
+		"page":       page,
+		"limit":      limit,
+	})
+}
+
+func sortTransactionsDesc(txns []Transaction) {
+	// Simple insertion sort — pages are tiny (≤ limit*2, capped at 200).
+	for i := 1; i < len(txns); i++ {
+		for j := i; j > 0; j-- {
+			a, b := txns[j-1], txns[j]
+			if a.OccurredAt > b.OccurredAt {
+				break
+			}
+			if a.OccurredAt == b.OccurredAt && a.RefID > b.RefID {
+				break
+			}
+			txns[j-1], txns[j] = b, a
+		}
+	}
+}
+
 // GetWalletHandler returns a civilian's wallet (balance + recent inbox items).
 func (e Economy) GetWalletHandler(w http.ResponseWriter, r *http.Request) {
 	civilianID := mux.Vars(r)["civilianId"]
@@ -776,22 +972,40 @@ func (e Economy) PayInboxItemHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
-	if err := e.CivDB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{
-		"$inc": bson.M{"civilian.balance": -item.Amount},
-		"$set": bson.M{
-			"civilian.balanceInitialized": true,
-			"civilian.updatedAt":          now,
+	// Atomic debit so we can capture the post-debit balance and stamp it onto
+	// the inbox item as balanceAfter for the transactions feed.
+	res := e.CivDB.FindOneAndUpdate(ctx,
+		bson.M{"_id": cID},
+		bson.M{
+			"$inc": bson.M{"civilian.balance": -item.Amount},
+			"$set": bson.M{
+				"civilian.balanceInitialized": true,
+				"civilian.updatedAt":          now,
+			},
 		},
-	}); err != nil {
-		config.ErrorStatus("failed to debit balance", http.StatusInternalServerError, w, err)
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+	if res.Err() != nil {
+		config.ErrorStatus("failed to debit balance", http.StatusInternalServerError, w, res.Err())
 		return
 	}
+	var updatedCiv models.Civilian
+	var balanceAfter int64
+	balanceAfterSet := false
+	if derr := res.Decode(&updatedCiv); derr == nil {
+		balanceAfter = updatedCiv.Details.Balance
+		balanceAfterSet = true
+	}
 
-	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": bson.M{
+	itemSet := bson.M{
 		"status":    "paid",
 		"paidAt":    now,
 		"updatedAt": now,
-	}}); err != nil {
+	}
+	if balanceAfterSet {
+		itemSet["balanceAfter"] = balanceAfter
+	}
+	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": itemSet}); err != nil {
 		zap.S().Errorw("debit succeeded but failed to mark inbox item paid", "error", err, "itemId", id)
 	}
 

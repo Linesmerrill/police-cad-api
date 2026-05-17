@@ -20,6 +20,11 @@ type InboxItem struct {
 	RefID       string             `json:"refId,omitempty" bson:"refId,omitempty"`
 	DueAt       primitive.DateTime `json:"dueAt,omitempty" bson:"dueAt,omitempty"`
 	PaidAt      primitive.DateTime `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
+	// BalanceAfter is the civilian's wallet balance (cents) immediately after
+	// this item was paid. Written by PayInboxItemHandler via an atomic
+	// FindOneAndUpdate. Unset for unpaid items and for items paid before this
+	// field existed; consumers should treat 0 as "unknown" not zero balance.
+	BalanceAfter int64 `json:"balanceAfter,omitempty" bson:"balanceAfter,omitempty"`
 	DismissedAt primitive.DateTime `json:"dismissedAt,omitempty" bson:"dismissedAt,omitempty"`
 	DismissedBy string             `json:"dismissedBy,omitempty" bson:"dismissedBy,omitempty"`
 	// Contest workflow: a civilian can contest a pending fine to push it
