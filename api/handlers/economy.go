@@ -459,6 +459,16 @@ func (e Economy) HeartbeatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetActiveSessionHandler returns the active session for ?civilianId= or ?userId=.
+//
+// ?civilianId=X — scoped to a specific civilian (used by /wallet).
+// ?userId=X     — returns the user's active session regardless of which
+//                 civilian it's attached to. Pairs with the
+//                 one-active-session-per-user rule in ClockInHandler so the
+//                 dept dashboard can reflect a session started against any
+//                 civilian. (Previously this branch also required
+//                 civilianId=="" so it only matched user-only sessions; that
+//                 made it impossible to detect a civilian-scoped session
+//                 from the user-side caller.)
 func (e Economy) GetActiveSessionHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -467,7 +477,6 @@ func (e Economy) GetActiveSessionHandler(w http.ResponseWriter, r *http.Request)
 		filter["civilianId"] = civID
 	} else if uid := r.URL.Query().Get("userId"); uid != "" {
 		filter["userId"] = uid
-		filter["civilianId"] = ""
 	} else {
 		config.ErrorStatus("civilianId or userId required", http.StatusBadRequest, w, nil)
 		return
