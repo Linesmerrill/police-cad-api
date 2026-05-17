@@ -119,3 +119,40 @@ func parseProductID(productID string) (plan string, isAnnual bool, ok bool) {
 		return "", false, false
 	}
 }
+
+// knownUSDPrice returns the USD list price for a product id we sell.
+// RevenueCat's /v1/subscribers endpoint doesn't include price for
+// subscriptions, so without this lookup the admin payment timeline
+// renders every RC row as "$0.00". Source of truth: the pricing table
+// in police-cad-app/screens/SubscriptionScreen.js — keep these in sync
+// any time we change a published price. Returns (0, false) for unknown
+// SKUs so the UI can render "—" instead of fabricating a number.
+func knownUSDPrice(productID string) (float64, bool) {
+	id := strings.ToLower(strings.TrimSpace(productID))
+	if id == "" {
+		return 0, false
+	}
+	if i := strings.Index(id, ":"); i >= 0 {
+		id = id[:i]
+	}
+	if i := strings.LastIndex(id, "."); i >= 0 {
+		id = id[i+1:]
+	}
+	switch id {
+	case "base_monthly":
+		return 3.00, true
+	case "base_annual":
+		return 32.00, true
+	case "premium_monthly":
+		return 8.00, true
+	case "premium_annual":
+		return 85.00, true
+	case "premium_plus_monthly":
+		return 19.99, true
+	case "premium_plus_annual":
+		return 209.00, true
+	case "community_elite_1month", "community_elite_promotion_1month":
+		return 50.00, true
+	}
+	return 0, false
+}

@@ -776,11 +776,23 @@ func buildPaymentTimeline(rc *rcSubscriberRaw, stripeInvoices []*stripe.Invoice)
 				continue
 			}
 			plan, _, _ := parseProductID(productID)
+			// RC's /v1/subscribers endpoint doesn't surface price for
+			// subscriptions, so fall back to our known SKU pricing.
+			amount := s.PriceInPurchasedCurrency.Amount
+			currency := s.PriceInPurchasedCurrency.Currency
+			if amount == 0 {
+				if p, ok := knownUSDPrice(productID); ok {
+					amount = p
+					if currency == "" {
+						currency = "USD"
+					}
+				}
+			}
 			rows = append(rows, paymentRow{
 				Date:           *s.PurchaseDate,
 				EffectiveUntil: s.ExpiresDate,
-				Amount:         s.PriceInPurchasedCurrency.Amount,
-				Currency:       s.PriceInPurchasedCurrency.Currency,
+				Amount:         amount,
+				Currency:       currency,
 				Status:         "purchase",
 				Source:         "revenuecat",
 				Reference:      productID,
@@ -802,11 +814,21 @@ func buildPaymentTimeline(rc *rcSubscriberRaw, stripeInvoices []*stripe.Invoice)
 				if ref == "" {
 					ref = productID
 				}
+				amount := p.PriceInPurchasedCurrency.Amount
+				currency := p.PriceInPurchasedCurrency.Currency
+				if amount == 0 {
+					if px, ok := knownUSDPrice(productID); ok {
+						amount = px
+						if currency == "" {
+							currency = "USD"
+						}
+					}
+				}
 				rows = append(rows, paymentRow{
 					Date:           *p.PurchaseDate,
 					EffectiveUntil: endPtr,
-					Amount:         p.PriceInPurchasedCurrency.Amount,
-					Currency:       p.PriceInPurchasedCurrency.Currency,
+					Amount:         amount,
+					Currency:       currency,
 					Status:         "purchase",
 					Source:         "revenuecat",
 					Reference:      ref,
