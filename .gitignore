@@ -11,3 +11,4 @@ backfill_*.csv
 # Stray compiled binaries from `go build` against scripts/.
 /reconcile_revenuecat
 /backfill_subscription_events
+/backfill_stripe_subscriptions
