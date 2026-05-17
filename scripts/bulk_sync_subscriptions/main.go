@@ -111,14 +111,41 @@ func main() {
 	users := client.Database(dbName).Collection("users")
 	events := client.Database(dbName).Collection("subscription_events")
 
-	// Candidates: active=true with source = app_store / play_store.
-	// We deliberately skip stripe-source users (Stripe webhook didn't
-	// have the same filter bug). Source-blank users with a non-Stripe
-	// sub.id are rare and risky to bulk-process — review those manually
-	// via the admin dashboard.
+	// Candidates: active=true AND looks like an iOS/Android user.
+	// Three patterns we catch:
+	//   1) source explicitly app_store or play_store
+	//   2) source blank but sub.id looks like a non-Stripe transaction
+	//      id (the webhook bug meant source never got written for many
+	//      of these — they were the original purchase doc with id but
+	//      nothing else ever updated)
+	//   3) source blank, sub.id blank, but no Stripe customer (legacy
+	//      mobile users from before the source field existed)
+	// Stripe-source users are deliberately excluded — different webhook
+	// path, didn't have the bug.
 	filter := bson.M{
 		"user.subscription.active": true,
-		"user.subscription.source": bson.M{"$in": []string{"app_store", "play_store"}},
+		"$or": []bson.M{
+			{"user.subscription.source": bson.M{"$in": []string{"app_store", "play_store"}}},
+			{
+				"user.subscription.source": bson.M{"$in": []interface{}{"", nil}},
+				"user.subscription.id":     bson.M{"$exists": true, "$ne": "", "$not": bson.M{"$regex": "^sub_"}},
+			},
+			{
+				"user.subscription.source":           bson.M{"$in": []interface{}{"", nil}},
+				"user.subscription.stripeCustomerId": bson.M{"$in": []interface{}{"", nil}},
+			},
+		},
+	}
+
+	// Pre-count so you know the blast radius before any RC calls happen.
+	total, err := users.CountDocuments(ctx, filter)
+	if err != nil {
+		die("count candidates: %v", err)
+	}
+	fmt.Printf("Matched %d candidate users by filter.\n", total)
+	if total == 0 {
+		fmt.Println("Nothing to process. If you expected matches, double-check the filter or DB connection.")
+		return
 	}
 
 	cursor, err := users.Find(ctx, filter, options.Find().SetBatchSize(100))
