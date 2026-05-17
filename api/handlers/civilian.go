@@ -31,7 +31,9 @@ type Civilian struct {
 	DB     databases.CivilianDatabase
 	UDB    databases.UserDatabase
 	CommDB databases.CommunityDatabase
-	IDB    databases.InboxItemDatabase // Economy inbox; nil-safe (hooks no-op when nil).
+	IDB    databases.InboxItemDatabase            // Economy inbox; nil-safe (hooks no-op when nil).
+	SDB    databases.ClockSessionDatabase         // Clock sessions; nil-safe (delete falls back to plain remove).
+	ACDB   databases.UserActiveCivilianDatabase   // Active-civilian pick; nil-safe.
 }
 
 // CivilianHandler returns all civilians
@@ -434,7 +436,11 @@ func (c Civilian) UpdateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// DeleteCivilianHandler deletes a civilian by ID
+// DeleteCivilianHandler deletes a civilian by ID. Any active clock-in session
+// tied to this civilian is finalized first so accrued earnings are credited
+// and the session row is marked ended — without this the session keeps
+// accruing time/money forever on the server, and the client can't clock out
+// because the civilian it points at is gone.
 func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) {
 	civID := mux.Vars(r)["civilian_id"]
 
@@ -448,10 +454,38 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// End any active clock-in sessions before deleting. Best-effort: a
+	// failure here logs and continues so a transient economy outage can't
+	// block a destructive operation the user explicitly requested.
+	if c.SDB != nil {
+		eco := Economy{SDB: c.SDB, CivDB: c.DB}
+		if ended, eerr := eco.EndActiveSessionsForCivilian(ctx, cID.Hex()); eerr != nil {
+			zap.S().Warnw("failed to end active sessions before civilian delete",
+				"civilianId", cID.Hex(), "error", eerr)
+		} else if ended > 0 {
+			zap.S().Infow("ended active sessions before civilian delete",
+				"civilianId", cID.Hex(), "endedCount", ended)
+		}
+	}
+
 	err = c.DB.DeleteOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("failed to delete civilian", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Cascade: clear any user_active_civilians rows pointing at this
+	// civilian so the wallet doesn't keep resolving to a now-deleted ID.
+	// Best-effort; resolveEconomyContext on the web also re-verifies the
+	// civilian exists and falls back gracefully if this cleanup is skipped.
+	if c.ACDB != nil {
+		if deleted, derr := c.ACDB.DeleteMany(ctx, bson.M{"civilianId": cID.Hex()}); derr != nil {
+			zap.S().Warnw("failed to clear active-civilian rows after civilian delete",
+				"civilianId", cID.Hex(), "error", derr)
+		} else if deleted > 0 {
+			zap.S().Infow("cleared active-civilian rows after civilian delete",
+				"civilianId", cID.Hex(), "deleted", deleted)
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
