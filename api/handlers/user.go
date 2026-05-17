@@ -44,6 +44,7 @@ type User struct {
 	UPDB  databases.UserPreferencesDatabase
 	SEDB  databases.SubscriptionEventDatabase
 	ACDB  databases.UserActiveCivilianDatabase // active-civilian-per-community pick, shared with the Discord bot
+	SDB   databases.ClockSessionDatabase       // clock sessions; used to keep the active-civ pin aligned with the running shift
 }
 
 // UserHandler returns a user given a userID
@@ -434,6 +435,29 @@ func (u User) SetActiveCivilianHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Coupling rule: the active civilian must match whichever civilian is
+	// currently on the clock for this user (if any). Downstream UI (wallet
+	// cards, job lists, clock-in/out modals, the bot's defaults) all read
+	// the active pin and assume it's the running-shift civilian — letting
+	// the two diverge desyncs every surface. If a different civilian is
+	// already on the clock, refuse the swap and surface the conflict the
+	// same shape as ClockInHandler does (409 + existing session body) so
+	// every caller can render a consistent "clock out first" prompt.
+	if u.SDB != nil {
+		if existing, _ := u.SDB.FindOne(ctx, bson.M{"status": "active", "userId": req.UserID}); existing != nil {
+			if existing.CivilianID != "" && existing.CivilianID != req.CivilianID {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error":   "active_session_with_different_civilian",
+					"message": "another civilian on this account is currently on the clock; clock them out before changing the active civilian",
+					"session": existing,
+				})
+				return
+			}
+		}
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 	err := u.ACDB.UpdateOne(ctx,
 		bson.M{"userId": req.UserID, "communityId": req.CommunityID},

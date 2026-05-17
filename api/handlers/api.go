@@ -51,7 +51,8 @@ func (a *App) New() *mux.Router {
 			zap.S().Warnw("failed to ensure user_active_civilians indexes", "error", err)
 		}
 	}()
-	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB}
+	sessionDB := databases.NewClockSessionDatabase(a.dbHelper)
+	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper), ACDB: acDB}
@@ -161,7 +162,7 @@ func (a *App) New() *mux.Router {
 
 	// Economy handler (clock-in/out, heartbeat, wallet, inbox)
 	economy := Economy{
-		SDB:    databases.NewClockSessionDatabase(a.dbHelper),
+		SDB:    sessionDB,
 		IDB:    databases.NewInboxItemDatabase(a.dbHelper),
 		CivDB:  databases.NewCivilianDatabase(a.dbHelper),
 		CommDB: databases.NewCommunityDatabase(a.dbHelper),
