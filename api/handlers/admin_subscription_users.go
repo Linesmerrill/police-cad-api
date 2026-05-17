@@ -809,6 +809,20 @@ func paymentRowFromEvent(evt models.SubscriptionEvent) (paymentRow, string) {
 		return paymentRow{}, ""
 	}
 
+	// Stripe-specific dedupe: the Stripe invoice list (fetched directly
+	// from the Stripe API) is the canonical source for money movement on
+	// Stripe subs — it includes every invoice ever raised. Our
+	// subscription_events would double-count every initial purchase as
+	// both an "invoice.paid" row AND a "customer.subscription.created" /
+	// "checkout.session.completed" row pointing at the same charge.
+	// So skip Stripe PURCHASE-events here and let the invoice list carry
+	// them. Refunds are the exception — Stripe's invoice list reports
+	// them as paid + a separate credit note, so we still need the
+	// refund event to surface that the money was returned.
+	if evt.Provider == "stripe" && !isRefund {
+		return paymentRow{}, ""
+	}
+
 	// Date: prefer the event-payload PurchasedAt (when the money actually
 	// moved), fall back to the row CreatedAt (when we recorded it).
 	date := evt.CreatedAt
