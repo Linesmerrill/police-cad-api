@@ -775,6 +775,75 @@ func sortTransactionsDesc(txns []Transaction) {
 	}
 }
 
+// GetSessionHandler returns a single ClockSession by id. Scoped to the
+// authenticated user — a session belonging to another user returns 404 (we
+// don't leak existence) rather than 403. Drives the wallet's
+// click-a-shift-transaction detail modal.
+//
+//	GET /api/v2/economy/session/{id}
+func (e Economy) GetSessionHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	sessID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid session id", http.StatusBadRequest, w, err)
+		return
+	}
+	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userID == "" {
+		userID = r.URL.Query().Get("userId")
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	sess, err := e.SDB.FindOne(ctx, bson.M{"_id": sessID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			config.ErrorStatus("session not found", http.StatusNotFound, w, err)
+			return
+		}
+		config.ErrorStatus("failed to load session", http.StatusInternalServerError, w, err)
+		return
+	}
+	if userID != "" && sess.UserID != "" && sess.UserID != userID {
+		config.ErrorStatus("session not found", http.StatusNotFound, w, nil)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(sess)
+}
+
+// GetInboxItemHandler returns a single InboxItem by id. Scoped to the
+// authenticated user — same 404-on-mismatch policy as GetSessionHandler.
+// Drives the wallet's click-an-inbox-transaction detail modal.
+//
+//	GET /api/v2/economy/inbox/{id}
+func (e Economy) GetInboxItemHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	itemID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid item id", http.StatusBadRequest, w, err)
+		return
+	}
+	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userID == "" {
+		userID = r.URL.Query().Get("userId")
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	item, err := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	if err != nil {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	if userID != "" && item.UserID != "" && item.UserID != userID {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, nil)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(item)
+}
+
 // GetWalletHandler returns a civilian's wallet (balance + recent inbox items).
 func (e Economy) GetWalletHandler(w http.ResponseWriter, r *http.Request) {
 	civilianID := mux.Vars(r)["civilianId"]
