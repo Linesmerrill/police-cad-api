@@ -31,8 +31,9 @@ type Civilian struct {
 	DB     databases.CivilianDatabase
 	UDB    databases.UserDatabase
 	CommDB databases.CommunityDatabase
-	IDB    databases.InboxItemDatabase     // Economy inbox; nil-safe (hooks no-op when nil).
-	SDB    databases.ClockSessionDatabase  // Clock sessions; nil-safe (delete falls back to plain remove).
+	IDB    databases.InboxItemDatabase            // Economy inbox; nil-safe (hooks no-op when nil).
+	SDB    databases.ClockSessionDatabase         // Clock sessions; nil-safe (delete falls back to plain remove).
+	ACDB   databases.UserActiveCivilianDatabase   // Active-civilian pick; nil-safe.
 }
 
 // CivilianHandler returns all civilians
@@ -471,6 +472,20 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		config.ErrorStatus("failed to delete civilian", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Cascade: clear any user_active_civilians rows pointing at this
+	// civilian so the wallet doesn't keep resolving to a now-deleted ID.
+	// Best-effort; resolveEconomyContext on the web also re-verifies the
+	// civilian exists and falls back gracefully if this cleanup is skipped.
+	if c.ACDB != nil {
+		if deleted, derr := c.ACDB.DeleteMany(ctx, bson.M{"civilianId": cID.Hex()}); derr != nil {
+			zap.S().Warnw("failed to clear active-civilian rows after civilian delete",
+				"civilianId", cID.Hex(), "error", derr)
+		} else if deleted > 0 {
+			zap.S().Infow("cleared active-civilian rows after civilian delete",
+				"civilianId", cID.Hex(), "deleted", deleted)
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

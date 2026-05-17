@@ -43,6 +43,7 @@ type User struct {
 	ALDB  databases.AuditLogDatabase
 	UPDB  databases.UserPreferencesDatabase
 	SEDB  databases.SubscriptionEventDatabase
+	ACDB  databases.UserActiveCivilianDatabase // active-civilian-per-community pick, shared with the Discord bot
 }
 
 // UserHandler returns a user given a userID
@@ -371,6 +372,90 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// setActiveCivilianRequest carries the upsert payload for
+// PUT /api/v2/user/active-civilian.
+type setActiveCivilianRequest struct {
+	UserID      string `json:"userId"`
+	CommunityID string `json:"communityId"`
+	CivilianID  string `json:"civilianId"`
+}
+
+// GetActiveCivilianHandler returns the active civilian the user has picked
+// for a given community, or an empty body when none is set. Shared with the
+// Discord bot's /set-active-civilian — both surfaces read/write the same row.
+func (u User) GetActiveCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID := r.URL.Query().Get("userId")
+	communityID := r.URL.Query().Get("communityId")
+	if userID == "" || communityID == "" {
+		config.ErrorStatus("userId and communityId are required", http.StatusBadRequest, w, nil)
+		return
+	}
+	if u.ACDB == nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("null"))
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	doc, err := u.ACDB.FindOne(ctx, bson.M{"userId": userID, "communityId": communityID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("null"))
+			return
+		}
+		config.ErrorStatus("failed to load active civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(doc)
+}
+
+// SetActiveCivilianHandler upserts the user's active civilian for a given
+// community. Web wallet's "Set as active" button and bot /set-active-civilian
+// both hit this. Idempotent (same payload twice = same end state).
+func (u User) SetActiveCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var req setActiveCivilianRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if req.UserID == "" || req.CommunityID == "" || req.CivilianID == "" {
+		config.ErrorStatus("userId, communityId, civilianId are required", http.StatusBadRequest, w, nil)
+		return
+	}
+	if u.ACDB == nil {
+		config.ErrorStatus("active-civilian store not configured", http.StatusInternalServerError, w, nil)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	now := primitive.NewDateTimeFromTime(time.Now())
+	err := u.ACDB.UpdateOne(ctx,
+		bson.M{"userId": req.UserID, "communityId": req.CommunityID},
+		bson.M{"$set": bson.M{
+			"userId":      req.UserID,
+			"communityId": req.CommunityID,
+			"civilianId":  req.CivilianID,
+			"updatedAt":   now,
+		}},
+		options.Update().SetUpsert(true),
+	)
+	if err != nil {
+		config.ErrorStatus("failed to set active civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"userId":      req.UserID,
+		"communityId": req.CommunityID,
+		"civilianId":  req.CivilianID,
+		"updatedAt":   now,
+	})
 }
 
 // UserFriendsHandler returns a list of friends for a user with pagination

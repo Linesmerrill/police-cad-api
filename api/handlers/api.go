@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/stripe/stripe-go/v82"
@@ -42,10 +43,18 @@ func (a *App) New() *mux.Router {
 	tlDB := databases.NewToneLogDatabase(a.dbHelper)
 	upDB := databases.NewUserPreferencesDatabase(a.dbHelper)
 	seDB := databases.NewSubscriptionEventDatabase(a.dbHelper)
-	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB}
+	acDB := databases.NewUserActiveCivilianDatabase(a.dbHelper)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := acDB.EnsureIndexes(ctx); err != nil {
+			zap.S().Warnw("failed to ensure user_active_civilians indexes", "error", err)
+		}
+	}()
+	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB}
-	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper)}
+	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper), ACDB: acDB}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
 	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper)}
@@ -415,6 +424,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{user_id}/subscription", api.Middleware(http.HandlerFunc(u.UpdateUserSubscriptionHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{user_id}/update-status", api.Middleware(http.HandlerFunc(u.UpdateFriendStatusHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.GetUserCommunitiesHandler))).Methods("GET")
+	// Active civilian per (user, community) — shared with the Discord bot.
+	apiV2.Handle("/user/active-civilian", api.Middleware(http.HandlerFunc(u.GetActiveCivilianHandler))).Methods("GET")
+	apiV2.Handle("/user/active-civilian", api.Middleware(http.HandlerFunc(u.SetActiveCivilianHandler))).Methods("PUT")
 	apiV2.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.FetchUserCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/user/{userId}/boost-communities", api.Middleware(http.HandlerFunc(u.BoostCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/communities", api.Middleware(http.HandlerFunc(u.AddCommunityToUserHandler))).Methods("PUT")
