@@ -44,10 +44,26 @@ type rcSubscriptionRaw struct {
 	} `json:"price_in_purchased_currency"`
 }
 
+// rcNonSubscriptionRaw is a one-time / consumable purchase under
+// subscriber.non_subscriptions[productID][]. These don't have an
+// expires_date — we infer an effective period from the product id
+// suffix when possible (e.g. "*_1month" → 30 days).
+type rcNonSubscriptionRaw struct {
+	ID                       string     `json:"id"`
+	PurchaseDate             *time.Time `json:"purchase_date"`
+	Store                    string     `json:"store"`
+	IsSandbox                bool       `json:"is_sandbox"`
+	PriceInPurchasedCurrency struct {
+		Amount   float64 `json:"amount"`
+		Currency string  `json:"currency"`
+	} `json:"price_in_purchased_currency"`
+}
+
 type rcSubscriberRaw struct {
 	Subscriber struct {
-		OriginalAppUserID string                       `json:"original_app_user_id"`
-		Subscriptions     map[string]rcSubscriptionRaw `json:"subscriptions"`
+		OriginalAppUserID string                            `json:"original_app_user_id"`
+		Subscriptions     map[string]rcSubscriptionRaw      `json:"subscriptions"`
+		NonSubscriptions  map[string][]rcNonSubscriptionRaw `json:"non_subscriptions"`
 	} `json:"subscriber"`
 }
 
@@ -92,13 +108,15 @@ type mismatchReport struct {
 }
 
 type paymentRow struct {
-	Date      time.Time `json:"date"`
-	Amount    float64   `json:"amount"`
-	Currency  string    `json:"currency"`
-	Status    string    `json:"status"` // "paid" | "failed" | "refunded" | "purchase" | ...
-	Source    string    `json:"source"` // "stripe" | "revenuecat"
-	Reference string    `json:"reference"` // invoice id / transaction id
-	Plan      string    `json:"plan,omitempty"`
+	Date           time.Time  `json:"date"`
+	EffectiveUntil *time.Time `json:"effectiveUntil,omitempty"` // entitlement end (for non-sub & sub anchor rows)
+	Amount         float64    `json:"amount"`
+	Currency       string     `json:"currency"`
+	Status         string     `json:"status"` // "paid" | "failed" | "refunded" | "purchase" | ...
+	Source         string     `json:"source"` // "stripe" | "revenuecat"
+	Reference      string     `json:"reference"` // invoice id / transaction id
+	Plan           string     `json:"plan,omitempty"`
+	ProductLabel   string     `json:"productLabel,omitempty"` // raw product id, e.g. "community_elite_1month"
 }
 
 type userDetailResponse struct {
@@ -728,19 +746,64 @@ func buildPaymentTimeline(rc *rcSubscriberRaw, stripeInvoices []*stripe.Invoice)
 			}
 			plan, _, _ := parseProductID(productID)
 			rows = append(rows, paymentRow{
-				Date:      *s.PurchaseDate,
-				Amount:    s.PriceInPurchasedCurrency.Amount,
-				Currency:  s.PriceInPurchasedCurrency.Currency,
-				Status:    "purchase",
-				Source:    "revenuecat",
-				Reference: productID,
-				Plan:      plan,
+				Date:           *s.PurchaseDate,
+				EffectiveUntil: s.ExpiresDate,
+				Amount:         s.PriceInPurchasedCurrency.Amount,
+				Currency:       s.PriceInPurchasedCurrency.Currency,
+				Status:         "purchase",
+				Source:         "revenuecat",
+				Reference:      productID,
+				Plan:           plan,
+				ProductLabel:   productID,
 			})
+		}
+		for productID, purchases := range rc.Subscriber.NonSubscriptions {
+			for _, p := range purchases {
+				if p.PurchaseDate == nil {
+					continue
+				}
+				var endPtr *time.Time
+				if d := nonSubDuration(productID); d > 0 {
+					end := p.PurchaseDate.Add(d)
+					endPtr = &end
+				}
+				ref := p.ID
+				if ref == "" {
+					ref = productID
+				}
+				rows = append(rows, paymentRow{
+					Date:           *p.PurchaseDate,
+					EffectiveUntil: endPtr,
+					Amount:         p.PriceInPurchasedCurrency.Amount,
+					Currency:       p.PriceInPurchasedCurrency.Currency,
+					Status:         "purchase",
+					Source:         "revenuecat",
+					Reference:      ref,
+					ProductLabel:   productID,
+				})
+			}
 		}
 	}
 
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Date.After(rows[j].Date) })
 	return rows
+}
+
+// nonSubDuration infers an entitlement window for one-time RC purchases
+// from the product id naming convention (e.g. "community_elite_1month").
+// Returns 0 when the id has no recognizable duration suffix — the UI then
+// renders the row as a single purchase date with no end.
+func nonSubDuration(productID string) time.Duration {
+	lower := strings.ToLower(productID)
+	switch {
+	case strings.Contains(lower, "1month"), strings.Contains(lower, "_monthly"), strings.HasSuffix(lower, "_month"):
+		return 30 * 24 * time.Hour
+	case strings.Contains(lower, "1year"), strings.Contains(lower, "_annual"), strings.Contains(lower, "_yearly"):
+		return 365 * 24 * time.Hour
+	case strings.Contains(lower, "1week"), strings.Contains(lower, "_weekly"):
+		return 7 * 24 * time.Hour
+	}
+	return 0
 }
 
 // planFromStripePriceID mirrors the API's own price-id → plan mapping.
