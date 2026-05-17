@@ -761,5 +761,63 @@ createIndexSafe(
   { name: "inbox_items_status_due_idx", background: true }
 );
 
+// ==========================================
+// SUBSCRIPTIONS — subscription_events
+// Audit trail for every RevenueCat / Stripe / mobile-app / admin
+// subscription event. Used both for forensics and as a dedupe table
+// for webhook retries.
+// ==========================================
+
+createIndexSafe(
+  db.subscription_events,
+  { userId: 1, createdAt: -1 },
+  { name: "subscription_events_user_created_idx", background: true }
+);
+
+createIndexSafe(
+  db.subscription_events,
+  { transactionId: 1 },
+  { name: "subscription_events_transaction_idx", background: true }
+);
+
+createIndexSafe(
+  db.subscription_events,
+  { originalTransactionId: 1 },
+  { name: "subscription_events_original_transaction_idx", background: true }
+);
+
+createIndexSafe(
+  db.subscription_events,
+  { userEmail: 1, createdAt: -1 },
+  { name: "subscription_events_email_created_idx", background: true }
+);
+
+createIndexSafe(
+  db.subscription_events,
+  { provider: 1, eventType: 1, createdAt: -1 },
+  { name: "subscription_events_provider_event_idx", background: true }
+);
+
+createIndexSafe(
+  db.subscription_events,
+  { createdAt: -1 },
+  { name: "subscription_events_created_idx", background: true }
+);
+
+// Idempotency: unique per (provider, providerEventId). Sparse + partial
+// so rows with empty providerEventId (mobile_app, admin) aren't
+// constrained. RevenueCat and Stripe both retry on non-2xx; this index
+// guarantees we only mutate state once per webhook delivery.
+createIndexSafe(
+  db.subscription_events,
+  { provider: 1, providerEventId: 1 },
+  {
+    name: "subscription_events_provider_event_id_unique_idx",
+    unique: true,
+    background: true,
+    partialFilterExpression: { providerEventId: { $exists: true, $gt: "" } }
+  }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
