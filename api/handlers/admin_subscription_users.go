@@ -717,6 +717,31 @@ func computeMismatch(db models.Subscription, auth authoritativeState) mismatchRe
 			Field: "source", Authoritative: auth.Source, DB: db.Source,
 		})
 	}
+	// Period end / cancel-at drift. We compare on day granularity to
+	// avoid flagging trivial timestamp jitter (e.g. RC reports a slightly
+	// different second than what we stored). Any present authoritative
+	// value vs missing/different DB value triggers the flag.
+	if auth.ExpiresAt != nil {
+		dbDay := subscriptionDateDay(db.CurrentPeriodEnd, db.ExpirationDate)
+		authDay := auth.ExpiresAt.UTC().Format("2006-01-02")
+		if dbDay != authDay {
+			fields = append(fields, mismatchField{
+				Field: "periodEnd", Authoritative: authDay,
+				DB: orDash(dbDay),
+			})
+		}
+	}
+	authCancelDay := ""
+	if auth.CancelAt != nil {
+		authCancelDay = auth.CancelAt.UTC().Format("2006-01-02")
+	}
+	dbCancelDay := subscriptionDateDay(db.CancelAt, "")
+	if authCancelDay != dbCancelDay {
+		fields = append(fields, mismatchField{
+			Field: "cancelAt", Authoritative: orDash(authCancelDay),
+			DB: orDash(dbCancelDay),
+		})
+	}
 
 	if len(fields) == 0 {
 		return mismatchReport{HasMismatch: false}
@@ -840,6 +865,56 @@ func buildPaymentTimeline(rc *rcSubscriberRaw, stripeInvoices []*stripe.Invoice)
 
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Date.After(rows[j].Date) })
 	return rows
+}
+
+// subscriptionDateDay normalizes a user.subscription date field — which
+// can come back from Mongo as primitive.DateTime, time.Time, RFC3339
+// string, or nil — into a YYYY-MM-DD string for day-granularity
+// comparison. Falls back to the second argument (an RFC3339 string) if
+// the first value is empty/unparseable. Returns "" when both are absent.
+func subscriptionDateDay(primary interface{}, fallbackRFC string) string {
+	if t, ok := coerceTime(primary); ok {
+		return t.UTC().Format("2006-01-02")
+	}
+	if fallbackRFC != "" {
+		if t, err := time.Parse(time.RFC3339, fallbackRFC); err == nil {
+			return t.UTC().Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+func coerceTime(v interface{}) (time.Time, bool) {
+	switch x := v.(type) {
+	case nil:
+		return time.Time{}, false
+	case primitive.DateTime:
+		if x == 0 {
+			return time.Time{}, false
+		}
+		return x.Time(), true
+	case time.Time:
+		if x.IsZero() {
+			return time.Time{}, false
+		}
+		return x, true
+	case string:
+		if x == "" {
+			return time.Time{}, false
+		}
+		if t, err := time.Parse(time.RFC3339, x); err == nil {
+			return t, true
+		}
+		return time.Time{}, false
+	}
+	return time.Time{}, false
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }
 
 // nonSubDuration infers an entitlement window for one-time RC purchases
