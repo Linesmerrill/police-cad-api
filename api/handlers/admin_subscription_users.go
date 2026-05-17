@@ -119,6 +119,16 @@ type paymentRow struct {
 	ProductLabel   string     `json:"productLabel,omitempty"` // raw product id, e.g. "community_elite_1month"
 }
 
+// liveSourceDiagnostic explains the outcome of trying to reach each
+// authoritative source. Without this, every failure mode (missing key,
+// 404, network error, wrong project) collapses to status="none" and the
+// dashboard contradicts itself when the DB says active but live says none.
+type liveSourceDiagnostic struct {
+	RevenueCat string `json:"revenuecat"` // "ok" | "no_api_key" | "user_not_found" | "http_error" | "parse_error"
+	Stripe     string `json:"stripe"`     // "ok" | "no_customer_id" | "http_error"
+	Note       string `json:"note,omitempty"`
+}
+
 type userDetailResponse struct {
 	User struct {
 		ID           string             `json:"id"`
@@ -129,6 +139,7 @@ type userDetailResponse struct {
 	Authoritative authoritativeState     `json:"authoritative"`
 	Mismatch      mismatchReport         `json:"mismatch"`
 	Payments      []paymentRow           `json:"payments"`
+	LiveSources   liveSourceDiagnostic   `json:"liveSources"`
 	RawSources    map[string]interface{} `json:"rawSources"`
 }
 
@@ -232,17 +243,33 @@ func (h Admin) AdminSubscriptionUserDetailHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	rcState, rcRaw := fetchRevenueCatStateForUser(r.Context(), userID)
+	rcState, rcRaw, rcStatus := fetchRevenueCatStateForUser(r.Context(), userID)
 	stripeSubs, stripeInvoices, stripeRaw := fetchStripeStateForUser(r.Context(), user.Details.Subscription.StripeCustomerID)
+
+	stripeStatus := "ok"
+	if user.Details.Subscription.StripeCustomerID == "" {
+		stripeStatus = "no_customer_id"
+	}
 
 	auth := pickAuthoritativeState(rcState, stripeSubs)
 	mm := computeMismatch(user.Details.Subscription, auth)
 	payments := buildPaymentTimeline(rcState, stripeInvoices)
 
+	diag := liveSourceDiagnostic{RevenueCat: rcStatus, Stripe: stripeStatus}
+	switch rcStatus {
+	case "no_api_key":
+		diag.Note = "REVENUECAT_SECRET_API_KEY is not set on this API deployment — live RC data cannot be loaded."
+	case "user_not_found":
+		diag.Note = "RevenueCat has no record for this user id. They may have purchased under a different RC project, or never via mobile."
+	case "http_error":
+		diag.Note = "RevenueCat call failed. Check API logs for details."
+	}
+
 	resp := userDetailResponse{
 		Authoritative: auth,
 		Mismatch:      mm,
 		Payments:      payments,
+		LiveSources:   diag,
 		RawSources: map[string]interface{}{
 			"revenuecat": rcRaw,
 			"stripe":     stripeRaw,
@@ -289,7 +316,7 @@ func (h Admin) AdminSubscriptionUserSyncHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	rcState, _ := fetchRevenueCatStateForUser(r.Context(), userID)
+	rcState, _, _ := fetchRevenueCatStateForUser(r.Context(), userID)
 	stripeSubs, _, _ := fetchStripeStateForUser(r.Context(), user.Details.Subscription.StripeCustomerID)
 
 	var chosen *authoritativeState
@@ -388,16 +415,20 @@ func (h Admin) AdminSubscriptionUserSyncHandler(w http.ResponseWriter, r *http.R
 }
 
 // fetchRevenueCatStateForUser calls RC's subscribers endpoint. Returns
-// (nil, nil) on any failure (404, network error, missing api key) so the
-// caller can fall through to Stripe-only or DB-only state.
-func fetchRevenueCatStateForUser(ctx context.Context, appUserID string) (*rcSubscriberRaw, map[string]interface{}) {
+// (nil, nil, status) on any failure so the caller can show staff *why*
+// the live state came back empty (missing key, 404, etc.) instead of
+// just "none".
+func fetchRevenueCatStateForUser(ctx context.Context, appUserID string) (*rcSubscriberRaw, map[string]interface{}, string) {
 	apiKey := os.Getenv("REVENUECAT_SECRET_API_KEY")
-	if apiKey == "" || appUserID == "" {
-		return nil, nil
+	if apiKey == "" {
+		return nil, nil, "no_api_key"
+	}
+	if appUserID == "" {
+		return nil, nil, "no_user_id"
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", rcSubscriberBaseURL+appUserID, nil)
 	if err != nil {
-		return nil, nil
+		return nil, nil, "http_error"
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "application/json")
@@ -405,24 +436,24 @@ func fetchRevenueCatStateForUser(ctx context.Context, appUserID string) (*rcSubs
 	resp, err := c.Do(req)
 	if err != nil {
 		zap.S().Warnw("RC fetch failed", "userId", appUserID, "error", err)
-		return nil, nil
+		return nil, nil, "http_error"
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		return nil, nil, "user_not_found"
 	}
 	if resp.StatusCode/100 != 2 {
 		zap.S().Warnw("RC non-2xx", "userId", appUserID, "status", resp.Status, "body", string(body))
-		return nil, nil
+		return nil, nil, "http_error"
 	}
 	var typed rcSubscriberRaw
 	if err := json.Unmarshal(body, &typed); err != nil {
-		return nil, nil
+		return nil, nil, "parse_error"
 	}
 	var raw map[string]interface{}
 	_ = json.Unmarshal(body, &raw)
-	return &typed, raw
+	return &typed, raw, "ok"
 }
 
 // fetchStripeStateForUser pulls every subscription + every invoice for
