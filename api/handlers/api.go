@@ -176,6 +176,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/economy/heartbeat", api.Middleware(http.HandlerFunc(economy.HeartbeatHandler))).Methods("POST")
 	apiV2.Handle("/economy/session/active", api.Middleware(http.HandlerFunc(economy.GetActiveSessionHandler))).Methods("GET")
 	apiV2.Handle("/economy/sessions/civilian/{civilianId}", api.Middleware(http.HandlerFunc(economy.ListSessionsByCivilianHandler))).Methods("GET")
+	apiV2.Handle("/economy/transactions/civilian/{civilianId}", api.Middleware(http.HandlerFunc(economy.ListTransactionsHandler))).Methods("GET")
 	apiV2.Handle("/economy/wallet/{civilianId}", api.Middleware(http.HandlerFunc(economy.GetWalletHandler))).Methods("GET")
 	apiV2.Handle("/economy/inbox", api.Middleware(http.HandlerFunc(economy.ListInboxHandler))).Methods("GET")
 	apiV2.Handle("/economy/inbox", api.Middleware(http.HandlerFunc(economy.CreateInboxItemHandler))).Methods("POST")
