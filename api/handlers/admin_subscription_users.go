@@ -338,18 +338,29 @@ func (h Admin) AdminSubscriptionUserSyncHandler(w http.ResponseWriter, r *http.R
 	}
 
 	set := bson.M{"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now())}
+
+	// "Effectively active" = the user should still be entitled.
+	// Anything past period end (expired, or canceled+lapsed) means free/inactive.
+	effectivelyActive := false
 	switch chosen.Status {
 	case "active":
-		set["user.subscription.active"] = true
+		effectivelyActive = true
 	case "canceled":
-		// Canceled but still inside the period — keep active, set cancelAt.
-		set["user.subscription.active"] = chosen.ExpiresAt != nil && chosen.ExpiresAt.After(time.Now())
-	default:
-		set["user.subscription.active"] = false
+		effectivelyActive = chosen.ExpiresAt != nil && chosen.ExpiresAt.After(time.Now())
 	}
-	if chosen.Plan != "" {
+	set["user.subscription.active"] = effectivelyActive
+
+	// Plan + cadence: keep the live plan only while the user is actually
+	// entitled. Once they're past period end (or status is expired /
+	// billing_issue / none) we MUST write plan=free, isAnnual=false —
+	// otherwise the mismatch detector keeps flagging plan as out-of-sync
+	// (it treats inactive as plan=free) and Fix in DB does nothing visible.
+	if effectivelyActive && chosen.Plan != "" {
 		set["user.subscription.plan"] = chosen.Plan
 		set["user.subscription.isAnnual"] = chosen.IsAnnual
+	} else {
+		set["user.subscription.plan"] = "free"
+		set["user.subscription.isAnnual"] = false
 	}
 	if chosen.Source != "" {
 		set["user.subscription.source"] = chosen.Source
