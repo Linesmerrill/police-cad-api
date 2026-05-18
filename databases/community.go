@@ -27,11 +27,12 @@ func excludePending(filter interface{}) interface{} {
 
 // CommunityDatabase contains the methods to use with the community database.
 //
-// FindOne / Find / CountDocuments transparently exclude communities marked
-// pending deletion (community.pendingDeletionAt set). Use the *IncludingPending
-// variants from contexts that explicitly need to see pending-deletion
-// communities — the admin console, the scheduler hard-delete sweep, and the
-// detail endpoint that returns 410 for a direct link to a pending community.
+// FindOne / Find / CountDocuments / Aggregate transparently exclude communities
+// marked pending deletion (community.pendingDeletionAt set). Use the
+// *IncludingPending variants from contexts that explicitly need to see
+// pending-deletion communities — the admin console, the scheduler hard-delete
+// sweep, and the detail endpoint that returns 410 for a direct link to a
+// pending community.
 type CommunityDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Community, error)
 	FindOneIncludingPending(ctx context.Context, filter interface{}) (*models.Community, error)
@@ -41,6 +42,7 @@ type CommunityDatabase interface {
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 	Aggregate(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error)
+	AggregateIncludingPending(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 	CountDocumentsIncludingPending(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
 }
@@ -96,7 +98,22 @@ func (c *communityDatabase) DeleteOne(ctx context.Context, filter interface{}, o
 
 }
 
+// Aggregate prepends a $match stage that excludes pending-deletion communities,
+// so customer-facing aggregations (discover, leaderboard, prioritized, tag
+// browse, elite, random) automatically hide them. The pipeline stage is cheap
+// — MongoDB collapses consecutive $match stages during optimization, and the
+// communities collection has indexes on the fields these pipelines start with.
+//
+// If the caller passes a pipeline that must run first (e.g. $geoNear, $search),
+// use AggregateIncludingPending and inject the filter into the pipeline by hand.
 func (c *communityDatabase) Aggregate(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error) {
+	prefixed := make(mongo.Pipeline, 0, len(pipeline)+1)
+	prefixed = append(prefixed, bson.D{{Key: "$match", Value: bson.M{"community.pendingDeletionAt": nil}}})
+	prefixed = append(prefixed, pipeline...)
+	return c.AggregateIncludingPending(ctx, prefixed, opts...)
+}
+
+func (c *communityDatabase) AggregateIncludingPending(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error) {
 	return c.db.Collection(collectionName).Aggregate(ctx, pipeline, opts...)
 }
 

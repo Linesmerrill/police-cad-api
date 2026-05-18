@@ -57,6 +57,43 @@ func (_m *CommunityDatabase) Aggregate(ctx context.Context, pipeline mongo.Pipel
 	return r0, r1
 }
 
+// AggregateIncludingPending provides a mock function with given fields: ctx, pipeline, opts
+func (_m *CommunityDatabase) AggregateIncludingPending(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*databases.MongoCursor, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, pipeline)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AggregateIncludingPending")
+	}
+
+	var r0 *databases.MongoCursor
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, mongo.Pipeline, ...*options.AggregateOptions) (*databases.MongoCursor, error)); ok {
+		return rf(ctx, pipeline, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, mongo.Pipeline, ...*options.AggregateOptions) *databases.MongoCursor); ok {
+		r0 = rf(ctx, pipeline, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*databases.MongoCursor)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, mongo.Pipeline, ...*options.AggregateOptions) error); ok {
+		r1 = rf(ctx, pipeline, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // CountDocuments provides a mock function with given fields: ctx, filter, opts
 func (_m *CommunityDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	_va := make([]interface{}, len(opts))
