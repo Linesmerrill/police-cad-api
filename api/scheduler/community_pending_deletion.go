@@ -24,6 +24,9 @@ func (s *Scheduler) processCommunityPendingDeletions() {
 	acquired, err := s.LockDB.TryAcquireLock(ctx, communityHardDeleteLockKey, s.instanceID, 25*time.Minute)
 	if err != nil {
 		zap.S().Errorw("community hard delete: failed to acquire lock", "error", err)
+		s.SendCronAlert("processCommunityPendingDeletions", err, map[string]string{
+			"phase": "lock_acquire",
+		})
 		return
 	}
 	if !acquired {
@@ -56,6 +59,9 @@ func (s *Scheduler) sendCommunityDeletionReminders(ctx context.Context, nowDT, o
 	cursor, err := s.CDB.FindIncludingPending(ctx, filter)
 	if err != nil {
 		zap.S().Errorw("community hard delete: reminder query failed", "error", err)
+		s.SendCronAlert("processCommunityPendingDeletions", err, map[string]string{
+			"phase": "reminder_find",
+		})
 		return
 	}
 	defer cursor.Close(ctx)
@@ -63,6 +69,9 @@ func (s *Scheduler) sendCommunityDeletionReminders(ctx context.Context, nowDT, o
 	var due []models.Community
 	if err := cursor.All(ctx, &due); err != nil {
 		zap.S().Errorw("community hard delete: reminder decode failed", "error", err)
+		s.SendCronAlert("processCommunityPendingDeletions", err, map[string]string{
+			"phase": "reminder_decode",
+		})
 		return
 	}
 
@@ -88,6 +97,9 @@ func (s *Scheduler) hardDeleteExpiredPendingCommunities(ctx context.Context, now
 	cursor, err := s.CDB.FindIncludingPending(ctx, filter)
 	if err != nil {
 		zap.S().Errorw("community hard delete: expired query failed", "error", err)
+		s.SendCronAlert("processCommunityPendingDeletions", err, map[string]string{
+			"phase": "expired_find",
+		})
 		return
 	}
 	defer cursor.Close(ctx)
@@ -95,6 +107,9 @@ func (s *Scheduler) hardDeleteExpiredPendingCommunities(ctx context.Context, now
 	var expired []models.Community
 	if err := cursor.All(ctx, &expired); err != nil {
 		zap.S().Errorw("community hard delete: expired decode failed", "error", err)
+		s.SendCronAlert("processCommunityPendingDeletions", err, map[string]string{
+			"phase": "expired_decode",
+		})
 		return
 	}
 
