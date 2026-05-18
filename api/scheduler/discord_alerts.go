@@ -67,7 +67,12 @@ func truncForDiscord(s string, n int) string {
 // `err` is the failure, and `fields` are arbitrary key/value pairs included
 // inline on the embed. Best-effort: if anything about the POST goes wrong,
 // we log via zap and move on.
-func (s *Scheduler) SendCronAlert(jobName string, err error, fields map[string]string) {
+//
+// Exposed as a package function so handlers outside the scheduler (e.g. the
+// admin smoke-test endpoint) can fire alerts without holding a Scheduler
+// reference. Callers should pass the running dyno's DYNO env, or empty
+// string if not relevant.
+func SendCronAlert(instanceID, jobName string, err error, fields map[string]string) {
 	webhook := os.Getenv(cronAlertWebhookEnv)
 	if webhook == "" || err == nil {
 		return
@@ -100,9 +105,12 @@ func (s *Scheduler) SendCronAlert(jobName string, err error, fields map[string]s
 		dyno = "local"
 	}
 
+	if instanceID == "" {
+		instanceID = dyno
+	}
 	embedFields := []discordField{
 		{Name: "Job", Value: jobName, Inline: true},
-		{Name: "Instance", Value: s.instanceID, Inline: true},
+		{Name: "Instance", Value: instanceID, Inline: true},
 	}
 	for k, v := range fields {
 		embedFields = append(embedFields, discordField{

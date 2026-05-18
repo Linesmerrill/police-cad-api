@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/api"
+	"github.com/linesmerrill/police-cad-api/api/scheduler"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -1557,6 +1558,49 @@ func (c Community) RestoreCommunityPendingDeletionHandler(w http.ResponseWriter,
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Community restored"})
+}
+
+// TestCronAlertHandler is an admin-only smoke test for the Discord cron-alert
+// webhook. Synthesizes an error and sends it through the same SendCronAlert
+// path the scheduler uses, so staff can confirm the channel is wired without
+// having to wait for a real cron failure. Bypasses dedup by stamping the
+// current timestamp into the error message.
+func (c Community) TestCronAlertHandler(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		CurrentUser map[string]interface{} `json:"currentUser"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if !hasAdminOrOwnerRole(payload.CurrentUser) {
+		config.ErrorStatus("admin or owner role required", http.StatusForbidden, w,
+			fmt.Errorf("caller missing admin/owner role"))
+		return
+	}
+
+	if os.Getenv("DISCORD_CRON_ERROR_WEBHOOK_URL") == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":      false,
+			"message": "DISCORD_CRON_ERROR_WEBHOOK_URL is not set on this dyno. Configure it in Heroku config vars and try again.",
+		})
+		return
+	}
+
+	caller, _ := payload.CurrentUser["email"].(string)
+	syntheticErr := fmt.Errorf("test alert from /admin/test-cron-alert at %s (triggered by %s)",
+		time.Now().UTC().Format(time.RFC3339), caller)
+	scheduler.SendCronAlert(os.Getenv("DYNO"), "testCronAlert", syntheticErr, map[string]string{
+		"phase":   "manual_smoke_test",
+		"trigger": caller,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "Synthetic cron alert dispatched. Check the Discord channel — it should arrive within a few seconds.",
+	})
 }
 
 // hasAdminOrOwnerRole reports whether the caller's currentUser payload contains
