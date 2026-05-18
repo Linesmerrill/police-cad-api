@@ -26,6 +26,7 @@ type Scheduler struct {
 	UDB     databases.UserDatabase
 	CDB        databases.CommunityDatabase
 	LockDB     databases.SchedulerLockDatabase
+	DBHelper   databases.DatabaseHelper
 	// Economy
 	SessionDB  databases.ClockSessionDatabase
 	InboxDB    databases.InboxItemDatabase
@@ -41,6 +42,7 @@ func NewScheduler(
 	uDB databases.UserDatabase,
 	cDB databases.CommunityDatabase,
 	lockDB databases.SchedulerLockDatabase,
+	dbHelper databases.DatabaseHelper,
 	sessionDB databases.ClockSessionDatabase,
 	inboxDB databases.InboxItemDatabase,
 	civDB databases.CivilianDatabase,
@@ -59,6 +61,7 @@ func NewScheduler(
 		UDB:        uDB,
 		CDB:        cDB,
 		LockDB:     lockDB,
+		DBHelper:   dbHelper,
 		SessionDB:  sessionDB,
 		InboxDB:    inboxDB,
 		CivDB:      civDB,
@@ -91,6 +94,13 @@ func (s *Scheduler) Start() {
 	if s.InboxDB != nil {
 		if _, err = s.cron.AddFunc("@every 5m", s.inboxDelinquencyTick); err != nil {
 			zap.S().Errorw("failed to register inbox delinquency tick", "error", err)
+		}
+	}
+
+	// Community soft-delete sweep: reminders + hard-deletes for elapsed grace periods
+	if s.CDB != nil && s.DBHelper != nil {
+		if _, err = s.cron.AddFunc("0 3 * * *", s.processCommunityPendingDeletions); err != nil {
+			zap.S().Errorw("failed to register community pending-deletion job", "error", err)
 		}
 	}
 

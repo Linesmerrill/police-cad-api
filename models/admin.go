@@ -280,14 +280,16 @@ type AdminUserResult struct {
 }
 
 type AdminCommunityResult struct {
-	ID              string      `json:"id"`
-	Name            string      `json:"name"`
-	Visibility      string      `json:"visibility"`  // "public" or "private"
-	CreatedAt       interface{} `json:"createdAt"`
-	Owner           *OwnerInfo  `json:"owner,omitempty"`
-	MemberCount     int         `json:"memberCount"`
-	DepartmentCount int         `json:"departmentCount"`
-	RolesCount      int         `json:"rolesCount"`
+	ID                  string      `json:"id"`
+	Name                string      `json:"name"`
+	Visibility          string      `json:"visibility"` // "public" or "private"
+	CreatedAt           interface{} `json:"createdAt"`
+	Owner               *OwnerInfo  `json:"owner,omitempty"`
+	MemberCount         int         `json:"memberCount"`
+	DepartmentCount     int         `json:"departmentCount"`
+	RolesCount          int         `json:"rolesCount"`
+	PendingDeletionAt   interface{} `json:"pendingDeletionAt,omitempty"`
+	ScheduledDeletionAt interface{} `json:"scheduledDeletionAt,omitempty"`
 }
 
 type OwnerInfo struct {
@@ -352,16 +354,18 @@ type AdminRoleMember struct {
 }
 
 type AdminCommunityDetails struct {
-	ID              string                 `json:"id"`
-	Name            string                 `json:"name"`
-	Visibility      string                 `json:"visibility"`  // "public" or "private"
-	CreatedAt       interface{}            `json:"createdAt"`
-	Owner           *OwnerInfo             `json:"owner,omitempty"`
-	MemberCount     int                    `json:"memberCount"`
-	Departments     []CommunityDept        `json:"departments,omitempty"`
-	DepartmentCount int                    `json:"departmentCount"`
-	RolesCount      int                    `json:"rolesCount"`
-	Subscription    *CommunitySubscription `json:"subscription,omitempty"`
+	ID                  string                 `json:"id"`
+	Name                string                 `json:"name"`
+	Visibility          string                 `json:"visibility"` // "public" or "private"
+	CreatedAt           interface{}            `json:"createdAt"`
+	Owner               *OwnerInfo             `json:"owner,omitempty"`
+	MemberCount         int                    `json:"memberCount"`
+	Departments         []CommunityDept        `json:"departments,omitempty"`
+	DepartmentCount     int                    `json:"departmentCount"`
+	RolesCount          int                    `json:"rolesCount"`
+	Subscription        *CommunitySubscription `json:"subscription,omitempty"`
+	PendingDeletionAt   interface{}            `json:"pendingDeletionAt,omitempty"`
+	ScheduledDeletionAt interface{}            `json:"scheduledDeletionAt,omitempty"`
 }
 
 type CommunityDept struct {

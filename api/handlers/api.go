@@ -243,6 +243,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/communities/{id}/transfer-ownership", http.HandlerFunc(adminHandler.AdminTransferOwnershipHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}/remove-member", http.HandlerFunc(adminHandler.AdminRemoveMemberHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}/roles", http.HandlerFunc(adminHandler.AdminGetCommunityRolesHandler)).Methods("GET")
+	apiCreate.Handle("/admin/communities/{community_id}/restore-pending-deletion", http.HandlerFunc(c.RestoreCommunityPendingDeletionHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
 
 	// Admin management routes (specific before general)
@@ -814,6 +815,7 @@ func (a *App) New() *mux.Router {
 		contentCreator.UDB,
 		contentCreator.CDB,
 		databases.NewSchedulerLockDatabase(a.dbHelper),
+		a.dbHelper,
 		economy.SDB,
 		economy.IDB,
 		economy.CivDB,

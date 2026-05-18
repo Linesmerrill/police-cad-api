@@ -634,6 +634,10 @@ type communitySearchRequest struct {
 	Query string `json:"query"`
 	Page  int    `json:"page"`  // Page number (0-based)
 	Limit int    `json:"limit"` // Records per page
+	// PendingDeletionOnly narrows the result set to communities currently
+	// scheduled for hard-deletion. When false (default) results include both
+	// active and pending-deletion communities so staff have a single search box.
+	PendingDeletionOnly bool `json:"pendingDeletionOnly,omitempty"`
 }
 
 type communitySearchResponse struct {
@@ -682,34 +686,68 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	// For queries >= 3 chars, use full regex match, otherwise use prefix match
 	queryLen := len(query)
 	escapedQuery := regexp.QuoteMeta(query)
-	var filter bson.M
-	var findOpts *options.FindOptions
-
-	if queryLen >= 3 {
-		// Use regex search for queries >= 3 chars
-		filter = bson.M{"community.name": bson.M{"$regex": escapedQuery, "$options": "i"}}
-	} else {
-		// For short queries, use prefix regex
-		filter = bson.M{"community.name": bson.M{"$regex": "^" + escapedQuery, "$options": "i"}}
+	nameRegex := bson.M{"$regex": escapedQuery, "$options": "i"}
+	if queryLen < 3 {
+		nameRegex = bson.M{"$regex": "^" + escapedQuery, "$options": "i"}
 	}
-	
-	findOpts = options.Find().
+
+	// Also resolve the query against user email/username so staff can find a
+	// community by typing its owner's identifier. Cap the owner sweep to a
+	// reasonable bound so a wildcard-ish query doesn't pull millions of rows.
+	ownerIDs := []string{}
+	if queryLen >= 2 {
+		ownerFilter := bson.M{"$or": bson.A{
+			bson.M{"user.email": nameRegex},
+			bson.M{"user.username": nameRegex},
+		}}
+		ownerOpts := options.Find().SetLimit(50).SetProjection(bson.M{"_id": 1})
+		if ownerCursor, ownerErr := h.UDB.Find(ctx, ownerFilter, ownerOpts); ownerErr == nil {
+			var owners []struct {
+				ID interface{} `bson:"_id"`
+			}
+			if cerr := ownerCursor.All(ctx, &owners); cerr == nil {
+				for _, ou := range owners {
+					switch v := ou.ID.(type) {
+					case string:
+						ownerIDs = append(ownerIDs, v)
+					case primitive.ObjectID:
+						ownerIDs = append(ownerIDs, v.Hex())
+					}
+				}
+			}
+			_ = ownerCursor.Close(ctx)
+		}
+	}
+
+	matchClauses := bson.A{bson.M{"community.name": nameRegex}}
+	if len(ownerIDs) > 0 {
+		matchClauses = append(matchClauses, bson.M{"community.ownerID": bson.M{"$in": ownerIDs}})
+	}
+	filter := bson.M{"$or": matchClauses}
+	if req.PendingDeletionOnly {
+		filter = bson.M{"$and": bson.A{
+			filter,
+			bson.M{"community.pendingDeletionAt": bson.M{"$ne": nil}},
+		}}
+	}
+
+	findOpts := options.Find().
 		SetSkip(skip).
 		SetLimit(limit64).
 		SetSort(bson.M{"community.name": 1})
-	
-	// Get total count for pagination metadata
+
+	// Always include pending-deletion communities — staff need them visible to
+	// restore or to confirm a scheduled hard-deletion.
 	var totalCount int64
 	var err error
-	totalCount, err = h.CDB.CountDocuments(ctx, filter)
+	totalCount, err = h.CDB.CountDocumentsIncludingPending(ctx, filter)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
 		return
 	}
-	
-	// Use community database to search with pagination
-	cursor, err := h.CDB.Find(ctx, filter, findOpts)
+
+	cursor, err := h.CDB.FindIncludingPending(ctx, filter, findOpts)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "search failed"})
@@ -767,6 +805,12 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 			MemberCount:     community.Details.MembersCount,
 			DepartmentCount: departmentCount,
 			RolesCount:      len(community.Details.Roles),
+		}
+		if community.Details.PendingDeletionAt != nil {
+			result.PendingDeletionAt = community.Details.PendingDeletionAt
+		}
+		if community.Details.ScheduledDeletionAt != nil {
+			result.ScheduledDeletionAt = community.Details.ScheduledDeletionAt
 		}
 		results = append(results, result)
 	}
@@ -1094,7 +1138,9 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	community, err := h.CDB.FindOne(r.Context(), bson.M{"_id": objectID})
+	// Use IncludingPending so admins can inspect a community even while it is
+	// scheduled for deletion (that's the whole point of the restore workflow).
+	community, err := h.CDB.FindOneIncludingPending(r.Context(), bson.M{"_id": objectID})
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			w.WriteHeader(http.StatusNotFound)
@@ -1180,6 +1226,12 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 		DepartmentCount: len(community.Details.Departments),
 		RolesCount:      len(community.Details.Roles),
 		Subscription:    subscription,
+	}
+	if community.Details.PendingDeletionAt != nil {
+		details.PendingDeletionAt = community.Details.PendingDeletionAt
+	}
+	if community.Details.ScheduledDeletionAt != nil {
+		details.ScheduledDeletionAt = community.Details.ScheduledDeletionAt
 	}
 
 	w.WriteHeader(http.StatusOK)
