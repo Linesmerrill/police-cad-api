@@ -171,6 +171,7 @@ func (a *App) New() *mux.Router {
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
+	r.HandleFunc("/health/scheduler", a.schedulerHealthHandler).Methods("GET")
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 	apiV2 := r.PathPrefix("/api/v2").Subrouter()
@@ -882,6 +883,34 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 		Alive: true,
 	})
 	_, _ = io.WriteString(w, string(b))
+}
+
+// schedulerHealthHandler returns the per-job run history captured by the
+// in-process scheduler. Public (no auth) so an uptime monitor can poll it,
+// but it only exposes timestamps + counts + the last error message — no
+// PII, no auth context.
+//
+// Top-level fields:
+//   alive: bool — does the scheduler have any registered jobs?
+//   nowAt: ISO timestamp of the response (anchor for staleness math)
+//   jobs:  { [jobName]: JobStat } — see scheduler.JobStat
+func (a *App) schedulerHealthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if a.Scheduler == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"alive": false,
+			"error": "scheduler not initialized",
+		})
+		return
+	}
+	stats := a.Scheduler.SnapshotJobStats()
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"alive": len(stats) > 0,
+		"nowAt": time.Now().UTC().Format(time.RFC3339),
+		"jobs":  stats,
+	})
 }
 
 // CorsMiddleware is a middleware that adds CORS headers to the response

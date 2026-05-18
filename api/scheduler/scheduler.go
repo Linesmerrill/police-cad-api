@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -32,6 +33,11 @@ type Scheduler struct {
 	InboxDB    databases.InboxItemDatabase
 	CivDB      databases.CivilianDatabase
 	instanceID string
+
+	// Per-job run stats for /health/scheduler. Multiple jobs may run in
+	// parallel goroutines, so all access goes through jobStatsMu.
+	jobStatsMu sync.Mutex
+	jobStats   map[string]*JobStat
 }
 
 // NewScheduler creates a new scheduler instance
@@ -66,41 +72,55 @@ func NewScheduler(
 		InboxDB:    inboxDB,
 		CivDB:      civDB,
 		instanceID: instanceID,
+		jobStats:   map[string]*JobStat{},
 	}
 }
 
 // Start begins the scheduler with all registered jobs
 func (s *Scheduler) Start() {
 	// Process grace period expirations and send reminders daily at 3 AM UTC
-	_, err := s.cron.AddFunc("0 3 * * *", s.processGracePeriods)
-	if err != nil {
+	const gracePeriodSchedule = "0 3 * * *"
+	if _, err := s.cron.AddFunc(gracePeriodSchedule, s.processGracePeriods); err != nil {
 		zap.S().Errorw("failed to register grace period job", "error", err)
+	} else {
+		s.registerJob("processGracePeriods", gracePeriodSchedule)
 	}
 
 	// Check for creators who need grace period warnings every 3 days at 2 AM UTC
 	// This catches creators whose follower counts may have dropped
-	_, err = s.cron.AddFunc("0 2 */3 * *", s.checkAllCreators)
-	if err != nil {
+	const checkCreatorsSchedule = "0 2 */3 * *"
+	if _, err := s.cron.AddFunc(checkCreatorsSchedule, s.checkAllCreators); err != nil {
 		zap.S().Errorw("failed to register creator check job", "error", err)
+	} else {
+		s.registerJob("checkAllCreators", checkCreatorsSchedule)
 	}
 
 	// Economy: sweep stale clock sessions every minute (only registers if DB present)
 	if s.SessionDB != nil {
-		if _, err = s.cron.AddFunc("@every 1m", s.staleSessionSweep); err != nil {
+		const staleSessionSchedule = "@every 1m"
+		if _, err := s.cron.AddFunc(staleSessionSchedule, s.staleSessionSweep); err != nil {
 			zap.S().Errorw("failed to register stale session sweep", "error", err)
+		} else {
+			s.registerJob("staleSessionSweep", staleSessionSchedule)
 		}
 	}
 	// Economy: flip overdue inbox items to delinquent every 5 minutes
 	if s.InboxDB != nil {
-		if _, err = s.cron.AddFunc("@every 5m", s.inboxDelinquencyTick); err != nil {
+		const inboxDelinquencySchedule = "@every 5m"
+		if _, err := s.cron.AddFunc(inboxDelinquencySchedule, s.inboxDelinquencyTick); err != nil {
 			zap.S().Errorw("failed to register inbox delinquency tick", "error", err)
+		} else {
+			s.registerJob("inboxDelinquencyTick", inboxDelinquencySchedule)
 		}
 	}
 
 	// Community soft-delete sweep: reminders + hard-deletes for elapsed grace periods
 	if s.CDB != nil && s.DBHelper != nil {
-		if _, err = s.cron.AddFunc("0 3 * * *", s.processCommunityPendingDeletions); err != nil {
+		const communityPendingSchedule = "0 3 * * *"
+		if _, err := s.cron.AddFunc(communityPendingSchedule, s.processCommunityPendingDeletions); err != nil {
 			zap.S().Errorw("failed to register community pending-deletion job", "error", err)
+		} else {
+			s.registerJob("processCommunityPendingDeletions", communityPendingSchedule)
 		}
 	}
 
@@ -117,6 +137,9 @@ func (s *Scheduler) Stop() {
 
 // processGracePeriods handles grace period expirations and sends reminder emails
 func (s *Scheduler) processGracePeriods() {
+	const jobName = "processGracePeriods"
+	s.recordStart(jobName)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -124,10 +147,13 @@ func (s *Scheduler) processGracePeriods() {
 	acquired, err := s.LockDB.TryAcquireLock(ctx, "grace_period_job", s.instanceID, 10*time.Minute)
 	if err != nil {
 		zap.S().Errorw("failed to acquire lock for grace period job", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "lock_acquire"})
 		return
 	}
 	if !acquired {
 		zap.S().Debug("Grace period job already running on another instance, skipping")
+		s.recordSkipped(jobName)
 		return
 	}
 	defer s.LockDB.ReleaseLock(ctx, "grace_period_job", s.instanceID)
@@ -146,12 +172,16 @@ func (s *Scheduler) processGracePeriods() {
 	cursor, err := s.CCDB.Find(ctx, expiredFilter)
 	if err != nil {
 		zap.S().Errorw("failed to find expired grace periods", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "expired_find"})
 		return
 	}
 
 	var expiredCreators []models.ContentCreator
 	if err := cursor.All(ctx, &expiredCreators); err != nil {
 		zap.S().Errorw("failed to decode expired creators", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "expired_decode"})
 		return
 	}
 	cursor.Close(ctx)
@@ -174,12 +204,16 @@ func (s *Scheduler) processGracePeriods() {
 	cursor, err = s.CCDB.Find(ctx, reminderFilter)
 	if err != nil {
 		zap.S().Errorw("failed to find creators needing reminder", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "reminder_find"})
 		return
 	}
 
 	var reminderCreators []models.ContentCreator
 	if err := cursor.All(ctx, &reminderCreators); err != nil {
 		zap.S().Errorw("failed to decode reminder creators", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "reminder_decode"})
 		return
 	}
 	cursor.Close(ctx)
@@ -189,6 +223,7 @@ func (s *Scheduler) processGracePeriods() {
 		s.sendReminderEmail(ctx, creator)
 	}
 
+	s.recordSuccess(jobName)
 	zap.S().Infow("Grace period processing complete",
 		"expiredProcessed", len(expiredCreators),
 		"remindersSent", len(reminderCreators),
@@ -340,6 +375,9 @@ func (s *Scheduler) removeCreator(ctx context.Context, creator models.ContentCre
 // checkAllCreators periodically checks all active creators for low follower counts
 // This catches cases where followers may have dropped since their last sync
 func (s *Scheduler) checkAllCreators() {
+	const jobName = "checkAllCreators"
+	s.recordStart(jobName)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -347,10 +385,13 @@ func (s *Scheduler) checkAllCreators() {
 	acquired, err := s.LockDB.TryAcquireLock(ctx, "check_all_creators_job", s.instanceID, 15*time.Minute)
 	if err != nil {
 		zap.S().Errorw("failed to acquire lock for creator check job", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "lock_acquire"})
 		return
 	}
 	if !acquired {
 		zap.S().Debug("Creator check job already running on another instance, skipping")
+		s.recordSkipped(jobName)
 		return
 	}
 	defer s.LockDB.ReleaseLock(ctx, "check_all_creators_job", s.instanceID)
@@ -372,12 +413,16 @@ func (s *Scheduler) checkAllCreators() {
 	cursor, err := s.CCDB.Find(ctx, filter)
 	if err != nil {
 		zap.S().Errorw("failed to find creators for check", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "find"})
 		return
 	}
 
 	var creators []models.ContentCreator
 	if err := cursor.All(ctx, &creators); err != nil {
 		zap.S().Errorw("failed to decode creators", "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "decode"})
 		return
 	}
 	cursor.Close(ctx)
@@ -398,6 +443,7 @@ func (s *Scheduler) checkAllCreators() {
 		}
 	}
 
+	s.recordSuccess(jobName)
 	zap.S().Infow("Periodic creator check complete",
 		"creatorsChecked", len(creators),
 		"lowFollowersFound", lowFollowerCount,

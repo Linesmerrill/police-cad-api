@@ -18,19 +18,22 @@ const communityHardDeleteLockKey = "community_hard_delete_job"
 // community whose ScheduledDeletionAt has elapsed. Idempotent across instances
 // via the shared scheduler lock.
 func (s *Scheduler) processCommunityPendingDeletions() {
+	const jobName = "processCommunityPendingDeletions"
+	s.recordStart(jobName)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
 	acquired, err := s.LockDB.TryAcquireLock(ctx, communityHardDeleteLockKey, s.instanceID, 25*time.Minute)
 	if err != nil {
 		zap.S().Errorw("community hard delete: failed to acquire lock", "error", err)
-		SendCronAlert(s.instanceID, "processCommunityPendingDeletions", err, map[string]string{
-			"phase": "lock_acquire",
-		})
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "lock_acquire"})
 		return
 	}
 	if !acquired {
 		zap.S().Debug("community hard delete job already running on another instance, skipping")
+		s.recordSkipped(jobName)
 		return
 	}
 	defer s.LockDB.ReleaseLock(ctx, communityHardDeleteLockKey, s.instanceID)
@@ -43,6 +46,7 @@ func (s *Scheduler) processCommunityPendingDeletions() {
 
 	s.sendCommunityDeletionReminders(ctx, nowDT, oneDayFromNowDT)
 	s.hardDeleteExpiredPendingCommunities(ctx, nowDT)
+	s.recordSuccess(jobName)
 }
 
 // sendCommunityDeletionReminders emails owners whose community is within 24 hours
