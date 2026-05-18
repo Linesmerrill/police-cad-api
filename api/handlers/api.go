@@ -176,6 +176,14 @@ func (a *App) New() *mux.Router {
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 	apiV2 := r.PathPrefix("/api/v2").Subrouter()
 
+	// Pending-deletion gate: any request whose matched route carries a
+	// community_id / communityId var is short-circuited with a 410 if the
+	// community is currently in pending-deletion state. Closes the race where
+	// an owner soft-deletes a community while members are actively using it.
+	pendingGate := CommunityPendingGate(databases.NewCommunityDatabase(a.dbHelper))
+	apiCreate.Use(pendingGate)
+	apiV2.Use(pendingGate)
+
 	// Metrics handler (must be after apiV2 is defined)
 	metricsHandler := MetricsHandler{}
 	apiV2.Handle("/metrics", http.HandlerFunc(metricsHandler.GetMetricsDashboard)).Methods("GET")
