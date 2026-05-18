@@ -21,6 +21,12 @@ type ClockSession struct {
 	EndedAt          primitive.DateTime `json:"endedAt,omitempty" bson:"endedAt,omitempty"`
 	PaidSeconds      int64              `json:"paidSeconds" bson:"paidSeconds"` // cumulative paid duration
 	Earnings         int64              `json:"earnings" bson:"earnings"`       // cumulative credited cents
+	// BalanceAfter is the civilian's wallet balance (cents) immediately after the
+	// most recent credit was applied. Written by paySession via an atomic
+	// FindOneAndUpdate so the value reflects the true post-credit balance even
+	// under concurrent debits. Older sessions credited before this field existed
+	// will be 0; consumers should treat 0 as "unknown" rather than zero balance.
+	BalanceAfter int64 `json:"balanceAfter,omitempty" bson:"balanceAfter,omitempty"`
 	MaxSessionMinutes int               `json:"maxSessionMinutes" bson:"maxSessionMinutes"` // snapshot at clock-in
 	AfkGraceSeconds  int                `json:"afkGraceSeconds" bson:"afkGraceSeconds"`     // snapshot at clock-in
 	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`

@@ -42,6 +42,9 @@ type User struct {
 	PTDB  databases.PushTokenDatabase
 	ALDB  databases.AuditLogDatabase
 	UPDB  databases.UserPreferencesDatabase
+	SEDB  databases.SubscriptionEventDatabase
+	ACDB  databases.UserActiveCivilianDatabase // active-civilian-per-community pick, shared with the Discord bot
+	SDB   databases.ClockSessionDatabase       // clock sessions; used to keep the active-civ pin aligned with the running shift
 }
 
 // UserHandler returns a user given a userID
@@ -370,6 +373,113 @@ func (u User) UsersLastAccessedCommunityHandler(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// setActiveCivilianRequest carries the upsert payload for
+// PUT /api/v2/user/active-civilian.
+type setActiveCivilianRequest struct {
+	UserID      string `json:"userId"`
+	CommunityID string `json:"communityId"`
+	CivilianID  string `json:"civilianId"`
+}
+
+// GetActiveCivilianHandler returns the active civilian the user has picked
+// for a given community, or an empty body when none is set. Shared with the
+// Discord bot's /set-active-civilian — both surfaces read/write the same row.
+func (u User) GetActiveCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID := r.URL.Query().Get("userId")
+	communityID := r.URL.Query().Get("communityId")
+	if userID == "" || communityID == "" {
+		config.ErrorStatus("userId and communityId are required", http.StatusBadRequest, w, nil)
+		return
+	}
+	if u.ACDB == nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("null"))
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	doc, err := u.ACDB.FindOne(ctx, bson.M{"userId": userID, "communityId": communityID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("null"))
+			return
+		}
+		config.ErrorStatus("failed to load active civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(doc)
+}
+
+// SetActiveCivilianHandler upserts the user's active civilian for a given
+// community. Web wallet's "Set as active" button and bot /set-active-civilian
+// both hit this. Idempotent (same payload twice = same end state).
+func (u User) SetActiveCivilianHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var req setActiveCivilianRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if req.UserID == "" || req.CommunityID == "" || req.CivilianID == "" {
+		config.ErrorStatus("userId, communityId, civilianId are required", http.StatusBadRequest, w, nil)
+		return
+	}
+	if u.ACDB == nil {
+		config.ErrorStatus("active-civilian store not configured", http.StatusInternalServerError, w, nil)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Coupling rule: the active civilian must match whichever civilian is
+	// currently on the clock for this user (if any). Downstream UI (wallet
+	// cards, job lists, clock-in/out modals, the bot's defaults) all read
+	// the active pin and assume it's the running-shift civilian — letting
+	// the two diverge desyncs every surface. If a different civilian is
+	// already on the clock, refuse the swap and surface the conflict the
+	// same shape as ClockInHandler does (409 + existing session body) so
+	// every caller can render a consistent "clock out first" prompt.
+	if u.SDB != nil {
+		if existing, _ := u.SDB.FindOne(ctx, bson.M{"status": "active", "userId": req.UserID}); existing != nil {
+			if existing.CivilianID != "" && existing.CivilianID != req.CivilianID {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error":   "active_session_with_different_civilian",
+					"message": "another civilian on this account is currently on the clock; clock them out before changing the active civilian",
+					"session": existing,
+				})
+				return
+			}
+		}
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	err := u.ACDB.UpdateOne(ctx,
+		bson.M{"userId": req.UserID, "communityId": req.CommunityID},
+		bson.M{"$set": bson.M{
+			"userId":      req.UserID,
+			"communityId": req.CommunityID,
+			"civilianId":  req.CivilianID,
+			"updatedAt":   now,
+		}},
+		options.Update().SetUpsert(true),
+	)
+	if err != nil {
+		config.ErrorStatus("failed to set active civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"userId":      req.UserID,
+		"communityId": req.CommunityID,
+		"civilianId":  req.CivilianID,
+		"updatedAt":   now,
+	})
 }
 
 // UserFriendsHandler returns a list of friends for a user with pagination
@@ -3368,7 +3478,12 @@ func (u User) CreatePortalSessionHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// SubscribeUserHandler subscribes a user to a specific tier
+// SubscribeUserHandler subscribes a user to a specific tier. Called by the
+// mobile app after a successful RevenueCat purchase. Accepts the legacy
+// body (userId, subscriptionId, status, tier, isAnnual) plus two optional
+// fields newer mobile builds send: store ("play_store" | "app_store") and
+// productId. Both are optional so older app builds in the wild keep
+// working unchanged.
 func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		UserID         string `json:"userId"`
@@ -3376,9 +3491,18 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 		Status         string `json:"status"`
 		Tier           string `json:"tier"`
 		IsAnnual       bool   `json:"isAnnual"`
+		Store          string `json:"store,omitempty"`     // optional: "play_store" | "app_store"
+		ProductID      string `json:"productId,omitempty"` // optional: RevenueCat / store product id
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+	// Read the raw body once so we can both decode it and persist it to
+	// the audit trail.
+	rawBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		config.ErrorStatus("failed to read request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if err := json.Unmarshal(rawBody, &requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -3395,23 +3519,54 @@ func (u User) SubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	isActive := requestBody.Status == "active"
 
-	filter := bson.M{"_id": userID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.id":        requestBody.SubscriptionID,
-			"user.subscription.plan":      requestBody.Tier,
-			"user.subscription.isAnnual":  requestBody.IsAnnual,
-			"user.subscription.active":    isActive,
-			"user.subscription.createdAt": primitive.NewDateTimeFromTime(time.Now()),
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
+	// Load the existing subscription so we can decide whether this is a
+	// first-time subscribe (set createdAt) or a re-subscribe (keep the
+	// original createdAt as the truth of when they first paid).
+	var existing models.User
+	hasExisting := false
+	if err := u.DB.FindOne(ctx, bson.M{"_id": userID}).Decode(&existing); err == nil {
+		hasExisting = existing.Details.Subscription.CreatedAt != nil &&
+			existing.Details.Subscription.CreatedAt != ""
 	}
 
-	_, err = u.DB.UpdateOne(ctx, filter, update)
-	if err != nil {
+	set := bson.M{
+		"user.subscription.id":        requestBody.SubscriptionID,
+		"user.subscription.plan":      requestBody.Tier,
+		"user.subscription.isAnnual":  requestBody.IsAnnual,
+		"user.subscription.active":    isActive,
+		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+	}
+	if !hasExisting {
+		set["user.subscription.createdAt"] = primitive.NewDateTimeFromTime(time.Now())
+	}
+	if source := mapStoreToSource(requestBody.Store); source != "" {
+		set["user.subscription.source"] = source
+	}
+
+	if _, err := u.DB.UpdateOne(ctx, bson.M{"_id": userID}, bson.M{"$set": set}); err != nil {
 		config.ErrorStatus("failed to subscribe user", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	plan := requestBody.Tier
+	isAnnual := requestBody.IsAnnual
+	if p, a, ok := parseProductID(requestBody.ProductID); ok {
+		plan = p
+		isAnnual = a
+	}
+	rec := subscriptionEventRecorder{UserDB: u.DB, EventDB: u.SEDB}
+	rec.record(ctx, subscriptionEventInput{
+		Provider:      "mobile_app",
+		EventType:     "mobile_subscribe",
+		Store:         strings.ToUpper(requestBody.Store),
+		UserIDHint:    requestBody.UserID,
+		Plan:          plan,
+		IsAnnual:      isAnnual,
+		ProductID:     requestBody.ProductID,
+		TransactionID: requestBody.SubscriptionID,
+		RawPayload:    rawBody,
+		SourceIP:      r.RemoteAddr,
+	})
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -3452,7 +3607,44 @@ func (u User) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	zap.S().Infof("Received Stripe webhook event: %s", event.Type)
+	zap.S().Infow("Received Stripe webhook event", "eventType", event.Type, "eventId", event.ID)
+
+	rec := subscriptionEventRecorder{UserDB: u.DB, EventDB: u.SEDB}
+
+	// Stripe retries on non-2xx and on socket failures. Pre-flight dedupe
+	// avoids re-running handlers; the unique (provider, providerEventId)
+	// index catches concurrent-delivery races.
+	if event.ID != "" && rec.isDuplicate(r.Context(), "stripe", event.ID) {
+		zap.S().Infow("duplicate Stripe event — skipping handler",
+			"eventId", event.ID, "eventType", string(event.Type))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "duplicate event — already processed"}`))
+		return
+	}
+
+	// Best-effort extraction of the subscription/customer ids from the raw
+	// event so we can attach the audit row to a user. We don't need this
+	// for correctness (the existing handlers do their own lookup), only
+	// for searchability of the subscription_events row.
+	stripeSubID, stripeCustomerID := extractStripeIdentifiers(event.Data.Raw)
+
+	rr := rec.record(r.Context(), subscriptionEventInput{
+		Provider:          "stripe",
+		ProviderEventID:   event.ID,
+		EventType:         string(event.Type),
+		Store:             "STRIPE",
+		TransactionIDHint: stripeSubID,
+		TransactionID:     stripeSubID,
+		ProductID:         stripeCustomerID, // not a product, but useful for searchability via the lookup endpoint
+		Environment:       stripeEnv(event.Livemode),
+		RawPayload:        payload,
+		SourceIP:          r.RemoteAddr,
+	})
+	if rr.Duplicate {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "duplicate event — already processed"}`))
+		return
+	}
 
 	// Handle different event types
 	switch event.Type {
@@ -3916,10 +4108,11 @@ func (u User) handleSubscriptionTrialWillEnd(event stripe.Event) error {
 
 // CancelSubscriptionHandler cancels a user's subscription
 func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	rawBody, _ := ioutil.ReadAll(r.Body)
 	var req struct {
 		UserID string `json:"userId"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(rawBody, &req); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -3971,6 +4164,18 @@ func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	rec := subscriptionEventRecorder{UserDB: u.DB, EventDB: u.SEDB}
+	rec.record(r.Context(), subscriptionEventInput{
+		Provider:      "admin",
+		EventType:     "admin_cancel_at_period_end",
+		Store:         "STRIPE",
+		UserIDHint:    req.UserID,
+		TransactionID: user.Details.Subscription.ID,
+		ExpiresAt:     &cancelAtTime,
+		RawPayload:    rawBody,
+		SourceIP:      r.RemoteAddr,
+	})
+
 	// Respond with the end date of the current billing cycle
 	response := struct {
 		Success bool   `json:"success"`
@@ -3988,11 +4193,12 @@ func (u User) CancelSubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 
 // UnsubscribeUserHandler unsubscribes a user
 func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
+	rawBody, _ := ioutil.ReadAll(r.Body)
 	var requestBody struct {
 		UserID string `json:"userId"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+	if err := json.Unmarshal(rawBody, &requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -4017,6 +4223,16 @@ func (u User) UnsubscribeUserHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("failed to unsubscribe user", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	rec := subscriptionEventRecorder{UserDB: u.DB, EventDB: u.SEDB}
+	rec.record(r.Context(), subscriptionEventInput{
+		Provider:   "admin",
+		EventType:  "admin_unsubscribe",
+		UserIDHint: requestBody.UserID,
+		Plan:       "free",
+		RawPayload: rawBody,
+		SourceIP:   r.RemoteAddr,
+	})
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -4425,6 +4641,7 @@ func (u User) DeleteUserNoteHandler(w http.ResponseWriter, r *http.Request) {
 func (u User) UpdateUserSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["user_id"]
 
+	rawBody, _ := ioutil.ReadAll(r.Body)
 	// Parse the request body to get the subscription details
 	var subscriptionData struct {
 		SubscriptionID string `json:"subscriptionId"`
@@ -4432,7 +4649,7 @@ func (u User) UpdateUserSubscriptionHandler(w http.ResponseWriter, r *http.Reque
 		IsAnnual       bool   `json:"isAnnual"`
 		Status         string `json:"status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&subscriptionData); err != nil {
+	if err := json.Unmarshal(rawBody, &subscriptionData); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -4463,6 +4680,18 @@ func (u User) UpdateUserSubscriptionHandler(w http.ResponseWriter, r *http.Reque
 		config.ErrorStatus("failed to update user subscription", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	rec := subscriptionEventRecorder{UserDB: u.DB, EventDB: u.SEDB}
+	rec.record(r.Context(), subscriptionEventInput{
+		Provider:      "admin",
+		EventType:     "admin_update_subscription",
+		UserIDHint:    userID,
+		Plan:          subscriptionData.Plan,
+		IsAnnual:      subscriptionData.IsAnnual,
+		TransactionID: subscriptionData.SubscriptionID,
+		RawPayload:    rawBody,
+		SourceIP:      r.RemoteAddr,
+	})
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "User subscription updated successfully"}`))
@@ -4736,7 +4965,90 @@ func (u User) BoostCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
-// HandleRevenueCatWebhook handles RevenueCat webhook events for subscription management
+// revenueCatEvent is the subset of a RevenueCat webhook event payload we care
+// about. RevenueCat documents the full schema at
+// https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields
+type revenueCatEvent struct {
+	ID                    string
+	AppUserID             string
+	Type                  string
+	Store                 string
+	ProductID             string
+	TransactionID         string
+	OriginalTransactionID string
+	PurchasedAt           *time.Time
+	ExpiresAt             *time.Time
+	PriceUSD              float64
+	PriceLocal            float64
+	Currency              string
+	Environment           string
+	PeriodType            string
+}
+
+// parseRevenueCatEvent extracts the typed event from the webhook body.
+// Returns (event, nil) on success; (nil, err) on a structural problem.
+func parseRevenueCatEvent(body map[string]interface{}) (*revenueCatEvent, error) {
+	raw, ok := body["event"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("missing or invalid event object")
+	}
+	ev := &revenueCatEvent{}
+	if v, ok := raw["id"].(string); ok {
+		ev.ID = v
+	}
+	if v, ok := raw["app_user_id"].(string); ok {
+		ev.AppUserID = v
+	} else if v, ok := body["app_user_id"].(string); ok {
+		// Older RC payloads put it at the top level.
+		ev.AppUserID = v
+	}
+	if v, ok := raw["type"].(string); ok {
+		ev.Type = v
+	}
+	if v, ok := raw["store"].(string); ok {
+		ev.Store = v
+	}
+	if v, ok := raw["product_id"].(string); ok {
+		ev.ProductID = v
+	}
+	if v, ok := raw["transaction_id"].(string); ok {
+		ev.TransactionID = v
+	}
+	if v, ok := raw["original_transaction_id"].(string); ok {
+		ev.OriginalTransactionID = v
+	}
+	if v, ok := raw["currency"].(string); ok {
+		ev.Currency = v
+	}
+	if v, ok := raw["environment"].(string); ok {
+		ev.Environment = v
+	}
+	if v, ok := raw["period_type"].(string); ok {
+		ev.PeriodType = v
+	}
+	if v, ok := raw["price"].(float64); ok {
+		ev.PriceUSD = v
+	}
+	if v, ok := raw["price_in_purchased_currency"].(float64); ok {
+		ev.PriceLocal = v
+	}
+	if v, ok := raw["purchased_at_ms"].(float64); ok && v > 0 {
+		t := time.UnixMilli(int64(v)).UTC()
+		ev.PurchasedAt = &t
+	}
+	if v, ok := raw["expiration_at_ms"].(float64); ok && v > 0 {
+		t := time.UnixMilli(int64(v)).UTC()
+		ev.ExpiresAt = &t
+	}
+	return ev, nil
+}
+
+// HandleRevenueCatWebhook handles RevenueCat webhook events for subscription
+// management. Every delivery (including duplicates and unhandled types) is
+// recorded to subscription_events for audit; the User document is mutated
+// only for known event types. Idempotency is provided by a unique index on
+// (provider, providerEventId) plus a pre-flight dedupe lookup, so RevenueCat
+// retries are safe.
 func (u User) HandleRevenueCatWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -4744,52 +5056,86 @@ func (u User) HandleRevenueCatWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the RevenueCat webhook payload
 	var webhookData map[string]interface{}
 	if err := json.Unmarshal(payload, &webhookData); err != nil {
 		config.ErrorStatus("failed to parse webhook payload", http.StatusBadRequest, w, err)
 		return
 	}
 
-	// Extract event type
-	eventType, ok := webhookData["event"].(map[string]interface{})
-	if !ok {
-		config.ErrorStatus("invalid webhook event structure", http.StatusBadRequest, w, nil)
+	ev, err := parseRevenueCatEvent(webhookData)
+	if err != nil {
+		config.ErrorStatus(fmt.Sprintf("invalid webhook event structure: %v", err), http.StatusBadRequest, w, err)
 		return
 	}
 
-	eventName, ok := eventType["type"].(string)
-	if !ok {
-		config.ErrorStatus("missing event type", http.StatusBadRequest, w, nil)
+	zap.S().Infow("Received RevenueCat webhook event",
+		"eventType", ev.Type,
+		"eventId", ev.ID,
+		"appUserId", ev.AppUserID,
+		"store", ev.Store,
+		"productId", ev.ProductID)
+
+	rec := subscriptionEventRecorder{UserDB: u.DB, EventDB: u.SEDB}
+
+	// Pre-flight dedupe: if we've already recorded this event id, return 200
+	// OK without re-running the handler. The unique index on (provider,
+	// providerEventId) is the source of truth and will catch the race.
+	if ev.ID != "" && rec.isDuplicate(r.Context(), "revenuecat", ev.ID) {
+		zap.S().Infow("duplicate RevenueCat event — skipping handler",
+			"eventId", ev.ID,
+			"eventType", ev.Type)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "duplicate event — already processed"}`))
 		return
 	}
 
-	zap.S().Infof("Received RevenueCat webhook event: %s", eventName)
+	plan, isAnnual, _ := parseProductID(ev.ProductID)
 
-	// Handle different RevenueCat event types
-	switch eventName {
-	case "INITIAL_PURCHASE":
-		err = u.handleRevenueCatInitialPurchase(webhookData)
-	case "RENEWAL":
-		err = u.handleRevenueCatRenewal(webhookData)
-	case "CANCELLATION":
-		err = u.handleRevenueCatCancellation(webhookData)
+	rr := rec.record(r.Context(), subscriptionEventInput{
+		Provider:              "revenuecat",
+		ProviderEventID:       ev.ID,
+		EventType:             ev.Type,
+		Store:                 ev.Store,
+		UserIDHint:            ev.AppUserID,
+		Plan:                  plan,
+		IsAnnual:              isAnnual,
+		ProductID:             ev.ProductID,
+		TransactionID:         ev.TransactionID,
+		OriginalTransactionID: ev.OriginalTransactionID,
+		PriceUSD:              ev.PriceUSD,
+		PriceLocal:            ev.PriceLocal,
+		Currency:              ev.Currency,
+		PurchasedAt:           ev.PurchasedAt,
+		ExpiresAt:             ev.ExpiresAt,
+		Environment:           ev.Environment,
+		RawPayload:            payload,
+		SourceIP:              r.RemoteAddr,
+	})
+	if rr.Duplicate {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "duplicate event — already processed"}`))
+		return
+	}
+
+	switch ev.Type {
+	case "INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE", "PRODUCT_CHANGE":
+		err = u.handleRevenueCatActivePurchase(r.Context(), ev)
 	case "UNCANCELLATION":
-		err = u.handleRevenueCatUncancellation(webhookData)
-	case "NON_RENEWING_PURCHASE":
-		err = u.handleRevenueCatNonRenewingPurchase(webhookData)
+		err = u.handleRevenueCatUncancellation(r.Context(), ev)
+	case "CANCELLATION":
+		err = u.handleRevenueCatCancellation(r.Context(), ev)
 	case "EXPIRATION":
-		err = u.handleRevenueCatExpiration(webhookData)
+		err = u.handleRevenueCatExpiration(r.Context(), ev)
 	case "BILLING_ISSUE":
-		err = u.handleRevenueCatBillingIssue(webhookData)
-	case "PRODUCT_CHANGE":
-		err = u.handleRevenueCatProductChange(webhookData)
+		err = u.handleRevenueCatBillingIssue(r.Context(), ev)
 	default:
-		zap.S().Infof("Unhandled RevenueCat event type: %s", eventName)
+		zap.S().Infow("Unhandled RevenueCat event type — recorded but not applied",
+			"eventType", ev.Type, "eventId", ev.ID)
 	}
 
 	if err != nil {
-		zap.S().Errorf("Error handling RevenueCat webhook event %s: %v", eventName, err)
+		zap.S().Errorw("Error handling RevenueCat webhook event",
+			"eventType", ev.Type, "eventId", ev.ID, "error", err)
 		config.ErrorStatus("failed to process webhook", http.StatusInternalServerError, w, err)
 		return
 	}
@@ -4798,206 +5144,144 @@ func (u User) HandleRevenueCatWebhook(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"message": "RevenueCat webhook processed successfully"}`))
 }
 
-// handleRevenueCatInitialPurchase handles initial purchase events
-func (u User) handleRevenueCatInitialPurchase(webhookData map[string]interface{}) error {
-	// Extract user ID and subscription details
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
-	}
-
-	// Update user subscription status with app_store source
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active":    true,
-			"user.subscription.source":    "app_store",
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
-	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+// rcUserFilter returns the Mongo filter used to find a user by RevenueCat's
+// app_user_id. RC's app_user_id is the user document's _id stringified
+// (see the mobile app: Purchases.configure({ appUserID: userId }) where
+// userId is the Mongo _id hex). If the value isn't a valid ObjectID we
+// return nil so callers can skip the update rather than match every
+// document.
+func rcUserFilter(appUserID string) bson.M {
+	oid, err := primitive.ObjectIDFromHex(appUserID)
 	if err != nil {
+		return nil
+	}
+	return bson.M{"_id": oid}
+}
+
+// handleRevenueCatActivePurchase covers any event that results in an
+// active subscription: INITIAL_PURCHASE, RENEWAL, NON_RENEWING_PURCHASE,
+// PRODUCT_CHANGE. All of these write the full subscription state we can
+// derive from the payload so the User document is a faithful mirror of
+// the latest known truth.
+func (u User) handleRevenueCatActivePurchase(ctx context.Context, ev *revenueCatEvent) error {
+	filter := rcUserFilter(ev.AppUserID)
+	if filter == nil {
+		zap.S().Warnw("RevenueCat event has invalid app_user_id — skipping User update",
+			"eventType", ev.Type, "appUserId", ev.AppUserID)
+		return nil
+	}
+
+	set := bson.M{
+		"user.subscription.active":    true,
+		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+	}
+	if source := mapStoreToSource(ev.Store); source != "" {
+		set["user.subscription.source"] = source
+	}
+	if ev.TransactionID != "" {
+		set["user.subscription.id"] = ev.TransactionID
+	}
+	if plan, isAnnual, ok := parseProductID(ev.ProductID); ok {
+		set["user.subscription.plan"] = plan
+		set["user.subscription.isAnnual"] = isAnnual
+	}
+	if ev.PurchasedAt != nil {
+		set["user.subscription.purchaseDate"] = ev.PurchasedAt.Format(time.RFC3339)
+	}
+	if ev.ExpiresAt != nil {
+		set["user.subscription.expirationDate"] = ev.ExpiresAt.Format(time.RFC3339)
+		set["user.subscription.currentPeriodEnd"] = primitive.NewDateTimeFromTime(*ev.ExpiresAt)
+	}
+	// New purchase / renewal clears any pending cancellation.
+	set["user.subscription.cancelAt"] = nil
+
+	if _, err := u.DB.UpdateOne(ctx, filter, bson.M{"$set": set}); err != nil {
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
-
-	zap.S().Infof("Updated user %s subscription to active (initial purchase via app store)", appUserID)
+	zap.S().Infow("Updated user subscription (active purchase)",
+		"appUserId", ev.AppUserID, "eventType", ev.Type, "store", ev.Store)
 	return nil
 }
 
-// handleRevenueCatRenewal handles renewal events
-func (u User) handleRevenueCatRenewal(webhookData map[string]interface{}) error {
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
+// handleRevenueCatCancellation marks the subscription as cancelled but
+// preserves access until the period ends. We leave plan/source/id intact
+// so the user document still describes what they bought.
+func (u User) handleRevenueCatCancellation(ctx context.Context, ev *revenueCatEvent) error {
+	filter := rcUserFilter(ev.AppUserID)
+	if filter == nil {
+		zap.S().Warnw("RevenueCat cancellation has invalid app_user_id — skipping User update",
+			"appUserId", ev.AppUserID)
+		return nil
 	}
-
-	// Update user subscription status with app_store source
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active":    true,
-			"user.subscription.source":    "app_store",
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
+	set := bson.M{
+		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
+	if ev.ExpiresAt != nil {
+		set["user.subscription.cancelAt"] = primitive.NewDateTimeFromTime(*ev.ExpiresAt)
+	}
+	if _, err := u.DB.UpdateOne(ctx, filter, bson.M{"$set": set}); err != nil {
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
-
-	zap.S().Infof("Updated user %s subscription to active (renewal via app store)", appUserID)
+	zap.S().Infow("Recorded RevenueCat cancellation (access kept until expiresAt)",
+		"appUserId", ev.AppUserID, "expiresAt", ev.ExpiresAt)
 	return nil
 }
 
-// handleRevenueCatCancellation handles cancellation events
-func (u User) handleRevenueCatCancellation(webhookData map[string]interface{}) error {
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
+// handleRevenueCatUncancellation flips an unexpired pending-cancel back on.
+func (u User) handleRevenueCatUncancellation(ctx context.Context, ev *revenueCatEvent) error {
+	filter := rcUserFilter(ev.AppUserID)
+	if filter == nil {
+		return nil
 	}
-
-	// Update user subscription status
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active": false,
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
-	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	_, err := u.DB.UpdateOne(ctx, filter, bson.M{"$set": bson.M{
+		"user.subscription.active":    true,
+		"user.subscription.cancelAt":  nil,
+		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+	}})
 	if err != nil {
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
-
-	zap.S().Infof("Updated user %s subscription to inactive (cancellation)", appUserID)
+	zap.S().Infow("Updated user subscription to active (uncancellation)", "appUserId", ev.AppUserID)
 	return nil
 }
 
-// handleRevenueCatUncancellation handles uncancellation events
-func (u User) handleRevenueCatUncancellation(webhookData map[string]interface{}) error {
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
+// handleRevenueCatExpiration marks the subscription as ended. Plan goes
+// to "free" so feature gates respond correctly; we keep source / id /
+// purchaseDate / expirationDate intact so the user doc remains a useful
+// breadcrumb for diagnostics.
+func (u User) handleRevenueCatExpiration(ctx context.Context, ev *revenueCatEvent) error {
+	filter := rcUserFilter(ev.AppUserID)
+	if filter == nil {
+		return nil
 	}
-
-	// Update user subscription status
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active": true,
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
-	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	_, err := u.DB.UpdateOne(ctx, filter, bson.M{"$set": bson.M{
+		"user.subscription.active":    false,
+		"user.subscription.plan":      "free",
+		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+	}})
 	if err != nil {
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
-
-	zap.S().Infof("Updated user %s subscription to active (uncancellation)", appUserID)
+	zap.S().Infow("Updated user subscription to inactive (expiration)", "appUserId", ev.AppUserID)
 	return nil
 }
 
-// handleRevenueCatNonRenewingPurchase handles non-renewing purchase events
-func (u User) handleRevenueCatNonRenewingPurchase(webhookData map[string]interface{}) error {
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
+// handleRevenueCatBillingIssue marks the sub inactive but does NOT
+// downgrade the plan — RevenueCat may recover on next retry and we don't
+// want to bounce the user through free in the meantime.
+func (u User) handleRevenueCatBillingIssue(ctx context.Context, ev *revenueCatEvent) error {
+	filter := rcUserFilter(ev.AppUserID)
+	if filter == nil {
+		return nil
 	}
-
-	// Update user subscription status
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active": true,
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
-	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
+	_, err := u.DB.UpdateOne(ctx, filter, bson.M{"$set": bson.M{
+		"user.subscription.active":    false,
+		"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+	}})
 	if err != nil {
 		return fmt.Errorf("failed to update user subscription: %v", err)
 	}
-
-	zap.S().Infof("Updated user %s subscription to active (non-renewing purchase)", appUserID)
-	return nil
-}
-
-// handleRevenueCatExpiration handles expiration events
-func (u User) handleRevenueCatExpiration(webhookData map[string]interface{}) error {
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
-	}
-
-	// Update user subscription status
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active": false,
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
-	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		return fmt.Errorf("failed to update user subscription: %v", err)
-	}
-
-	zap.S().Infof("Updated user %s subscription to inactive (expiration)", appUserID)
-	return nil
-}
-
-// handleRevenueCatBillingIssue handles billing issue events
-func (u User) handleRevenueCatBillingIssue(webhookData map[string]interface{}) error {
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
-	}
-
-	// Update user subscription status
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active": false,
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
-	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		return fmt.Errorf("failed to update user subscription: %v", err)
-	}
-
-	zap.S().Infof("Updated user %s subscription to inactive (billing issue)", appUserID)
-	return nil
-}
-
-// handleRevenueCatProductChange handles product change events
-func (u User) handleRevenueCatProductChange(webhookData map[string]interface{}) error {
-	appUserID, ok := webhookData["app_user_id"].(string)
-	if !ok {
-		return fmt.Errorf("missing app_user_id")
-	}
-
-	// Update user subscription status
-	filter := bson.M{"user.id": appUserID}
-	update := bson.M{
-		"$set": bson.M{
-			"user.subscription.active": true,
-			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
-	}
-
-	_, err := u.DB.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		return fmt.Errorf("failed to update user subscription: %v", err)
-	}
-
-	zap.S().Infof("Updated user %s subscription (product change)", appUserID)
+	zap.S().Infow("Updated user subscription to inactive (billing issue)", "appUserId", ev.AppUserID)
 	return nil
 }
 

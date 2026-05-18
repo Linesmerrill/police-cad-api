@@ -27,6 +27,7 @@ type Economy struct {
 	IDB    databases.InboxItemDatabase
 	CivDB  databases.CivilianDatabase
 	CommDB databases.CommunityDatabase
+	ACDB   databases.UserActiveCivilianDatabase // active-civilian pick; nil-safe — auto-pin on first clock-in is skipped when nil.
 }
 
 // ---- helpers ----
@@ -137,38 +138,95 @@ func (e Economy) paySession(ctx context.Context, sess *models.ClockSession, now 
 	nowDT := primitive.NewDateTimeFromTime(now)
 	endDT := primitive.NewDateTimeFromTime(endT)
 
+	// Apply the credit to the civilian first so we can capture the
+	// post-credit balance and write it onto the session as balanceAfter.
+	// This makes the unified transactions feed possible without recomputing
+	// a running balance from the ledger every request.
+	var balanceAfter int64
+	balanceAfterSet := false
+	if credit > 0 && sess.CivilianID != "" {
+		if civID, perr := primitive.ObjectIDFromHex(sess.CivilianID); perr == nil {
+			res := e.CivDB.FindOneAndUpdate(ctx,
+				bson.M{"_id": civID},
+				bson.M{
+					"$inc": bson.M{"civilian.balance": credit},
+					"$set": bson.M{
+						"civilian.balanceInitialized": true,
+						"civilian.updatedAt":          nowDT,
+					},
+				},
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			)
+			if res.Err() == nil {
+				var updated models.Civilian
+				if derr := res.Decode(&updated); derr == nil {
+					balanceAfter = updated.Details.Balance
+					balanceAfterSet = true
+				}
+			}
+		}
+	}
+
+	sessSet := bson.M{
+		"lastPayoutAt": endDT,
+		"updatedAt":    nowDT,
+	}
+	if balanceAfterSet {
+		sessSet["balanceAfter"] = balanceAfter
+	}
+	if terminalStatus != "" {
+		sessSet["status"] = terminalStatus
+		sessSet["endedAt"] = nowDT
+	}
 	sessUpdate := bson.M{
 		"$inc": bson.M{
 			"paidSeconds": durationSec,
 			"earnings":    credit,
 		},
-		"$set": bson.M{
-			"lastPayoutAt": endDT,
-			"updatedAt":    nowDT,
-		},
-	}
-	if terminalStatus != "" {
-		sessUpdate["$set"].(bson.M)["status"] = terminalStatus
-		sessUpdate["$set"].(bson.M)["endedAt"] = nowDT
+		"$set": sessSet,
 	}
 	if err := e.SDB.UpdateOne(ctx, bson.M{"_id": sess.ID}, sessUpdate); err != nil {
 		return 0, endT, err
 	}
 
-	if credit > 0 && sess.CivilianID != "" {
-		civID, err := primitive.ObjectIDFromHex(sess.CivilianID)
-		if err == nil {
-			_ = e.CivDB.UpdateOne(ctx, bson.M{"_id": civID}, bson.M{
-				"$inc": bson.M{"civilian.balance": credit},
-				"$set": bson.M{
-					"civilian.balanceInitialized": true,
-					"civilian.updatedAt":          nowDT,
-				},
-			})
-		}
-	}
-
 	return credit, endT, nil
+}
+
+// EndActiveSessionsForCivilian finalizes every active clock-in session attached
+// to the given civilian: pays out accrued earnings up to now and marks the
+// session ended. Returns the number of sessions that were ended.
+//
+// Call this before any operation that would orphan the session — most notably
+// deleting the civilian. Without it, the active session keeps accruing
+// time/earnings forever on the server while the client has no way to clock
+// out (the civilian it points at is gone). Idempotent: if no sessions match,
+// returns (0, nil) without error.
+func (e Economy) EndActiveSessionsForCivilian(ctx context.Context, civilianID string) (int, error) {
+	if civilianID == "" {
+		return 0, nil
+	}
+	sessions, err := e.SDB.Find(ctx, bson.M{"civilianId": civilianID, "status": "active"})
+	if err != nil {
+		return 0, fmt.Errorf("list active sessions: %w", err)
+	}
+	if len(sessions) == 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	ended := 0
+	for i := range sessions {
+		if _, _, perr := e.paySession(ctx, &sessions[i], now, "ended"); perr != nil {
+			// Log and keep going — a single failure shouldn't block the
+			// caller from finishing destructive work like a delete.
+			zap.S().Warnw("failed to end active session before civilian cleanup",
+				"sessionId", sessions[i].ID.Hex(),
+				"civilianId", civilianID,
+				"error", perr)
+			continue
+		}
+		ended++
+	}
+	return ended, nil
 }
 
 // ensureBalanceInitialized lazy-backfills a civilian's balance from the community default
@@ -269,15 +327,13 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		_, payRate, _, _, _, _ = resolveDepartmentEconomy(community, req.DepartmentID, rankID)
 	}
 
-	// Enforce one active session per civilian (or per user when civilianId is empty).
-	activeFilter := bson.M{"status": "active", "communityId": req.CommunityID}
-	if req.CivilianID != "" {
-		activeFilter["civilianId"] = req.CivilianID
-	} else {
-		activeFilter["userId"] = userID
-		activeFilter["civilianId"] = ""
-	}
-	if existing, _ := e.SDB.FindOne(ctx, activeFilter); existing != nil {
+	// Enforce one active session per USER. The previous check scoped by
+	// civilianId, which let a single user clock in N civilians at once and
+	// accrue parallel earnings — clearly not the intent. A user can only
+	// physically be at one job at a time, so any pre-existing active
+	// session (any civilian, any community) blocks a new clock-in. The
+	// client is expected to clock out the existing session first.
+	if existing, _ := e.SDB.FindOne(ctx, bson.M{"status": "active", "userId": userID}); existing != nil {
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(existing)
 		return
@@ -306,6 +362,33 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 	if _, err := e.SDB.InsertOne(ctx, sess); err != nil {
 		config.ErrorStatus("failed to create clock session", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	// Auto-pin: if the user hasn't picked an active civilian for this
+	// community yet, pin the one they just clocked in. Makes "first time
+	// you clock in is your default" the implicit behavior so users don't
+	// have to discover the Set-as-active button separately. Idempotent —
+	// when an active civ already exists we leave it alone (e.g. a user
+	// explicitly picked Test Dude then temporarily clocks in Test Fam
+	// shouldn't overwrite their pin). Best-effort — failures here don't
+	// fail the clock-in itself.
+	if e.ACDB != nil && req.CivilianID != "" {
+		filter := bson.M{"userId": userID, "communityId": req.CommunityID}
+		existing, _ := e.ACDB.FindOne(ctx, filter)
+		if existing == nil || existing.CivilianID == "" {
+			if uerr := e.ACDB.UpdateOne(ctx, filter, bson.M{"$set": bson.M{
+				"userId":      userID,
+				"communityId": req.CommunityID,
+				"civilianId":  req.CivilianID,
+				"updatedAt":   nowDT,
+			}}, options.Update().SetUpsert(true)); uerr != nil {
+				zap.S().Warnw("failed to auto-pin active civilian on clock-in",
+					"userId", userID,
+					"communityId", req.CommunityID,
+					"civilianId", req.CivilianID,
+					"error", uerr)
+			}
+		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -424,6 +507,16 @@ func (e Economy) HeartbeatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetActiveSessionHandler returns the active session for ?civilianId= or ?userId=.
+//
+// ?civilianId=X — scoped to a specific civilian (used by /wallet).
+// ?userId=X     — returns the user's active session regardless of which
+//                 civilian it's attached to. Pairs with the
+//                 one-active-session-per-user rule in ClockInHandler so the
+//                 dept dashboard can reflect a session started against any
+//                 civilian. (Previously this branch also required
+//                 civilianId=="" so it only matched user-only sessions; that
+//                 made it impossible to detect a civilian-scoped session
+//                 from the user-side caller.)
 func (e Economy) GetActiveSessionHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -432,7 +525,6 @@ func (e Economy) GetActiveSessionHandler(w http.ResponseWriter, r *http.Request)
 		filter["civilianId"] = civID
 	} else if uid := r.URL.Query().Get("userId"); uid != "" {
 		filter["userId"] = uid
-		filter["civilianId"] = ""
 	} else {
 		config.ErrorStatus("civilianId or userId required", http.StatusBadRequest, w, nil)
 		return
@@ -505,6 +597,251 @@ func (e Economy) ListSessionsByCivilianHandler(w http.ResponseWriter, r *http.Re
 		"page":       page,
 		"limit":      limit,
 	})
+}
+
+// Transaction is a unified ledger entry surfaced by ListTransactionsHandler.
+// Shifts and paid inbox items both contribute rows; future systems (shop
+// purchases, judicial verdicts, admin grants) can extend the union by adding
+// new ref types without changing the wire shape.
+type Transaction struct {
+	Type              string             `json:"type"`               // "shift" | "fine" | "fee" | "verdict" | "payroll" | "other"
+	Direction         string             `json:"direction"`          // "credit" | "debit"
+	Amount            int64              `json:"amount"`             // unsigned cents
+	BalanceAfter      int64              `json:"balanceAfter"`       // 0 if unknown (legacy row)
+	BalanceAfterKnown bool               `json:"balanceAfterKnown"`  // explicit so 0 isn't ambiguous
+	Title             string             `json:"title"`
+	Subtitle          string             `json:"subtitle,omitempty"`
+	OccurredAt        primitive.DateTime `json:"occurredAt"`
+	RefType           string             `json:"refType"` // "clockSession" | "inboxItem"
+	RefID             string             `json:"refId"`
+	// Shift-specific extras (omitted for non-shift rows).
+	DepartmentName string `json:"departmentName,omitempty"`
+	PaidSeconds    int64  `json:"paidSeconds,omitempty"`
+	Status         string `json:"status,omitempty"`
+}
+
+// ListTransactionsHandler returns a unified, newest-first feed of every
+// balance-affecting event for a civilian: ended clock sessions (credits) and
+// paid inbox items (debits). Pagination merges both collections in memory —
+// safe because each side is bounded to skip+limit before merge.
+//
+//	GET /api/v2/economy/transactions/civilian/{civilianId}?page=1&limit=20
+//
+// Response: { data: []Transaction, totalCount, page, limit }
+func (e Economy) ListTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+	civilianID := mux.Vars(r)["civilianId"]
+	if civilianID == "" {
+		config.ErrorStatus("civilianId required", http.StatusBadRequest, w, nil)
+		return
+	}
+	page, limit := 1, 20
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			page = v
+		}
+	}
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100 {
+			limit = v
+		}
+	}
+	skip := (page - 1) * limit
+	window := int64(skip + limit)
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	shiftFilter := bson.M{
+		"civilianId": civilianID,
+		"status":     bson.M{"$in": []string{"ended", "expired", "abandoned"}},
+	}
+	inboxFilter := bson.M{
+		"civilianId": civilianID,
+		"status":     "paid",
+	}
+
+	shiftTotal, _ := e.SDB.CountDocuments(ctx, shiftFilter)
+	inboxTotal, _ := e.IDB.CountDocuments(ctx, inboxFilter)
+	totalCount := shiftTotal + inboxTotal
+
+	shifts, err := e.SDB.Find(ctx, shiftFilter,
+		options.Find().SetSort(bson.D{{Key: "endedAt", Value: -1}}).SetLimit(window))
+	if err != nil {
+		config.ErrorStatus("failed to list shift transactions", http.StatusInternalServerError, w, err)
+		return
+	}
+	inboxItems, err := e.IDB.Find(ctx, inboxFilter,
+		options.Find().SetSort(bson.D{{Key: "paidAt", Value: -1}}).SetLimit(window))
+	if err != nil {
+		config.ErrorStatus("failed to list inbox transactions", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	merged := make([]Transaction, 0, len(shifts)+len(inboxItems))
+	for i := range shifts {
+		s := &shifts[i]
+		occurredAt := s.EndedAt
+		if occurredAt == 0 {
+			occurredAt = s.UpdatedAt
+		}
+		merged = append(merged, Transaction{
+			Type:              "shift",
+			Direction:         "credit",
+			Amount:            s.Earnings,
+			BalanceAfter:      s.BalanceAfter,
+			BalanceAfterKnown: s.BalanceAfter != 0,
+			Title:             s.DepartmentName,
+			Subtitle:          s.Status,
+			OccurredAt:        occurredAt,
+			RefType:           "clockSession",
+			RefID:             s.ID.Hex(),
+			DepartmentName:    s.DepartmentName,
+			PaidSeconds:       s.PaidSeconds,
+			Status:            s.Status,
+		})
+	}
+	for i := range inboxItems {
+		it := &inboxItems[i]
+		occurredAt := it.PaidAt
+		if occurredAt == 0 {
+			occurredAt = it.UpdatedAt
+		}
+		txType := it.Type
+		if txType == "" {
+			txType = "other"
+		}
+		// InboxItem.Amount is signed: positive = owed (debit on pay),
+		// negative = credit on pay (payroll, refund). Normalize to an
+		// unsigned amount + an explicit direction so the UI can render
+		// the +/- sign without re-checking the sign convention.
+		direction := "debit"
+		amt := it.Amount
+		if amt < 0 {
+			direction = "credit"
+			amt = -amt
+		}
+		merged = append(merged, Transaction{
+			Type:              txType,
+			Direction:         direction,
+			Amount:            amt,
+			BalanceAfter:      it.BalanceAfter,
+			BalanceAfterKnown: it.BalanceAfter != 0,
+			Title:             it.Title,
+			Subtitle:          it.Source,
+			OccurredAt:        occurredAt,
+			RefType:           "inboxItem",
+			RefID:             it.ID.Hex(),
+		})
+	}
+
+	// Newest-first by occurredAt; tie-break on RefID to make pagination stable.
+	sortTransactionsDesc(merged)
+
+	start := skip
+	if start > len(merged) {
+		start = len(merged)
+	}
+	end := start + limit
+	if end > len(merged) {
+		end = len(merged)
+	}
+	pageData := merged[start:end]
+	if pageData == nil {
+		pageData = []Transaction{}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":       pageData,
+		"totalCount": totalCount,
+		"page":       page,
+		"limit":      limit,
+	})
+}
+
+func sortTransactionsDesc(txns []Transaction) {
+	// Simple insertion sort — pages are tiny (≤ limit*2, capped at 200).
+	for i := 1; i < len(txns); i++ {
+		for j := i; j > 0; j-- {
+			a, b := txns[j-1], txns[j]
+			if a.OccurredAt > b.OccurredAt {
+				break
+			}
+			if a.OccurredAt == b.OccurredAt && a.RefID > b.RefID {
+				break
+			}
+			txns[j-1], txns[j] = b, a
+		}
+	}
+}
+
+// GetSessionHandler returns a single ClockSession by id. Scoped to the
+// authenticated user — a session belonging to another user returns 404 (we
+// don't leak existence) rather than 403. Drives the wallet's
+// click-a-shift-transaction detail modal.
+//
+//	GET /api/v2/economy/session/{id}
+func (e Economy) GetSessionHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	sessID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid session id", http.StatusBadRequest, w, err)
+		return
+	}
+	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userID == "" {
+		userID = r.URL.Query().Get("userId")
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	sess, err := e.SDB.FindOne(ctx, bson.M{"_id": sessID})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			config.ErrorStatus("session not found", http.StatusNotFound, w, err)
+			return
+		}
+		config.ErrorStatus("failed to load session", http.StatusInternalServerError, w, err)
+		return
+	}
+	if userID != "" && sess.UserID != "" && sess.UserID != userID {
+		config.ErrorStatus("session not found", http.StatusNotFound, w, nil)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(sess)
+}
+
+// GetInboxItemHandler returns a single InboxItem by id. Scoped to the
+// authenticated user — same 404-on-mismatch policy as GetSessionHandler.
+// Drives the wallet's click-an-inbox-transaction detail modal.
+//
+//	GET /api/v2/economy/inbox/{id}
+func (e Economy) GetInboxItemHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	itemID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		config.ErrorStatus("invalid item id", http.StatusBadRequest, w, err)
+		return
+	}
+	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userID == "" {
+		userID = r.URL.Query().Get("userId")
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	item, err := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
+	if err != nil {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	if userID != "" && item.UserID != "" && item.UserID != userID {
+		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, nil)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(item)
 }
 
 // GetWalletHandler returns a civilian's wallet (balance + recent inbox items).
@@ -704,22 +1041,40 @@ func (e Economy) PayInboxItemHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
-	if err := e.CivDB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{
-		"$inc": bson.M{"civilian.balance": -item.Amount},
-		"$set": bson.M{
-			"civilian.balanceInitialized": true,
-			"civilian.updatedAt":          now,
+	// Atomic debit so we can capture the post-debit balance and stamp it onto
+	// the inbox item as balanceAfter for the transactions feed.
+	res := e.CivDB.FindOneAndUpdate(ctx,
+		bson.M{"_id": cID},
+		bson.M{
+			"$inc": bson.M{"civilian.balance": -item.Amount},
+			"$set": bson.M{
+				"civilian.balanceInitialized": true,
+				"civilian.updatedAt":          now,
+			},
 		},
-	}); err != nil {
-		config.ErrorStatus("failed to debit balance", http.StatusInternalServerError, w, err)
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+	if res.Err() != nil {
+		config.ErrorStatus("failed to debit balance", http.StatusInternalServerError, w, res.Err())
 		return
 	}
+	var updatedCiv models.Civilian
+	var balanceAfter int64
+	balanceAfterSet := false
+	if derr := res.Decode(&updatedCiv); derr == nil {
+		balanceAfter = updatedCiv.Details.Balance
+		balanceAfterSet = true
+	}
 
-	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": bson.M{
+	itemSet := bson.M{
 		"status":    "paid",
 		"paidAt":    now,
 		"updatedAt": now,
-	}}); err != nil {
+	}
+	if balanceAfterSet {
+		itemSet["balanceAfter"] = balanceAfter
+	}
+	if err := e.IDB.UpdateOne(ctx, bson.M{"_id": itemID}, bson.M{"$set": itemSet}); err != nil {
 		zap.S().Errorw("debit succeeded but failed to mark inbox item paid", "error", err, "itemId", id)
 	}
 
