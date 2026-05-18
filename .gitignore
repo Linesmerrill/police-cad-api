@@ -3,3 +3,12 @@ coverage.out
 .env
 police-cad-api
 server.log
+# Local output of scripts/reconcile_revenuecat/main.go and
+# scripts/backfill_subscription_events/main.go — sensitive customer data,
+# do not commit.
+reconciliation_*.csv
+backfill_*.csv
+# Stray compiled binaries from `go build` against scripts/.
+/reconcile_revenuecat
+/backfill_subscription_events
+/backfill_stripe_subscriptions
