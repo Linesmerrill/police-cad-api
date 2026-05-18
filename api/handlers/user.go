@@ -4800,8 +4800,15 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Build Mongo filter and fetch communities
+	// Build Mongo filter and fetch communities. CDB.Find/CountDocuments both
+	// exclude pending-deletion communities; recompute totalCount from the
+	// collection so the client's pagination terminates when soft-deleted
+	// communities are stripped from results (otherwise data.length stays below
+	// the user-array count forever and pagers loop).
 	communityFilter := bson.M{"_id": bson.M{"$in": filteredCommunities}}
+	if visibleCount, countErr := u.CDB.CountDocuments(ctx, communityFilter); countErr == nil {
+		totalFilteredCount = int(visibleCount)
+	}
 	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
 	cursor, err := u.CDB.Find(ctx, communityFilter, opts)
 	if err != nil {
