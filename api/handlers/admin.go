@@ -1234,6 +1234,44 @@ func (h Admin) AdminCommunityDetailsHandler(w http.ResponseWriter, r *http.Reque
 		details.ScheduledDeletionAt = community.Details.ScheduledDeletionAt
 	}
 
+	// Owner-tier context for the admin red-flag UI. Only populate when we
+	// successfully resolved the owner; otherwise leave the fields zero so
+	// the frontend just skips the section.
+	if ownerInfo != nil {
+		ownerObjID, _ := primitive.ObjectIDFromHex(ownerInfo.ID)
+		var ownerUser models.User
+		// Re-fetch the user (we have ownerInfo from above but it's the
+		// summary type; we need Subscription too).
+		_ = h.UDB.FindOne(r.Context(), bson.M{"_id": ownerObjID}).Decode(&ownerUser)
+		plan := models.PlanFromUser(&ownerUser)
+		details.OwnerPlan = plan
+		details.OwnerCommunityCap = models.CommunityCap(plan)
+		// Other live (non-pending) communities the same owner has, minus this
+		// one. CDB.Find already excludes pending-deletion docs, so the list
+		// is naturally limited to communities they still have live.
+		othersCursor, otherErr := h.CDB.Find(r.Context(), bson.M{
+			"community.ownerID": ownerInfo.ID,
+			"_id":               bson.M{"$ne": community.ID},
+		})
+		if otherErr == nil {
+			var others []models.Community
+			if err := othersCursor.All(r.Context(), &others); err == nil {
+				rows := make([]models.AdminOwnerOtherCommunity, 0, len(others))
+				for _, o := range others {
+					rows = append(rows, models.AdminOwnerOtherCommunity{
+						ID:           o.ID.Hex(),
+						Name:         o.Details.Name,
+						Plan:         o.Details.Subscription.Plan,
+						MembersCount: o.Details.MembersCount,
+					})
+				}
+				details.OwnerOtherCommunities = rows
+				details.OwnerActiveCount = len(rows)
+			}
+			_ = othersCursor.Close(r.Context())
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(communityDetailsResponse{Community: details})
 }

@@ -306,6 +306,36 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Enforce the owned-community cap. CDB.CountDocuments already excludes
+	// pending-deletion communities, so a user who soft-deleted their only
+	// free-tier community can immediately create a fresh one. Hard-deletes
+	// (admin force-delete) likewise free up a slot. We fetch the owner's
+	// plan from the user record rather than trusting anything client-side.
+	if ownerHex := strings.TrimSpace(newCommunity.Details.OwnerID); ownerHex != "" {
+		if ownerObjID, idErr := primitive.ObjectIDFromHex(ownerHex); idErr == nil {
+			capCtx, capCancel := api.WithQueryTimeout(r.Context())
+			defer capCancel()
+			var owner models.User
+			if err := c.UDB.FindOne(capCtx, bson.M{"_id": ownerObjID}).Decode(&owner); err == nil {
+				plan := models.PlanFromUser(&owner)
+				cap := models.CommunityCap(plan)
+				active, _ := c.DB.CountDocuments(capCtx, bson.M{"community.ownerID": ownerHex})
+				if int(active) >= cap {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"error":   "community_limit_reached",
+						"message": fmt.Sprintf("Your %s plan allows up to %d communities. Upgrade your plan or delete an existing community to create another.", plan, cap),
+						"plan":    plan,
+						"cap":     cap,
+						"active":  active,
+					})
+					return
+				}
+			}
+		}
+	}
+
 	// Generate a new _id for the community
 	newCommunity.ID = primitive.NewObjectID()
 	// Set the createdAt and updatedAt fields to the current time
@@ -1558,6 +1588,72 @@ func (c Community) RestoreCommunityPendingDeletionHandler(w http.ResponseWriter,
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Community restored"})
+}
+
+// ForceDeleteCommunityHandler hard-deletes a community immediately, bypassing
+// the 30-day soft-delete grace period. Staff-only — used when the owner has
+// explicitly asked support to purge their community now (e.g., free-tier user
+// who wants to start fresh and doesn't want to wait the 30 days).
+//
+// Runs the same cascade the scheduler runs at end-of-grace: removes the
+// community doc, pulls user.communities refs, and wipes child collections.
+// Requires a typed confirmation in the request body matching the community
+// name so a fat-finger on the admin console can't accidentally nuke the
+// wrong community.
+func (c Community) ForceDeleteCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		CurrentUser  map[string]interface{} `json:"currentUser"`
+		Confirmation string                 `json:"confirmation"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if !hasAdminOrOwnerRole(payload.CurrentUser) {
+		config.ErrorStatus("admin or owner role required", http.StatusForbidden, w,
+			fmt.Errorf("caller missing admin/owner role"))
+		return
+	}
+
+	communityID := mux.Vars(r)["community_id"]
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	existing, err := c.DB.FindOneIncludingPending(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to load community", http.StatusNotFound, w, err)
+		return
+	}
+	if strings.TrimSpace(payload.Confirmation) != existing.Details.Name {
+		config.ErrorStatus("confirmation does not match community name", http.StatusBadRequest, w,
+			fmt.Errorf("expected %q, got %q", existing.Details.Name, payload.Confirmation))
+		return
+	}
+
+	adminEmail, _ := payload.CurrentUser["email"].(string)
+	// Audit BEFORE the destructive call so the trail survives even if the
+	// cascade is partial. Snapshot enough of the doc to identify it later.
+	logAudit(c.ALDB, cID, "community.force_deleted", "community", adminEmail, adminEmail, communityID, "",
+		map[string]interface{}{
+			"communityName":       existing.Details.Name,
+			"ownerID":             existing.Details.OwnerID,
+			"wasPendingDeletion":  existing.Details.PendingDeletionAt != nil,
+			"scheduledDeletionAt": existing.Details.ScheduledDeletionAt,
+		})
+
+	scheduler.HardDeleteCommunityWithCascade(ctx, c.DB, c.UDB, c.DBHelper, communityID, cID)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":       "Community force-deleted",
+		"communityId":   communityID,
+		"communityName": existing.Details.Name,
+	})
 }
 
 // TestCronAlertHandler is an admin-only smoke test for the Discord cron-alert

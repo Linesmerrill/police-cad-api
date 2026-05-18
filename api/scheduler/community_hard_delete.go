@@ -6,23 +6,36 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.uber.org/zap"
+
+	"github.com/linesmerrill/police-cad-api/databases"
 )
 
-// hardDeleteCommunityWithCascade runs the full community hard-delete pipeline:
+// HardDeleteCommunityWithCascade runs the full community hard-delete pipeline:
 // removes the community document, pulls user.communities references, and
 // cascades deletion across all child collections.
 //
 // Mirrors the cascade that DeleteCommunityByIDHandler used to perform before
 // the soft-delete refactor. Best-effort: logs errors per collection but keeps
 // going, so a single failed collection does not block the rest.
-func (s *Scheduler) hardDeleteCommunityWithCascade(ctx context.Context, communityID string, cID primitive.ObjectID) {
-	if err := s.CDB.DeleteOne(ctx, bson.M{"_id": cID}); err != nil {
+//
+// Exported so the admin "force delete now" endpoint can call it directly
+// rather than waiting for the daily scheduler tick to pick up the pending
+// community.
+func HardDeleteCommunityWithCascade(
+	ctx context.Context,
+	cdb databases.CommunityDatabase,
+	udb databases.UserDatabase,
+	dbHelper databases.DatabaseHelper,
+	communityID string,
+	cID primitive.ObjectID,
+) {
+	if err := cdb.DeleteOne(ctx, bson.M{"_id": cID}); err != nil {
 		zap.S().Errorw("hard delete: failed to delete community document",
 			"communityId", communityID, "error", err)
 		return
 	}
 
-	if _, err := s.UDB.UpdateMany(ctx,
+	if _, err := udb.UpdateMany(ctx,
 		bson.M{"user.communities.communityId": communityID},
 		bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}},
 	); err != nil {
@@ -57,7 +70,7 @@ func (s *Scheduler) hardDeleteCommunityWithCascade(ctx context.Context, communit
 	}
 
 	for _, col := range cleanups {
-		deleted, err := s.DBHelper.Collection(col.name).DeleteMany(ctx, col.filter)
+		deleted, err := dbHelper.Collection(col.name).DeleteMany(ctx, col.filter)
 		if err != nil {
 			zap.S().Errorw("hard delete: cascade delete failed",
 				"collection", col.name, "communityId", communityID, "error", err)
@@ -68,4 +81,10 @@ func (s *Scheduler) hardDeleteCommunityWithCascade(ctx context.Context, communit
 				"collection", col.name, "communityId", communityID, "count", deleted)
 		}
 	}
+}
+
+// hardDeleteCommunityWithCascade is the scheduler's adapter for the exported
+// cascade. Kept as a method so existing scheduler call sites are unchanged.
+func (s *Scheduler) hardDeleteCommunityWithCascade(ctx context.Context, communityID string, cID primitive.ObjectID) {
+	HardDeleteCommunityWithCascade(ctx, s.CDB, s.UDB, s.DBHelper, communityID, cID)
 }
