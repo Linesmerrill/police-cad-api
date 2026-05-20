@@ -224,6 +224,25 @@ func TestRpPromotionHistoryNewestFirst(t *testing.T) {
 	}
 }
 
+func TestRpPromotionMessageLink(t *testing.T) {
+	// No guild configured → no link.
+	if got := rpPromotionMessageLink("chan", "msg"); got != "" {
+		t.Errorf("expected empty link without guild env, got %q", got)
+	}
+
+	t.Setenv("DISCORD_RP_SERVERS_GUILD_ID", "111")
+	if got := rpPromotionMessageLink("222", "333"); got != "https://discord.com/channels/111/222/333" {
+		t.Errorf("unexpected link: %q", got)
+	}
+	// Missing channel or message ID → no link even with a guild set.
+	if got := rpPromotionMessageLink("", "333"); got != "" {
+		t.Errorf("expected empty link with missing channel, got %q", got)
+	}
+	if got := rpPromotionMessageLink("222", ""); got != "" {
+		t.Errorf("expected empty link with missing message, got %q", got)
+	}
+}
+
 func TestCleanStringSlice(t *testing.T) {
 	got := cleanStringSlice([]string{" a ", "", "b", "  ", "c"}, 10)
 	want := []string{"a", "b", "c"}

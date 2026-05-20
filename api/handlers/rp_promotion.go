@@ -34,6 +34,7 @@ import (
 
 const (
 	rpPromoWebhookEnv         = "DISCORD_RP_SERVERS_WEBHOOK_URL"
+	rpPromoGuildEnv           = "DISCORD_RP_SERVERS_GUILD_ID"
 	rpPromoCooldownEnv        = "RP_PROMOTION_COOLDOWN_HOURS"
 	rpPromoDefaultCooldownHrs = 24
 
@@ -104,15 +105,27 @@ func rpPromotionTierForCommunity(c *models.Community) rpTierConfig {
 	return rpTiers["free"]
 }
 
+// rpPromotionMessageLink builds a Discord jump link for a posted promotion.
+// Returns "" when the guild ID is not configured or the IDs are missing —
+// callers/clients treat an empty link as "no link available".
+func rpPromotionMessageLink(channelID, messageID string) string {
+	guildID := os.Getenv(rpPromoGuildEnv)
+	if guildID == "" || channelID == "" || messageID == "" {
+		return ""
+	}
+	return "https://discord.com/channels/" + guildID + "/" + channelID + "/" + messageID
+}
+
 // rpPromotionHistoryEntry is a history post shaped for the API response —
 // PostedAt is rendered as an RFC3339 string for the client.
 type rpPromotionHistoryEntry struct {
-	ID        string                 `json:"id"`
-	PostedAt  string                 `json:"postedAt"`
-	PostedBy  string                 `json:"postedBy"`
-	Tier      string                 `json:"tier"`
-	MessageID string                 `json:"messageId,omitempty"`
-	Data      models.RpPromotionData `json:"data"`
+	ID          string                 `json:"id"`
+	PostedAt    string                 `json:"postedAt"`
+	PostedBy    string                 `json:"postedBy"`
+	Tier        string                 `json:"tier"`
+	MessageID   string                 `json:"messageId,omitempty"`
+	MessageLink string                 `json:"messageLink,omitempty"`
+	Data        models.RpPromotionData `json:"data"`
 }
 
 // rpPromotionHistoryNewestFirst returns the community's promotion history
@@ -125,12 +138,13 @@ func rpPromotionHistoryNewestFirst(c *models.Community) []rpPromotionHistoryEntr
 	h := c.Details.RpPromotion.History
 	for i := len(h) - 1; i >= 0; i-- {
 		out = append(out, rpPromotionHistoryEntry{
-			ID:        h[i].ID,
-			PostedAt:  h[i].PostedAt.Time().UTC().Format(time.RFC3339),
-			PostedBy:  h[i].PostedBy,
-			Tier:      h[i].Tier,
-			MessageID: h[i].MessageID,
-			Data:      h[i].Data,
+			ID:          h[i].ID,
+			PostedAt:    h[i].PostedAt.Time().UTC().Format(time.RFC3339),
+			PostedBy:    h[i].PostedBy,
+			Tier:        h[i].Tier,
+			MessageID:   h[i].MessageID,
+			MessageLink: rpPromotionMessageLink(h[i].ChannelID, h[i].MessageID),
+			Data:        h[i].Data,
 		})
 	}
 	return out
@@ -300,7 +314,7 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 
 	// Post to Discord. This is synchronous so we can surface a failure to the
 	// user and capture the message ID; nothing is persisted if it fails.
-	messageID, err := sendRpPromotionWebhook(webhookURL, data, tier)
+	messageID, channelID, err := sendRpPromotionWebhook(webhookURL, data, tier)
 	if err != nil {
 		zap.S().Errorw("rp promotion: discord post failed", "community_id", communityID, "error", err)
 		config.ErrorStatus("failed to post promotion to Discord", http.StatusBadGateway, w, err)
@@ -315,6 +329,7 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 		PostedBy:  actorID,
 		Tier:      tier.Key,
 		MessageID: messageID,
+		ChannelID: channelID,
 		Data:      data,
 	}
 	// Append to history (capped to the most recent rpPromoHistoryMax) and bump
@@ -343,6 +358,7 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 		"postedAt":        now.UTC().Format(time.RFC3339),
 		"nextAvailableAt": now.Add(cooldown).UTC().Format(time.RFC3339),
 		"messageId":       messageID,
+		"messageLink":     rpPromotionMessageLink(channelID, messageID),
 		"tier":            tier.Key,
 	})
 }

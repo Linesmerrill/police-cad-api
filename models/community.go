@@ -101,8 +101,9 @@ type RpPromotionPost struct {
 	ID        string             `json:"id" bson:"id"` // ObjectID hex, stable handle for the post
 	PostedAt  primitive.DateTime `json:"postedAt" bson:"postedAt"`
 	PostedBy  string             `json:"postedBy" bson:"postedBy"`
-	Tier      string             `json:"tier" bson:"tier"` // boost tier key at post time
-	MessageID string             `json:"messageId,omitempty" bson:"messageId,omitempty"`
+	Tier      string             `json:"tier" bson:"tier"`                               // boost tier key at post time
+	MessageID string             `json:"messageId,omitempty" bson:"messageId,omitempty"` // Discord message ID
+	ChannelID string             `json:"channelId,omitempty" bson:"channelId,omitempty"` // Discord channel ID, for building a jump link
 	Data      RpPromotionData    `json:"data" bson:"data"`
 }
 

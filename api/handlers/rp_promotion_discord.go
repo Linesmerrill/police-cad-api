@@ -68,9 +68,11 @@ type rpDiscordWebhookPayload struct {
 	Embeds  []rpDiscordEmbed `json:"embeds"`
 }
 
-// rpDiscordWebhookResponse is the slice of the message object we care about.
+// rpDiscordWebhookResponse is the slice of the message object we care about —
+// the message ID and its channel, used to build a jump link.
 type rpDiscordWebhookResponse struct {
-	ID string `json:"id"`
+	ID        string `json:"id"`
+	ChannelID string `json:"channel_id"`
 }
 
 func rpTrunc(s string, n int) string {
@@ -197,12 +199,13 @@ func buildRpPromotionEmbeds(data models.RpPromotionData, tier rpTierConfig) []rp
 }
 
 // sendRpPromotionWebhook posts the promotion embeds to Discord and returns the
-// created message ID. webhookURL must be non-empty (the handler checks first).
-func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, tier rpTierConfig) (string, error) {
+// created message's ID and channel ID. webhookURL must be non-empty (the
+// handler checks first).
+func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, tier rpTierConfig) (messageID, channelID string, err error) {
 	payload := rpDiscordWebhookPayload{Embeds: buildRpPromotionEmbeds(data, tier)}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshal webhook payload: %w", err)
+		return "", "", fmt.Errorf("marshal webhook payload: %w", err)
 	}
 
 	// ?wait=true makes Discord return the created message so we can keep its ID.
@@ -215,24 +218,24 @@ func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, tier
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("build webhook request: %w", err)
+		return "", "", fmt.Errorf("build webhook request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: rpPromoHTTPDeadline}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("post to discord: %w", err)
+		return "", "", fmt.Errorf("post to discord: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("discord returned status %d", resp.StatusCode)
+		return "", "", fmt.Errorf("discord returned status %d", resp.StatusCode)
 	}
 
 	var parsed rpDiscordWebhookResponse
-	// The message ID is a nice-to-have for future edits — a decode failure
+	// The IDs are a nice-to-have (jump link, future edits) — a decode failure
 	// should not fail the user's post, since the message did go through.
 	_ = json.NewDecoder(resp.Body).Decode(&parsed)
-	return parsed.ID, nil
+	return parsed.ID, parsed.ChannelID, nil
 }
