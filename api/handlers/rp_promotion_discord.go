@@ -29,13 +29,16 @@ const (
 	rpPromoHTTPDeadline = 10 * time.Second
 
 	// Discord structural limits we defensively truncate against.
-	rpPromoMaxTitle  = 256
-	rpPromoMaxDesc   = 4096
-	rpPromoMaxField  = 1024
-	rpPromoMaxFooter = 2048
+	rpPromoMaxTitle   = 256
+	rpPromoMaxDesc    = 4096
+	rpPromoMaxField   = 1024
+	rpPromoMaxFooter  = 2048
+	rpPromoMaxContent = 2000
 
-	// Discord allows at most 10 embeds per message.
-	rpPromoMaxEmbeds = 10
+	// Discord allows at most 10 embeds per message. We put the invite link in
+	// the message content, so Discord appends its own auto-generated invite
+	// card as an extra embed — cap our embeds at 9 to leave a slot for it.
+	rpPromoMaxEmbeds = 9
 )
 
 type rpDiscordEmbedImage struct {
@@ -107,6 +110,16 @@ func rpPromoFooterText(tier rpTierConfig) string {
 	default:
 		return "Posted via Lines Police CAD"
 	}
+}
+
+// rpPromoContentLine builds the webhook message content: a short headline
+// plus the bare invite URL on its own line. Discord auto-unfurls an invite
+// URL placed in the message content into its native invite card (server
+// icon, live online/member counts, Join button) — a link inside an embed
+// never unfurls. The handler guarantees a valid InviteURL before we get here.
+func rpPromoContentLine(data models.RpPromotionData) string {
+	line := "🎮 **Now recruiting — " + data.ServerName + "**\n" + data.InviteURL
+	return rpTrunc(line, rpPromoMaxContent)
 }
 
 // buildRpPromotionEmbeds renders the structured promotion data into one
@@ -202,7 +215,10 @@ func buildRpPromotionEmbeds(data models.RpPromotionData, tier rpTierConfig) []rp
 // created message's ID and channel ID. webhookURL must be non-empty (the
 // handler checks first).
 func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, tier rpTierConfig) (messageID, channelID string, err error) {
-	payload := rpDiscordWebhookPayload{Embeds: buildRpPromotionEmbeds(data, tier)}
+	payload := rpDiscordWebhookPayload{
+		Content: rpPromoContentLine(data),
+		Embeds:  buildRpPromotionEmbeds(data, tier),
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", "", fmt.Errorf("marshal webhook payload: %w", err)

@@ -292,6 +292,21 @@ func TestCleanStringSlice(t *testing.T) {
 	}
 }
 
+func TestRpPromoContentLine(t *testing.T) {
+	data := validRpData()
+	got := rpPromoContentLine(data)
+	if !strings.Contains(got, data.ServerName) {
+		t.Errorf("content line should include the server name, got %q", got)
+	}
+	// The bare invite URL must be present so Discord unfurls its invite card.
+	if !strings.Contains(got, data.InviteURL) {
+		t.Errorf("content line should include the invite URL, got %q", got)
+	}
+	if len([]rune(got)) > rpPromoMaxContent {
+		t.Errorf("content line exceeds Discord's %d-char limit: %d", rpPromoMaxContent, len([]rune(got)))
+	}
+}
+
 func TestBuildRpPromotionEmbeds_FreeSingleEmbed(t *testing.T) {
 	data := validRpData()
 	data.Images = []string{"https://cdn.example.com/a.png"}
