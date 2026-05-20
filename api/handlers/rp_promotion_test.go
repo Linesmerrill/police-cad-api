@@ -168,6 +168,25 @@ func TestSanitizeRpPromotionData_RejectsNonHttpsImage(t *testing.T) {
 	}
 }
 
+func TestSanitizeRpPromotionData_PreservesLongImageURL(t *testing.T) {
+	// A real Cloudinary URL easily exceeds rpPromoMaxItemLen; sanitizing must
+	// not truncate it (a truncated URL is a broken image).
+	longURL := "https://res.cloudinary.com/dqtwwvm7p/image/upload/v1747054441/" +
+		"community-promotions/community-promotions/" +
+		strings.Repeat("abcdef0123456789", 6) + ".jpg"
+	if len(longURL) <= rpPromoMaxItemLen {
+		t.Fatalf("test URL is %d chars, expected longer than %d", len(longURL), rpPromoMaxItemLen)
+	}
+	data := validRpData()
+	data.Images = []string{longURL}
+	if err := sanitizeRpPromotionData(&data, rpTiers["free"]); err != nil {
+		t.Fatalf("sanitize returned error: %v", err)
+	}
+	if len(data.Images) != 1 || data.Images[0] != longURL {
+		t.Errorf("long image URL was not preserved intact: got %v", data.Images)
+	}
+}
+
 func TestRpPromotionTierForCommunity(t *testing.T) {
 	cases := []struct {
 		name   string

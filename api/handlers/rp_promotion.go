@@ -43,6 +43,11 @@ const (
 	rpPromoMaxDepartments = 12
 	rpPromoMaxItemLen     = 120
 
+	// Image/banner URLs (e.g. Cloudinary) routinely run well past
+	// rpPromoMaxItemLen, so they get a separate, URL-sized cap. Truncating a
+	// URL silently breaks the image, so this only guards against abuse.
+	rpPromoMaxURLLen = 2048
+
 	// Discord renders at most this many images per message (a same-URL embed
 	// gallery caps here). The banner counts as one, so banner + gallery
 	// images may not exceed this.
@@ -432,7 +437,7 @@ func sanitizeRpPromotionData(data *models.RpPromotionData, tier rpTierConfig) er
 	if maxImages > renderCap {
 		maxImages = renderCap
 	}
-	data.Images = cleanStringSlice(data.Images, maxImages)
+	data.Images = cleanURLSlice(data.Images, maxImages)
 	for _, img := range data.Images {
 		if !strings.HasPrefix(strings.ToLower(img), "https://") {
 			return fmt.Errorf("image URLs must be https")
@@ -440,6 +445,25 @@ func sanitizeRpPromotionData(data *models.RpPromotionData, tier rpTierConfig) er
 	}
 
 	return nil
+}
+
+// cleanURLSlice trims each entry, drops blanks, and limits the slice to max
+// items. Unlike cleanStringSlice it does NOT truncate individual entries to
+// rpPromoMaxItemLen — image URLs (Cloudinary, etc.) are commonly longer than
+// that, and truncating one yields a broken link. Returns a non-nil slice.
+func cleanURLSlice(in []string, max int) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || len(s) > rpPromoMaxURLLen {
+			continue
+		}
+		out = append(out, s)
+		if len(out) >= max {
+			break
+		}
+	}
+	return out
 }
 
 // cleanStringSlice trims each entry, drops blanks, caps individual length, and
