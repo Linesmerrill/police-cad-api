@@ -131,6 +131,35 @@ func TestSanitizeRpPromotionData_DescriptionCapScalesWithTier(t *testing.T) {
 	}
 }
 
+func TestSanitizeRpPromotionData_GalleryCappedToRenderLimit(t *testing.T) {
+	imgs := []string{
+		"https://cdn.example.com/a.png", "https://cdn.example.com/b.png",
+		"https://cdn.example.com/c.png", "https://cdn.example.com/d.png",
+		"https://cdn.example.com/e.png",
+	}
+
+	// With a banner, Discord renders 4 images total → banner + 3 gallery.
+	withBanner := validRpData()
+	withBanner.BannerImage = "https://cdn.example.com/banner.png"
+	withBanner.Images = append([]string{}, imgs...)
+	if err := sanitizeRpPromotionData(&withBanner, rpTiers["elite"]); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(withBanner.Images) != rpPromoMaxRenderedImages-1 {
+		t.Errorf("banner present: gallery should cap at %d, got %d", rpPromoMaxRenderedImages-1, len(withBanner.Images))
+	}
+
+	// Without a banner, the gallery itself may use all 4 render slots.
+	noBanner := validRpData()
+	noBanner.Images = append([]string{}, imgs...)
+	if err := sanitizeRpPromotionData(&noBanner, rpTiers["elite"]); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(noBanner.Images) != rpPromoMaxRenderedImages {
+		t.Errorf("no banner: gallery should cap at %d, got %d", rpPromoMaxRenderedImages, len(noBanner.Images))
+	}
+}
+
 func TestSanitizeRpPromotionData_RejectsNonHttpsImage(t *testing.T) {
 	data := validRpData()
 	data.Images = []string{"http://cdn.example.com/a.png"}

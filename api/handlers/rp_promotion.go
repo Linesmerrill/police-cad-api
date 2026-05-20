@@ -42,6 +42,11 @@ const (
 	rpPromoMaxDepartments = 12
 	rpPromoMaxItemLen     = 120
 
+	// Discord renders at most this many images per message (a same-URL embed
+	// gallery caps here). The banner counts as one, so banner + gallery
+	// images may not exceed this.
+	rpPromoMaxRenderedImages = 4
+
 	// How many past posts to retain per community for the history panel.
 	rpPromoHistoryMax = 20
 )
@@ -73,12 +78,17 @@ func (t rpTierConfig) colorInt() int {
 // rpTiers is the canonical tier ladder. Colors match the community-pricing
 // tier cards: free=cyan, basic=blue, standard=emerald, premium=indigo,
 // elite=gold.
+//
+// ImagesMax is the gallery-image allowance. Discord renders at most
+// rpPromoMaxRenderedImages images per post and the banner counts as one of
+// them, so sanitizeRpPromotionData additionally clamps banner + images to
+// that ceiling — see there.
 var rpTiers = map[string]rpTierConfig{
 	"free":     {Key: "free", Label: "Free", ColorHex: "#38bdf8", DescMax: 600, FeaturesMax: 6, ImagesMax: 1, AllowBanner: false, Verified: false, Featured: false},
-	"basic":    {Key: "basic", Label: "Basic Boost", ColorHex: "#3b82f6", DescMax: 1000, FeaturesMax: 8, ImagesMax: 1, AllowBanner: false, Verified: false, Featured: false},
-	"standard": {Key: "standard", Label: "Standard Boost", ColorHex: "#10b981", DescMax: 1500, FeaturesMax: 10, ImagesMax: 2, AllowBanner: false, Verified: true, Featured: false},
-	"premium":  {Key: "premium", Label: "Premium Boost", ColorHex: "#667eea", DescMax: 2500, FeaturesMax: 12, ImagesMax: 3, AllowBanner: true, Verified: true, Featured: false},
-	"elite":    {Key: "elite", Label: "Elite Boost", ColorHex: "#fbbf24", DescMax: 3500, FeaturesMax: 15, ImagesMax: 5, AllowBanner: true, Verified: true, Featured: true},
+	"basic":    {Key: "basic", Label: "Basic Boost", ColorHex: "#3b82f6", DescMax: 1000, FeaturesMax: 8, ImagesMax: 2, AllowBanner: false, Verified: false, Featured: false},
+	"standard": {Key: "standard", Label: "Standard Boost", ColorHex: "#10b981", DescMax: 1500, FeaturesMax: 10, ImagesMax: 3, AllowBanner: false, Verified: true, Featured: false},
+	"premium":  {Key: "premium", Label: "Premium Boost", ColorHex: "#667eea", DescMax: 2500, FeaturesMax: 12, ImagesMax: 4, AllowBanner: true, Verified: true, Featured: false},
+	"elite":    {Key: "elite", Label: "Elite Boost", ColorHex: "#fbbf24", DescMax: 3500, FeaturesMax: 15, ImagesMax: 4, AllowBanner: true, Verified: true, Featured: true},
 }
 
 // rpPromotionTierForCommunity resolves a community's effective promotion tier.
@@ -385,13 +395,8 @@ func sanitizeRpPromotionData(data *models.RpPromotionData, tier rpTierConfig) er
 		data.Requirements = string([]rune(data.Requirements)[:rpPromoMaxItemLen*4])
 	}
 
-	// Image / banner tier rules.
-	data.Images = cleanStringSlice(data.Images, tier.ImagesMax)
-	for _, img := range data.Images {
-		if !strings.HasPrefix(strings.ToLower(img), "https://") {
-			return fmt.Errorf("image URLs must be https")
-		}
-	}
+	// Banner first — the tier may forbid it, and whether one is set changes
+	// how many gallery images can render.
 	if tier.AllowBanner {
 		data.BannerImage = strings.TrimSpace(data.BannerImage)
 		if data.BannerImage != "" && !strings.HasPrefix(strings.ToLower(data.BannerImage), "https://") {
@@ -399,6 +404,23 @@ func sanitizeRpPromotionData(data *models.RpPromotionData, tier rpTierConfig) er
 		}
 	} else {
 		data.BannerImage = ""
+	}
+
+	// Gallery images: bounded by the tier allowance and by Discord's hard
+	// cap of rpPromoMaxRenderedImages images per post (the banner is one).
+	maxImages := tier.ImagesMax
+	renderCap := rpPromoMaxRenderedImages
+	if data.BannerImage != "" {
+		renderCap--
+	}
+	if maxImages > renderCap {
+		maxImages = renderCap
+	}
+	data.Images = cleanStringSlice(data.Images, maxImages)
+	for _, img := range data.Images {
+		if !strings.HasPrefix(strings.ToLower(img), "https://") {
+			return fmt.Errorf("image URLs must be https")
+		}
 	}
 
 	return nil
