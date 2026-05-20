@@ -126,6 +126,31 @@ func rpPromotionHistoryNewestFirst(c *models.Community) []rpPromotionHistoryEntr
 	return out
 }
 
+// rpPromotionAutofill builds the form defaults the website seeds a new
+// promotion with, sourced from the community's current settings.
+func rpPromotionAutofill(c *models.Community) map[string]interface{} {
+	deptNames := []string{}
+	for _, d := range c.Details.Departments {
+		if strings.TrimSpace(d.Name) != "" {
+			deptNames = append(deptNames, d.Name)
+		}
+	}
+	desc := c.Details.PromotionalDescription
+	if strings.TrimSpace(desc) == "" {
+		desc = c.Details.Description
+	}
+	platforms := c.Details.Tags
+	if platforms == nil {
+		platforms = []string{}
+	}
+	return map[string]interface{}{
+		"serverName":  c.Details.Name,
+		"description": desc,
+		"departments": deptNames,
+		"platforms":   platforms,
+	}
+}
+
 // rpPromotionCooldown returns the configured posting cooldown. Falls back to
 // the 24h default when the env var is missing or unparseable.
 func rpPromotionCooldown() time.Duration {
@@ -177,6 +202,10 @@ func (c Community) GetRpPromotionHandler(w http.ResponseWriter, r *http.Request)
 		"configured":     os.Getenv(rpPromoWebhookEnv) != "",
 		"maxDepartments": rpPromoMaxDepartments,
 		"history":        rpPromotionHistoryNewestFirst(community),
+		// Fresh-from-DB defaults for seeding a new post — the website prefers
+		// these over its page-rendered copy, which can be stale after the
+		// admin edits community settings in the same session.
+		"autofill": rpPromotionAutofill(community),
 	}
 	if rp := community.Details.RpPromotion; rp != nil && rp.LastPostedAt != nil {
 		postedAt := rp.LastPostedAt.Time()
