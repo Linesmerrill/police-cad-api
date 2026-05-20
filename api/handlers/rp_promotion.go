@@ -16,6 +16,7 @@ import (
 
 	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
+	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 )
 
@@ -124,32 +125,46 @@ func rpPromotionMessageLink(channelID, messageID string) string {
 // rpPromotionHistoryEntry is a history post shaped for the API response —
 // PostedAt is rendered as an RFC3339 string for the client.
 type rpPromotionHistoryEntry struct {
-	ID          string                 `json:"id"`
-	PostedAt    string                 `json:"postedAt"`
-	PostedBy    string                 `json:"postedBy"`
-	Tier        string                 `json:"tier"`
-	MessageID   string                 `json:"messageId,omitempty"`
-	MessageLink string                 `json:"messageLink,omitempty"`
-	Data        models.RpPromotionData `json:"data"`
+	ID           string                 `json:"id"`
+	PostedAt     string                 `json:"postedAt"`
+	PostedBy     string                 `json:"postedBy"`
+	PostedByName string                 `json:"postedByName,omitempty"`
+	Tier         string                 `json:"tier"`
+	MessageID    string                 `json:"messageId,omitempty"`
+	MessageLink  string                 `json:"messageLink,omitempty"`
+	Data         models.RpPromotionData `json:"data"`
 }
 
 // rpPromotionHistoryNewestFirst returns the community's promotion history
-// ordered most-recent-first for display. Always non-nil.
-func rpPromotionHistoryNewestFirst(c *models.Community) []rpPromotionHistoryEntry {
+// ordered most-recent-first for display. Always non-nil. Posts store the
+// poster's username (PostedByName); for any older post that predates that
+// field, the name is resolved from udb and memoized per call.
+func rpPromotionHistoryNewestFirst(c *models.Community, udb databases.UserDatabase) []rpPromotionHistoryEntry {
 	out := []rpPromotionHistoryEntry{}
 	if c.Details.RpPromotion == nil {
 		return out
 	}
+	nameCache := map[string]string{}
 	h := c.Details.RpPromotion.History
 	for i := len(h) - 1; i >= 0; i-- {
+		name := h[i].PostedByName
+		if name == "" && h[i].PostedBy != "" {
+			cached, ok := nameCache[h[i].PostedBy]
+			if !ok {
+				cached = resolveActorName(udb, h[i].PostedBy)
+				nameCache[h[i].PostedBy] = cached
+			}
+			name = cached
+		}
 		out = append(out, rpPromotionHistoryEntry{
-			ID:          h[i].ID,
-			PostedAt:    h[i].PostedAt.Time().UTC().Format(time.RFC3339),
-			PostedBy:    h[i].PostedBy,
-			Tier:        h[i].Tier,
-			MessageID:   h[i].MessageID,
-			MessageLink: rpPromotionMessageLink(h[i].ChannelID, h[i].MessageID),
-			Data:        h[i].Data,
+			ID:           h[i].ID,
+			PostedAt:     h[i].PostedAt.Time().UTC().Format(time.RFC3339),
+			PostedBy:     h[i].PostedBy,
+			PostedByName: name,
+			Tier:         h[i].Tier,
+			MessageID:    h[i].MessageID,
+			MessageLink:  rpPromotionMessageLink(h[i].ChannelID, h[i].MessageID),
+			Data:         h[i].Data,
 		})
 	}
 	return out
@@ -230,7 +245,7 @@ func (c Community) GetRpPromotionHandler(w http.ResponseWriter, r *http.Request)
 		"cooldownHours":  int(cooldown.Hours()),
 		"configured":     os.Getenv(rpPromoWebhookEnv) != "",
 		"maxDepartments": rpPromoMaxDepartments,
-		"history":        rpPromotionHistoryNewestFirst(community),
+		"history":        rpPromotionHistoryNewestFirst(community, c.UDB),
 		// Fresh-from-DB defaults for seeding a new post — the website prefers
 		// these over its page-rendered copy, which can be stale after the
 		// admin edits community settings in the same session.
@@ -328,14 +343,18 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 
 	now := time.Now()
 	nowDT := primitive.NewDateTimeFromTime(now)
+	// Capture the poster's username now so the history panel can show who
+	// posted each promotion even if the user is later renamed or removed.
+	actorName := resolveActorName(c.UDB, actorID)
 	post := models.RpPromotionPost{
-		ID:        primitive.NewObjectID().Hex(),
-		PostedAt:  nowDT,
-		PostedBy:  actorID,
-		Tier:      tier.Key,
-		MessageID: messageID,
-		ChannelID: channelID,
-		Data:      data,
+		ID:           primitive.NewObjectID().Hex(),
+		PostedAt:     nowDT,
+		PostedBy:     actorID,
+		PostedByName: actorName,
+		Tier:         tier.Key,
+		MessageID:    messageID,
+		ChannelID:    channelID,
+		Data:         data,
 	}
 	// Append to history (capped to the most recent rpPromoHistoryMax) and bump
 	// the cooldown timestamp. $push/$set create community.rpPromotion if absent.
@@ -353,7 +372,7 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 		zap.S().Errorw("rp promotion: posted to discord but failed to persist", "community_id", communityID, "error", err)
 	}
 
-	logAudit(c.ALDB, communityObjID, "rp_promotion.posted", "community", actorID, resolveActorName(c.UDB, actorID), "", "",
+	logAudit(c.ALDB, communityObjID, "rp_promotion.posted", "community", actorID, actorName, "", "",
 		map[string]interface{}{"serverName": data.ServerName, "tier": tier.Key})
 
 	w.Header().Set("Content-Type", "application/json")

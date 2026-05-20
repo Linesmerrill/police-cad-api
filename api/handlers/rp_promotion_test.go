@@ -215,7 +215,7 @@ func TestRpPromotionTierForCommunity(t *testing.T) {
 
 func TestRpPromotionHistoryNewestFirst(t *testing.T) {
 	// nil promotion → empty (non-nil) slice.
-	if got := rpPromotionHistoryNewestFirst(&models.Community{}); got == nil || len(got) != 0 {
+	if got := rpPromotionHistoryNewestFirst(&models.Community{}, nil); got == nil || len(got) != 0 {
 		t.Errorf("expected empty non-nil slice for no promotion, got %#v", got)
 	}
 
@@ -228,7 +228,7 @@ func TestRpPromotionHistoryNewestFirst(t *testing.T) {
 			{ID: "newest", PostedAt: primitive.NewDateTimeFromTime(time.Unix(3000, 0))},
 		},
 	}
-	got := rpPromotionHistoryNewestFirst(c)
+	got := rpPromotionHistoryNewestFirst(c, nil)
 	want := []string{"newest", "middle", "oldest"}
 	if len(got) != len(want) {
 		t.Fatalf("got %d entries, want %d", len(got), len(want))
@@ -240,6 +240,25 @@ func TestRpPromotionHistoryNewestFirst(t *testing.T) {
 		if got[i].PostedAt == "" {
 			t.Errorf("entry %d: postedAt should be a formatted string", i)
 		}
+	}
+}
+
+func TestRpPromotionHistoryUsesStoredPostedByName(t *testing.T) {
+	// A post with PostedByName set must surface that name directly, with no
+	// user-database lookup (udb is nil here, so a lookup would panic).
+	c := &models.Community{}
+	c.Details.RpPromotion = &models.RpPromotion{
+		History: []models.RpPromotionPost{
+			{ID: "p1", PostedBy: "507f1f77bcf86cd799439011", PostedByName: "ChiefWiggum",
+				PostedAt: primitive.NewDateTimeFromTime(time.Unix(1000, 0))},
+		},
+	}
+	got := rpPromotionHistoryNewestFirst(c, nil)
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	if got[0].PostedByName != "ChiefWiggum" {
+		t.Errorf("postedByName: got %q, want %q", got[0].PostedByName, "ChiefWiggum")
 	}
 }
 
