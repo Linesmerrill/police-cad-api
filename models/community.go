@@ -85,15 +85,25 @@ type CommunityDetails struct {
 	UpdatedAt                 primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
 }
 
-// RpPromotion tracks a community's recruitment/promotion post sent to the
-// shared Discord rp-servers channel. LastPostedAt drives the posting cooldown;
-// LastMessageID is captured from the Discord webhook response so a future
-// iteration can edit the live message in place.
+// RpPromotion tracks a community's recruitment/promotion posts to the shared
+// Discord rp-servers channel. LastPostedAt drives the posting cooldown;
+// History keeps the most recent posts so an admin can review, reuse as a
+// template, and (in a future iteration) edit a still-live message.
 type RpPromotion struct {
-	LastPostedAt  *primitive.DateTime `json:"lastPostedAt,omitempty" bson:"lastPostedAt,omitempty"`
-	LastMessageID string              `json:"lastMessageId,omitempty" bson:"lastMessageId,omitempty"`
-	LastPostedBy  string              `json:"lastPostedBy,omitempty" bson:"lastPostedBy,omitempty"`
-	LastData      *RpPromotionData    `json:"lastData,omitempty" bson:"lastData,omitempty"`
+	LastPostedAt *primitive.DateTime `json:"lastPostedAt,omitempty" bson:"lastPostedAt,omitempty"`
+	History      []RpPromotionPost   `json:"history,omitempty" bson:"history,omitempty"`
+}
+
+// RpPromotionPost is a single posted promotion, retained in RpPromotion.History.
+// MessageID is the Discord message ID captured from the webhook response — it
+// is what a future "edit your live post" feature will PATCH.
+type RpPromotionPost struct {
+	ID        string             `json:"id" bson:"id"` // ObjectID hex, stable handle for the post
+	PostedAt  primitive.DateTime `json:"postedAt" bson:"postedAt"`
+	PostedBy  string             `json:"postedBy" bson:"postedBy"`
+	Tier      string             `json:"tier" bson:"tier"` // boost tier key at post time
+	MessageID string             `json:"messageId,omitempty" bson:"messageId,omitempty"`
+	Data      RpPromotionData    `json:"data" bson:"data"`
 }
 
 // RpPromotionData is the structured content of an RP server promotion post.

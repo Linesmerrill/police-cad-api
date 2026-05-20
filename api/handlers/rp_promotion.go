@@ -41,6 +41,9 @@ const (
 	rpPromoMaxServerName  = 100
 	rpPromoMaxDepartments = 12
 	rpPromoMaxItemLen     = 120
+
+	// How many past posts to retain per community for the history panel.
+	rpPromoHistoryMax = 20
 )
 
 // rpTierConfig defines how rich a promotion a given boost tier may post and
@@ -89,6 +92,38 @@ func rpPromotionTierForCommunity(c *models.Community) rpTierConfig {
 		return t
 	}
 	return rpTiers["free"]
+}
+
+// rpPromotionHistoryEntry is a history post shaped for the API response —
+// PostedAt is rendered as an RFC3339 string for the client.
+type rpPromotionHistoryEntry struct {
+	ID        string                 `json:"id"`
+	PostedAt  string                 `json:"postedAt"`
+	PostedBy  string                 `json:"postedBy"`
+	Tier      string                 `json:"tier"`
+	MessageID string                 `json:"messageId,omitempty"`
+	Data      models.RpPromotionData `json:"data"`
+}
+
+// rpPromotionHistoryNewestFirst returns the community's promotion history
+// ordered most-recent-first for display. Always non-nil.
+func rpPromotionHistoryNewestFirst(c *models.Community) []rpPromotionHistoryEntry {
+	out := []rpPromotionHistoryEntry{}
+	if c.Details.RpPromotion == nil {
+		return out
+	}
+	h := c.Details.RpPromotion.History
+	for i := len(h) - 1; i >= 0; i-- {
+		out = append(out, rpPromotionHistoryEntry{
+			ID:        h[i].ID,
+			PostedAt:  h[i].PostedAt.Time().UTC().Format(time.RFC3339),
+			PostedBy:  h[i].PostedBy,
+			Tier:      h[i].Tier,
+			MessageID: h[i].MessageID,
+			Data:      h[i].Data,
+		})
+	}
+	return out
 }
 
 // rpPromotionCooldown returns the configured posting cooldown. Falls back to
@@ -141,18 +176,15 @@ func (c Community) GetRpPromotionHandler(w http.ResponseWriter, r *http.Request)
 		"cooldownHours":  int(cooldown.Hours()),
 		"configured":     os.Getenv(rpPromoWebhookEnv) != "",
 		"maxDepartments": rpPromoMaxDepartments,
+		"history":        rpPromotionHistoryNewestFirst(community),
 	}
-	if rp := community.Details.RpPromotion; rp != nil {
-		resp["lastData"] = rp.LastData
-		resp["lastPostedBy"] = rp.LastPostedBy
-		if rp.LastPostedAt != nil {
-			postedAt := rp.LastPostedAt.Time()
-			resp["lastPostedAt"] = postedAt.UTC().Format(time.RFC3339)
-			nextAt := postedAt.Add(cooldown)
-			if time.Now().Before(nextAt) {
-				resp["canPostNow"] = false
-				resp["nextAvailableAt"] = nextAt.UTC().Format(time.RFC3339)
-			}
+	if rp := community.Details.RpPromotion; rp != nil && rp.LastPostedAt != nil {
+		postedAt := rp.LastPostedAt.Time()
+		resp["lastPostedAt"] = postedAt.UTC().Format(time.RFC3339)
+		nextAt := postedAt.Add(cooldown)
+		if time.Now().Before(nextAt) {
+			resp["canPostNow"] = false
+			resp["nextAvailableAt"] = nextAt.UTC().Format(time.RFC3339)
 		}
 	}
 
@@ -238,14 +270,24 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 
 	now := time.Now()
 	nowDT := primitive.NewDateTimeFromTime(now)
-	rp := models.RpPromotion{
-		LastPostedAt:  &nowDT,
-		LastMessageID: messageID,
-		LastPostedBy:  actorID,
-		LastData:      &data,
+	post := models.RpPromotionPost{
+		ID:        primitive.NewObjectID().Hex(),
+		PostedAt:  nowDT,
+		PostedBy:  actorID,
+		Tier:      tier.Key,
+		MessageID: messageID,
+		Data:      data,
 	}
-	if err := c.DB.UpdateOne(ctx, bson.M{"_id": communityObjID},
-		bson.M{"$set": bson.M{"community.rpPromotion": rp}}); err != nil {
+	// Append to history (capped to the most recent rpPromoHistoryMax) and bump
+	// the cooldown timestamp. $push/$set create community.rpPromotion if absent.
+	update := bson.M{
+		"$set": bson.M{"community.rpPromotion.lastPostedAt": nowDT},
+		"$push": bson.M{"community.rpPromotion.history": bson.M{
+			"$each":  []models.RpPromotionPost{post},
+			"$slice": -rpPromoHistoryMax,
+		}},
+	}
+	if err := c.DB.UpdateOne(ctx, bson.M{"_id": communityObjID}, update); err != nil {
 		// The Discord post already succeeded — log loudly but still report
 		// success so the user isn't told it failed when it didn't. The next
 		// cooldown check just won't see this post; acceptable degradation.

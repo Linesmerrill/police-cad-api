@@ -3,6 +3,9 @@ package handlers
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/linesmerrill/police-cad-api/models"
 )
@@ -159,6 +162,36 @@ func TestRpPromotionTierForCommunity(t *testing.T) {
 				t.Errorf("got tier %q, want %q", got.Key, tc.want)
 			}
 		})
+	}
+}
+
+func TestRpPromotionHistoryNewestFirst(t *testing.T) {
+	// nil promotion → empty (non-nil) slice.
+	if got := rpPromotionHistoryNewestFirst(&models.Community{}); got == nil || len(got) != 0 {
+		t.Errorf("expected empty non-nil slice for no promotion, got %#v", got)
+	}
+
+	// History is stored oldest→newest; the response must be newest→oldest.
+	c := &models.Community{}
+	c.Details.RpPromotion = &models.RpPromotion{
+		History: []models.RpPromotionPost{
+			{ID: "oldest", PostedAt: primitive.NewDateTimeFromTime(time.Unix(1000, 0))},
+			{ID: "middle", PostedAt: primitive.NewDateTimeFromTime(time.Unix(2000, 0))},
+			{ID: "newest", PostedAt: primitive.NewDateTimeFromTime(time.Unix(3000, 0))},
+		},
+	}
+	got := rpPromotionHistoryNewestFirst(c)
+	want := []string{"newest", "middle", "oldest"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d", len(got), len(want))
+	}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Errorf("entry %d: got %q, want %q", i, got[i].ID, id)
+		}
+		if got[i].PostedAt == "" {
+			t.Errorf("entry %d: postedAt should be a formatted string", i)
+		}
 	}
 }
 
