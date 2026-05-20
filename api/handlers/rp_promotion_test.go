@@ -22,7 +22,7 @@ func validRpData() models.RpPromotionData {
 
 func TestSanitizeRpPromotionData_Valid(t *testing.T) {
 	data := validRpData()
-	if err := sanitizeRpPromotionData(&data, false); err != nil {
+	if err := sanitizeRpPromotionData(&data, rpTiers["free"]); err != nil {
 		t.Fatalf("expected valid data to pass, got: %v", err)
 	}
 }
@@ -40,7 +40,7 @@ func TestSanitizeRpPromotionData_RequiredFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			data := validRpData()
 			mutate(&data)
-			if err := sanitizeRpPromotionData(&data, false); err == nil {
+			if err := sanitizeRpPromotionData(&data, rpTiers["free"]); err == nil {
 				t.Errorf("%s: expected validation error, got nil", name)
 			}
 		})
@@ -55,50 +55,110 @@ func TestSanitizeRpPromotionData_FreeTierStripsBoostFields(t *testing.T) {
 		"https://cdn.example.com/b.png",
 		"https://cdn.example.com/c.png",
 	}
-	if err := sanitizeRpPromotionData(&data, false); err != nil {
+	if err := sanitizeRpPromotionData(&data, rpTiers["free"]); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if data.BannerImage != "" {
 		t.Errorf("free tier should drop the banner image, got %q", data.BannerImage)
 	}
-	if len(data.Images) != rpPromoMaxImagesFree {
-		t.Errorf("free tier should cap images at %d, got %d", rpPromoMaxImagesFree, len(data.Images))
+	if len(data.Images) != rpTiers["free"].ImagesMax {
+		t.Errorf("free tier should cap images at %d, got %d", rpTiers["free"].ImagesMax, len(data.Images))
 	}
 }
 
-func TestSanitizeRpPromotionData_BoostedKeepsBoostFields(t *testing.T) {
+func TestSanitizeRpPromotionData_EliteKeepsBoostFields(t *testing.T) {
 	data := validRpData()
 	data.BannerImage = "https://cdn.example.com/banner.png"
 	data.Images = []string{"https://cdn.example.com/a.png", "https://cdn.example.com/b.png"}
-	if err := sanitizeRpPromotionData(&data, true); err != nil {
+	if err := sanitizeRpPromotionData(&data, rpTiers["elite"]); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if data.BannerImage == "" {
-		t.Error("boosted tier should keep the banner image")
+		t.Error("elite tier should keep the banner image")
 	}
 	if len(data.Images) != 2 {
-		t.Errorf("boosted tier should keep both images, got %d", len(data.Images))
+		t.Errorf("elite tier should keep both images, got %d", len(data.Images))
 	}
 }
 
-func TestSanitizeRpPromotionData_FeatureCap(t *testing.T) {
+func TestSanitizeRpPromotionData_BannerOnlyOnAllowedTiers(t *testing.T) {
+	// standard does not allow a banner; premium does.
+	for _, tc := range []struct {
+		tier       string
+		bannerKept bool
+	}{
+		{"basic", false},
+		{"standard", false},
+		{"premium", true},
+		{"elite", true},
+	} {
+		data := validRpData()
+		data.BannerImage = "https://cdn.example.com/banner.png"
+		if err := sanitizeRpPromotionData(&data, rpTiers[tc.tier]); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.tier, err)
+		}
+		got := data.BannerImage != ""
+		if got != tc.bannerKept {
+			t.Errorf("%s: banner kept = %v, want %v", tc.tier, got, tc.bannerKept)
+		}
+	}
+}
+
+func TestSanitizeRpPromotionData_FeatureCapScalesWithTier(t *testing.T) {
 	data := validRpData()
-	for i := 0; i < rpPromoMaxFeaturesFree+3; i++ {
+	for i := 0; i < rpTiers["free"].FeaturesMax+3; i++ {
 		data.Features = append(data.Features, "feature")
 	}
-	if err := sanitizeRpPromotionData(&data, false); err == nil {
+	if err := sanitizeRpPromotionData(&data, rpTiers["free"]); err == nil {
 		t.Error("expected free tier to reject too many features")
 	}
-	if err := sanitizeRpPromotionData(&data, true); err != nil {
-		t.Errorf("boosted tier should accept more features: %v", err)
+	if err := sanitizeRpPromotionData(&data, rpTiers["elite"]); err != nil {
+		t.Errorf("elite tier should accept more features: %v", err)
+	}
+}
+
+func TestSanitizeRpPromotionData_DescriptionCapScalesWithTier(t *testing.T) {
+	data := validRpData()
+	data.Description = strings.Repeat("x", rpTiers["free"].DescMax+50)
+	if err := sanitizeRpPromotionData(&data, rpTiers["free"]); err == nil {
+		t.Error("expected free tier to reject an over-long description")
+	}
+	if err := sanitizeRpPromotionData(&data, rpTiers["elite"]); err != nil {
+		t.Errorf("elite tier should accept the longer description: %v", err)
 	}
 }
 
 func TestSanitizeRpPromotionData_RejectsNonHttpsImage(t *testing.T) {
 	data := validRpData()
 	data.Images = []string{"http://cdn.example.com/a.png"}
-	if err := sanitizeRpPromotionData(&data, true); err == nil {
+	if err := sanitizeRpPromotionData(&data, rpTiers["elite"]); err == nil {
 		t.Error("expected non-https image URL to be rejected")
+	}
+}
+
+func TestRpPromotionTierForCommunity(t *testing.T) {
+	cases := []struct {
+		name   string
+		active bool
+		plan   string
+		want   string
+	}{
+		{"no subscription", false, "", "free"},
+		{"inactive premium", false, "premium", "free"},
+		{"active basic", true, "basic", "basic"},
+		{"active standard", true, "standard", "standard"},
+		{"active elite uppercase", true, "Elite", "elite"},
+		{"active unknown plan", true, "mystery", "free"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &models.Community{}
+			c.Details.Subscription.Active = tc.active
+			c.Details.Subscription.Plan = tc.plan
+			if got := rpPromotionTierForCommunity(c); got.Key != tc.want {
+				t.Errorf("got tier %q, want %q", got.Key, tc.want)
+			}
+		})
 	}
 }
 
@@ -116,35 +176,50 @@ func TestCleanStringSlice(t *testing.T) {
 func TestBuildRpPromotionEmbeds_FreeSingleEmbed(t *testing.T) {
 	data := validRpData()
 	data.Images = []string{"https://cdn.example.com/a.png"}
-	embeds := buildRpPromotionEmbeds(data, false)
+	embeds := buildRpPromotionEmbeds(data, rpTiers["free"])
 	if len(embeds) != 1 {
-		t.Fatalf("free tier should produce exactly 1 embed, got %d", len(embeds))
+		t.Fatalf("free tier with 1 image should produce exactly 1 embed, got %d", len(embeds))
 	}
-	if embeds[0].Color != rpPromoColorFree {
-		t.Errorf("free embed color = %d, want %d", embeds[0].Color, rpPromoColorFree)
+	if embeds[0].Color != rpTiers["free"].colorInt() {
+		t.Errorf("free embed color = %d, want %d", embeds[0].Color, rpTiers["free"].colorInt())
 	}
 	if embeds[0].Image == nil || embeds[0].Image.URL != data.Images[0] {
 		t.Error("free embed should use the single image as the content image")
 	}
 }
 
-func TestBuildRpPromotionEmbeds_BoostedGallery(t *testing.T) {
+func TestBuildRpPromotionEmbeds_EliteGalleryAndMarkers(t *testing.T) {
 	data := validRpData()
 	data.BannerImage = "https://cdn.example.com/banner.png"
 	data.Images = []string{"https://cdn.example.com/a.png", "https://cdn.example.com/b.png"}
-	embeds := buildRpPromotionEmbeds(data, true)
+	embeds := buildRpPromotionEmbeds(data, rpTiers["elite"])
+	// banner = hero embed; both images = 2 gallery embeds → 3 total.
 	if len(embeds) != 3 {
-		t.Fatalf("boosted with banner + 2 images should produce 3 embeds, got %d", len(embeds))
+		t.Fatalf("elite with banner + 2 images should produce 3 embeds, got %d", len(embeds))
 	}
-	if embeds[0].Color != rpPromoColorBoosted {
-		t.Errorf("boosted embed color = %d, want %d", embeds[0].Color, rpPromoColorBoosted)
+	if embeds[0].Color != rpTiers["elite"].colorInt() {
+		t.Errorf("elite embed color = %d, want %d", embeds[0].Color, rpTiers["elite"].colorInt())
 	}
 	if embeds[0].Image == nil || embeds[0].Image.URL != data.BannerImage {
-		t.Error("boosted content embed should use the banner image")
+		t.Error("elite content embed should use the banner image as the hero")
+	}
+	if !strings.HasPrefix(embeds[0].Title, "⭐") {
+		t.Errorf("elite (featured) title should start with the star marker, got %q", embeds[0].Title)
 	}
 	for i := 1; i < len(embeds); i++ {
 		if embeds[i].URL != data.InviteURL {
 			t.Errorf("gallery embed %d must share the invite URL to group", i)
 		}
+	}
+}
+
+func TestBuildRpPromotionEmbeds_VerifiedMarker(t *testing.T) {
+	data := validRpData()
+	embeds := buildRpPromotionEmbeds(data, rpTiers["standard"])
+	if !strings.HasPrefix(embeds[0].Title, "✅") {
+		t.Errorf("standard (verified) title should start with the check marker, got %q", embeds[0].Title)
+	}
+	if strings.HasPrefix(embeds[0].Title, "⭐") {
+		t.Error("standard tier should not get the featured star")
 	}
 }

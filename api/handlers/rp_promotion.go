@@ -27,25 +27,69 @@ import (
 // Both are owner/administrator-only. POST enforces a once-per-cooldown gate
 // (RP_PROMOTION_COOLDOWN_HOURS, default 24) so a community can't flood the
 // shared Discord rp-servers channel.
+//
+// The richness of a promotion scales with the community's boost tier — see
+// rpTiers below. Tier keys/colors mirror the community-pricing page
+// (app/community-pricing/page.tsx in police-cad).
 
 const (
 	rpPromoWebhookEnv         = "DISCORD_RP_SERVERS_WEBHOOK_URL"
 	rpPromoCooldownEnv        = "RP_PROMOTION_COOLDOWN_HOURS"
 	rpPromoDefaultCooldownHrs = 24
 
-	// Field caps. Free communities get a deliberately smaller allowance so
-	// boosting is a visible upgrade; both tiers stay well inside Discord's
-	// hard embed limits.
-	rpPromoMaxServerName      = 100
-	rpPromoMaxDescFree        = 600
-	rpPromoMaxDescBoosted     = 3500
-	rpPromoMaxFeaturesFree    = 6
-	rpPromoMaxFeaturesBoosted = 15
-	rpPromoMaxDepartments     = 12
-	rpPromoMaxItemLen         = 120
-	rpPromoMaxImagesFree      = 1
-	rpPromoMaxImagesBoosted   = 3
+	// Flat caps that don't scale with tier.
+	rpPromoMaxServerName  = 100
+	rpPromoMaxDepartments = 12
+	rpPromoMaxItemLen     = 120
 )
+
+// rpTierConfig defines how rich a promotion a given boost tier may post and
+// how its Discord embed is styled. Free communities get the smallest
+// allowance so each paid tier is a visible, tangible upgrade.
+type rpTierConfig struct {
+	Key         string `json:"key"`         // "free" | "basic" | "standard" | "premium" | "elite"
+	Label       string `json:"label"`       // human label, also used in the embed footer
+	ColorHex    string `json:"color"`       // embed accent + website preview color
+	DescMax     int    `json:"descMax"`     // description character cap
+	FeaturesMax int    `json:"featuresMax"` // max "What We Offer" bullets
+	ImagesMax   int    `json:"imagesMax"`   // max uploaded images
+	AllowBanner bool   `json:"allowBanner"` // dedicated banner image
+	Verified    bool   `json:"verified"`    // ✓ verified-community marker
+	Featured    bool   `json:"featured"`    // ⭐ featured marker (elite)
+}
+
+// colorInt converts the tier's hex color to the integer form Discord wants.
+func (t rpTierConfig) colorInt() int {
+	n, err := strconv.ParseInt(strings.TrimPrefix(t.ColorHex, "#"), 16, 32)
+	if err != nil {
+		return 0x38bdf8
+	}
+	return int(n)
+}
+
+// rpTiers is the canonical tier ladder. Colors match the community-pricing
+// tier cards: free=cyan, basic=blue, standard=emerald, premium=indigo,
+// elite=gold.
+var rpTiers = map[string]rpTierConfig{
+	"free":     {Key: "free", Label: "Free", ColorHex: "#38bdf8", DescMax: 600, FeaturesMax: 6, ImagesMax: 1, AllowBanner: false, Verified: false, Featured: false},
+	"basic":    {Key: "basic", Label: "Basic Boost", ColorHex: "#3b82f6", DescMax: 1000, FeaturesMax: 8, ImagesMax: 1, AllowBanner: false, Verified: false, Featured: false},
+	"standard": {Key: "standard", Label: "Standard Boost", ColorHex: "#10b981", DescMax: 1500, FeaturesMax: 10, ImagesMax: 2, AllowBanner: false, Verified: true, Featured: false},
+	"premium":  {Key: "premium", Label: "Premium Boost", ColorHex: "#667eea", DescMax: 2500, FeaturesMax: 12, ImagesMax: 3, AllowBanner: true, Verified: true, Featured: false},
+	"elite":    {Key: "elite", Label: "Elite Boost", ColorHex: "#fbbf24", DescMax: 3500, FeaturesMax: 15, ImagesMax: 5, AllowBanner: true, Verified: true, Featured: true},
+}
+
+// rpPromotionTierForCommunity resolves a community's effective promotion tier.
+// An inactive or unrecognized subscription falls back to the free tier.
+func rpPromotionTierForCommunity(c *models.Community) rpTierConfig {
+	if !c.Details.Subscription.Active {
+		return rpTiers["free"]
+	}
+	key := strings.ToLower(strings.TrimSpace(c.Details.Subscription.Plan))
+	if t, ok := rpTiers[key]; ok {
+		return t
+	}
+	return rpTiers["free"]
+}
 
 // rpPromotionCooldown returns the configured posting cooldown. Falls back to
 // the 24h default when the env var is missing or unparseable.
@@ -59,14 +103,8 @@ func rpPromotionCooldown() time.Duration {
 	return time.Duration(hrs) * time.Hour
 }
 
-// communityIsBoosted reports whether a community currently has an active
-// (non-free) subscription, which unlocks the richer promotion styling.
-func communityIsBoosted(c *models.Community) bool {
-	return c.Details.Subscription.Active && c.Details.Subscription.Plan != "" && c.Details.Subscription.Plan != "basic"
-}
-
-// GetRpPromotionHandler returns the community's last promotion post and whether
-// a new post can be made yet. Owner/administrator only.
+// GetRpPromotionHandler returns the community's last promotion post, its boost
+// tier allowance, and whether a new post can be made yet. Owner/admin only.
 func (c Community) GetRpPromotionHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	communityObjID, err := primitive.ObjectIDFromHex(communityID)
@@ -94,12 +132,15 @@ func (c Community) GetRpPromotionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	tier := rpPromotionTierForCommunity(community)
 	cooldown := rpPromotionCooldown()
 	resp := map[string]interface{}{
-		"boosted":       communityIsBoosted(community),
-		"canPostNow":    true,
-		"cooldownHours": int(cooldown.Hours()),
-		"configured":    os.Getenv(rpPromoWebhookEnv) != "",
+		"tier":           tier,
+		"boosted":        tier.Key != "free",
+		"canPostNow":     true,
+		"cooldownHours":  int(cooldown.Hours()),
+		"configured":     os.Getenv(rpPromoWebhookEnv) != "",
+		"maxDepartments": rpPromoMaxDepartments,
 	}
 	if rp := community.Details.RpPromotion; rp != nil {
 		resp["lastData"] = rp.LastData
@@ -162,7 +203,7 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	boosted := communityIsBoosted(community)
+	tier := rpPromotionTierForCommunity(community)
 
 	// Cooldown gate — one promotion per community per cooldown window.
 	cooldown := rpPromotionCooldown()
@@ -180,15 +221,15 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Validate + normalize the submitted content (also applies tier limits).
-	if vErr := sanitizeRpPromotionData(&data, boosted); vErr != nil {
+	// Validate + normalize the submitted content against the tier allowance.
+	if vErr := sanitizeRpPromotionData(&data, tier); vErr != nil {
 		config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, vErr)
 		return
 	}
 
 	// Post to Discord. This is synchronous so we can surface a failure to the
 	// user and capture the message ID; nothing is persisted if it fails.
-	messageID, err := sendRpPromotionWebhook(webhookURL, data, boosted)
+	messageID, err := sendRpPromotionWebhook(webhookURL, data, tier)
 	if err != nil {
 		zap.S().Errorw("rp promotion: discord post failed", "community_id", communityID, "error", err)
 		config.ErrorStatus("failed to post promotion to Discord", http.StatusBadGateway, w, err)
@@ -212,7 +253,7 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	logAudit(c.ALDB, communityObjID, "rp_promotion.posted", "community", actorID, resolveActorName(c.UDB, actorID), "", "",
-		map[string]interface{}{"serverName": data.ServerName, "boosted": boosted})
+		map[string]interface{}{"serverName": data.ServerName, "tier": tier.Key})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -221,13 +262,14 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 		"postedAt":        now.UTC().Format(time.RFC3339),
 		"nextAvailableAt": now.Add(cooldown).UTC().Format(time.RFC3339),
 		"messageId":       messageID,
+		"tier":            tier.Key,
 	})
 }
 
 // sanitizeRpPromotionData validates required fields, trims/caps every field to
-// the community's tier allowance, and strips boost-only fields for free
-// communities. Mutates data in place. Returns a user-facing error on failure.
-func sanitizeRpPromotionData(data *models.RpPromotionData, boosted bool) error {
+// the community's tier allowance, and strips banner/extra images the tier does
+// not permit. Mutates data in place. Returns a user-facing error on failure.
+func sanitizeRpPromotionData(data *models.RpPromotionData, tier rpTierConfig) error {
 	data.ServerName = strings.TrimSpace(data.ServerName)
 	data.Game = strings.TrimSpace(data.Game)
 	data.Description = strings.TrimSpace(data.Description)
@@ -246,12 +288,8 @@ func sanitizeRpPromotionData(data *models.RpPromotionData, boosted bool) error {
 	if data.Description == "" {
 		return fmt.Errorf("description is required")
 	}
-	descCap := rpPromoMaxDescFree
-	if boosted {
-		descCap = rpPromoMaxDescBoosted
-	}
-	if len([]rune(data.Description)) > descCap {
-		return fmt.Errorf("description must be %d characters or fewer (boost your community for more room)", descCap)
+	if len([]rune(data.Description)) > tier.DescMax {
+		return fmt.Errorf("description must be %d characters or fewer on the %s tier", tier.DescMax, tier.Label)
 	}
 
 	// Invite URL must be an https Discord link.
@@ -267,40 +305,29 @@ func sanitizeRpPromotionData(data *models.RpPromotionData, boosted bool) error {
 
 	data.Departments = cleanStringSlice(data.Departments, rpPromoMaxDepartments)
 
-	featureCap := rpPromoMaxFeaturesFree
-	if boosted {
-		featureCap = rpPromoMaxFeaturesBoosted
+	if len(cleanStringSlice(data.Features, 1000)) > tier.FeaturesMax {
+		return fmt.Errorf("the %s tier allows up to %d features — boost to add more", tier.Label, tier.FeaturesMax)
 	}
-	if len(cleanStringSlice(data.Features, 1000)) > featureCap {
-		return fmt.Errorf("free communities can list up to %d features — boost to add more", featureCap)
-	}
-	data.Features = cleanStringSlice(data.Features, featureCap)
+	data.Features = cleanStringSlice(data.Features, tier.FeaturesMax)
 
 	if len([]rune(data.Requirements)) > rpPromoMaxItemLen*4 {
 		data.Requirements = string([]rune(data.Requirements)[:rpPromoMaxItemLen*4])
 	}
 
 	// Image / banner tier rules.
-	data.Images = cleanStringSlice(data.Images, rpPromoMaxImagesBoosted)
+	data.Images = cleanStringSlice(data.Images, tier.ImagesMax)
 	for _, img := range data.Images {
 		if !strings.HasPrefix(strings.ToLower(img), "https://") {
 			return fmt.Errorf("image URLs must be https")
 		}
 	}
-	if boosted {
-		if len(data.Images) > rpPromoMaxImagesBoosted {
-			data.Images = data.Images[:rpPromoMaxImagesBoosted]
-		}
+	if tier.AllowBanner {
 		data.BannerImage = strings.TrimSpace(data.BannerImage)
 		if data.BannerImage != "" && !strings.HasPrefix(strings.ToLower(data.BannerImage), "https://") {
 			return fmt.Errorf("banner image URL must be https")
 		}
 	} else {
-		// Free tier: no banner, single image.
 		data.BannerImage = ""
-		if len(data.Images) > rpPromoMaxImagesFree {
-			data.Images = data.Images[:rpPromoMaxImagesFree]
-		}
 	}
 
 	return nil

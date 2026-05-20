@@ -18,6 +18,9 @@ import (
 // treat an empty URL as "not configured" and refuse the request so a user
 // never sees a silent success.
 //
+// Embed styling (color, verified/featured markers, banner, image gallery)
+// scales with the community's boost tier — see rpTierConfig in rp_promotion.go.
+//
 // Unlike the best-effort cron alerts, this POST is synchronous: we append
 // ?wait=true so Discord returns the created message, letting us capture the
 // message ID for a future in-place edit.
@@ -25,16 +28,14 @@ import (
 const (
 	rpPromoHTTPDeadline = 10 * time.Second
 
-	// Discord embed colors. Boosted communities get the gold accent; free
-	// communities get the standard LPC cyan.
-	rpPromoColorBoosted = 0xfbbf24
-	rpPromoColorFree    = 0x38bdf8
-
 	// Discord structural limits we defensively truncate against.
 	rpPromoMaxTitle  = 256
 	rpPromoMaxDesc   = 4096
 	rpPromoMaxField  = 1024
 	rpPromoMaxFooter = 2048
+
+	// Discord allows at most 10 embeds per message.
+	rpPromoMaxEmbeds = 10
 )
 
 type rpDiscordEmbedImage struct {
@@ -80,17 +81,38 @@ func rpTrunc(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// buildRpPromotionEmbeds renders the structured promotion data into one
-// content embed plus, for boosted communities, up to two extra image-only
-// embeds. The extra embeds share the content embed's URL so Discord groups
-// them into a single image gallery under the post.
-func buildRpPromotionEmbeds(data models.RpPromotionData, boosted bool) []rpDiscordEmbed {
-	color := rpPromoColorFree
-	if boosted {
-		color = rpPromoColorBoosted
+// rpPromoTitlePrefix returns the marker shown before the server name for the
+// tier — a star for featured (elite) communities, a check for verified ones.
+func rpPromoTitlePrefix(tier rpTierConfig) string {
+	if tier.Featured {
+		return "⭐ "
 	}
+	if tier.Verified {
+		return "✅ "
+	}
+	return ""
+}
 
-	fields := make([]rpDiscordEmbedField, 0, 5)
+// rpPromoFooterText builds the embed footer for the tier.
+func rpPromoFooterText(tier rpTierConfig) string {
+	switch {
+	case tier.Featured:
+		return "⭐ Featured community · " + tier.Label + " · Posted via Lines Police CAD"
+	case tier.Verified:
+		return "✅ Verified community · " + tier.Label + " · Posted via Lines Police CAD"
+	case tier.Key != "free":
+		return tier.Label + " · Posted via Lines Police CAD"
+	default:
+		return "Posted via Lines Police CAD"
+	}
+}
+
+// buildRpPromotionEmbeds renders the structured promotion data into one
+// content embed plus extra image-only embeds (up to the tier's image
+// allowance). The extra embeds share the content embed's URL so Discord
+// groups them into a single image gallery under the post.
+func buildRpPromotionEmbeds(data models.RpPromotionData, tier rpTierConfig) []rpDiscordEmbed {
+	fields := make([]rpDiscordEmbedField, 0, 6)
 	if len(data.Consoles) > 0 {
 		fields = append(fields, rpDiscordEmbedField{
 			Name:   "🎮 Platform",
@@ -131,39 +153,36 @@ func buildRpPromotionEmbeds(data models.RpPromotionData, boosted bool) []rpDisco
 		Value: data.InviteURL,
 	})
 
-	footerText := "Posted via Lines Police CAD"
-	if boosted {
-		footerText = "⭐ Boosted community · Posted via Lines Police CAD"
-	}
-
 	content := rpDiscordEmbed{
-		Title:       rpTrunc(data.ServerName, rpPromoMaxTitle),
+		Title:       rpTrunc(rpPromoTitlePrefix(tier)+data.ServerName, rpPromoMaxTitle),
 		URL:         data.InviteURL,
 		Description: rpTrunc(data.Description, rpPromoMaxDesc),
-		Color:       color,
+		Color:       tier.colorInt(),
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		Fields:      fields,
-		Footer:      &rpDiscordEmbedFooter{Text: rpTrunc(footerText, rpPromoMaxFooter)},
+		Footer:      &rpDiscordEmbedFooter{Text: rpTrunc(rpPromoFooterText(tier), rpPromoMaxFooter)},
 	}
 
-	// Primary image: boosted banner wins, else the first uploaded image.
-	if boosted && strings.TrimSpace(data.BannerImage) != "" {
+	// Primary image: a tier-allowed banner wins, else the first uploaded image.
+	bannerUsed := false
+	if tier.AllowBanner && strings.TrimSpace(data.BannerImage) != "" {
 		content.Image = &rpDiscordEmbedImage{URL: data.BannerImage}
+		bannerUsed = true
 	} else if len(data.Images) > 0 {
 		content.Image = &rpDiscordEmbedImage{URL: data.Images[0]}
 	}
 
 	embeds := []rpDiscordEmbed{content}
 
-	// Boosted communities get a small image gallery from any remaining images.
-	// Discord caps a message at 10 embeds; we add at most 2 extras.
-	if boosted && data.InviteURL != "" {
+	// Remaining images become a gallery. When the banner is the hero image,
+	// every uploaded image is still available for the gallery; otherwise the
+	// first image was already used as the hero.
+	if data.InviteURL != "" && len(data.Images) > 0 {
 		start := 0
-		if content.Image != nil && (data.BannerImage == "" || strings.TrimSpace(data.BannerImage) == "") {
-			start = 1 // images[0] already used as the content image
+		if !bannerUsed {
+			start = 1
 		}
-		extras := 0
-		for i := start; i < len(data.Images) && extras < 2; i++ {
+		for i := start; i < len(data.Images) && len(embeds) < rpPromoMaxEmbeds; i++ {
 			if strings.TrimSpace(data.Images[i]) == "" {
 				continue
 			}
@@ -171,7 +190,6 @@ func buildRpPromotionEmbeds(data models.RpPromotionData, boosted bool) []rpDisco
 				URL:   data.InviteURL,
 				Image: &rpDiscordEmbedImage{URL: data.Images[i]},
 			})
-			extras++
 		}
 	}
 
@@ -180,8 +198,8 @@ func buildRpPromotionEmbeds(data models.RpPromotionData, boosted bool) []rpDisco
 
 // sendRpPromotionWebhook posts the promotion embeds to Discord and returns the
 // created message ID. webhookURL must be non-empty (the handler checks first).
-func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, boosted bool) (string, error) {
-	payload := rpDiscordWebhookPayload{Embeds: buildRpPromotionEmbeds(data, boosted)}
+func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, tier rpTierConfig) (string, error) {
+	payload := rpDiscordWebhookPayload{Embeds: buildRpPromotionEmbeds(data, tier)}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal webhook payload: %w", err)
