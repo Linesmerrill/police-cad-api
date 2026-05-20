@@ -69,6 +69,14 @@ type CommunityDetails struct {
 	MostWantedVisibleFields []string               `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
 	MostWantedCustomFields  []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
 	Economy                EconomySettings         `json:"economy" bson:"economy"`
+	// Soft-delete fields. When PendingDeletionAt is set, the community is hidden
+	// from all customer-facing surfaces and the scheduler hard-deletes it once
+	// ScheduledDeletionAt elapses. The community owner cannot self-restore;
+	// staff handle restores through the admin console.
+	PendingDeletionAt         *primitive.DateTime `json:"pendingDeletionAt,omitempty" bson:"pendingDeletionAt,omitempty"`
+	ScheduledDeletionAt       *primitive.DateTime `json:"scheduledDeletionAt,omitempty" bson:"scheduledDeletionAt,omitempty"`
+	PendingDeletionNotifiedAt *primitive.DateTime `json:"pendingDeletionNotifiedAt,omitempty" bson:"pendingDeletionNotifiedAt,omitempty"`
+	DeletionRequestedBy       string              `json:"deletionRequestedBy,omitempty" bson:"deletionRequestedBy,omitempty"`
 	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
 }

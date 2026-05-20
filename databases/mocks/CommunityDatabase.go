@@ -57,6 +57,43 @@ func (_m *CommunityDatabase) Aggregate(ctx context.Context, pipeline mongo.Pipel
 	return r0, r1
 }
 
+// AggregateIncludingPending provides a mock function with given fields: ctx, pipeline, opts
+func (_m *CommunityDatabase) AggregateIncludingPending(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*databases.MongoCursor, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, pipeline)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AggregateIncludingPending")
+	}
+
+	var r0 *databases.MongoCursor
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, mongo.Pipeline, ...*options.AggregateOptions) (*databases.MongoCursor, error)); ok {
+		return rf(ctx, pipeline, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, mongo.Pipeline, ...*options.AggregateOptions) *databases.MongoCursor); ok {
+		r0 = rf(ctx, pipeline, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*databases.MongoCursor)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, mongo.Pipeline, ...*options.AggregateOptions) error); ok {
+		r1 = rf(ctx, pipeline, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // CountDocuments provides a mock function with given fields: ctx, filter, opts
 func (_m *CommunityDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	_va := make([]interface{}, len(opts))
@@ -175,6 +212,106 @@ func (_m *CommunityDatabase) FindOne(ctx context.Context, filter interface{}) (*
 
 	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
 		r1 = rf(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// FindOneIncludingPending provides a mock function with given fields: ctx, filter
+func (_m *CommunityDatabase) FindOneIncludingPending(ctx context.Context, filter interface{}) (*models.Community, error) {
+	ret := _m.Called(ctx, filter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindOneIncludingPending")
+	}
+
+	var r0 *models.Community
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) (*models.Community, error)); ok {
+		return rf(ctx, filter)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) *models.Community); ok {
+		r0 = rf(ctx, filter)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.Community)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
+		r1 = rf(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// FindIncludingPending provides a mock function with given fields: ctx, filter, opts
+func (_m *CommunityDatabase) FindIncludingPending(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (databases.MongoCursor, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindIncludingPending")
+	}
+
+	var r0 databases.MongoCursor
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) (databases.MongoCursor, error)); ok {
+		return rf(ctx, filter, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.FindOptions) databases.MongoCursor); ok {
+		r0 = rf(ctx, filter, opts...)
+	} else {
+		r0 = ret.Get(0).(databases.MongoCursor)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}, ...*options.FindOptions) error); ok {
+		r1 = rf(ctx, filter, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// CountDocumentsIncludingPending provides a mock function with given fields: ctx, filter, opts
+func (_m *CommunityDatabase) CountDocumentsIncludingPending(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountDocumentsIncludingPending")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.CountOptions) (int64, error)); ok {
+		return rf(ctx, filter, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, ...*options.CountOptions) int64); ok {
+		r0 = rf(ctx, filter, opts...)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}, ...*options.CountOptions) error); ok {
+		r1 = rf(ctx, filter, opts...)
 	} else {
 		r1 = ret.Error(1)
 	}

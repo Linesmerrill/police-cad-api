@@ -280,14 +280,16 @@ type AdminUserResult struct {
 }
 
 type AdminCommunityResult struct {
-	ID              string      `json:"id"`
-	Name            string      `json:"name"`
-	Visibility      string      `json:"visibility"`  // "public" or "private"
-	CreatedAt       interface{} `json:"createdAt"`
-	Owner           *OwnerInfo  `json:"owner,omitempty"`
-	MemberCount     int         `json:"memberCount"`
-	DepartmentCount int         `json:"departmentCount"`
-	RolesCount      int         `json:"rolesCount"`
+	ID                  string      `json:"id"`
+	Name                string      `json:"name"`
+	Visibility          string      `json:"visibility"` // "public" or "private"
+	CreatedAt           interface{} `json:"createdAt"`
+	Owner               *OwnerInfo  `json:"owner,omitempty"`
+	MemberCount         int         `json:"memberCount"`
+	DepartmentCount     int         `json:"departmentCount"`
+	RolesCount          int         `json:"rolesCount"`
+	PendingDeletionAt   interface{} `json:"pendingDeletionAt,omitempty"`
+	ScheduledDeletionAt interface{} `json:"scheduledDeletionAt,omitempty"`
 }
 
 type OwnerInfo struct {
@@ -352,16 +354,38 @@ type AdminRoleMember struct {
 }
 
 type AdminCommunityDetails struct {
-	ID              string                 `json:"id"`
-	Name            string                 `json:"name"`
-	Visibility      string                 `json:"visibility"`  // "public" or "private"
-	CreatedAt       interface{}            `json:"createdAt"`
-	Owner           *OwnerInfo             `json:"owner,omitempty"`
-	MemberCount     int                    `json:"memberCount"`
-	Departments     []CommunityDept        `json:"departments,omitempty"`
-	DepartmentCount int                    `json:"departmentCount"`
-	RolesCount      int                    `json:"rolesCount"`
-	Subscription    *CommunitySubscription `json:"subscription,omitempty"`
+	ID                  string                 `json:"id"`
+	Name                string                 `json:"name"`
+	Visibility          string                 `json:"visibility"` // "public" or "private"
+	CreatedAt           interface{}            `json:"createdAt"`
+	Owner               *OwnerInfo             `json:"owner,omitempty"`
+	MemberCount         int                    `json:"memberCount"`
+	Departments         []CommunityDept        `json:"departments,omitempty"`
+	DepartmentCount     int                    `json:"departmentCount"`
+	RolesCount          int                    `json:"rolesCount"`
+	Subscription        *CommunitySubscription `json:"subscription,omitempty"`
+	PendingDeletionAt   interface{}            `json:"pendingDeletionAt,omitempty"`
+	ScheduledDeletionAt interface{}            `json:"scheduledDeletionAt,omitempty"`
+
+	// Owner tier context — populated when the community is pending deletion
+	// so the admin console can flag whether a restore would put the owner
+	// over their cap. The "other" list excludes this community itself and
+	// any other pending-deletion entries (so it's a true picture of what
+	// the owner already has live).
+	OwnerPlan             string                       `json:"ownerPlan,omitempty"`
+	OwnerCommunityCap     int                          `json:"ownerCommunityCap,omitempty"`
+	OwnerActiveCount      int                          `json:"ownerActiveCount,omitempty"`
+	OwnerOtherCommunities []AdminOwnerOtherCommunity   `json:"ownerOtherCommunities,omitempty"`
+}
+
+// AdminOwnerOtherCommunity is a thin row used by the admin community detail
+// panel to list the other communities an owner has live, so staff can see
+// whether a restore would put them over their plan cap.
+type AdminOwnerOtherCommunity struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Plan         string `json:"plan,omitempty"`
+	MembersCount int    `json:"membersCount"`
 }
 
 type CommunityDept struct {

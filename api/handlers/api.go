@@ -171,9 +171,18 @@ func (a *App) New() *mux.Router {
 
 	// healthchex
 	r.HandleFunc("/health", healthCheckHandler)
+	r.HandleFunc("/health/scheduler", a.schedulerHealthHandler).Methods("GET")
 
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 	apiV2 := r.PathPrefix("/api/v2").Subrouter()
+
+	// Pending-deletion gate: any request whose matched route carries a
+	// community_id / communityId var is short-circuited with a 410 if the
+	// community is currently in pending-deletion state. Closes the race where
+	// an owner soft-deletes a community while members are actively using it.
+	pendingGate := CommunityPendingGate(databases.NewCommunityDatabase(a.dbHelper))
+	apiCreate.Use(pendingGate)
+	apiV2.Use(pendingGate)
 
 	// Metrics handler (must be after apiV2 is defined)
 	metricsHandler := MetricsHandler{}
@@ -243,6 +252,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/communities/{id}/transfer-ownership", http.HandlerFunc(adminHandler.AdminTransferOwnershipHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}/remove-member", http.HandlerFunc(adminHandler.AdminRemoveMemberHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}/roles", http.HandlerFunc(adminHandler.AdminGetCommunityRolesHandler)).Methods("GET")
+	apiCreate.Handle("/admin/communities/{community_id}/restore-pending-deletion", http.HandlerFunc(c.RestoreCommunityPendingDeletionHandler)).Methods("POST")
+	apiCreate.Handle("/admin/communities/{community_id}/force-delete", http.HandlerFunc(c.ForceDeleteCommunityHandler)).Methods("POST")
+	// Admin-only smoke test for the cron-alert Discord webhook. POST with
+	// { currentUser: { roles: ["admin"] } } in the body. Returns JSON.
+	apiCreate.Handle("/admin/test-cron-alert", http.HandlerFunc(c.TestCronAlertHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}", http.HandlerFunc(adminHandler.AdminCommunityDetailsHandler)).Methods("GET")
 
 	// Admin management routes (specific before general)
@@ -814,6 +828,7 @@ func (a *App) New() *mux.Router {
 		contentCreator.UDB,
 		contentCreator.CDB,
 		databases.NewSchedulerLockDatabase(a.dbHelper),
+		a.dbHelper,
 		economy.SDB,
 		economy.IDB,
 		economy.CivDB,
@@ -877,6 +892,34 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 		Alive: true,
 	})
 	_, _ = io.WriteString(w, string(b))
+}
+
+// schedulerHealthHandler returns the per-job run history captured by the
+// in-process scheduler. Public (no auth) so an uptime monitor can poll it,
+// but it only exposes timestamps + counts + the last error message — no
+// PII, no auth context.
+//
+// Top-level fields:
+//   alive: bool — does the scheduler have any registered jobs?
+//   nowAt: ISO timestamp of the response (anchor for staleness math)
+//   jobs:  { [jobName]: JobStat } — see scheduler.JobStat
+func (a *App) schedulerHealthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if a.Scheduler == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"alive": false,
+			"error": "scheduler not initialized",
+		})
+		return
+	}
+	stats := a.Scheduler.SnapshotJobStats()
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"alive": len(stats) > 0,
+		"nowAt": time.Now().UTC().Format(time.RFC3339),
+		"jobs":  stats,
+	})
 }
 
 // CorsMiddleware is a middleware that adds CORS headers to the response

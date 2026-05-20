@@ -57,7 +57,7 @@ func TestCommunity_CommunityHandler_UsesLiveCount_OverwritesStored(t *testing.T)
 			MembersCount: 85, // stale, drifted
 		},
 	}
-	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+	mockCommunityDB.On("FindOneIncludingPending", mock.Anything, bson.M{"_id": communityObjectID}).
 		Return(storedCommunity, nil)
 	mockUserDB.On("CountDocuments", mock.Anything, approvedMembersFilter(communityID)).
 		Return(int64(35), nil)
@@ -98,7 +98,7 @@ func TestCommunity_CommunityHandler_CountFails_FallsBackToStored(t *testing.T) {
 			MembersCount: 42,
 		},
 	}
-	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+	mockCommunityDB.On("FindOneIncludingPending", mock.Anything, bson.M{"_id": communityObjectID}).
 		Return(storedCommunity, nil)
 	mockUserDB.On("CountDocuments", mock.Anything, approvedMembersFilter(communityID)).
 		Return(int64(0), errors.New("transient mongo error"))
@@ -133,7 +133,7 @@ func TestCommunity_CommunityHandler_CommunityNotFound_ReturnsNotFound(t *testing
 	mockCommunityDB := &mocks.CommunityDatabase{}
 	mockUserDB := &mocks.UserDatabase{}
 
-	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+	mockCommunityDB.On("FindOneIncludingPending", mock.Anything, bson.M{"_id": communityObjectID}).
 		Return((*models.Community)(nil), mongo.ErrNoDocuments)
 
 	c := handlers.Community{
@@ -170,7 +170,7 @@ func TestCommunity_CommunityHandler_InvalidObjectID_ReturnsBadRequest(t *testing
 	http.HandlerFunc(c.CommunityHandler).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	mockCommunityDB.AssertNotCalled(t, "FindOne", mock.Anything, mock.Anything)
+	mockCommunityDB.AssertNotCalled(t, "FindOneIncludingPending", mock.Anything, mock.Anything)
 	mockUserDB.AssertNotCalled(t, "CountDocuments", mock.Anything, mock.Anything)
 }
 

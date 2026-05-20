@@ -819,5 +819,18 @@ createIndexSafe(
   }
 );
 
+// Community soft-delete sweep: the daily cron filters by
+// community.scheduledDeletionAt. Sparse so the vast majority of communities
+// (which are not pending deletion) carry no index entry.
+createIndexSafe(
+  db.communities,
+  { "community.scheduledDeletionAt": 1 },
+  {
+    name: "communities_scheduled_deletion_idx",
+    background: true,
+    sparse: true
+  }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

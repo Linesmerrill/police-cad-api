@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/api"
+	"github.com/linesmerrill/police-cad-api/api/scheduler"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -236,9 +238,16 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	dbResp, err := c.DB.FindOne(ctx, filter)
+	// Use the IncludingPending variant so we can distinguish a pending-deletion
+	// community (410 Gone with a body that lets the client render a route-block
+	// page) from a truly missing one (404).
+	dbResp, err := c.DB.FindOneIncludingPending(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to get community by ID", http.StatusNotFound, w, err)
+		return
+	}
+	if dbResp.Details.PendingDeletionAt != nil {
+		writePendingDeletionGone(w, dbResp)
 		return
 	}
 
@@ -295,6 +304,36 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	if err := json.NewDecoder(r.Body).Decode(&newCommunity); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
+	}
+
+	// Enforce the owned-community cap. CDB.CountDocuments already excludes
+	// pending-deletion communities, so a user who soft-deleted their only
+	// free-tier community can immediately create a fresh one. Hard-deletes
+	// (admin force-delete) likewise free up a slot. We fetch the owner's
+	// plan from the user record rather than trusting anything client-side.
+	if ownerHex := strings.TrimSpace(newCommunity.Details.OwnerID); ownerHex != "" {
+		if ownerObjID, idErr := primitive.ObjectIDFromHex(ownerHex); idErr == nil {
+			capCtx, capCancel := api.WithQueryTimeout(r.Context())
+			defer capCancel()
+			var owner models.User
+			if err := c.UDB.FindOne(capCtx, bson.M{"_id": ownerObjID}).Decode(&owner); err == nil {
+				plan := models.PlanFromUser(&owner)
+				cap := models.CommunityCap(plan)
+				active, _ := c.DB.CountDocuments(capCtx, bson.M{"community.ownerID": ownerHex})
+				if int(active) >= cap {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"error":   "community_limit_reached",
+						"message": fmt.Sprintf("Your %s plan allows up to %d communities. Upgrade your plan or delete an existing community to create another.", plan, cap),
+						"plan":    plan,
+						"cap":     cap,
+						"active":  active,
+					})
+					return
+				}
+			}
+		}
 	}
 
 	// Generate a new _id for the community
@@ -1404,100 +1443,283 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 	w.Write([]byte(`{"message": "Role permissions updated successfully"}`))
 }
 
-// DeleteCommunityByIDHandler deletes a community by ID and removes references from all users
+// CommunitySoftDeleteGraceDays is how long a community stays in the pending-deletion
+// state before the scheduler hard-deletes it. Owners cannot self-restore; staff
+// handle restores through the admin console.
+const CommunitySoftDeleteGraceDays = 30
+
+// writePendingDeletionGone writes a 410 Gone response describing a community
+// that is pending deletion. Customer-facing clients render a route-block page
+// from this payload.
+func writePendingDeletionGone(w http.ResponseWriter, comm *models.Community) {
+	payload := map[string]interface{}{
+		"error":   "pending_deletion",
+		"message": "This community is pending deletion. Contact support to restore access.",
+	}
+	if comm != nil {
+		if comm.Details.ScheduledDeletionAt != nil {
+			payload["scheduledDeletionAt"] = comm.Details.ScheduledDeletionAt.Time().UTC().Format(time.RFC3339)
+		}
+		if comm.Details.Name != "" {
+			payload["communityName"] = comm.Details.Name
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusGone)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// DeleteCommunityByIDHandler marks a community as pending deletion. The community
+// becomes hidden from all customer-facing surfaces (404/410 on direct links) and
+// is hard-deleted by the scheduler once ScheduledDeletionAt elapses.
 func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["community_id"]
 
-	// Convert the community ID to primitive.ObjectID
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
 		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 		return
 	}
 
-	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Delete the community by ID
-	communityFilter := bson.M{"_id": cID}
-	err = c.DB.DeleteOne(ctx, communityFilter)
+	existing, err := c.DB.FindOneIncludingPending(ctx, bson.M{"_id": cID})
 	if err != nil {
-		config.ErrorStatus("failed to delete community", http.StatusInternalServerError, w, err)
+		config.ErrorStatus("failed to load community", http.StatusNotFound, w, err)
+		return
+	}
+	if existing.Details.PendingDeletionAt != nil {
+		config.ErrorStatus("community is already pending deletion", http.StatusBadRequest, w,
+			fmt.Errorf("community %s already has pendingDeletionAt set", communityID))
 		return
 	}
 
-	// Remove the community references from all users
-	userFilter := bson.M{"user.communities.communityId": communityID}
-	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}
-	_, err = c.UDB.UpdateMany(ctx, userFilter, userUpdate)
-	if err != nil {
-		config.ErrorStatus("failed to remove community references from users", http.StatusInternalServerError, w, err)
+	now := time.Now().UTC()
+	scheduled := now.Add(CommunitySoftDeleteGraceDays * 24 * time.Hour)
+	pendingAt := primitive.NewDateTimeFromTime(now)
+	scheduledAt := primitive.NewDateTimeFromTime(scheduled)
+
+	actorID := resolveActorFromRequest(r)
+	update := bson.M{
+		"$set": bson.M{
+			"community.pendingDeletionAt":   pendingAt,
+			"community.scheduledDeletionAt": scheduledAt,
+			"community.deletionRequestedBy": actorID,
+			"community.updatedAt":           pendingAt,
+		},
+	}
+	if err := c.DB.UpdateOne(ctx, bson.M{"_id": cID}, update); err != nil {
+		config.ErrorStatus("failed to mark community pending deletion", http.StatusInternalServerError, w, err)
 		return
 	}
 
-	// Cascade delete all child data in the background
-	bgCtx, bgCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	go func() {
-		defer bgCancel()
-		c.cascadeDeleteCommunityData(bgCtx, communityID, cID)
-	}()
+	logAudit(c.ALDB, cID, "community.pending_deletion_scheduled", "community", actorID,
+		resolveActorName(c.UDB, actorID), communityID, "", map[string]interface{}{
+			"scheduledDeletionAt": scheduled.Format(time.RFC3339),
+		})
 
+	resp := map[string]interface{}{
+		"message":             "Community scheduled for deletion",
+		"scheduledDeletionAt": scheduled.Format(time.RFC3339),
+		"graceDays":           CommunitySoftDeleteGraceDays,
+	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Community deleted and references removed successfully"}`))
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// cascadeDeleteCommunityData removes all child data associated with a deleted community.
-// Designed to run in a background goroutine. Best-effort: logs errors but does not fail.
-func (c Community) cascadeDeleteCommunityData(ctx context.Context, communityID string, cID primitive.ObjectID) {
-	type collectionCleanup struct {
-		name   string
-		filter bson.M
+// RestoreCommunityPendingDeletionHandler clears the soft-delete fields on a
+// community. Staff-only — restores are not exposed to community owners.
+func (c Community) RestoreCommunityPendingDeletionHandler(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		CurrentUser map[string]interface{} `json:"currentUser"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if !hasAdminOrOwnerRole(payload.CurrentUser) {
+		config.ErrorStatus("admin or owner role required", http.StatusForbidden, w,
+			fmt.Errorf("caller missing admin/owner role"))
+		return
 	}
 
-	cleanups := []collectionCleanup{
-		// Collections using string activeCommunityID
-		{"civilians", bson.M{"civilian.activeCommunityID": communityID}},
-		{"vehicles", bson.M{"vehicle.activeCommunityID": communityID}},
-		{"firearms", bson.M{"firearm.activeCommunityID": communityID}},
-		{"licenses", bson.M{"license.activeCommunityID": communityID}},
-		{"warrants", bson.M{"warrant.activeCommunityID": communityID}},
-		{"ems", bson.M{"ems.activeCommunityID": communityID}},
-		{"emsvehicles", bson.M{"vehicle.activeCommunityID": communityID}},
-		{"medicalreports", bson.M{"report.activeCommunityID": communityID}},
-		{"medications", bson.M{"medication.activeCommunityID": communityID}},
-		// Collections using string communityID
-		{"calls", bson.M{"call.communityID": communityID}},
-		{"bolos", bson.M{"bolo.communityID": communityID}},
-		{"courtcases", bson.M{"courtCase.communityID": communityID}},
-		{"courtsessions", bson.M{"courtSession.communityID": communityID}},
-		{"most_wanted_entries", bson.M{"mostWanted.communityID": communityID}},
-		// Collections using string communityId (lowercase d)
-		{"inviteCodes", bson.M{"communityId": communityID}},
-		{"tone_logs", bson.M{"communityId": communityID}},
-		// Collections using ObjectID communityId
-		{"audit_logs", bson.M{"communityId": cID}},
-		{"announcements", bson.M{"community": cID}},
+	communityID := mux.Vars(r)["community_id"]
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
 	}
 
-	for _, col := range cleanups {
-		deleted, err := c.DBHelper.Collection(col.name).DeleteMany(ctx, col.filter)
-		if err != nil {
-			zap.S().Errorw("cascade delete failed",
-				"collection", col.name,
-				"communityId", communityID,
-				"error", err,
-			)
-			continue
-		}
-		if deleted > 0 {
-			zap.S().Infow("cascade deleted documents",
-				"collection", col.name,
-				"communityId", communityID,
-				"count", deleted,
-			)
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	existing, err := c.DB.FindOneIncludingPending(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to load community", http.StatusNotFound, w, err)
+		return
+	}
+	if existing.Details.PendingDeletionAt == nil {
+		config.ErrorStatus("community is not pending deletion", http.StatusBadRequest, w,
+			fmt.Errorf("community %s has no pendingDeletionAt", communityID))
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now().UTC())
+	update := bson.M{
+		"$unset": bson.M{
+			"community.pendingDeletionAt":         "",
+			"community.scheduledDeletionAt":       "",
+			"community.pendingDeletionNotifiedAt": "",
+			"community.deletionRequestedBy":       "",
+		},
+		"$set": bson.M{
+			"community.updatedAt": now,
+		},
+	}
+	if err := c.DB.UpdateOne(ctx, bson.M{"_id": cID}, update); err != nil {
+		config.ErrorStatus("failed to restore community", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	adminEmail, _ := payload.CurrentUser["email"].(string)
+	logAudit(c.ALDB, cID, "community.pending_deletion_restored", "community", adminEmail,
+		adminEmail, communityID, "", nil)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Community restored"})
+}
+
+// ForceDeleteCommunityHandler hard-deletes a community immediately, bypassing
+// the 30-day soft-delete grace period. Staff-only — used when the owner has
+// explicitly asked support to purge their community now (e.g., free-tier user
+// who wants to start fresh and doesn't want to wait the 30 days).
+//
+// Runs the same cascade the scheduler runs at end-of-grace: removes the
+// community doc, pulls user.communities refs, and wipes child collections.
+// Requires a typed confirmation in the request body matching the community
+// name so a fat-finger on the admin console can't accidentally nuke the
+// wrong community.
+func (c Community) ForceDeleteCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		CurrentUser  map[string]interface{} `json:"currentUser"`
+		Confirmation string                 `json:"confirmation"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if !hasAdminOrOwnerRole(payload.CurrentUser) {
+		config.ErrorStatus("admin or owner role required", http.StatusForbidden, w,
+			fmt.Errorf("caller missing admin/owner role"))
+		return
+	}
+
+	communityID := mux.Vars(r)["community_id"]
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	existing, err := c.DB.FindOneIncludingPending(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("failed to load community", http.StatusNotFound, w, err)
+		return
+	}
+	if strings.TrimSpace(payload.Confirmation) != existing.Details.Name {
+		config.ErrorStatus("confirmation does not match community name", http.StatusBadRequest, w,
+			fmt.Errorf("expected %q, got %q", existing.Details.Name, payload.Confirmation))
+		return
+	}
+
+	adminEmail, _ := payload.CurrentUser["email"].(string)
+	// Audit BEFORE the destructive call so the trail survives even if the
+	// cascade is partial. Snapshot enough of the doc to identify it later.
+	logAudit(c.ALDB, cID, "community.force_deleted", "community", adminEmail, adminEmail, communityID, "",
+		map[string]interface{}{
+			"communityName":       existing.Details.Name,
+			"ownerID":             existing.Details.OwnerID,
+			"wasPendingDeletion":  existing.Details.PendingDeletionAt != nil,
+			"scheduledDeletionAt": existing.Details.ScheduledDeletionAt,
+		})
+
+	scheduler.HardDeleteCommunityWithCascade(ctx, c.DB, c.UDB, c.DBHelper, communityID, cID)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":       "Community force-deleted",
+		"communityId":   communityID,
+		"communityName": existing.Details.Name,
+	})
+}
+
+// TestCronAlertHandler is an admin-only smoke test for the Discord cron-alert
+// webhook. Synthesizes an error and sends it through the same SendCronAlert
+// path the scheduler uses, so staff can confirm the channel is wired without
+// having to wait for a real cron failure. Bypasses dedup by stamping the
+// current timestamp into the error message.
+func (c Community) TestCronAlertHandler(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		CurrentUser map[string]interface{} `json:"currentUser"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if !hasAdminOrOwnerRole(payload.CurrentUser) {
+		config.ErrorStatus("admin or owner role required", http.StatusForbidden, w,
+			fmt.Errorf("caller missing admin/owner role"))
+		return
+	}
+
+	if os.Getenv("DISCORD_CRON_ERROR_WEBHOOK_URL") == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":      false,
+			"message": "DISCORD_CRON_ERROR_WEBHOOK_URL is not set on this dyno. Configure it in Heroku config vars and try again.",
+		})
+		return
+	}
+
+	caller, _ := payload.CurrentUser["email"].(string)
+	syntheticErr := fmt.Errorf("test alert from /admin/test-cron-alert at %s (triggered by %s)",
+		time.Now().UTC().Format(time.RFC3339), caller)
+	scheduler.SendCronAlert(os.Getenv("DYNO"), "testCronAlert", syntheticErr, map[string]string{
+		"phase":   "manual_smoke_test",
+		"trigger": caller,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "Synthetic cron alert dispatched. Check the Discord channel — it should arrive within a few seconds.",
+	})
+}
+
+// hasAdminOrOwnerRole reports whether the caller's currentUser payload contains
+// an admin or owner role. Mirrors the existing checkAdminOrOwnerPermissions
+// pattern used elsewhere in the admin handlers.
+func hasAdminOrOwnerRole(currentUser map[string]interface{}) bool {
+	if currentUser == nil {
+		return false
+	}
+	check := func(s string) bool { return s == "admin" || s == "owner" }
+	if role, ok := currentUser["role"].(string); ok && check(role) {
+		return true
+	}
+	roles, ok := currentUser["roles"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, r := range roles {
+		if s, ok := r.(string); ok && check(s) {
+			return true
 		}
 	}
+	return false
 }
 
 // GetBannedUsersHandler returns all banned users of a community
@@ -1745,10 +1967,16 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
 		return
 	}
-	// var community models.Community
-	community, err := c.DB.FindOne(ctx, bson.M{"_id": communityObjID})
+	// Look up including pending so we can return a clear 410 (rather than a
+	// generic 404) when the community is mid-soft-delete. The website surfaces
+	// this to the user as "this community is pending deletion".
+	community, err := c.DB.FindOneIncludingPending(ctx, bson.M{"_id": communityObjID})
 	if err != nil {
 		config.ErrorStatus("Community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if community.Details.PendingDeletionAt != nil {
+		writePendingDeletionGone(w, community)
 		return
 	}
 
@@ -1775,6 +2003,19 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Reject joins targeting a pending-deletion community before consuming an
+	// invite-code use, so a stale invite link doesn't burn a slot. The atomic
+	// invite-decrement below would otherwise charge the use and then fail at
+	// the community lookup.
+	if invitePeek, err := c.IDB.FindOne(ctx, bson.M{"code": req.InviteCode}); err == nil && invitePeek != nil {
+		if cObjID, perr := primitive.ObjectIDFromHex(invitePeek.CommunityID); perr == nil {
+			if peekComm, perr := c.DB.FindOneIncludingPending(ctx, bson.M{"_id": cObjID}); perr == nil && peekComm.Details.PendingDeletionAt != nil {
+				writePendingDeletionGone(w, peekComm)
+				return
+			}
+		}
+	}
 
 	// Step 1: Validate the invite code with conditional decrement and increment uses
 	var invite models.InviteCode
