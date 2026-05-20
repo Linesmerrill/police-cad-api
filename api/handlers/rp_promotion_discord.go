@@ -1,0 +1,220 @@
+package handlers
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/linesmerrill/police-cad-api/models"
+)
+
+// RP server promotion → Discord webhook.
+//
+// Posts a structured recruitment embed to the shared rp-servers channel.
+// Reads DISCORD_RP_SERVERS_WEBHOOK_URL from the environment; callers must
+// treat an empty URL as "not configured" and refuse the request so a user
+// never sees a silent success.
+//
+// Unlike the best-effort cron alerts, this POST is synchronous: we append
+// ?wait=true so Discord returns the created message, letting us capture the
+// message ID for a future in-place edit.
+
+const (
+	rpPromoHTTPDeadline = 10 * time.Second
+
+	// Discord embed colors. Boosted communities get the gold accent; free
+	// communities get the standard LPC cyan.
+	rpPromoColorBoosted = 0xfbbf24
+	rpPromoColorFree    = 0x38bdf8
+
+	// Discord structural limits we defensively truncate against.
+	rpPromoMaxTitle  = 256
+	rpPromoMaxDesc   = 4096
+	rpPromoMaxField  = 1024
+	rpPromoMaxFooter = 2048
+)
+
+type rpDiscordEmbedImage struct {
+	URL string `json:"url"`
+}
+
+type rpDiscordEmbedFooter struct {
+	Text string `json:"text"`
+}
+
+type rpDiscordEmbedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type rpDiscordEmbed struct {
+	Title       string                `json:"title,omitempty"`
+	URL         string                `json:"url,omitempty"`
+	Description string                `json:"description,omitempty"`
+	Color       int                   `json:"color,omitempty"`
+	Timestamp   string                `json:"timestamp,omitempty"`
+	Fields      []rpDiscordEmbedField `json:"fields,omitempty"`
+	Image       *rpDiscordEmbedImage  `json:"image,omitempty"`
+	Footer      *rpDiscordEmbedFooter `json:"footer,omitempty"`
+}
+
+type rpDiscordWebhookPayload struct {
+	Content string           `json:"content,omitempty"`
+	Embeds  []rpDiscordEmbed `json:"embeds"`
+}
+
+// rpDiscordWebhookResponse is the slice of the message object we care about.
+type rpDiscordWebhookResponse struct {
+	ID string `json:"id"`
+}
+
+func rpTrunc(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// buildRpPromotionEmbeds renders the structured promotion data into one
+// content embed plus, for boosted communities, up to two extra image-only
+// embeds. The extra embeds share the content embed's URL so Discord groups
+// them into a single image gallery under the post.
+func buildRpPromotionEmbeds(data models.RpPromotionData, boosted bool) []rpDiscordEmbed {
+	color := rpPromoColorFree
+	if boosted {
+		color = rpPromoColorBoosted
+	}
+
+	fields := make([]rpDiscordEmbedField, 0, 5)
+	if len(data.Consoles) > 0 {
+		fields = append(fields, rpDiscordEmbedField{
+			Name:   "🎮 Platform",
+			Value:  rpTrunc(strings.Join(data.Consoles, " · "), rpPromoMaxField),
+			Inline: true,
+		})
+	}
+	if strings.TrimSpace(data.Game) != "" {
+		fields = append(fields, rpDiscordEmbedField{
+			Name:   "🕹️ Game",
+			Value:  rpTrunc(data.Game, rpPromoMaxField),
+			Inline: true,
+		})
+	}
+	if len(data.Departments) > 0 {
+		fields = append(fields, rpDiscordEmbedField{
+			Name:   "🚓 Departments",
+			Value:  rpTrunc("• "+strings.Join(data.Departments, "\n• "), rpPromoMaxField),
+			Inline: false,
+		})
+	}
+	if len(data.Features) > 0 {
+		fields = append(fields, rpDiscordEmbedField{
+			Name:   "🌟 What We Offer",
+			Value:  rpTrunc("• "+strings.Join(data.Features, "\n• "), rpPromoMaxField),
+			Inline: false,
+		})
+	}
+	if strings.TrimSpace(data.Requirements) != "" {
+		fields = append(fields, rpDiscordEmbedField{
+			Name:   "📋 Requirements",
+			Value:  rpTrunc(data.Requirements, rpPromoMaxField),
+			Inline: false,
+		})
+	}
+	fields = append(fields, rpDiscordEmbedField{
+		Name:  "💬 Join",
+		Value: data.InviteURL,
+	})
+
+	footerText := "Posted via Lines Police CAD"
+	if boosted {
+		footerText = "⭐ Boosted community · Posted via Lines Police CAD"
+	}
+
+	content := rpDiscordEmbed{
+		Title:       rpTrunc(data.ServerName, rpPromoMaxTitle),
+		URL:         data.InviteURL,
+		Description: rpTrunc(data.Description, rpPromoMaxDesc),
+		Color:       color,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Fields:      fields,
+		Footer:      &rpDiscordEmbedFooter{Text: rpTrunc(footerText, rpPromoMaxFooter)},
+	}
+
+	// Primary image: boosted banner wins, else the first uploaded image.
+	if boosted && strings.TrimSpace(data.BannerImage) != "" {
+		content.Image = &rpDiscordEmbedImage{URL: data.BannerImage}
+	} else if len(data.Images) > 0 {
+		content.Image = &rpDiscordEmbedImage{URL: data.Images[0]}
+	}
+
+	embeds := []rpDiscordEmbed{content}
+
+	// Boosted communities get a small image gallery from any remaining images.
+	// Discord caps a message at 10 embeds; we add at most 2 extras.
+	if boosted && data.InviteURL != "" {
+		start := 0
+		if content.Image != nil && (data.BannerImage == "" || strings.TrimSpace(data.BannerImage) == "") {
+			start = 1 // images[0] already used as the content image
+		}
+		extras := 0
+		for i := start; i < len(data.Images) && extras < 2; i++ {
+			if strings.TrimSpace(data.Images[i]) == "" {
+				continue
+			}
+			embeds = append(embeds, rpDiscordEmbed{
+				URL:   data.InviteURL,
+				Image: &rpDiscordEmbedImage{URL: data.Images[i]},
+			})
+			extras++
+		}
+	}
+
+	return embeds
+}
+
+// sendRpPromotionWebhook posts the promotion embeds to Discord and returns the
+// created message ID. webhookURL must be non-empty (the handler checks first).
+func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, boosted bool) (string, error) {
+	payload := rpDiscordWebhookPayload{Embeds: buildRpPromotionEmbeds(data, boosted)}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal webhook payload: %w", err)
+	}
+
+	// ?wait=true makes Discord return the created message so we can keep its ID.
+	url := webhookURL
+	if strings.Contains(url, "?") {
+		url += "&wait=true"
+	} else {
+		url += "?wait=true"
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build webhook request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: rpPromoHTTPDeadline}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("post to discord: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("discord returned status %d", resp.StatusCode)
+	}
+
+	var parsed rpDiscordWebhookResponse
+	// The message ID is a nice-to-have for future edits — a decode failure
+	// should not fail the user's post, since the message did go through.
+	_ = json.NewDecoder(resp.Body).Decode(&parsed)
+	return parsed.ID, nil
+}
