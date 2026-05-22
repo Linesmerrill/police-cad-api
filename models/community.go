@@ -19,56 +19,60 @@ type Community struct {
 
 // CommunityDetails holds the structure for the inner community collection in mongo
 type CommunityDetails struct {
-	Name                   string                  `json:"name" bson:"name"`
-	OwnerID                string                  `json:"ownerID" bson:"ownerID"`
-	Code                   string                  `json:"code" bson:"code"`
-	ActivePanics           map[string]interface{}  `json:"activePanics" bson:"activePanics"`
-	ActiveSignal100        bool                    `json:"activeSignal100" bson:"activeSignal100"`
-	Signal100              Signal100Data           `json:"signal100" bson:"signal100"`
-	ImageLink              string                  `json:"imageLink" bson:"imageLink"`
-	MapLink                string                  `json:"mapLink" bson:"mapLink"`
-	Visibility             string                  `json:"visibility" bson:"visibility"`
-	PromotionalText        string                  `json:"promotionalText" bson:"promotionalText"`
-	PromotionalDescription string                  `json:"promotionalDescription" bson:"promotionalDescription"`
-	InviteCodeIds          []string                `json:"inviteCodeIds" bson:"inviteCodeIds"`
-	Tags                   []string                `json:"tags" bson:"tags"`
-	Roles                  []Role                  `json:"roles" bson:"roles"`
-	BanList                []string                `json:"banList" bson:"banList"`
-	Description            string                  `json:"description" bson:"description"`
-	Members                map[string]MemberDetail `json:"members" bson:"members"`
-	MembersCount           int                     `json:"membersCount" bson:"membersCount"`
-	Events                 []Event                 `json:"events" bson:"events"`
-	Departments            []Department            `json:"departments" bson:"departments"`
-	TenCodes               []TenCodes              `json:"tenCodes" bson:"tenCodes"`
-	Fines                  CommunityFine           `json:"fines" bson:"fines"`
-	PenalCodes             CommunityPenalCode      `json:"penalCodes" bson:"penalCodes"`
-	Templates              []Template              `json:"templates" bson:"templates"`
-	Subscription           Subscription            `json:"subscription" bson:"subscription"`
-	SubscriptionCreatedBy  string                  `json:"subscriptionCreatedBy" bson:"subscriptionCreatedBy"`
-	Analytics              CommunityAnalytics      `json:"analytics" bson:"analytics"`
-	ActivityLevel          string                  `json:"activityLevel" bson:"activityLevel"`
-	CivilianCreationLimitsEnabled bool             `json:"civilianCreationLimitsEnabled" bson:"civilianCreationLimitsEnabled"`
-	CivilianCreationLimit  int                     `json:"civilianCreationLimit" bson:"civilianCreationLimit"`
-	VehicleCreationLimitsEnabled bool              `json:"vehicleCreationLimitsEnabled" bson:"vehicleCreationLimitsEnabled"`
-	VehicleCreationLimit  int                      `json:"vehicleCreationLimit" bson:"vehicleCreationLimit"`
-	FirearmCreationLimitsEnabled bool              `json:"firearmCreationLimitsEnabled" bson:"firearmCreationLimitsEnabled"`
-	FirearmCreationLimit  int                      `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
-	CivilianApprovalSystemEnabled bool             `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
-	ActivePanicAlerts       []PanicAlert          `json:"activePanicAlerts" bson:"activePanicAlerts"`
-	CustomToneGroups        []CustomToneGroup     `json:"customToneGroups" bson:"customToneGroups"`
-	CustomToneSounds        []CustomToneSound     `json:"customToneSounds" bson:"customToneSounds"`
-	DefaultToneLeo          string                `json:"defaultToneLeo,omitempty" bson:"defaultToneLeo,omitempty"`
-	DefaultToneFd           string                `json:"defaultToneFd,omitempty" bson:"defaultToneFd,omitempty"`
-	DefaultToneEms          string                `json:"defaultToneEms,omitempty" bson:"defaultToneEms,omitempty"`
-	DefaultPanicSound       string                `json:"defaultPanicSound,omitempty" bson:"defaultPanicSound,omitempty"`
-	DefaultSignal100Sound   string                `json:"defaultSignal100Sound,omitempty" bson:"defaultSignal100Sound,omitempty"`
-	WarrantApprovalMode        string              `json:"warrantApprovalMode" bson:"warrantApprovalMode"`               // "auto-approve", "random", "require-judge"
-	WarrantRandomApprovalRate  int                 `json:"warrantRandomApprovalRate" bson:"warrantRandomApprovalRate"`   // 0-100 percentage, default 70
-	MostWantedEnabled       bool                   `json:"mostWantedEnabled" bson:"mostWantedEnabled"`
-	MostWantedSidebarName   string                 `json:"mostWantedSidebarName" bson:"mostWantedSidebarName"`
-	MostWantedVisibleFields []string               `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
-	MostWantedCustomFields  []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
-	Economy                EconomySettings         `json:"economy" bson:"economy"`
+	Name                          string                  `json:"name" bson:"name"`
+	OwnerID                       string                  `json:"ownerID" bson:"ownerID"`
+	Code                          string                  `json:"code" bson:"code"`
+	ActivePanics                  map[string]interface{}  `json:"activePanics" bson:"activePanics"`
+	ActiveSignal100               bool                    `json:"activeSignal100" bson:"activeSignal100"`
+	Signal100                     Signal100Data           `json:"signal100" bson:"signal100"`
+	ImageLink                     string                  `json:"imageLink" bson:"imageLink"`
+	MapLink                       string                  `json:"mapLink" bson:"mapLink"`
+	Visibility                    string                  `json:"visibility" bson:"visibility"`
+	PromotionalText               string                  `json:"promotionalText" bson:"promotionalText"`
+	PromotionalDescription        string                  `json:"promotionalDescription" bson:"promotionalDescription"`
+	InviteCodeIds                 []string                `json:"inviteCodeIds" bson:"inviteCodeIds"`
+	Tags                          []string                `json:"tags" bson:"tags"`
+	Roles                         []Role                  `json:"roles" bson:"roles"`
+	BanList                       []string                `json:"banList" bson:"banList"`
+	Description                   string                  `json:"description" bson:"description"`
+	Members                       map[string]MemberDetail `json:"members" bson:"members"`
+	MembersCount                  int                     `json:"membersCount" bson:"membersCount"`
+	Events                        []Event                 `json:"events" bson:"events"`
+	Departments                   []Department            `json:"departments" bson:"departments"`
+	TenCodes                      []TenCodes              `json:"tenCodes" bson:"tenCodes"`
+	Fines                         CommunityFine           `json:"fines" bson:"fines"`
+	PenalCodes                    CommunityPenalCode      `json:"penalCodes" bson:"penalCodes"`
+	Templates                     []Template              `json:"templates" bson:"templates"`
+	Subscription                  Subscription            `json:"subscription" bson:"subscription"`
+	SubscriptionCreatedBy         string                  `json:"subscriptionCreatedBy" bson:"subscriptionCreatedBy"`
+	Analytics                     CommunityAnalytics      `json:"analytics" bson:"analytics"`
+	ActivityLevel                 string                  `json:"activityLevel" bson:"activityLevel"`
+	CivilianCreationLimitsEnabled bool                    `json:"civilianCreationLimitsEnabled" bson:"civilianCreationLimitsEnabled"`
+	CivilianCreationLimit         int                     `json:"civilianCreationLimit" bson:"civilianCreationLimit"`
+	VehicleCreationLimitsEnabled  bool                    `json:"vehicleCreationLimitsEnabled" bson:"vehicleCreationLimitsEnabled"`
+	VehicleCreationLimit          int                     `json:"vehicleCreationLimit" bson:"vehicleCreationLimit"`
+	FirearmCreationLimitsEnabled  bool                    `json:"firearmCreationLimitsEnabled" bson:"firearmCreationLimitsEnabled"`
+	FirearmCreationLimit          int                     `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
+	CivilianApprovalSystemEnabled bool                    `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
+	ActivePanicAlerts             []PanicAlert            `json:"activePanicAlerts" bson:"activePanicAlerts"`
+	CustomToneGroups              []CustomToneGroup       `json:"customToneGroups" bson:"customToneGroups"`
+	CustomToneSounds              []CustomToneSound       `json:"customToneSounds" bson:"customToneSounds"`
+	DefaultToneLeo                string                  `json:"defaultToneLeo,omitempty" bson:"defaultToneLeo,omitempty"`
+	DefaultToneFd                 string                  `json:"defaultToneFd,omitempty" bson:"defaultToneFd,omitempty"`
+	DefaultToneEms                string                  `json:"defaultToneEms,omitempty" bson:"defaultToneEms,omitempty"`
+	DefaultPanicSound             string                  `json:"defaultPanicSound,omitempty" bson:"defaultPanicSound,omitempty"`
+	DefaultSignal100Sound         string                  `json:"defaultSignal100Sound,omitempty" bson:"defaultSignal100Sound,omitempty"`
+	WarrantApprovalMode           string                  `json:"warrantApprovalMode" bson:"warrantApprovalMode"`             // "auto-approve", "random", "require-judge"
+	WarrantRandomApprovalRate     int                     `json:"warrantRandomApprovalRate" bson:"warrantRandomApprovalRate"` // 0-100 percentage, default 70
+	MostWantedEnabled             bool                    `json:"mostWantedEnabled" bson:"mostWantedEnabled"`
+	MostWantedSidebarName         string                  `json:"mostWantedSidebarName" bson:"mostWantedSidebarName"`
+	MostWantedVisibleFields       []string                `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
+	MostWantedCustomFields        []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
+	Economy                       EconomySettings         `json:"economy" bson:"economy"`
+	// RpPromotion holds the community's last "RP server promotion" Discord post
+	// and the timestamp used to enforce the once-per-cooldown posting gate.
+	// Pointer so legacy communities that never promoted serialize it as absent.
+	RpPromotion *RpPromotion `json:"rpPromotion,omitempty" bson:"rpPromotion,omitempty"`
 	// Soft-delete fields. When PendingDeletionAt is set, the community is hidden
 	// from all customer-facing surfaces and the scheduler hard-deletes it once
 	// ScheduledDeletionAt elapses. The community owner cannot self-restore;
@@ -77,8 +81,47 @@ type CommunityDetails struct {
 	ScheduledDeletionAt       *primitive.DateTime `json:"scheduledDeletionAt,omitempty" bson:"scheduledDeletionAt,omitempty"`
 	PendingDeletionNotifiedAt *primitive.DateTime `json:"pendingDeletionNotifiedAt,omitempty" bson:"pendingDeletionNotifiedAt,omitempty"`
 	DeletionRequestedBy       string              `json:"deletionRequestedBy,omitempty" bson:"deletionRequestedBy,omitempty"`
-	CreatedAt              primitive.DateTime      `json:"createdAt" bson:"createdAt"`
-	UpdatedAt              primitive.DateTime      `json:"updatedAt" bson:"updatedAt"`
+	CreatedAt                 primitive.DateTime  `json:"createdAt" bson:"createdAt"`
+	UpdatedAt                 primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
+}
+
+// RpPromotion tracks a community's recruitment/promotion posts to the shared
+// Discord rp-servers channel. LastPostedAt drives the posting cooldown;
+// History keeps the most recent posts so an admin can review, reuse as a
+// template, and (in a future iteration) edit a still-live message.
+type RpPromotion struct {
+	LastPostedAt *primitive.DateTime `json:"lastPostedAt,omitempty" bson:"lastPostedAt,omitempty"`
+	History      []RpPromotionPost   `json:"history,omitempty" bson:"history,omitempty"`
+}
+
+// RpPromotionPost is a single posted promotion, retained in RpPromotion.History.
+// MessageID is the Discord message ID captured from the webhook response — it
+// is what a future "edit your live post" feature will PATCH.
+type RpPromotionPost struct {
+	ID           string             `json:"id" bson:"id"` // ObjectID hex, stable handle for the post
+	PostedAt     primitive.DateTime `json:"postedAt" bson:"postedAt"`
+	PostedBy     string             `json:"postedBy" bson:"postedBy"`                                   // user ID of the posting admin
+	PostedByName string             `json:"postedByName,omitempty" bson:"postedByName,omitempty"`       // username captured at post time, for the history audit trail
+	Tier         string             `json:"tier" bson:"tier"`                                           // boost tier key at post time
+	MessageID string             `json:"messageId,omitempty" bson:"messageId,omitempty"` // Discord message ID
+	ChannelID string             `json:"channelId,omitempty" bson:"channelId,omitempty"` // Discord channel ID, for building a jump link
+	Data      RpPromotionData    `json:"data" bson:"data"`
+}
+
+// RpPromotionData is the structured content of an RP server promotion post.
+// It is what the website form collects, what the Discord embed is built from,
+// and what gets echoed back so the form can be pre-filled on the next visit.
+type RpPromotionData struct {
+	ServerName   string   `json:"serverName" bson:"serverName"`
+	Consoles     []string `json:"consoles" bson:"consoles"` // e.g. "PS5", "Xbox", "PC"
+	Game         string   `json:"game" bson:"game"`         // e.g. "GTA RP", "Roblox RP"
+	Description  string   `json:"description" bson:"description"`
+	Departments  []string `json:"departments" bson:"departments"`
+	Features     []string `json:"features" bson:"features"`
+	Requirements string   `json:"requirements,omitempty" bson:"requirements,omitempty"`
+	InviteURL    string   `json:"inviteUrl" bson:"inviteUrl"`
+	BannerImage  string   `json:"bannerImage,omitempty" bson:"bannerImage,omitempty"` // boosted only
+	Images       []string `json:"images,omitempty" bson:"images,omitempty"`
 }
 
 // MostWantedCustomField holds the structure for a custom field on the most wanted list
@@ -210,46 +253,46 @@ type RankRequirement struct {
 
 // Rank defines a configurable LEO rank within a department
 type Rank struct {
-	ID           primitive.ObjectID `json:"_id" bson:"_id"`
-	Name         string             `json:"name" bson:"name"`                         // e.g. "Sergeant"
-	Prefix       string             `json:"prefix,omitempty" bson:"prefix,omitempty"` // e.g. "PD", "SO"
-	DisplayOrder int                `json:"displayOrder" bson:"displayOrder"`         // lower = higher rank
-	Requirements []RankRequirement  `json:"requirements" bson:"requirements"`
-	AutoPromote  bool               `json:"autoPromote" bson:"autoPromote"`
-	CanViewStats bool               `json:"canViewStats" bson:"canViewStats"` // can view department metrics
-	IsDefault    bool               `json:"isDefault" bson:"isDefault"`       // unranked members get this rank
-	PayRatePerHour int64            `json:"payRatePerHour" bson:"payRatePerHour"` // Economy: hourly pay in cents; 0 falls back to Department.BasePayPerHour
+	ID             primitive.ObjectID `json:"_id" bson:"_id"`
+	Name           string             `json:"name" bson:"name"`                         // e.g. "Sergeant"
+	Prefix         string             `json:"prefix,omitempty" bson:"prefix,omitempty"` // e.g. "PD", "SO"
+	DisplayOrder   int                `json:"displayOrder" bson:"displayOrder"`         // lower = higher rank
+	Requirements   []RankRequirement  `json:"requirements" bson:"requirements"`
+	AutoPromote    bool               `json:"autoPromote" bson:"autoPromote"`
+	CanViewStats   bool               `json:"canViewStats" bson:"canViewStats"`     // can view department metrics
+	IsDefault      bool               `json:"isDefault" bson:"isDefault"`           // unranked members get this rank
+	PayRatePerHour int64              `json:"payRatePerHour" bson:"payRatePerHour"` // Economy: hourly pay in cents; 0 falls back to Department.BasePayPerHour
 }
 
 // Department holds the structure for a department
 type Department struct {
-	ID                primitive.ObjectID `json:"_id" bson:"_id"`
-	Name              string             `json:"name" bson:"name"`
-	Description       string             `json:"description" bson:"description"`
-	Image             string             `json:"image" bson:"image"`
-	ApprovalRequired  bool               `json:"approvalRequired" bson:"approvalRequired"`
-	Members           []MemberStatus     `json:"members" bson:"members"`
-	Ranks             []Rank             `json:"ranks" bson:"ranks"`
-	Template          Template           `json:"template" bson:"template"` // Legacy embedded template (for backward compatibility)
-	TemplateRef       *TemplateReference `json:"templateRef" bson:"templateRef"` // New template reference system
-	ToneSound         string             `json:"toneSound,omitempty" bson:"toneSound,omitempty"` // "leo", "fd", "ems", or "" (uses template default)
+	ID               primitive.ObjectID `json:"_id" bson:"_id"`
+	Name             string             `json:"name" bson:"name"`
+	Description      string             `json:"description" bson:"description"`
+	Image            string             `json:"image" bson:"image"`
+	ApprovalRequired bool               `json:"approvalRequired" bson:"approvalRequired"`
+	Members          []MemberStatus     `json:"members" bson:"members"`
+	Ranks            []Rank             `json:"ranks" bson:"ranks"`
+	Template         Template           `json:"template" bson:"template"`                       // Legacy embedded template (for backward compatibility)
+	TemplateRef      *TemplateReference `json:"templateRef" bson:"templateRef"`                 // New template reference system
+	ToneSound        string             `json:"toneSound,omitempty" bson:"toneSound,omitempty"` // "leo", "fd", "ems", or "" (uses template default)
 	// RestrictCivilianRecordDeletion gates civilian-initiated deletion of records
 	// (citations, written warnings, arrest reports) issued by this department.
 	// When true, only community owner / "administrator" / "manage records" can delete.
 	// Stored as a pointer so we can distinguish "explicitly false" (allow) from
 	// "missing on a legacy department" (also treated as allow, preserves prior behavior).
 	// New departments are created with this set to true.
-	RestrictCivilianRecordDeletion *bool              `json:"restrictCivilianRecordDeletion,omitempty" bson:"restrictCivilianRecordDeletion,omitempty"`
+	RestrictCivilianRecordDeletion *bool `json:"restrictCivilianRecordDeletion,omitempty" bson:"restrictCivilianRecordDeletion,omitempty"`
 	// Economy fields
-	EconomyEnabled           bool                     `json:"economyEnabled" bson:"economyEnabled"`
-	BasePayPerHour           int64                    `json:"basePayPerHour" bson:"basePayPerHour"`                     // cents/hr, fallback if rank pay is 0
-	MaxSessionMinutes        int                      `json:"maxSessionMinutes" bson:"maxSessionMinutes"`               // default 120
-	AfkPromptIntervalSeconds int                      `json:"afkPromptIntervalSeconds" bson:"afkPromptIntervalSeconds"` // e.g. 600
-	AfkGraceSeconds          int                      `json:"afkGraceSeconds" bson:"afkGraceSeconds"`                   // e.g. 60
-	PayoutMode               string                   `json:"payoutMode" bson:"payoutMode"`                             // "on_heartbeat" | "on_clockout"
-	CreatedAt         primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt         primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
-	OnlineMemberCount int                `json:"onlineMemberCount" bson:"onlineMemberCount"`
+	EconomyEnabled           bool               `json:"economyEnabled" bson:"economyEnabled"`
+	BasePayPerHour           int64              `json:"basePayPerHour" bson:"basePayPerHour"`                     // cents/hr, fallback if rank pay is 0
+	MaxSessionMinutes        int                `json:"maxSessionMinutes" bson:"maxSessionMinutes"`               // default 120
+	AfkPromptIntervalSeconds int                `json:"afkPromptIntervalSeconds" bson:"afkPromptIntervalSeconds"` // e.g. 600
+	AfkGraceSeconds          int                `json:"afkGraceSeconds" bson:"afkGraceSeconds"`                   // e.g. 60
+	PayoutMode               string             `json:"payoutMode" bson:"payoutMode"`                             // "on_heartbeat" | "on_clockout"
+	CreatedAt                primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt                primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	OnlineMemberCount        int                `json:"onlineMemberCount" bson:"onlineMemberCount"`
 }
 
 // EconomySettings holds community-wide economy config.
@@ -258,7 +301,7 @@ type EconomySettings struct {
 	DefaultStartingBalance int64  `json:"defaultStartingBalance" bson:"defaultStartingBalance"` // cents
 	FineMode               string `json:"fineMode" bson:"fineMode"`                             // "inbox" | "auto_debit"
 	AllowNegativeBalance   bool   `json:"allowNegativeBalance" bson:"allowNegativeBalance"`
-	DefaultDueDays         int    `json:"defaultDueDays" bson:"defaultDueDays"` // days before inbox item flips delinquent
+	DefaultDueDays         int    `json:"defaultDueDays" bson:"defaultDueDays"`             // days before inbox item flips delinquent
 	ContestExtensionDays   int    `json:"contestExtensionDays" bson:"contestExtensionDays"` // days the due date is pushed when a civilian contests a fine
 }
 
@@ -374,22 +417,22 @@ type CustomToneGroup struct {
 
 // CustomToneSound represents a community-uploaded custom tone sound file.
 type CustomToneSound struct {
-	Key       string             `json:"key" bson:"key"`             // unique identifier, e.g. "custom_abc123"
-	Name      string             `json:"name" bson:"name"`           // display name, e.g. "Station 5 Fire Tone"
-	URL       string             `json:"url" bson:"url"`             // Cloudinary URL
+	Key       string             `json:"key" bson:"key"`   // unique identifier, e.g. "custom_abc123"
+	Name      string             `json:"name" bson:"name"` // display name, e.g. "Station 5 Fire Tone"
+	URL       string             `json:"url" bson:"url"`   // Cloudinary URL
 	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
 }
 
 // PanicAlert holds the structure for a panic alert
 type PanicAlert struct {
-	AlertID       string             `json:"alertId" bson:"alertId"`
-	UserID        string             `json:"userId" bson:"userId"`
-	Username      string             `json:"username" bson:"username"`
-	CallSign      string             `json:"callSign" bson:"callSign"`
-	DepartmentType string            `json:"departmentType" bson:"departmentType"`
-	CommunityID   string             `json:"communityId" bson:"communityId"`
-	TriggeredAt   primitive.DateTime `json:"triggeredAt" bson:"triggeredAt"`
-	Status        string             `json:"status" bson:"status"` // "active", "cleared"
-	ClearedBy     *string            `json:"clearedBy" bson:"clearedBy"`
-	ClearedAt     *primitive.DateTime `json:"clearedAt" bson:"clearedAt"`
+	AlertID        string              `json:"alertId" bson:"alertId"`
+	UserID         string              `json:"userId" bson:"userId"`
+	Username       string              `json:"username" bson:"username"`
+	CallSign       string              `json:"callSign" bson:"callSign"`
+	DepartmentType string              `json:"departmentType" bson:"departmentType"`
+	CommunityID    string              `json:"communityId" bson:"communityId"`
+	TriggeredAt    primitive.DateTime  `json:"triggeredAt" bson:"triggeredAt"`
+	Status         string              `json:"status" bson:"status"` // "active", "cleared"
+	ClearedBy      *string             `json:"clearedBy" bson:"clearedBy"`
+	ClearedAt      *primitive.DateTime `json:"clearedAt" bson:"clearedAt"`
 }

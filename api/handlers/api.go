@@ -322,6 +322,8 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/community/{communityId}/vehicles", api.Middleware(http.HandlerFunc(c.GetCommunityVehiclesHandlerV2))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/firearms", api.Middleware(http.HandlerFunc(c.GetCommunityFirearmsHandlerV2))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/audit-logs", api.Middleware(http.HandlerFunc(c.GetCommunityAuditLogsHandler))).Methods("GET")
+	apiV2.Handle("/community/{communityId}/rp-promotion", api.Middleware(http.HandlerFunc(c.GetRpPromotionHandler))).Methods("GET")
+	apiV2.Handle("/community/{communityId}/rp-promotion", api.Middleware(http.HandlerFunc(c.PostRpPromotionHandler))).Methods("POST")
 	apiCreate.Handle("/invite-code/{inviteCodeId}", api.Middleware(http.HandlerFunc(c.DeleteInviteCodeHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/invite-codes/expired", api.Middleware(http.HandlerFunc(c.DeleteExpiredInviteCodesHandler))).Methods("DELETE")
 	apiV2.Handle("/community/{communityId}/my-departments", api.Middleware(http.HandlerFunc(c.GetUserMemberDepartmentsHandler))).Methods("GET")
