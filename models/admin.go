@@ -270,13 +270,17 @@ type AdminPasswordReset struct {
 
 // Admin response models
 type AdminUserResult struct {
-	ID             string      `json:"id"`
-	Email          string      `json:"email"`
-	Username       string      `json:"username,omitempty"`
-	ProfilePicture string      `json:"profilePicture,omitempty"`
-	IsDeactivated  bool        `json:"isDeactivated"`
-	CreatedAt      interface{} `json:"createdAt"`
-	LastLoginAt    interface{} `json:"lastLoginAt,omitempty"`
+	ID                   string      `json:"id"`
+	Email                string      `json:"email"`
+	Username             string      `json:"username,omitempty"`
+	ProfilePicture       string      `json:"profilePicture,omitempty"`
+	IsDeactivated        bool        `json:"isDeactivated"`
+	CreatedAt            interface{} `json:"createdAt"`
+	LastLoginAt          interface{} `json:"lastLoginAt,omitempty"`
+	DeactivatedAt        interface{} `json:"deactivatedAt,omitempty"`
+	DeactivationReason   string      `json:"deactivationReason,omitempty"`
+	DeactivatedByAdminID string      `json:"deactivatedByAdminId,omitempty"`
+	DeactivatedByAdmin   string      `json:"deactivatedByAdmin,omitempty"` // resolved admin email for display
 }
 
 type AdminCommunityResult struct {
@@ -309,6 +313,10 @@ type AdminUserDetails struct {
 	CommunitiesCount     int                  `json:"communitiesCount"`
 	ResetPasswordToken   string               `json:"resetPasswordToken,omitempty"`
 	ResetPasswordExpires interface{}          `json:"resetPasswordExpires,omitempty"`
+	DeactivatedAt        interface{}          `json:"deactivatedAt,omitempty"`
+	DeactivationReason   string               `json:"deactivationReason,omitempty"`
+	DeactivatedByAdminID string               `json:"deactivatedByAdminId,omitempty"`
+	DeactivatedByAdmin   string               `json:"deactivatedByAdmin,omitempty"`
 }
 
 type AdminUserCommunity struct {
