@@ -236,6 +236,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/subscription/users/{user_id}/sync", http.HandlerFunc(adminHandler.AdminSubscriptionUserSyncHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
+	apiCreate.Handle("/admin/users/{id}/deactivate", http.HandlerFunc(adminHandler.AdminUserDeactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/verify-email", http.HandlerFunc(adminHandler.AdminVerifyEmailHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}", http.HandlerFunc(adminHandler.AdminUserDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users", http.HandlerFunc(adminHandler.CreateAdminUserHandler)).Methods("POST")
@@ -762,6 +763,7 @@ func (a *App) New() *mux.Router {
 		VDB:     databases.NewFeatureRequestVoteDatabase(a.dbHelper),
 		UDB:     databases.NewUserDatabase(a.dbHelper),
 		AdminDB: databases.NewAdminDatabase(a.dbHelper),
+		AADB:    databases.NewAdminActivityDatabase(a.dbHelper),
 	}
 
 	// Public feature request routes (no auth required)

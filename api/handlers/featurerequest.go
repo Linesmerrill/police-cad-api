@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -28,6 +29,7 @@ type FeatureRequestHandler struct {
 	VDB     databases.FeatureRequestVoteDatabase
 	UDB     databases.UserDatabase
 	AdminDB databases.AdminDatabase
+	AADB    databases.AdminActivityDatabase
 }
 
 // ListFeatureRequestsHandler returns paginated feature requests with filtering, sorting, and search
@@ -665,12 +667,23 @@ func (h FeatureRequestHandler) DeleteFeatureRequestHandler(w http.ResponseWriter
 		return
 	}
 
-	// Check ownership or admin
-	if fr.Author.Hex() != userID {
-		isAdmin := h.checkIsAdmin(ctx, userID)
+	// Admin deletes require a reason so moderation actions can be audited later.
+	// Author-self-delete is unchanged.
+	isAuthor := fr.Author.Hex() == userID
+	isAdmin := false
+	reason := strings.TrimSpace(r.URL.Query().Get("reason"))
+	if !isAuthor {
+		isAdmin = h.checkIsAdmin(ctx, userID)
 		if !isAdmin {
 			config.ErrorStatus("Unauthorized to delete this feature request", http.StatusForbidden, w, fmt.Errorf("only the author or admin can delete"))
 			return
+		}
+		if len(reason) < 3 {
+			config.ErrorStatus("A reason is required when an admin deletes another user's feature request", http.StatusBadRequest, w, fmt.Errorf("reason missing or too short"))
+			return
+		}
+		if len(reason) > 1000 {
+			reason = reason[:1000]
 		}
 	}
 
@@ -684,12 +697,64 @@ func (h FeatureRequestHandler) DeleteFeatureRequestHandler(w http.ResponseWriter
 	// Also delete all associated votes
 	h.VDB.DeleteOne(ctx, bson.M{"featureRequestId": frID})
 
+	// Write an audit record for the moderation action so we can review later
+	// who deleted what and why.
+	if isAdmin {
+		h.writeFRDeletionAudit(ctx, r, userID, fr, reason)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Feature request deleted successfully",
 	})
+}
+
+// writeFRDeletionAudit records an admin-initiated feature-request deletion in
+// the admin activity log. Resolves the acting admin via the LPC user's email
+// (admin.email or admin.linkedUserEmail) so the audit row attributes back to
+// the right operator.
+func (h FeatureRequestHandler) writeFRDeletionAudit(ctx context.Context, r *http.Request, userID string, fr *models.FeatureRequest, reason string) {
+	if h.AADB == nil {
+		return
+	}
+
+	var adminID string
+	if uoid, err := primitive.ObjectIDFromHex(userID); err == nil {
+		var userDoc struct {
+			Details models.UserDetails `bson:"user"`
+		}
+		if err := h.UDB.FindOne(ctx, bson.M{"_id": uoid}).Decode(&userDoc); err == nil && userDoc.Details.Email != "" {
+			if admin, aerr := h.AdminDB.FindOne(ctx, bson.M{
+				"$or":    []bson.M{{"email": userDoc.Details.Email}, {"linkedUserEmail": userDoc.Details.Email}},
+				"active": true,
+			}); aerr == nil && admin != nil {
+				adminID = admin.ID.Hex()
+			}
+		}
+	}
+
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	_, err := h.AADB.InsertOne(ctx, models.AdminActivityStorage{
+		AdminID:   adminID,
+		Type:      "feature_request_deleted",
+		Title:     "Feature request deleted",
+		Details:   fmt.Sprintf("Deleted feature request %q (id=%s, author=%s) — reason: %s", fr.Title, fr.ID.Hex(), fr.Author.Hex(), reason),
+		Timestamp: time.Now(),
+		IP:        ip,
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		log.Printf("Failed to log feature_request_deleted action: %v", err)
+	}
 }
 
 // ToggleVoteHandler toggles an upvote on a feature request
