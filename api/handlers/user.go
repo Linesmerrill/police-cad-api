@@ -3280,20 +3280,20 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 	base := SubscriptionTier{
 		Name: "Base", Key: "base",
 		MonthlyPrice: 3, AnnualPrice: 32,
-		Features: []string{"5 communities", "Default departments", "Full ads"},
+		Features: []string{"Create up to 5 communities", "Default departments", "Full ads"},
 		Color:    "#3b82f6",
 	}
 	premium := SubscriptionTier{
 		Name: "Premium", Key: "premium",
 		MonthlyPrice: 8, AnnualPrice: 85,
-		Features: []string{"10 communities", "Verified badge", "50% fewer ads"},
+		Features: []string{"Create up to 10 communities", "Verified badge", "50% fewer ads"},
 		Color:    "#667eea",
 		Popular:  true,
 	}
 	premiumPlus := SubscriptionTier{
 		Name: "Premium Plus", Key: "premium_plus",
 		MonthlyPrice: 19.99, AnnualPrice: 209,
-		Features: []string{"Unlimited communities", "No ads", "Verified badge"},
+		Features: []string{"Create unlimited communities", "No ads", "Verified badge"},
 		Color:    "#fbbf24",
 	}
 
@@ -3317,7 +3317,7 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 			Key:          "free",
 			MonthlyPrice: 0,
 			AnnualPrice:  0,
-			Features:     []string{"1 community", "Default departments", "Full ads"},
+			Features:     []string{"Create 1 community", "Default departments", "Full ads"},
 			Color:        "#718096",
 		},
 		base,
