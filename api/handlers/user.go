@@ -3269,8 +3269,48 @@ type CommunityTier struct {
 	Popular      bool     `json:"popular,omitempty"`
 }
 
-// GetSubscriptionTiersHandler returns the available subscription tiers (public endpoint)
+// GetSubscriptionTiersHandler returns the available subscription tiers (public endpoint).
+// When KICKBACK_PRICE_DROP_LIVE=true the response uses the post-drop V2 prices
+// and sets OnSale=true with the old prices in OriginalMonthlyPrice / OriginalAnnualPrice
+// so clients render the SALE badge + strikethrough. Default off — JSON output
+// is byte-identical to today.
 func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request) {
+	priceDropLive, _ := strconv.ParseBool(os.Getenv("KICKBACK_PRICE_DROP_LIVE"))
+
+	base := SubscriptionTier{
+		Name: "Base", Key: "base",
+		MonthlyPrice: 3, AnnualPrice: 32,
+		Features: []string{"5 communities", "Default departments", "Full ads"},
+		Color:    "#3b82f6",
+	}
+	premium := SubscriptionTier{
+		Name: "Premium", Key: "premium",
+		MonthlyPrice: 8, AnnualPrice: 85,
+		Features: []string{"10 communities", "Verified badge", "50% fewer ads"},
+		Color:    "#667eea",
+		Popular:  true,
+	}
+	premiumPlus := SubscriptionTier{
+		Name: "Premium Plus", Key: "premium_plus",
+		MonthlyPrice: 19.99, AnnualPrice: 209,
+		Features: []string{"Unlimited communities", "No ads", "Verified badge"},
+		Color:    "#fbbf24",
+	}
+
+	if priceDropLive {
+		base.OriginalMonthlyPrice, base.OriginalAnnualPrice = base.MonthlyPrice, base.AnnualPrice
+		base.MonthlyPrice, base.AnnualPrice = 2, 20
+		base.OnSale = true
+
+		premium.OriginalMonthlyPrice, premium.OriginalAnnualPrice = premium.MonthlyPrice, premium.AnnualPrice
+		premium.MonthlyPrice, premium.AnnualPrice = 5, 50
+		premium.OnSale = true
+
+		premiumPlus.OriginalMonthlyPrice, premiumPlus.OriginalAnnualPrice = premiumPlus.MonthlyPrice, premiumPlus.AnnualPrice
+		premiumPlus.MonthlyPrice, premiumPlus.AnnualPrice = 9.99, 99
+		premiumPlus.OnSale = true
+	}
+
 	tiers := []SubscriptionTier{
 		{
 			Name:         "Free",
@@ -3280,31 +3320,9 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 			Features:     []string{"1 community", "Default departments", "Full ads"},
 			Color:        "#718096",
 		},
-		{
-			Name:         "Base",
-			Key:          "base",
-			MonthlyPrice: 3,
-			AnnualPrice:  32,
-			Features:     []string{"5 communities", "Default departments", "Full ads"},
-			Color:        "#3b82f6",
-		},
-		{
-			Name:         "Premium",
-			Key:          "premium",
-			MonthlyPrice: 8,
-			AnnualPrice:  85,
-			Features:     []string{"10 communities", "Verified badge", "50% fewer ads"},
-			Color:        "#667eea",
-			Popular:      true,
-		},
-		{
-			Name:         "Premium Plus",
-			Key:          "premium_plus",
-			MonthlyPrice: 19.99,
-			AnnualPrice:  209,
-			Features:     []string{"Unlimited communities", "No ads", "Verified badge"},
-			Color:        "#fbbf24",
-		},
+		base,
+		premium,
+		premiumPlus,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
