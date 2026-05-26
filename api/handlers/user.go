@@ -3048,6 +3048,16 @@ type CheckoutRequest struct {
 	BillingInterval string `json:"billingInterval"`
 }
 
+// userTierPriceID returns the V2 (post-price-drop) Stripe price ID for a user
+// tier if it is set, otherwise falls back to the V1 (original) price ID. The
+// fallback lets us deploy this code before V2 prices exist in Stripe.
+func userTierPriceID(v2Env, v1Env string) string {
+	if id := os.Getenv(v2Env); id != "" {
+		return id
+	}
+	return os.Getenv(v1Env)
+}
+
 func createCheckoutSession(c *CheckoutRequest) (*stripe.CheckoutSession, error) {
 	var priceID string
 	tier := strings.ToLower(c.Tier)
@@ -3061,21 +3071,21 @@ func createCheckoutSession(c *CheckoutRequest) (*stripe.CheckoutSession, error) 
 	switch tier {
 	case "base":
 		if billingInterval == "monthly" {
-			priceID = os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID")
+			priceID = userTierPriceID("STRIPE_BASE_V2_MONTHLY_PRICE_ID", "STRIPE_BASE_MONTHLY_PRICE_ID")
 		} else {
-			priceID = os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID")
+			priceID = userTierPriceID("STRIPE_BASE_V2_ANNUAL_PRICE_ID", "STRIPE_BASE_ANNUAL_PRICE_ID")
 		}
 	case "premium":
 		if billingInterval == "monthly" {
-			priceID = os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID")
+			priceID = userTierPriceID("STRIPE_PREMIUM_V2_MONTHLY_PRICE_ID", "STRIPE_PREMIUM_MONTHLY_PRICE_ID")
 		} else {
-			priceID = os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID")
+			priceID = userTierPriceID("STRIPE_PREMIUM_V2_ANNUAL_PRICE_ID", "STRIPE_PREMIUM_ANNUAL_PRICE_ID")
 		}
 	case "premium_plus":
 		if billingInterval == "monthly" {
-			priceID = os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID")
+			priceID = userTierPriceID("STRIPE_PREMIUM_PLUS_V2_MONTHLY_PRICE_ID", "STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID")
 		} else {
-			priceID = os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID")
+			priceID = userTierPriceID("STRIPE_PREMIUM_PLUS_V2_ANNUAL_PRICE_ID", "STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID")
 		}
 	case "promotion_basic":
 		if billingInterval == "monthly" {
@@ -3237,13 +3247,16 @@ func (u User) VerifySubscriptionHandler(w http.ResponseWriter, r *http.Request) 
 
 // SubscriptionTier represents a subscription tier for the pricing page
 type SubscriptionTier struct {
-	Name         string   `json:"name"`
-	Key          string   `json:"key"`
-	MonthlyPrice float64  `json:"monthlyPrice"`
-	AnnualPrice  float64  `json:"annualPrice"`
-	Features     []string `json:"features"`
-	Color        string   `json:"color"`
-	Popular      bool     `json:"popular,omitempty"`
+	Name                 string   `json:"name"`
+	Key                  string   `json:"key"`
+	MonthlyPrice         float64  `json:"monthlyPrice"`
+	AnnualPrice          float64  `json:"annualPrice"`
+	OriginalMonthlyPrice float64  `json:"originalMonthlyPrice,omitempty"`
+	OriginalAnnualPrice  float64  `json:"originalAnnualPrice,omitempty"`
+	OnSale               bool     `json:"onSale,omitempty"`
+	Features             []string `json:"features"`
+	Color                string   `json:"color"`
+	Popular              bool     `json:"popular,omitempty"`
 }
 
 // CommunityTier represents a community promotional tier
@@ -4040,24 +4053,35 @@ func (u User) handleSubscriptionUpdated(event stripe.Event) error {
 	return nil
 }
 
-// mapStripePriceIDToPlan maps a Stripe price ID to the plan name and whether it's annual billing
+// mapStripePriceIDToPlan maps a Stripe price ID to the plan name and whether
+// it's annual billing. Accepts both V1 (original) and V2 (price-drop) price
+// IDs so webhooks for grandfathered and migrated subs both resolve correctly.
+// Empty env vars are skipped to avoid matching an empty incoming priceID.
 func mapStripePriceIDToPlan(priceID string) (string, bool) {
-	switch priceID {
-	case os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID"):
-		return "base", false
-	case os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID"):
-		return "base", true
-	case os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID"):
-		return "premium", false
-	case os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID"):
-		return "premium", true
-	case os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID"):
-		return "premium_plus", false
-	case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
-		return "premium_plus", true
-	default:
+	if priceID == "" {
 		return "unknown", false
 	}
+	type tierEnv struct {
+		plan     string
+		annual   bool
+		envNames []string
+	}
+	tiers := []tierEnv{
+		{"base", false, []string{"STRIPE_BASE_MONTHLY_PRICE_ID", "STRIPE_BASE_V2_MONTHLY_PRICE_ID"}},
+		{"base", true, []string{"STRIPE_BASE_ANNUAL_PRICE_ID", "STRIPE_BASE_V2_ANNUAL_PRICE_ID"}},
+		{"premium", false, []string{"STRIPE_PREMIUM_MONTHLY_PRICE_ID", "STRIPE_PREMIUM_V2_MONTHLY_PRICE_ID"}},
+		{"premium", true, []string{"STRIPE_PREMIUM_ANNUAL_PRICE_ID", "STRIPE_PREMIUM_V2_ANNUAL_PRICE_ID"}},
+		{"premium_plus", false, []string{"STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID", "STRIPE_PREMIUM_PLUS_V2_MONTHLY_PRICE_ID"}},
+		{"premium_plus", true, []string{"STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID", "STRIPE_PREMIUM_PLUS_V2_ANNUAL_PRICE_ID"}},
+	}
+	for _, t := range tiers {
+		for _, env := range t.envNames {
+			if v := os.Getenv(env); v != "" && v == priceID {
+				return t.plan, t.annual
+			}
+		}
+	}
+	return "unknown", false
 }
 
 // handleSubscriptionDeleted handles subscription deletions
