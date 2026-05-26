@@ -15,6 +15,7 @@ type SubscriptionEventDatabase interface {
 	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) SingleResultHelper
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 }
 
 type subscriptionEventDatabase struct {
@@ -40,4 +41,9 @@ func (s *subscriptionEventDatabase) Find(ctx context.Context, filter interface{}
 
 func (s *subscriptionEventDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	return s.db.Collection(subscriptionEventCollectionName).CountDocuments(ctx, filter, opts...)
+}
+
+func (s *subscriptionEventDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
+	_, err := s.db.Collection(subscriptionEventCollectionName).UpdateOne(ctx, filter, update, opts...)
+	return err
 }

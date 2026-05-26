@@ -234,6 +234,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/subscription/users", http.HandlerFunc(adminHandler.AdminSubscriptionUserSearchHandler)).Methods("GET")
 	apiCreate.Handle("/admin/subscription/users/{user_id}", http.HandlerFunc(adminHandler.AdminSubscriptionUserDetailHandler)).Methods("GET")
 	apiCreate.Handle("/admin/subscription/users/{user_id}/sync", http.HandlerFunc(adminHandler.AdminSubscriptionUserSyncHandler)).Methods("POST")
+	// Price-drop V2 rollout: credit app-store-billed users with free time and
+	// migrate Stripe subs to the new lower V2 prices (proration credit).
+	apiCreate.Handle("/admin/subscription/kickback/apply", http.HandlerFunc(adminHandler.AdminKickbackApplyHandler)).Methods("POST")
+	apiCreate.Handle("/admin/subscription/stripe/migrate-to-v2", http.HandlerFunc(adminHandler.AdminStripeMigrateToV2Handler)).Methods("POST")
+	apiCreate.Handle("/admin/subscription/stripe/migrate-to-v2/test-email", http.HandlerFunc(adminHandler.AdminStripeMigrateTestEmailHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/deactivate", http.HandlerFunc(adminHandler.AdminUserDeactivateHandler)).Methods("POST")

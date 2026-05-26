@@ -819,6 +819,19 @@ createIndexSafe(
   }
 );
 
+// Price-drop kickback script scans recently-purchased events that have not
+// been credited yet. Sparse: only the small cohort of rows with
+// kickbackApplied=true (or to-be-true) carries an entry.
+createIndexSafe(
+  db.subscription_events,
+  { kickbackApplied: 1, purchasedAt: -1 },
+  {
+    name: "subscription_events_kickback_purchased_idx",
+    background: true,
+    sparse: true
+  }
+);
+
 // Community soft-delete sweep: the daily cron filters by
 // community.scheduledDeletionAt. Sparse so the vast majority of communities
 // (which are not pending deletion) carry no index entry.

@@ -70,4 +70,10 @@ type SubscriptionEvent struct {
 
 	SourceIP  string    `bson:"sourceIp,omitempty" json:"sourceIp,omitempty"`
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+
+	// Kickback fields — set when the price-drop kickback script credits
+	// this purchase. Idempotency guard: skip events where KickbackApplied is true.
+	KickbackApplied       bool       `bson:"kickbackApplied,omitempty" json:"kickbackApplied,omitempty"`
+	KickbackMonthsGranted int        `bson:"kickbackMonthsGranted,omitempty" json:"kickbackMonthsGranted,omitempty"`
+	KickbackAppliedAt     *time.Time `bson:"kickbackAppliedAt,omitempty" json:"kickbackAppliedAt,omitempty"`
 }

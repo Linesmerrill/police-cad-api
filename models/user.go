@@ -69,6 +69,19 @@ type Subscription struct {
 	IsAnnual           bool        `json:"isAnnual" bson:"isAnnual"`
 	CreatedAt          interface{} `json:"createdAt" bson:"createdAt"`
 	UpdatedAt          interface{} `json:"updatedAt" bson:"updatedAt"`
+
+	// KickbackBanner is set when a price-drop kickback was applied to this
+	// user. Frontend reads it to render a "thank-you, N months added" banner
+	// and hides it after ExpiresAt. Nil when no active kickback.
+	KickbackBanner *KickbackBanner `json:"kickbackBanner,omitempty" bson:"kickbackBanner,omitempty"`
+}
+
+// KickbackBanner holds the user-visible summary of a price-drop kickback.
+type KickbackBanner struct {
+	Months         int         `json:"months" bson:"months"`
+	OriginalAmount float64     `json:"originalAmount" bson:"originalAmount"`
+	ExpiresAt      interface{} `json:"expiresAt" bson:"expiresAt"`
+	CreatedAt      interface{} `json:"createdAt" bson:"createdAt"`
 }
 
 // Friend holds the structure for a friend
