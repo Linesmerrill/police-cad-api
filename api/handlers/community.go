@@ -534,6 +534,19 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(communities))
+	for _, comm := range communities {
+		ids = append(ids, comm.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, c.UDB, ids)
+	for i := range communities {
+		if live, ok := liveCounts[communities[i].ID.Hex()]; ok {
+			communities[i].Details.MembersCount = live
+		}
+	}
+
 	b, err := json.Marshal(communities)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
@@ -3812,14 +3825,26 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(decodedCommunities))
+	for _, item := range decodedCommunities {
+		ids = append(ids, item.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, c.UDB, ids)
+
 	// Trimmed down result structure
 	var responseData []map[string]interface{}
 	for _, item := range decodedCommunities {
+		membersCount := item.Community.MembersCount
+		if live, ok := liveCounts[item.ID.Hex()]; ok {
+			membersCount = live
+		}
 		responseData = append(responseData, map[string]interface{}{
 			"_id":                    item.ID,
 			"name":                   item.Community.Name,
 			"imageLink":              item.Community.ImageLink,
-			"membersCount":           item.Community.MembersCount,
+			"membersCount":           membersCount,
 			"tags":                   item.Community.Tags,
 			"promotionalText":        item.Community.PromotionalText,
 			"promotionalDescription": item.Community.PromotionalDescription,
@@ -4459,14 +4484,26 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 
 	results := aggRes.results
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(results))
+	for _, item := range results {
+		ids = append(ids, item.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, c.UDB, ids)
+
 	// Format response
 	var data []map[string]interface{}
 	for _, item := range results {
+		membersCount := item.Community.MembersCount
+		if live, ok := liveCounts[item.ID.Hex()]; ok {
+			membersCount = live
+		}
 		data = append(data, map[string]interface{}{
 			"_id":                    item.ID,
 			"name":                   item.Community.Name,
 			"imageLink":              item.Community.ImageLink,
-			"membersCount":           item.Community.MembersCount,
+			"membersCount":           membersCount,
 			"tags":                   item.Community.Tags,
 			"promotionalText":        item.Community.PromotionalText,
 			"promotionalDescription": item.Community.PromotionalDescription,
@@ -7409,9 +7446,24 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 		// Count total for pagination
 		totalCount, _ := c.DB.CountDocuments(ctx, match)
 
+		// Self-heal displayed membersCount with a live count. Sorting still uses
+		// the stored field (sorting on a live computed value would require
+		// pulling all communities into memory), so rankings can be slightly off
+		// from the displayed numbers until stored values are backfilled. The
+		// numbers shown are correct.
+		leaderboardIDs := make([]string, 0, len(docs))
+		for _, d := range docs {
+			leaderboardIDs = append(leaderboardIDs, d.ID.Hex())
+		}
+		liveCounts := liveMemberCounts(ctx, c.UDB, leaderboardIDs)
+
 		// Build response data with placeholders for non-members stats to avoid heavy computation
 		responseData := make([]map[string]interface{}, 0, len(docs))
 		for _, d := range docs {
+			membersCount := d.MembersCount
+			if live, ok := liveCounts[d.ID.Hex()]; ok {
+				membersCount = live
+			}
 			item := map[string]interface{}{
 				"_id":  d.ID.Hex(),
 				"name": d.Name,
@@ -7421,7 +7473,7 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 					}
 					return d.ImageLink
 				}(),
-				"membersCount":     d.MembersCount,
+				"membersCount":     membersCount,
 				"onlineCount":      0,
 				"activityScore":    0,
 				"growthPercentage": 0.0,
