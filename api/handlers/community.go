@@ -7403,67 +7403,123 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		// Build aggregation to fetch top communities by membersCount
-		match := bson.M{
-			"community.visibility":   "public",
-			"community.membersCount": bson.M{"$gte": 1},
-		}
-
-		// Use aggregation for sorting and paging by indexed field
+		// Rank by LIVE approved-member count from the users collection rather
+		// than the denormalized community.membersCount. Stored counts drift
+		// (sometimes severely — observed gaps in the thousands), so sorting on
+		// them buries actually-large communities under ghost rankings. The
+		// users collection is the source of truth.
+		//
+		// Pipeline: pre-filter users with at least one approved community,
+		// unwind, group by communityId with $sum=1, lookup community metadata
+		// scoped to public+non-pending, sort by live count, then $facet for
+		// {rows, total} in one round trip. Cached top-10 for 24h hides the
+		// cost; cache resets on process restart (deploy).
+		approvedMatch := bson.M{"user.communities": bson.M{"$elemMatch": bson.M{"status": "approved"}}}
 		pipeline := mongo.Pipeline{
-			bson.D{{Key: "$match", Value: match}},
-			bson.D{{Key: "$project", Value: bson.M{
-				"_id":          1,
-				"name":         "$community.name",
-				"imageLink":    "$community.imageLink",
-				"membersCount": "$community.membersCount",
-				"plan":         "$community.subscription.plan",
+			{{Key: "$match", Value: approvedMatch}},
+			{{Key: "$unwind", Value: "$user.communities"}},
+			{{Key: "$match", Value: bson.M{"user.communities.status": "approved"}}},
+			{{Key: "$group", Value: bson.M{
+				"_id":   "$user.communities.communityId",
+				"count": bson.M{"$sum": 1},
 			}}},
-			bson.D{{Key: "$sort", Value: bson.M{"membersCount": -1}}},
-			bson.D{{Key: "$skip", Value: int64(page * limit)}},
-			bson.D{{Key: "$limit", Value: int64(limit)}},
+			{{Key: "$lookup", Value: bson.M{
+				"from": "communities",
+				"let":  bson.M{"cidStr": "$_id"},
+				"pipeline": bson.A{
+					bson.M{"$match": bson.M{"$expr": bson.M{"$eq": bson.A{
+						"$_id",
+						bson.M{"$convert": bson.M{
+							"input":   "$$cidStr",
+							"to":      "objectId",
+							"onError": nil,
+						}},
+					}}}},
+					bson.M{"$match": bson.M{
+						"community.visibility":       "public",
+						"community.pendingDeletionAt": nil,
+					}},
+					bson.M{"$project": bson.M{
+						"name":      "$community.name",
+						"imageLink": "$community.imageLink",
+						"plan":      "$community.subscription.plan",
+					}},
+				},
+				"as": "community",
+			}}},
+			{{Key: "$match", Value: bson.M{"community.0": bson.M{"$exists": true}}}},
+			{{Key: "$unwind", Value: "$community"}},
+			{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}, {Key: "_id", Value: 1}}}},
+			{{Key: "$facet", Value: bson.M{
+				"rows": bson.A{
+					bson.M{"$skip": int64(page * limit)},
+					bson.M{"$limit": int64(limit)},
+				},
+				"total": bson.A{
+					bson.M{"$count": "total"},
+				},
+			}}},
 		}
 
-		cur, err := c.DB.Aggregate(ctx, pipeline)
+		cur, err := c.UDB.Aggregate(ctx, pipeline)
 		if err != nil {
 			config.ErrorStatus("failed to fetch leaderboard", http.StatusInternalServerError, w, err)
 			return
 		}
 		defer cur.Close(ctx)
 
-		var docs []struct {
-			ID           primitive.ObjectID `bson:"_id"`
-			Name         string             `bson:"name"`
-			ImageLink    string             `bson:"imageLink"`
-			MembersCount int                `bson:"membersCount"`
-			Plan         string             `bson:"plan"`
+		var facetResults []struct {
+			Rows []struct {
+				ID        string `bson:"_id"`
+				Count     int    `bson:"count"`
+				Community struct {
+					ID        primitive.ObjectID `bson:"_id"`
+					Name      string             `bson:"name"`
+					ImageLink string             `bson:"imageLink"`
+					Plan      string             `bson:"plan"`
+				} `bson:"community"`
+			} `bson:"rows"`
+			Total []struct {
+				Total int64 `bson:"total"`
+			} `bson:"total"`
 		}
-		if err := cur.All(ctx, &docs); err != nil {
+		if err := cur.All(ctx, &facetResults); err != nil {
 			config.ErrorStatus("failed to decode leaderboard", http.StatusInternalServerError, w, err)
 			return
 		}
 
-		// Count total for pagination
-		totalCount, _ := c.DB.CountDocuments(ctx, match)
-
-		// Self-heal displayed membersCount with a live count. Sorting still uses
-		// the stored field (sorting on a live computed value would require
-		// pulling all communities into memory), so rankings can be slightly off
-		// from the displayed numbers until stored values are backfilled. The
-		// numbers shown are correct.
-		leaderboardIDs := make([]string, 0, len(docs))
-		for _, d := range docs {
-			leaderboardIDs = append(leaderboardIDs, d.ID.Hex())
+		var docs []struct {
+			ID           primitive.ObjectID
+			Name         string
+			ImageLink    string
+			MembersCount int
+			Plan         string
 		}
-		liveCounts := liveMemberCounts(ctx, c.UDB, leaderboardIDs)
+		var totalCount int64
+		if len(facetResults) > 0 {
+			for _, r := range facetResults[0].Rows {
+				docs = append(docs, struct {
+					ID           primitive.ObjectID
+					Name         string
+					ImageLink    string
+					MembersCount int
+					Plan         string
+				}{
+					ID:           r.Community.ID,
+					Name:         r.Community.Name,
+					ImageLink:    r.Community.ImageLink,
+					MembersCount: r.Count,
+					Plan:         r.Community.Plan,
+				})
+			}
+			if len(facetResults[0].Total) > 0 {
+				totalCount = facetResults[0].Total[0].Total
+			}
+		}
 
 		// Build response data with placeholders for non-members stats to avoid heavy computation
 		responseData := make([]map[string]interface{}, 0, len(docs))
 		for _, d := range docs {
-			membersCount := d.MembersCount
-			if live, ok := liveCounts[d.ID.Hex()]; ok {
-				membersCount = live
-			}
 			item := map[string]interface{}{
 				"_id":  d.ID.Hex(),
 				"name": d.Name,
@@ -7473,7 +7529,7 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 					}
 					return d.ImageLink
 				}(),
-				"membersCount":     membersCount,
+				"membersCount":     d.MembersCount,
 				"onlineCount":      0,
 				"activityScore":    0,
 				"growthPercentage": 0.0,
@@ -7561,6 +7617,16 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 	callsCollection := c.DBHelper.Collection("calls")
 	reportsCollection := c.DBHelper.Collection("reports")
 
+	// Self-heal displayed membersCount with live counts before computing
+	// stats. Sort key for activity/growth statTypes is unaffected (it's the
+	// activity/growth score, not member count) — this only ensures the number
+	// rendered in the response column reflects reality.
+	slowPathIDs := make([]string, 0, len(communities))
+	for _, comm := range communities {
+		slowPathIDs = append(slowPathIDs, comm.ID.Hex())
+	}
+	slowPathLiveCounts := liveMemberCounts(ctx, c.UDB, slowPathIDs)
+
 	// Calculate stats for each community
 	type CommunityStats struct {
 		Community     models.Community
@@ -7574,9 +7640,13 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 
 	for _, comm := range communities {
 		communityID := comm.ID.Hex()
+		membersCount := comm.Details.MembersCount
+		if live, ok := slowPathLiveCounts[communityID]; ok {
+			membersCount = live
+		}
 		stats := CommunityStats{
 			Community:    comm,
-			MembersCount: comm.Details.MembersCount,
+			MembersCount: membersCount,
 		}
 
 		// Calculate online count - users with this community who are online
