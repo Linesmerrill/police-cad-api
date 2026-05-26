@@ -3730,6 +3730,25 @@ func min(a, b int) int {
 	return b
 }
 
+// subscriptionPeriodFields returns the current billing period start/end as a
+// bson fragment ready to merge into a $set. In Stripe API v82+ the current
+// period window lives on the subscription item, not the top-level subscription,
+// so callers must read it from sub.Items.Data[0].
+func subscriptionPeriodFields(sub *stripe.Subscription) bson.M {
+	fields := bson.M{}
+	if sub == nil || sub.Items == nil || len(sub.Items.Data) == 0 {
+		return fields
+	}
+	item := sub.Items.Data[0]
+	if item.CurrentPeriodStart > 0 {
+		fields["user.subscription.currentPeriodStart"] = primitive.NewDateTimeFromTime(time.Unix(item.CurrentPeriodStart, 0).UTC())
+	}
+	if item.CurrentPeriodEnd > 0 {
+		fields["user.subscription.currentPeriodEnd"] = primitive.NewDateTimeFromTime(time.Unix(item.CurrentPeriodEnd, 0).UTC())
+	}
+	return fields
+}
+
 // handleCheckoutSessionCompleted handles successful checkout sessions
 func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
 	var checkoutSession stripe.CheckoutSession
@@ -3807,6 +3826,9 @@ func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
 			"user.subscription.createdAt":        primitive.NewDateTimeFromTime(time.Now()),
 			"user.subscription.updatedAt":        primitive.NewDateTimeFromTime(time.Now()),
 		},
+	}
+	for k, v := range subscriptionPeriodFields(sub) {
+		update["$set"].(bson.M)[k] = v
 	}
 
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)
@@ -3921,6 +3943,9 @@ func (u User) handleInvoicePaymentSucceeded(event stripe.Event) error {
 			"user.subscription.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
+	for k, v := range subscriptionPeriodFields(sub) {
+		update["$set"].(bson.M)[k] = v
+	}
 
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)
 	if err != nil {
@@ -4000,6 +4025,10 @@ func (u User) handleSubscriptionUpdated(event stripe.Event) error {
 		update["$set"].(bson.M)["user.subscription.cancelAt"] = primitive.NewDateTimeFromTime(cancelAtTime)
 	} else {
 		update["$set"].(bson.M)["user.subscription.cancelAt"] = nil
+	}
+
+	for k, v := range subscriptionPeriodFields(&sub) {
+		update["$set"].(bson.M)[k] = v
 	}
 
 	_, err = u.DB.UpdateOne(context.Background(), filter, update)

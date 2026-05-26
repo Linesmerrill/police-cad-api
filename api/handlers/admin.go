@@ -600,15 +600,23 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-resolve admin emails for any users that were deactivated by an admin
+	// so the UI can render "Deactivated by: <admin email>" without a per-row API call.
+	adminEmailByID := h.resolveAdminEmails(ctx, users)
+
 	var results []models.AdminUserResult
 	for _, user := range users {
 		result := models.AdminUserResult{
-			ID:             user.ID,
-			Email:          user.Details.Email,
-			Username:       user.Details.Username,
-			ProfilePicture: user.Details.ProfilePicture,
-			IsDeactivated:  user.Details.IsDeactivated,
-			CreatedAt:      user.Details.CreatedAt,
+			ID:                   user.ID,
+			Email:                user.Details.Email,
+			Username:             user.Details.Username,
+			ProfilePicture:       user.Details.ProfilePicture,
+			IsDeactivated:        user.Details.IsDeactivated,
+			CreatedAt:            user.Details.CreatedAt,
+			DeactivatedAt:        user.Details.DeactivatedAt,
+			DeactivationReason:   user.Details.DeactivationReason,
+			DeactivatedByAdminID: user.Details.DeactivatedByAdminID,
+			DeactivatedByAdmin:   adminEmailByID[user.Details.DeactivatedByAdminID],
 		}
 		results = append(results, result)
 	}
@@ -1094,6 +1102,17 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		resetPasswordExpires = user.Details.ResetPasswordExpires
 	}
 
+	// Resolve the acting admin's email if this account was deactivated by an admin
+	// so the details view can show who took the action.
+	var deactivatedByAdminEmail string
+	if user.Details.DeactivatedByAdminID != "" {
+		if oid, oidErr := primitive.ObjectIDFromHex(user.Details.DeactivatedByAdminID); oidErr == nil {
+			if admin, adminErr := h.ADB.FindOne(r.Context(), bson.M{"_id": oid}); adminErr == nil && admin != nil {
+				deactivatedByAdminEmail = admin.Email
+			}
+		}
+	}
+
 	details := models.AdminUserDetails{
 		ID:                   user.ID,
 		Email:                user.Details.Email,
@@ -1105,6 +1124,10 @@ func (h Admin) AdminUserDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		// Add password reset fields for frontend
 		ResetPasswordToken:   resetPasswordToken,
 		ResetPasswordExpires: resetPasswordExpires,
+		DeactivatedAt:        user.Details.DeactivatedAt,
+		DeactivationReason:   user.Details.DeactivationReason,
+		DeactivatedByAdminID: user.Details.DeactivatedByAdminID,
+		DeactivatedByAdmin:   deactivatedByAdminEmail,
 	}
 
 
@@ -1452,7 +1475,8 @@ func (h Admin) AdminUserReactivateHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Reactivate the user
+	// Reactivate the user. Clear the moderation reason so a future deactivation
+	// (whether self-service or admin-initiated) starts with a clean slate.
 	filter := bson.M{"_id": userID}
 	if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
 		filter = bson.M{"$or": []bson.M{{"_id": userID}, {"_id": oid}}}
@@ -1462,6 +1486,10 @@ func (h Admin) AdminUserReactivateHandler(w http.ResponseWriter, r *http.Request
 		"$set": bson.M{
 			"user.isDeactivated": false,
 			"updatedAt":          time.Now(),
+		},
+		"$unset": bson.M{
+			"user.deactivationReason":   "",
+			"user.deactivatedByAdminId": "",
 		},
 	})
 
@@ -1496,6 +1524,228 @@ func (h Admin) AdminUserReactivateHandler(w http.ResponseWriter, r *http.Request
 			"username":      user.Details.Username,
 			"isDeactivated": false,
 			"updatedAt":     time.Now(),
+		},
+	})
+}
+
+// resolveAdminEmails returns a map of adminID (hex) -> admin email for every
+// distinct DeactivatedByAdminID found on the given users. Used by list handlers
+// to populate the human-readable "deactivated by" field in a single DB round
+// trip instead of one per result row.
+func (h Admin) resolveAdminEmails(ctx context.Context, users []models.User) map[string]string {
+	out := map[string]string{}
+	seen := map[string]bool{}
+	var oids []primitive.ObjectID
+	for _, u := range users {
+		id := u.Details.DeactivatedByAdminID
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if oid, err := primitive.ObjectIDFromHex(id); err == nil {
+			oids = append(oids, oid)
+		}
+	}
+	if len(oids) == 0 {
+		return out
+	}
+	cursor, err := h.ADB.Find(ctx, bson.M{"_id": bson.M{"$in": oids}})
+	if err != nil {
+		return out
+	}
+	defer cursor.Close(ctx)
+	var admins []models.AdminUser
+	if err := cursor.All(ctx, &admins); err != nil {
+		return out
+	}
+	for _, admin := range admins {
+		out[admin.ID.Hex()] = admin.Email
+	}
+	return out
+}
+
+// AdminUserDeactivateHandler handles admin-initiated deactivation of a user
+// account (moderation/ban). Differs from self-deactivation in that a reason is
+// required and stored alongside the acting admin's ID so future admins can see
+// why the account was disabled.
+func (h Admin) AdminUserDeactivateHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid user ID",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+	userID := pathParts[len(pathParts)-2]
+
+	var req struct {
+		Reason      string `json:"reason"`
+		CurrentUser struct {
+			Email string   `json:"email"`
+			Roles []string `json:"roles"`
+		} `json:"currentUser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	hasPermission := false
+	for _, role := range req.CurrentUser.Roles {
+		if role == "admin" || role == "owner" {
+			hasPermission = true
+			break
+		}
+	}
+	if !hasPermission {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Insufficient permissions to deactivate user accounts",
+			Code:    "PERMISSION_DENIED",
+		})
+		return
+	}
+
+	reason := strings.TrimSpace(req.Reason)
+	if len(reason) < 3 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "A reason is required (at least 3 characters)",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+	if len(reason) > 1000 {
+		reason = reason[:1000]
+	}
+
+	// Load target user (string ID first, then ObjectID).
+	var user models.User
+	err := h.UDB.FindOne(r.Context(), bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+			var userObj struct {
+				ID      primitive.ObjectID `bson:"_id"`
+				Details models.UserDetails `bson:"user"`
+				Version int32              `bson:"__v"`
+			}
+			if err2 := h.UDB.FindOne(r.Context(), bson.M{"_id": oid}).Decode(&userObj); err2 == nil {
+				user = models.User{ID: userObj.ID.Hex(), Details: userObj.Details, Version: userObj.Version}
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+					Success: false,
+					Error:   "User not found",
+					Code:    "NOT_FOUND",
+				})
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "User not found",
+				Code:    "NOT_FOUND",
+			})
+			return
+		}
+	}
+
+	if user.Details.IsDeactivated {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "User account is already deactivated",
+			Code:    "VALIDATION_ERROR",
+		})
+		return
+	}
+
+	// Refuse to deactivate any user backed by an active admin account — either
+	// directly (admin email matches) or via a linked LPC account.
+	if user.Details.Email != "" {
+		adminMatch, _ := h.ADB.FindOne(r.Context(), bson.M{
+			"$or":    []bson.M{{"email": user.Details.Email}, {"linkedUserEmail": user.Details.Email}},
+			"active": true,
+		})
+		if adminMatch != nil && adminMatch.ID != primitive.NilObjectID {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Success: false,
+				Error:   "Cannot deactivate an admin or owner account through this surface",
+				Code:    "PERMISSION_DENIED",
+			})
+			return
+		}
+	}
+
+	// Resolve acting admin ID for audit fields and activity log.
+	var actingAdminID string
+	if req.CurrentUser.Email != "" {
+		if admin, adminErr := h.ADB.FindOne(r.Context(), bson.M{"email": req.CurrentUser.Email}); adminErr == nil && admin != nil {
+			actingAdminID = admin.ID.Hex()
+		}
+	}
+
+	now := time.Now()
+	filter := bson.M{"_id": userID}
+	if oid, oidErr := primitive.ObjectIDFromHex(userID); oidErr == nil {
+		filter = bson.M{"$or": []bson.M{{"_id": userID}, {"_id": oid}}}
+	}
+
+	_, err = h.UDB.UpdateOne(r.Context(), filter, bson.M{
+		"$set": bson.M{
+			"user.isDeactivated":         true,
+			"user.deactivatedAt":         now,
+			"user.restoreUntil":          now.Add(30 * 24 * time.Hour),
+			"user.deactivationReason":    reason,
+			"user.deactivatedByAdminId":  actingAdminID,
+			"updatedAt":                  now,
+		},
+	})
+	if err != nil {
+		log.Printf("Failed to deactivate user: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Success: false,
+			Error:   "Failed to deactivate user",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	if actingAdminID != "" {
+		if oid, oidErr := primitive.ObjectIDFromHex(actingAdminID); oidErr == nil {
+			h.trackAdminAction(oid, "account_deactivated", userID, "user", fmt.Sprintf("Deactivated user account: %s — reason: %s", user.Details.Email, reason), r)
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "User account deactivated successfully",
+		"user": map[string]interface{}{
+			"id":                    user.ID,
+			"email":                 user.Details.Email,
+			"username":              user.Details.Username,
+			"isDeactivated":         true,
+			"deactivatedAt":         now,
+			"restoreUntil":          now.Add(30 * 24 * time.Hour),
+			"deactivationReason":    reason,
+			"deactivatedByAdminId":  actingAdminID,
+			"updatedAt":             now,
 		},
 	})
 }
@@ -3727,6 +3977,10 @@ func getActionTitle(actionType string) string {
 		return "Password reset completed"
 	case "account_reactivated":
 		return "User account reactivated"
+	case "account_deactivated":
+		return "User account deactivated"
+	case "feature_request_deleted":
+		return "Feature request deleted"
 	case "user_reset_initiated":
 		return "User password reset initiated"
 	case "temp_password_created":
