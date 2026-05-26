@@ -2,22 +2,27 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/linesmerrill/police-cad-api/api/scheduler"
+	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/subscription"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
 )
 
 // stripeMigrateRequest controls the V1 → V2 price migration run.
 type stripeMigrateRequest struct {
-	DryRun bool `json:"dryRun"`
-	Limit  int  `json:"limit,omitempty"`
+	DryRun    bool `json:"dryRun"`
+	Limit     int  `json:"limit,omitempty"`
+	SendEmail bool `json:"sendEmail,omitempty"`
 }
 
 // stripeMigrateResult is one row of the per-subscription summary.
@@ -31,6 +36,26 @@ type stripeMigrateResult struct {
 	Status         string `json:"status"` // "migrated" | "skipped" | "error"
 	Reason         string `json:"reason,omitempty"`
 	Error          string `json:"error,omitempty"`
+	EmailSent      bool   `json:"emailSent,omitempty"`
+	EmailRecipient string `json:"emailRecipient,omitempty"`
+}
+
+// priceDropTierInfo holds the per-tier display copy used in the price-drop
+// announcement email. Keys match the tier names in v1ToV2PriceMapping.
+type priceDropTierInfo struct {
+	PlanName     string // "Premium Plus"
+	Interval     string // "monthly" | "annual"
+	NewPriceText string // "$9.99/month"
+	OldPriceText string // "$19.99/month"
+}
+
+var priceDropEmailTierInfo = map[string]priceDropTierInfo{
+	"base_monthly":         {"Base", "monthly", "$2/month", "$3/month"},
+	"base_annual":          {"Base", "annual", "$20/year", "$32/year"},
+	"premium_monthly":      {"Premium", "monthly", "$5/month", "$8/month"},
+	"premium_annual":       {"Premium", "annual", "$50/year", "$85/year"},
+	"premium_plus_monthly": {"Premium Plus", "monthly", "$9.99/month", "$19.99/month"},
+	"premium_plus_annual":  {"Premium Plus", "annual", "$99/year", "$209/year"},
 }
 
 // v1ToV2PriceMapping returns the lookup of V1 price IDs to their V2
@@ -91,6 +116,11 @@ func (h Admin) AdminStripeMigrateToV2Handler(w http.ResponseWriter, r *http.Requ
 	if v := r.URL.Query().Get("dryRun"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			req.DryRun = b
+		}
+	}
+	if v := r.URL.Query().Get("sendEmail"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			req.SendEmail = b
 		}
 	}
 	if req.Limit <= 0 {
@@ -169,8 +199,22 @@ func (h Admin) AdminStripeMigrateToV2Handler(w http.ResponseWriter, r *http.Requ
 				continue
 			}
 			result.Status = "migrated"
-			results = append(results, result)
 			migrated++
+
+			if req.SendEmail {
+				if email, username, ok := h.lookupStripeCustomerEmail(r, result.CustomerID); ok {
+					if info, infoOK := priceDropEmailTierInfo[mapped.Tier]; infoOK {
+						sendPriceDropAnnouncementEmailAsync(email, username, info)
+						result.EmailSent = true
+						result.EmailRecipient = email
+					} else {
+						zap.S().Warnw("stripe migrate: no email copy for tier", "tier", mapped.Tier, "subId", sub.ID)
+					}
+				} else {
+					zap.S().Warnw("stripe migrate: could not look up customer email", "customerId", result.CustomerID, "subId", sub.ID)
+				}
+			}
+			results = append(results, result)
 		}
 	}
 	if err := iter.Err(); err != nil {
@@ -198,4 +242,65 @@ func subCustomerID(sub *stripe.Subscription) string {
 		return ""
 	}
 	return sub.Customer.ID
+}
+
+// lookupStripeCustomerEmail finds the user document for a given Stripe
+// customer ID and returns their email + username. Returns ok=false if no
+// matching user is found or the email is empty.
+func (h Admin) lookupStripeCustomerEmail(r *http.Request, customerID string) (email, username string, ok bool) {
+	if customerID == "" || h.UDB == nil {
+		return "", "", false
+	}
+	var user models.User
+	filter := bson.M{"user.subscription.stripeCustomerId": customerID}
+	if err := h.UDB.FindOne(r.Context(), filter).Decode(&user); err != nil {
+		return "", "", false
+	}
+	if user.Details.Email == "" {
+		return "", "", false
+	}
+	return user.Details.Email, user.Details.Username, true
+}
+
+// sendPriceDropAnnouncementEmailAsync notifies a migrated Stripe customer
+// that their subscription price has been lowered. Sent fire-and-forget via
+// SendGrid through the package's existing sensitiveEmail helper.
+func sendPriceDropAnnouncementEmailAsync(email, username string, info priceDropTierInfo) {
+	name := strings.TrimSpace(username)
+	if name == "" {
+		name = "there"
+	}
+	subject := "Your Lines Police CAD subscription price just dropped"
+	plain := fmt.Sprintf(`Hi %s,
+
+Just a heads-up: we lowered our subscription prices today, and since you're already a customer, your plan automatically goes to the new lower rate.
+
+  Your plan: %s (%s)
+  New price: %s — down from %s
+
+You'll see a prorated credit on your next Stripe invoice for the unused portion of this month at the old price, so your next renewal will be close to free.
+
+We know everything seems to keep getting more expensive lately. We wanted to do the opposite — and since you've been here supporting us, we wanted to make sure you got the new pricing too, not just new sign-ups.
+
+Thanks for using Lines Police CAD.
+
+— The Lines Police CAD Team`, name, info.PlanName, info.Interval, info.NewPriceText, info.OldPriceText)
+	html := fmt.Sprintf(`<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0f172a;line-height:1.6;">
+<p>Hi %s,</p>
+<p>Just a heads-up: we lowered our subscription prices today, and since you're already a customer, your plan automatically goes to the new lower rate.</p>
+<div style="background:#f1f5f9;border-left:3px solid #38bdf8;padding:16px 20px;border-radius:4px;margin:20px 0;">
+  <div style="margin-bottom:6px;">Your plan: <strong>%s</strong> (%s)</div>
+  <div>New price: <strong style="color:#0ea5e9;">%s</strong> &nbsp;<span style="text-decoration:line-through;color:#64748b;">%s</span></div>
+</div>
+<p>You'll see a prorated credit on your next Stripe invoice for the unused portion of this month at the old price, so your next renewal will be close to free.</p>
+<p>We know everything seems to keep getting more expensive lately. We wanted to do the opposite — and since you've been here supporting us, we wanted to make sure you got the new pricing too, not just new sign-ups.</p>
+<p>Thanks for using Lines Police CAD.</p>
+<p style="margin-top:32px;">— The Lines Police CAD Team</p>
+</div>`, name, info.PlanName, info.Interval, info.NewPriceText, info.OldPriceText)
+	sendSensitiveEmailAsync(sensitiveEmail{
+		To:        email,
+		Subject:   subject,
+		PlainText: plain,
+		HTML:      html,
+	})
 }
