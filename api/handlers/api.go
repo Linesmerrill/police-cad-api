@@ -238,6 +238,7 @@ func (a *App) New() *mux.Router {
 	// migrate Stripe subs to the new lower V2 prices (proration credit).
 	apiCreate.Handle("/admin/subscription/kickback/apply", http.HandlerFunc(adminHandler.AdminKickbackApplyHandler)).Methods("POST")
 	apiCreate.Handle("/admin/subscription/stripe/migrate-to-v2", http.HandlerFunc(adminHandler.AdminStripeMigrateToV2Handler)).Methods("POST")
+	apiCreate.Handle("/admin/subscription/stripe/migrate-to-v2/test-email", http.HandlerFunc(adminHandler.AdminStripeMigrateTestEmailHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/deactivate", http.HandlerFunc(adminHandler.AdminUserDeactivateHandler)).Methods("POST")

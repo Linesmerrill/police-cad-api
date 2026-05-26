@@ -234,6 +234,67 @@ func (h Admin) AdminStripeMigrateToV2Handler(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// AdminStripeMigrateTestEmailHandler sends a single price-drop announcement
+// email to a specified recipient without touching Stripe. Used to preview
+// the email contents and deliverability before running the live migration.
+//
+//	POST /api/v1/admin/subscription/stripe/migrate-to-v2/test-email
+//	Body: { "email": "you@example.com", "username": "yourname", "tier": "premium_plus_monthly" }
+//
+// `tier` must be one of the keys in priceDropEmailTierInfo. Returns the
+// resolved tier copy alongside the recipient so you can sanity-check.
+func (h Admin) AdminStripeMigrateTestEmailHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	rawBody, _ := io.ReadAll(r.Body)
+	var req struct {
+		Email    string `json:"email"`
+		Username string `json:"username"`
+		Tier     string `json:"tier"`
+	}
+	if err := json.Unmarshal(rawBody, &req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	req.Tier = strings.TrimSpace(req.Tier)
+	if req.Email == "" || req.Tier == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email and tier are required"})
+		return
+	}
+
+	info, ok := priceDropEmailTierInfo[req.Tier]
+	if !ok {
+		validTiers := make([]string, 0, len(priceDropEmailTierInfo))
+		for k := range priceDropEmailTierInfo {
+			validTiers = append(validTiers, k)
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      "unknown tier",
+			"validTiers": validTiers,
+		})
+		return
+	}
+
+	sendPriceDropAnnouncementEmailAsync(req.Email, req.Username, info)
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":         true,
+		"email":      req.Email,
+		"username":   req.Username,
+		"tier":       req.Tier,
+		"planName":   info.PlanName,
+		"interval":   info.Interval,
+		"newPrice":   info.NewPriceText,
+		"oldPrice":   info.OldPriceText,
+		"note":       "Email queued via SendGrid (fire-and-forget). Delivery typically within seconds.",
+		"finishedAt": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 // subCustomerID extracts the customer ID from a Stripe subscription. The
 // customer field can be an embedded object or a string ID depending on
 // expand parameters — the SDK exposes it as *Customer with an ID field.
