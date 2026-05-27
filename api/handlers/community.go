@@ -3259,13 +3259,58 @@ func (c Community) UpdateDepartmentImageLinkHandler(w http.ResponseWriter, r *ht
 	w.Write([]byte(`{"message": "Department image link updated successfully"}`))
 }
 
-// UpdateDepartmentDetailsHandler updates the details of a department
+// departmentPatchBounds are the per-field sanity limits applied to numeric
+// economy fields when updating a department. They guard against junk values
+// (NaN, Infinity, scientific-notation doubles, negative numbers) ever landing
+// on the document — those used to permanently break community reads because
+// the Go BSON decoder would overflow trying to coerce a Double back into the
+// int-typed model field. Bounds are intentionally generous; they only reject
+// values that are obviously wrong.
+var departmentPatchBounds = map[string]struct {
+	min int64
+	max int64
+}{
+	"basePayPerHour":           {0, 1_000_000_000},     // cents/hr (cap = $10M/hr)
+	"maxSessionMinutes":        {1, 24 * 60 * 7},       // 1 min .. 1 week
+	"afkPromptIntervalSeconds": {30, 86400},            // 30s .. 1 day
+	"afkGraceSeconds":          {10, 86400},            // 10s .. 1 day
+}
+
+// coerceJSONInt accepts any JSON number (decoded as float64 by encoding/json),
+// rejects NaN/Infinity/non-integer/out-of-range values, and returns the int64.
+// JSON booleans, strings, and other types are rejected — clients must send a
+// real number for numeric fields.
+func coerceJSONInt(raw interface{}, lo, hi int64) (int64, error) {
+	f, ok := raw.(float64)
+	if !ok {
+		return 0, fmt.Errorf("expected number, got %T", raw)
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, fmt.Errorf("value is not finite")
+	}
+	if f != math.Trunc(f) {
+		return 0, fmt.Errorf("value must be an integer")
+	}
+	if f < float64(lo) || f > float64(hi) {
+		return 0, fmt.Errorf("value %v out of range [%d, %d]", f, lo, hi)
+	}
+	return int64(f), nil
+}
+
+// UpdateDepartmentDetailsHandler updates the details of a department.
+//
+// The body is a partial document — every field is optional. We allowlist the
+// fields that legitimate clients (web + mobile) actually send, validate types
+// and (for numeric fields) ranges, and write only those fields. Anything else
+// is rejected with 400 to keep the document well-formed and to close a
+// mass-assignment vector (callers could previously set _id, members, ranks,
+// etc. by simply naming the field in the JSON body).
 func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	departmentID := mux.Vars(r)["departmentId"]
 
-	var updatedDetails map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updatedDetails); err != nil {
+	var raw map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -3281,14 +3326,71 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	update := bson.M{}
+	for key, value := range raw {
+		switch key {
+		// String fields
+		case "name", "description", "image", "toneSound":
+			s, ok := value.(string)
+			if !ok {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: expected string", key), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = s
+
+		// Constrained string enums
+		case "payoutMode":
+			s, ok := value.(string)
+			if !ok || (s != "on_heartbeat" && s != "on_clockout") {
+				config.ErrorStatus("invalid payoutMode: expected \"on_heartbeat\" or \"on_clockout\"", http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = s
+
+		// Bool fields
+		case "approvalRequired", "restrictCivilianRecordDeletion", "economyEnabled":
+			b, ok := value.(bool)
+			if !ok {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: expected boolean", key), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = b
+
+		// Range-checked numeric fields
+		case "basePayPerHour", "maxSessionMinutes", "afkPromptIntervalSeconds", "afkGraceSeconds":
+			bounds := departmentPatchBounds[key]
+			n, ierr := coerceJSONInt(value, bounds.min, bounds.max)
+			if ierr != nil {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: %s", key, ierr.Error()), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = n
+
+		// Opaque object fields — passed through as-is. These are too deeply
+		// structured to validate inline here; the model decoder will reject
+		// truly malformed shapes on the next read.
+		case "template", "templateRef":
+			if _, ok := value.(map[string]interface{}); !ok && value != nil {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: expected object", key), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = value
+
+		default:
+			config.ErrorStatus(fmt.Sprintf("field %q is not updatable via this endpoint", key), http.StatusBadRequest, w, nil)
+			return
+		}
+	}
+
+	if len(update) == 0 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "no fields to update"}`))
+		return
+	}
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
-
-	update := bson.M{}
-	for key, value := range updatedDetails {
-		update["community.departments.$."+key] = value
-	}
 
 	filter := bson.M{"_id": cID, "community.departments._id": dID}
 	err = c.DB.UpdateOne(ctx, filter, bson.M{"$set": update})
