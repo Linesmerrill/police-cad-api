@@ -477,6 +477,19 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(communities))
+	for _, comm := range communities {
+		ids = append(ids, comm.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, s.UserDB, ids)
+	for i := range communities {
+		if live, ok := liveCounts[communities[i].ID.Hex()]; ok {
+			communities[i].Details.MembersCount = live
+		}
+	}
+
 	// For very short queries (1-2 chars), skip expensive CountDocuments
 	// Return results with estimated count based on current page results
 	var totalCount int64

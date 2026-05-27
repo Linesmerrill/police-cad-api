@@ -534,6 +534,19 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(communities))
+	for _, comm := range communities {
+		ids = append(ids, comm.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, c.UDB, ids)
+	for i := range communities {
+		if live, ok := liveCounts[communities[i].ID.Hex()]; ok {
+			communities[i].Details.MembersCount = live
+		}
+	}
+
 	b, err := json.Marshal(communities)
 	if err != nil {
 		config.ErrorStatus("failed to marshal response", http.StatusInternalServerError, w, err)
@@ -978,6 +991,23 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 				zap.S().Debugf("%s was empty string, defaulting to 1", field)
 			}
 		}
+	}
+
+	// Same hardening as UpdateDepartmentDetailsHandler: when the payload
+	// includes an `economy` sub-object, validate it strictly so a malformed
+	// numeric (e.g. afkPromptIntervalSeconds=3e22-style overflow on the
+	// community-level fields) can never land on the document and break every
+	// subsequent BSON decode of that community. Other top-level community
+	// fields still flow through the existing pass-through code — this endpoint
+	// is a catch-all used by many surfaces and we don't want to lock those
+	// down piecemeal here.
+	if econRaw, exists := req["economy"]; exists {
+		cleaned, vErr := validateCommunityEconomyPatch(econRaw)
+		if vErr != nil {
+			config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+			return
+		}
+		req["economy"] = cleaned
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
@@ -3246,13 +3276,114 @@ func (c Community) UpdateDepartmentImageLinkHandler(w http.ResponseWriter, r *ht
 	w.Write([]byte(`{"message": "Department image link updated successfully"}`))
 }
 
-// UpdateDepartmentDetailsHandler updates the details of a department
+// departmentPatchBounds are the per-field sanity limits applied to numeric
+// economy fields when updating a department. They guard against junk values
+// (NaN, Infinity, scientific-notation doubles, negative numbers) ever landing
+// on the document — those used to permanently break community reads because
+// the Go BSON decoder would overflow trying to coerce a Double back into the
+// int-typed model field. Bounds are intentionally generous; they only reject
+// values that are obviously wrong.
+var departmentPatchBounds = map[string]struct {
+	min int64
+	max int64
+}{
+	"basePayPerHour":           {0, 1_000_000_000},     // cents/hr (cap = $10M/hr)
+	"maxSessionMinutes":        {1, 24 * 60 * 7},       // 1 min .. 1 week
+	"afkPromptIntervalSeconds": {30, 86400},            // 30s .. 1 day
+	"afkGraceSeconds":          {10, 86400},            // 10s .. 1 day
+}
+
+// coerceJSONInt accepts any JSON number (decoded as float64 by encoding/json),
+// rejects NaN/Infinity/non-integer/out-of-range values, and returns the int64.
+// JSON booleans, strings, and other types are rejected — clients must send a
+// real number for numeric fields.
+func coerceJSONInt(raw interface{}, lo, hi int64) (int64, error) {
+	f, ok := raw.(float64)
+	if !ok {
+		return 0, fmt.Errorf("expected number, got %T", raw)
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, fmt.Errorf("value is not finite")
+	}
+	if f != math.Trunc(f) {
+		return 0, fmt.Errorf("value must be an integer")
+	}
+	if f < float64(lo) || f > float64(hi) {
+		return 0, fmt.Errorf("value %v out of range [%d, %d]", f, lo, hi)
+	}
+	return int64(f), nil
+}
+
+// communityEconomyPatchBounds matches the EconomySettings model fields. Same
+// rationale as departmentPatchBounds: prevent any client (mobile, web, or
+// otherwise) from persisting a non-int / out-of-range value that the Go BSON
+// decoder cannot read back. Caps are intentionally generous; they only reject
+// values that are obviously wrong.
+var communityEconomyPatchBounds = map[string]struct {
+	min int64
+	max int64
+}{
+	"defaultStartingBalance": {0, 1_000_000_000_000}, // cents ($10B cap)
+	"defaultDueDays":         {0, 3650},              // up to 10 years
+	"contestExtensionDays":   {0, 3650},
+}
+
+// validateCommunityEconomyPatch takes the raw `economy` sub-object from a
+// community PATCH body, validates every field with a strict allowlist (same
+// approach as UpdateDepartmentDetailsHandler), and returns a clean bson.M
+// safe to write under `community.economy`. Unknown fields are rejected so
+// arbitrary keys cannot be smuggled onto community.economy.
+func validateCommunityEconomyPatch(raw interface{}) (bson.M, error) {
+	if raw == nil {
+		return bson.M{}, nil
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid economy: expected object")
+	}
+	clean := bson.M{}
+	for key, value := range m {
+		switch key {
+		case "enabled", "allowNegativeBalance":
+			b, ok := value.(bool)
+			if !ok {
+				return nil, fmt.Errorf("invalid economy.%s: expected boolean", key)
+			}
+			clean[key] = b
+		case "fineMode":
+			s, ok := value.(string)
+			if !ok || (s != "inbox" && s != "auto_debit") {
+				return nil, fmt.Errorf("invalid economy.fineMode: expected \"inbox\" or \"auto_debit\"")
+			}
+			clean[key] = s
+		case "defaultStartingBalance", "defaultDueDays", "contestExtensionDays":
+			bounds := communityEconomyPatchBounds[key]
+			n, ierr := coerceJSONInt(value, bounds.min, bounds.max)
+			if ierr != nil {
+				return nil, fmt.Errorf("invalid economy.%s: %s", key, ierr.Error())
+			}
+			clean[key] = n
+		default:
+			return nil, fmt.Errorf("field economy.%q is not updatable via this endpoint", key)
+		}
+	}
+	return clean, nil
+}
+
+// UpdateDepartmentDetailsHandler updates the details of a department.
+//
+// The body is a partial document — every field is optional. We allowlist the
+// fields that legitimate clients (web + mobile) actually send, validate types
+// and (for numeric fields) ranges, and write only those fields. Anything else
+// is rejected with 400 to keep the document well-formed and to close a
+// mass-assignment vector (callers could previously set _id, members, ranks,
+// etc. by simply naming the field in the JSON body).
 func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 	departmentID := mux.Vars(r)["departmentId"]
 
-	var updatedDetails map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updatedDetails); err != nil {
+	var raw map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
 		return
 	}
@@ -3268,14 +3399,71 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	update := bson.M{}
+	for key, value := range raw {
+		switch key {
+		// String fields
+		case "name", "description", "image", "toneSound":
+			s, ok := value.(string)
+			if !ok {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: expected string", key), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = s
+
+		// Constrained string enums
+		case "payoutMode":
+			s, ok := value.(string)
+			if !ok || (s != "on_heartbeat" && s != "on_clockout") {
+				config.ErrorStatus("invalid payoutMode: expected \"on_heartbeat\" or \"on_clockout\"", http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = s
+
+		// Bool fields
+		case "approvalRequired", "restrictCivilianRecordDeletion", "economyEnabled":
+			b, ok := value.(bool)
+			if !ok {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: expected boolean", key), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = b
+
+		// Range-checked numeric fields
+		case "basePayPerHour", "maxSessionMinutes", "afkPromptIntervalSeconds", "afkGraceSeconds":
+			bounds := departmentPatchBounds[key]
+			n, ierr := coerceJSONInt(value, bounds.min, bounds.max)
+			if ierr != nil {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: %s", key, ierr.Error()), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = n
+
+		// Opaque object fields — passed through as-is. These are too deeply
+		// structured to validate inline here; the model decoder will reject
+		// truly malformed shapes on the next read.
+		case "template", "templateRef":
+			if _, ok := value.(map[string]interface{}); !ok && value != nil {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: expected object", key), http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.departments.$."+key] = value
+
+		default:
+			config.ErrorStatus(fmt.Sprintf("field %q is not updatable via this endpoint", key), http.StatusBadRequest, w, nil)
+			return
+		}
+	}
+
+	if len(update) == 0 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "no fields to update"}`))
+		return
+	}
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
-
-	update := bson.M{}
-	for key, value := range updatedDetails {
-		update["community.departments.$."+key] = value
-	}
 
 	filter := bson.M{"_id": cID, "community.departments._id": dID}
 	err = c.DB.UpdateOne(ctx, filter, bson.M{"$set": update})
@@ -3812,14 +4000,26 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(decodedCommunities))
+	for _, item := range decodedCommunities {
+		ids = append(ids, item.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, c.UDB, ids)
+
 	// Trimmed down result structure
 	var responseData []map[string]interface{}
 	for _, item := range decodedCommunities {
+		membersCount := item.Community.MembersCount
+		if live, ok := liveCounts[item.ID.Hex()]; ok {
+			membersCount = live
+		}
 		responseData = append(responseData, map[string]interface{}{
 			"_id":                    item.ID,
 			"name":                   item.Community.Name,
 			"imageLink":              item.Community.ImageLink,
-			"membersCount":           item.Community.MembersCount,
+			"membersCount":           membersCount,
 			"tags":                   item.Community.Tags,
 			"promotionalText":        item.Community.PromotionalText,
 			"promotionalDescription": item.Community.PromotionalDescription,
@@ -4459,14 +4659,26 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 
 	results := aggRes.results
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(results))
+	for _, item := range results {
+		ids = append(ids, item.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, c.UDB, ids)
+
 	// Format response
 	var data []map[string]interface{}
 	for _, item := range results {
+		membersCount := item.Community.MembersCount
+		if live, ok := liveCounts[item.ID.Hex()]; ok {
+			membersCount = live
+		}
 		data = append(data, map[string]interface{}{
 			"_id":                    item.ID,
 			"name":                   item.Community.Name,
 			"imageLink":              item.Community.ImageLink,
-			"membersCount":           item.Community.MembersCount,
+			"membersCount":           membersCount,
 			"tags":                   item.Community.Tags,
 			"promotionalText":        item.Community.PromotionalText,
 			"promotionalDescription": item.Community.PromotionalDescription,
@@ -7366,48 +7578,119 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		// Build aggregation to fetch top communities by membersCount
-		match := bson.M{
-			"community.visibility":   "public",
-			"community.membersCount": bson.M{"$gte": 1},
-		}
-
-		// Use aggregation for sorting and paging by indexed field
+		// Rank by LIVE approved-member count from the users collection rather
+		// than the denormalized community.membersCount. Stored counts drift
+		// (sometimes severely — observed gaps in the thousands), so sorting on
+		// them buries actually-large communities under ghost rankings. The
+		// users collection is the source of truth.
+		//
+		// Pipeline: pre-filter users with at least one approved community,
+		// unwind, group by communityId with $sum=1, lookup community metadata
+		// scoped to public+non-pending, sort by live count, then $facet for
+		// {rows, total} in one round trip. Cached top-10 for 24h hides the
+		// cost; cache resets on process restart (deploy).
+		approvedMatch := bson.M{"user.communities": bson.M{"$elemMatch": bson.M{"status": "approved"}}}
 		pipeline := mongo.Pipeline{
-			bson.D{{Key: "$match", Value: match}},
-			bson.D{{Key: "$project", Value: bson.M{
-				"_id":          1,
-				"name":         "$community.name",
-				"imageLink":    "$community.imageLink",
-				"membersCount": "$community.membersCount",
-				"plan":         "$community.subscription.plan",
+			{{Key: "$match", Value: approvedMatch}},
+			{{Key: "$unwind", Value: "$user.communities"}},
+			{{Key: "$match", Value: bson.M{"user.communities.status": "approved"}}},
+			{{Key: "$group", Value: bson.M{
+				"_id":   "$user.communities.communityId",
+				"count": bson.M{"$sum": 1},
 			}}},
-			bson.D{{Key: "$sort", Value: bson.M{"membersCount": -1}}},
-			bson.D{{Key: "$skip", Value: int64(page * limit)}},
-			bson.D{{Key: "$limit", Value: int64(limit)}},
+			{{Key: "$lookup", Value: bson.M{
+				"from": "communities",
+				"let":  bson.M{"cidStr": "$_id"},
+				"pipeline": bson.A{
+					bson.M{"$match": bson.M{"$expr": bson.M{"$eq": bson.A{
+						"$_id",
+						bson.M{"$convert": bson.M{
+							"input":   "$$cidStr",
+							"to":      "objectId",
+							"onError": nil,
+						}},
+					}}}},
+					bson.M{"$match": bson.M{
+						"community.visibility":       "public",
+						"community.pendingDeletionAt": nil,
+					}},
+					bson.M{"$project": bson.M{
+						"name":      "$community.name",
+						"imageLink": "$community.imageLink",
+						"plan":      "$community.subscription.plan",
+					}},
+				},
+				"as": "community",
+			}}},
+			{{Key: "$match", Value: bson.M{"community.0": bson.M{"$exists": true}}}},
+			{{Key: "$unwind", Value: "$community"}},
+			{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}, {Key: "_id", Value: 1}}}},
+			{{Key: "$facet", Value: bson.M{
+				"rows": bson.A{
+					bson.M{"$skip": int64(page * limit)},
+					bson.M{"$limit": int64(limit)},
+				},
+				"total": bson.A{
+					bson.M{"$count": "total"},
+				},
+			}}},
 		}
 
-		cur, err := c.DB.Aggregate(ctx, pipeline)
+		cur, err := c.UDB.Aggregate(ctx, pipeline)
 		if err != nil {
 			config.ErrorStatus("failed to fetch leaderboard", http.StatusInternalServerError, w, err)
 			return
 		}
 		defer cur.Close(ctx)
 
-		var docs []struct {
-			ID           primitive.ObjectID `bson:"_id"`
-			Name         string             `bson:"name"`
-			ImageLink    string             `bson:"imageLink"`
-			MembersCount int                `bson:"membersCount"`
-			Plan         string             `bson:"plan"`
+		var facetResults []struct {
+			Rows []struct {
+				ID        string `bson:"_id"`
+				Count     int    `bson:"count"`
+				Community struct {
+					ID        primitive.ObjectID `bson:"_id"`
+					Name      string             `bson:"name"`
+					ImageLink string             `bson:"imageLink"`
+					Plan      string             `bson:"plan"`
+				} `bson:"community"`
+			} `bson:"rows"`
+			Total []struct {
+				Total int64 `bson:"total"`
+			} `bson:"total"`
 		}
-		if err := cur.All(ctx, &docs); err != nil {
+		if err := cur.All(ctx, &facetResults); err != nil {
 			config.ErrorStatus("failed to decode leaderboard", http.StatusInternalServerError, w, err)
 			return
 		}
 
-		// Count total for pagination
-		totalCount, _ := c.DB.CountDocuments(ctx, match)
+		var docs []struct {
+			ID           primitive.ObjectID
+			Name         string
+			ImageLink    string
+			MembersCount int
+			Plan         string
+		}
+		var totalCount int64
+		if len(facetResults) > 0 {
+			for _, r := range facetResults[0].Rows {
+				docs = append(docs, struct {
+					ID           primitive.ObjectID
+					Name         string
+					ImageLink    string
+					MembersCount int
+					Plan         string
+				}{
+					ID:           r.Community.ID,
+					Name:         r.Community.Name,
+					ImageLink:    r.Community.ImageLink,
+					MembersCount: r.Count,
+					Plan:         r.Community.Plan,
+				})
+			}
+			if len(facetResults[0].Total) > 0 {
+				totalCount = facetResults[0].Total[0].Total
+			}
+		}
 
 		// Build response data with placeholders for non-members stats to avoid heavy computation
 		responseData := make([]map[string]interface{}, 0, len(docs))
@@ -7509,6 +7792,16 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 	callsCollection := c.DBHelper.Collection("calls")
 	reportsCollection := c.DBHelper.Collection("reports")
 
+	// Self-heal displayed membersCount with live counts before computing
+	// stats. Sort key for activity/growth statTypes is unaffected (it's the
+	// activity/growth score, not member count) — this only ensures the number
+	// rendered in the response column reflects reality.
+	slowPathIDs := make([]string, 0, len(communities))
+	for _, comm := range communities {
+		slowPathIDs = append(slowPathIDs, comm.ID.Hex())
+	}
+	slowPathLiveCounts := liveMemberCounts(ctx, c.UDB, slowPathIDs)
+
 	// Calculate stats for each community
 	type CommunityStats struct {
 		Community     models.Community
@@ -7522,9 +7815,13 @@ func (c Community) CommunityLeaderboardHandler(w http.ResponseWriter, r *http.Re
 
 	for _, comm := range communities {
 		communityID := comm.ID.Hex()
+		membersCount := comm.Details.MembersCount
+		if live, ok := slowPathLiveCounts[communityID]; ok {
+			membersCount = live
+		}
 		stats := CommunityStats{
 			Community:    comm,
-			MembersCount: comm.Details.MembersCount,
+			MembersCount: membersCount,
 		}
 
 		// Calculate online count - users with this community who are online

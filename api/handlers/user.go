@@ -4598,14 +4598,26 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(decodedCommunities))
+	for _, item := range decodedCommunities {
+		ids = append(ids, item.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, u.DB, ids)
+
 	// Format response
 	var responseData []map[string]interface{}
 	for _, item := range decodedCommunities {
+		membersCount := item.Community.MembersCount
+		if live, ok := liveCounts[item.ID.Hex()]; ok {
+			membersCount = live
+		}
 		responseData = append(responseData, map[string]interface{}{
 			"_id":                    item.ID,
 			"name":                   item.Community.Name,
 			"imageLink":              item.Community.ImageLink,
-			"membersCount":           item.Community.MembersCount,
+			"membersCount":           membersCount,
 			"tags":                   item.Community.Tags,
 			"promotionalText":        item.Community.PromotionalText,
 			"promotionalDescription": item.Community.PromotionalDescription,
@@ -4906,14 +4918,26 @@ func (u User) FetchUserCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(decodedCommunities))
+	for _, item := range decodedCommunities {
+		ids = append(ids, item.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, u.DB, ids)
+
 	// Transform into response format
 	var communities []map[string]interface{}
 	for _, item := range decodedCommunities {
+		membersCount := item.Community.MembersCount
+		if live, ok := liveCounts[item.ID.Hex()]; ok {
+			membersCount = live
+		}
 		communities = append(communities, map[string]interface{}{
 			"_id":             item.ID,
 			"name":            item.Community.Name,
 			"imageLink":       item.Community.ImageLink,
-			"membersCount":    item.Community.MembersCount,
+			"membersCount":    membersCount,
 			"subscription":    item.Community.Subscription.Active,
 			"promotionalText": item.Community.PromotionalText,
 		})

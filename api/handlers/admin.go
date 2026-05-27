@@ -490,30 +490,54 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	isEmailQuery := strings.Contains(query, "@") // Detect if query looks like an email
 	var filter bson.M
 	var findOpts *options.FindOptions
+	var countOpts *options.CountOptions
 
 	// Use request context with timeout
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
-	
+
 	var err error
 
+	// Projection: only pull fields needed for AdminUserResult. Some user docs
+	// are very large (huge communities/notifications arrays); without this the
+	// driver decodes the whole document just to extract ~8 fields, which can
+	// blow past the query timeout for affected accounts.
+	resultProjection := bson.M{
+		"_id":                       1,
+		"user.email":                1,
+		"user.username":             1,
+		"user.profilePicture":       1,
+		"user.isDeactivated":        1,
+		"user.createdAt":            1,
+		"user.deactivatedAt":        1,
+		"user.deactivationReason":   1,
+		"user.deactivatedByAdminId": 1,
+	}
+
 	if isEmailQuery {
-		// For email queries, use direct lookup only (fastest - uses user_email_idx index)
-		filter = bson.M{"user.email": query} // Direct lookup uses user_email_idx (case-insensitive collation)
+		// For email queries, use direct lookup only (fastest - uses user_email_idx index).
+		// The index is defined with collation {locale:"en", strength:2}; the query
+		// must specify the same collation or Mongo will fall back to a COLLSCAN.
+		filter = bson.M{"user.email": query}
+		emailCollation := &options.Collation{Locale: "en", Strength: 2}
 		findOpts = &options.FindOptions{
-			Skip:  &skip,
-			Limit: &limit64,
-			Sort:  bson.M{"user.email": 1},
+			Skip:       &skip,
+			Limit:      &limit64,
+			Sort:       bson.M{"user.email": 1},
+			Projection: resultProjection,
+			Collation:  emailCollation,
 		}
+		countOpts = options.Count().SetCollation(emailCollation)
 	} else if queryLen >= 3 {
 		// Use $text search for name/username queries
 		filter = bson.M{
 			"$text": bson.M{"$search": query}, // Uses user_search_text_idx for name/username
 		}
 		findOpts = &options.FindOptions{
-			Skip:  &skip,
-			Limit: &limit64,
-			Sort:  bson.M{"score": bson.M{"$meta": "textScore"}, "user.email": 1},
+			Skip:       &skip,
+			Limit:      &limit64,
+			Sort:       bson.M{"score": bson.M{"$meta": "textScore"}, "user.email": 1},
+			Projection: resultProjection,
 		}
 	} else {
 		// For very short queries, use regex but limit aggressively
@@ -525,16 +549,21 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		findOpts = &options.FindOptions{
-			Skip:  &skip,
-			Limit: &limit64,
-			Sort:  bson.M{"user.email": 1},
+			Skip:       &skip,
+			Limit:      &limit64,
+			Sort:       bson.M{"user.email": 1},
+			Projection: resultProjection,
 		}
 	}
-	
+
 	// Get total count for pagination metadata (skip for very short queries to avoid slow count)
 	var totalCount int64
 	if isEmailQuery || queryLen >= 3 {
-		totalCount, err = h.UDB.CountDocuments(ctx, filter)
+		if countOpts != nil {
+			totalCount, err = h.UDB.CountDocuments(ctx, filter, countOpts)
+		} else {
+			totalCount, err = h.UDB.CountDocuments(ctx, filter)
+		}
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "search count failed"})
@@ -544,7 +573,7 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		// For short queries, estimate count based on results (faster)
 		totalCount = 0 // Will be estimated from results
 	}
-	
+
 	// Use existing user database to search with pagination
 	cursor, err := h.UDB.Find(ctx, filter, findOpts)
 	if err != nil {
@@ -560,9 +589,10 @@ func (h Admin) AdminUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 			findOpts = &options.FindOptions{
-				Skip:  &skip,
-				Limit: &limit64,
-				Sort:  bson.M{"user.email": 1},
+				Skip:       &skip,
+				Limit:      &limit64,
+				Sort:       bson.M{"user.email": 1},
+				Projection: resultProjection,
 			}
 			// Retry count with new filter
 			totalCount, err = h.UDB.CountDocuments(ctx, filter)
