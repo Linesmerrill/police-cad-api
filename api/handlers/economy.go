@@ -1279,3 +1279,296 @@ func (e Economy) GetInboxPendingCountsHandler(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{"counts": counts})
 }
+
+// transferRequest is the body for POST /api/v2/economy/transfer.
+type transferRequest struct {
+	FromCivilianID string `json:"fromCivilianId"`
+	ToCivilianID   string `json:"toCivilianId"`
+	AmountCents    int64  `json:"amountCents"`
+	Message        string `json:"message,omitempty"`
+}
+
+// Peer-transfer limits. Message limit chosen to keep memos tweet-short so the
+// UI can render them inline without truncation. Max amount caps blast radius
+// of a fat-finger or compromised account.
+const (
+	transferMaxMessageChars = 140
+	transferMinCents        = 1
+	transferMaxCents        = 100_000_00 // $100,000 per transfer
+)
+
+// TransferHandler moves money from one civilian to another in the same
+// community. Hard-blocks negative balances regardless of community policy —
+// peer transfers must never overdraft. Creates two inbox items (sender +
+// recipient), both pre-marked "paid" since no settlement action is needed.
+//
+//	POST /api/v2/economy/transfer
+//	body: { fromCivilianId, toCivilianId, amountCents, message? }
+//	resp: { fromBalanceAfter, toBalanceAfter, senderInboxId, recipientInboxId }
+func (e Economy) TransferHandler(w http.ResponseWriter, r *http.Request) {
+	var req transferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userID == "" {
+		userID = r.URL.Query().Get("userId")
+	}
+	if userID == "" {
+		config.ErrorStatus("missing authenticated user", http.StatusUnauthorized, w, nil)
+		return
+	}
+	if req.FromCivilianID == "" || req.ToCivilianID == "" {
+		config.ErrorStatus("fromCivilianId and toCivilianId required", http.StatusBadRequest, w, nil)
+		return
+	}
+	if req.FromCivilianID == req.ToCivilianID {
+		config.ErrorStatus("cannot send money to yourself", http.StatusBadRequest, w, nil)
+		return
+	}
+	if req.AmountCents < transferMinCents {
+		config.ErrorStatus("amount must be at least 1 cent", http.StatusBadRequest, w, nil)
+		return
+	}
+	if req.AmountCents > transferMaxCents {
+		config.ErrorStatus("amount exceeds per-transfer maximum", http.StatusBadRequest, w, nil)
+		return
+	}
+	if len(req.Message) > transferMaxMessageChars {
+		config.ErrorStatus("message exceeds 140 characters", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	fromID, err := primitive.ObjectIDFromHex(req.FromCivilianID)
+	if err != nil {
+		config.ErrorStatus("invalid fromCivilianId", http.StatusBadRequest, w, err)
+		return
+	}
+	toID, err := primitive.ObjectIDFromHex(req.ToCivilianID)
+	if err != nil {
+		config.ErrorStatus("invalid toCivilianId", http.StatusBadRequest, w, err)
+		return
+	}
+
+	fromCiv, err := e.CivDB.FindOne(ctx, bson.M{"_id": fromID})
+	if err != nil {
+		config.ErrorStatus("sender civilian not found", http.StatusNotFound, w, err)
+		return
+	}
+	// Ownership: caller must own the sender civilian. Civilian.UserID is the
+	// owning user; we trust the auth-context userID over anything in the body.
+	if fromCiv.Details.UserID != userID {
+		config.ErrorStatus("forbidden", http.StatusForbidden, w, nil)
+		return
+	}
+	toCiv, err := e.CivDB.FindOne(ctx, bson.M{"_id": toID})
+	if err != nil {
+		config.ErrorStatus("recipient civilian not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Same-community guard. Both civilians must have the same active
+	// community AND that community must have economy enabled. Prevents
+	// cross-community leaks and disabled-economy abuse.
+	commIDHex := fromCiv.Details.ActiveCommunityID
+	if commIDHex == "" || commIDHex != toCiv.Details.ActiveCommunityID {
+		config.ErrorStatus("both civilians must be in the same active community", http.StatusBadRequest, w, nil)
+		return
+	}
+	commID, err := primitive.ObjectIDFromHex(commIDHex)
+	if err != nil {
+		config.ErrorStatus("invalid community id on civilian", http.StatusBadRequest, w, err)
+		return
+	}
+	community, err := e.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !community.Details.Economy.Enabled {
+		config.ErrorStatus("economy is disabled for this community", http.StatusForbidden, w, nil)
+		return
+	}
+	// Both users must be current members of the community.
+	if _, ok := community.Details.Members[fromCiv.Details.UserID]; !ok {
+		config.ErrorStatus("sender is not a member of this community", http.StatusForbidden, w, nil)
+		return
+	}
+	if _, ok := community.Details.Members[toCiv.Details.UserID]; !ok {
+		config.ErrorStatus("recipient is not a member of this community", http.StatusForbidden, w, nil)
+		return
+	}
+
+	e.ensureBalanceInitialized(ctx, fromCiv, community)
+	e.ensureBalanceInitialized(ctx, toCiv, community)
+
+	// Pre-check sender balance. Hard-block regardless of community
+	// AllowNegativeBalance — peer transfers must never overdraft.
+	if fromCiv.Details.Balance < req.AmountCents {
+		config.ErrorStatus("insufficient balance", http.StatusPaymentRequired, w, nil)
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// Atomic debit on sender. The post-update doc gives us the authoritative
+	// new balance and a second-line defense against concurrent debits: if
+	// the post-debit balance is negative we revert with a compensating $inc
+	// and surface 402 rather than silently leaving the sender underwater.
+	debitRes := e.CivDB.FindOneAndUpdate(ctx,
+		bson.M{"_id": fromID},
+		bson.M{
+			"$inc": bson.M{"civilian.balance": -req.AmountCents},
+			"$set": bson.M{
+				"civilian.balanceInitialized": true,
+				"civilian.updatedAt":          now,
+			},
+		},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+	if debitRes.Err() != nil {
+		config.ErrorStatus("failed to debit sender", http.StatusInternalServerError, w, debitRes.Err())
+		return
+	}
+	var debitedSender models.Civilian
+	if derr := debitRes.Decode(&debitedSender); derr != nil {
+		config.ErrorStatus("failed to decode sender after debit", http.StatusInternalServerError, w, derr)
+		return
+	}
+	if debitedSender.Details.Balance < 0 {
+		// Lost the race — concurrent debit got there first. Refund.
+		_ = e.CivDB.UpdateOne(ctx, bson.M{"_id": fromID}, bson.M{
+			"$inc": bson.M{"civilian.balance": req.AmountCents},
+			"$set": bson.M{"civilian.updatedAt": now},
+		})
+		config.ErrorStatus("insufficient balance", http.StatusPaymentRequired, w, nil)
+		return
+	}
+
+	// Credit recipient. If this fails, refund the sender so the system
+	// doesn't quietly burn money.
+	creditRes := e.CivDB.FindOneAndUpdate(ctx,
+		bson.M{"_id": toID},
+		bson.M{
+			"$inc": bson.M{"civilian.balance": req.AmountCents},
+			"$set": bson.M{
+				"civilian.balanceInitialized": true,
+				"civilian.updatedAt":          now,
+			},
+		},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+	if creditRes.Err() != nil {
+		_ = e.CivDB.UpdateOne(ctx, bson.M{"_id": fromID}, bson.M{
+			"$inc": bson.M{"civilian.balance": req.AmountCents},
+			"$set": bson.M{"civilian.updatedAt": now},
+		})
+		config.ErrorStatus("failed to credit recipient", http.StatusInternalServerError, w, creditRes.Err())
+		return
+	}
+	var creditedRecipient models.Civilian
+	if derr := creditRes.Decode(&creditedRecipient); derr != nil {
+		zap.S().Errorw("transfer: credit succeeded but decode failed", "error", derr, "toCivilianId", req.ToCivilianID)
+	}
+
+	senderBalanceAfter := debitedSender.Details.Balance
+	recipientBalanceAfter := creditedRecipient.Details.Balance
+
+	// Build display-name strings up front so each inbox item can show the
+	// other party without an extra lookup at render time.
+	senderName := civilianDisplayName(fromCiv)
+	recipientName := civilianDisplayName(toCiv)
+	memo := req.Message
+
+	// Sender's receipt — appears in their ledger via ListTransactionsHandler
+	// (which keys off status="paid"). Amount is signed positive = debit, per
+	// the existing inbox convention.
+	senderItem := models.InboxItem{
+		ID:                     primitive.NewObjectID(),
+		CommunityID:            commIDHex,
+		UserID:                 fromCiv.Details.UserID,
+		CivilianID:             req.FromCivilianID,
+		Type:                   "transfer-sent",
+		Source:                 "peer",
+		Title:                  "Sent to " + recipientName,
+		Body:                   memo,
+		Amount:                 req.AmountCents,
+		Status:                 "paid",
+		IssuedBy:               fromCiv.Details.UserID,
+		BalanceAfter:           senderBalanceAfter,
+		CounterpartyCivilianID: req.ToCivilianID,
+		CounterpartyUserID:     toCiv.Details.UserID,
+		Memo:                   memo,
+		PaidAt:                 now,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}
+	// Recipient's notification — same status="paid" (no action required),
+	// Amount negative = credit per the existing convention.
+	recipientItem := models.InboxItem{
+		ID:                     primitive.NewObjectID(),
+		CommunityID:            commIDHex,
+		UserID:                 toCiv.Details.UserID,
+		CivilianID:             req.ToCivilianID,
+		Type:                   "transfer-received",
+		Source:                 "peer",
+		Title:                  "Received from " + senderName,
+		Body:                   memo,
+		Amount:                 -req.AmountCents,
+		Status:                 "paid",
+		IssuedBy:               fromCiv.Details.UserID,
+		BalanceAfter:           recipientBalanceAfter,
+		CounterpartyCivilianID: req.FromCivilianID,
+		CounterpartyUserID:     fromCiv.Details.UserID,
+		Memo:                   memo,
+		PaidAt:                 now,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}
+
+	if _, err := e.IDB.InsertOne(ctx, senderItem); err != nil {
+		zap.S().Errorw("transfer: balances updated but failed to insert sender inbox item",
+			"error", err, "fromCivilianId", req.FromCivilianID, "toCivilianId", req.ToCivilianID, "amount", req.AmountCents)
+	}
+	if _, err := e.IDB.InsertOne(ctx, recipientItem); err != nil {
+		zap.S().Errorw("transfer: balances updated but failed to insert recipient inbox item",
+			"error", err, "fromCivilianId", req.FromCivilianID, "toCivilianId", req.ToCivilianID, "amount", req.AmountCents)
+	}
+
+	go BroadcastInboxEvent("inbox.created", commIDHex, senderItem)
+	go BroadcastInboxEvent("inbox.created", commIDHex, recipientItem)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"fromBalanceAfter": senderBalanceAfter,
+		"toBalanceAfter":   recipientBalanceAfter,
+		"senderInboxId":    senderItem.ID.Hex(),
+		"recipientInboxId": recipientItem.ID.Hex(),
+		"senderName":       senderName,
+		"recipientName":    recipientName,
+	})
+}
+
+// civilianDisplayName returns "First Last" for a civilian, falling back to
+// just the first or last name if one is missing.
+func civilianDisplayName(c *models.Civilian) string {
+	if c == nil {
+		return ""
+	}
+	first := c.Details.FirstName
+	last := c.Details.LastName
+	switch {
+	case first != "" && last != "":
+		return first + " " + last
+	case first != "":
+		return first
+	case last != "":
+		return last
+	default:
+		return "Civilian"
+	}
+}
