@@ -1554,21 +1554,26 @@ func (e Economy) TransferHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // civilianDisplayName returns "First Last" for a civilian, falling back to
-// just the first or last name if one is missing.
+// the legacy `Name` field (older docs store the full name there), then to
+// just first or last individually, then to a generic "Civilian" so the
+// caller always has something printable.
 func civilianDisplayName(c *models.Civilian) string {
 	if c == nil {
 		return ""
 	}
 	first := c.Details.FirstName
 	last := c.Details.LastName
-	switch {
-	case first != "" && last != "":
+	if first != "" && last != "" {
 		return first + " " + last
-	case first != "":
-		return first
-	case last != "":
-		return last
-	default:
-		return "Civilian"
 	}
+	if c.Details.Name != "" {
+		return c.Details.Name
+	}
+	if first != "" {
+		return first
+	}
+	if last != "" {
+		return last
+	}
+	return "Civilian"
 }
