@@ -32,56 +32,67 @@ print("=== FIX CORRUPT ECONOMY NUMERICS ===");
 print(`DRY_RUN: ${DRY_RUN}`);
 print("");
 
-// Field specs: name -> { min, max, defaultIfBad }
-// Bounds are intentionally generous so we only clamp truly broken values.
-// int64 max is 9223372036854775807; we keep everything well under so the Go
-// `int` (architecture-dependent, but always at least 32-bit signed) decoder
-// is safe even on 32-bit targets.
+// Field spec: just the safe fallback we install when we find an unreadable
+// value. We ONLY repair values that the Go BSON decoder cannot read into the
+// int-typed model field — doubles that overflow int64, NaN, Infinity, or
+// doubles with a fractional part. We do NOT enforce conceptual minimums
+// (e.g. "afkPromptIntervalSeconds >= 30"). A value of 0 is the legitimate
+// zero-value for departments that never configured the economy; the Go
+// decoder handles it fine, and "repairing" it would touch 99%+ of the
+// population for no benefit.
 const DEPT_FIELDS = {
-  basePayPerHour:           { min: 0, max: 1_000_000_000, defaultIfBad: 0 },     // cents/hr, $10M/hr cap
-  maxSessionMinutes:        { min: 1, max: 24 * 60 * 7,   defaultIfBad: 120 },   // 1 min .. 1 week
-  afkPromptIntervalSeconds: { min: 30, max: 86400,         defaultIfBad: 600 },  // 30s .. 1 day
-  afkGraceSeconds:          { min: 10, max: 86400,         defaultIfBad: 60 },   // 10s .. 1 day
+  basePayPerHour:           { defaultIfBad: 0 },
+  maxSessionMinutes:        { defaultIfBad: 120 },
+  afkPromptIntervalSeconds: { defaultIfBad: 600 },
+  afkGraceSeconds:          { defaultIfBad: 60 },
 };
 
 const COMMUNITY_ECONOMY_FIELDS = {
-  defaultStartingBalance: { min: 0,                       max: 1_000_000_000_00, defaultIfBad: 0 },   // cents, $1B cap
-  defaultDueDays:         { min: 0,                       max: 365,              defaultIfBad: 14 },
-  contestExtensionDays:   { min: 0,                       max: 365,              defaultIfBad: 7 },
+  defaultStartingBalance: { defaultIfBad: 0 },
+  defaultDueDays:         { defaultIfBad: 14 },
+  contestExtensionDays:   { defaultIfBad: 7 },
 };
 
-const SAFE_INT_MAX = Number.MAX_SAFE_INTEGER; // 2^53 - 1, far below int64 max
-const SAFE_INT_MIN = Number.MIN_SAFE_INTEGER;
+// Anything past this point is unreadable by the Go decoder targeting int64.
+// (Real int64 max is 2^63-1 = 9223372036854775807, but JS can't represent it
+// exactly; MAX_SAFE_INTEGER = 2^53-1 is a safer guard.)
+const INT64_SAFE_MAX = Number.MAX_SAFE_INTEGER;
+const INT64_SAFE_MIN = Number.MIN_SAFE_INTEGER;
 
-function isSafeInt(v) {
-  return typeof v === "number"
-    && Number.isFinite(v)
-    && Math.floor(v) === v
-    && v <= SAFE_INT_MAX
-    && v >= SAFE_INT_MIN;
+// isMongoLong matches BSON Long, which mongosh surfaces as an object with
+// .low/.high/.unsigned. Long is the correct int64 wire type for these
+// fields, so it is always valid — including when the wrapped value is zero.
+function isMongoLong(v) {
+  return v !== null
+    && typeof v === "object"
+    && typeof v.low === "number"
+    && typeof v.high === "number"
+    && "unsigned" in v;
 }
 
-// Decide whether the stored value is acceptable. We're lenient about MISSING
-// fields (those are fine — the Go decoder treats them as zero) and only act
-// when the field is present-but-broken.
-function repair(value, spec) {
-  if (value === undefined || value === null) return { changed: false };
-  if (!isSafeInt(value)) {
-    return { changed: true, newValue: spec.defaultIfBad, reason: `not-safe-int (${String(value)})` };
+// detectBad returns null if the value is fine, or { newValue, reason } if it
+// needs repair. Conditions treated as fine:
+//   - field absent
+//   - field is a BSON Long (correct type, always valid)
+//   - field is a JS number that is finite, an integer, and in int64 range
+// Everything else (NaN, Infinity, non-integer double, overflowing double,
+// unexpected wrapper) is decoder-breaking and gets reset to the default.
+function detectBad(value, spec) {
+  if (value === undefined || value === null) return null;
+  if (isMongoLong(value)) return null;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return { newValue: spec.defaultIfBad, reason: `non-finite (${String(value)})` };
+    }
+    if (!Number.isInteger(value)) {
+      return { newValue: spec.defaultIfBad, reason: `non-integer (${value})` };
+    }
+    if (value > INT64_SAFE_MAX || value < INT64_SAFE_MIN) {
+      return { newValue: spec.defaultIfBad, reason: `overflows int64 (${value})` };
+    }
+    return null; // ordinary in-range integer double — decoder handles it
   }
-  if (value < spec.min) {
-    return { changed: true, newValue: spec.min, reason: `below-min (${value} < ${spec.min})` };
-  }
-  if (value > spec.max) {
-    return { changed: true, newValue: spec.defaultIfBad, reason: `above-max (${value} > ${spec.max})` };
-  }
-  // Already an int but Mongo may have stored it as a double (NumberDouble) due
-  // to past JSON-decoded writes. We can detect this in mongosh: bsonsize()
-  // doesn't tell us the type but $type would on the server side. We can't
-  // cheaply detect double-vs-long here without an extra round trip, so we
-  // accept safe ints as-is. The Go BSON decoder converts NumberDouble to int
-  // fine *as long as* the value fits — which by definition a safe int does.
-  return { changed: false };
+  return { newValue: spec.defaultIfBad, reason: `unexpected type (${typeof value})` };
 }
 
 const cursor = db.communities.find(
@@ -105,10 +116,10 @@ while (cursor.hasNext()) {
   const econ = doc.community && doc.community.economy;
   if (econ && typeof econ === "object") {
     for (const [field, spec] of Object.entries(COMMUNITY_ECONOMY_FIELDS)) {
-      const result = repair(econ[field], spec);
-      if (result.changed) {
-        setOps[`community.economy.${field}`] = result.newValue;
-        docFixes.push({ path: `community.economy.${field}`, was: econ[field], now: result.newValue, reason: result.reason });
+      const bad = detectBad(econ[field], spec);
+      if (bad) {
+        setOps[`community.economy.${field}`] = bad.newValue;
+        docFixes.push({ path: `community.economy.${field}`, was: econ[field], now: bad.newValue, reason: bad.reason });
       }
     }
   }
@@ -118,16 +129,16 @@ while (cursor.hasNext()) {
   for (let i = 0; i < depts.length; i++) {
     const dept = depts[i] || {};
     for (const [field, spec] of Object.entries(DEPT_FIELDS)) {
-      const result = repair(dept[field], spec);
-      if (result.changed) {
-        setOps[`community.departments.${i}.${field}`] = result.newValue;
+      const bad = detectBad(dept[field], spec);
+      if (bad) {
+        setOps[`community.departments.${i}.${field}`] = bad.newValue;
         docFixes.push({
           path: `community.departments.${i}.${field}`,
           deptId: dept._id,
           deptName: dept.name,
           was: dept[field],
-          now: result.newValue,
-          reason: result.reason,
+          now: bad.newValue,
+          reason: bad.reason,
         });
       }
     }
