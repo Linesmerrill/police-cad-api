@@ -993,6 +993,23 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Same hardening as UpdateDepartmentDetailsHandler: when the payload
+	// includes an `economy` sub-object, validate it strictly so a malformed
+	// numeric (e.g. afkPromptIntervalSeconds=3e22-style overflow on the
+	// community-level fields) can never land on the document and break every
+	// subsequent BSON decode of that community. Other top-level community
+	// fields still flow through the existing pass-through code — this endpoint
+	// is a catch-all used by many surfaces and we don't want to lock those
+	// down piecemeal here.
+	if econRaw, exists := req["economy"]; exists {
+		cleaned, vErr := validateCommunityEconomyPatch(econRaw)
+		if vErr != nil {
+			config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+			return
+		}
+		req["economy"] = cleaned
+	}
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -3295,6 +3312,62 @@ func coerceJSONInt(raw interface{}, lo, hi int64) (int64, error) {
 		return 0, fmt.Errorf("value %v out of range [%d, %d]", f, lo, hi)
 	}
 	return int64(f), nil
+}
+
+// communityEconomyPatchBounds matches the EconomySettings model fields. Same
+// rationale as departmentPatchBounds: prevent any client (mobile, web, or
+// otherwise) from persisting a non-int / out-of-range value that the Go BSON
+// decoder cannot read back. Caps are intentionally generous; they only reject
+// values that are obviously wrong.
+var communityEconomyPatchBounds = map[string]struct {
+	min int64
+	max int64
+}{
+	"defaultStartingBalance": {0, 1_000_000_000_000}, // cents ($10B cap)
+	"defaultDueDays":         {0, 3650},              // up to 10 years
+	"contestExtensionDays":   {0, 3650},
+}
+
+// validateCommunityEconomyPatch takes the raw `economy` sub-object from a
+// community PATCH body, validates every field with a strict allowlist (same
+// approach as UpdateDepartmentDetailsHandler), and returns a clean bson.M
+// safe to write under `community.economy`. Unknown fields are rejected so
+// arbitrary keys cannot be smuggled onto community.economy.
+func validateCommunityEconomyPatch(raw interface{}) (bson.M, error) {
+	if raw == nil {
+		return bson.M{}, nil
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid economy: expected object")
+	}
+	clean := bson.M{}
+	for key, value := range m {
+		switch key {
+		case "enabled", "allowNegativeBalance":
+			b, ok := value.(bool)
+			if !ok {
+				return nil, fmt.Errorf("invalid economy.%s: expected boolean", key)
+			}
+			clean[key] = b
+		case "fineMode":
+			s, ok := value.(string)
+			if !ok || (s != "inbox" && s != "auto_debit") {
+				return nil, fmt.Errorf("invalid economy.fineMode: expected \"inbox\" or \"auto_debit\"")
+			}
+			clean[key] = s
+		case "defaultStartingBalance", "defaultDueDays", "contestExtensionDays":
+			bounds := communityEconomyPatchBounds[key]
+			n, ierr := coerceJSONInt(value, bounds.min, bounds.max)
+			if ierr != nil {
+				return nil, fmt.Errorf("invalid economy.%s: %s", key, ierr.Error())
+			}
+			clean[key] = n
+		default:
+			return nil, fmt.Errorf("field economy.%q is not updatable via this endpoint", key)
+		}
+	}
+	return clean, nil
 }
 
 // UpdateDepartmentDetailsHandler updates the details of a department.
