@@ -32,32 +32,37 @@ print("=== FIX CORRUPT ECONOMY NUMERICS ===");
 print(`DRY_RUN: ${DRY_RUN}`);
 print("");
 
-// Field spec: just the safe fallback we install when we find an unreadable
-// value. We ONLY repair values that the Go BSON decoder cannot read into the
-// int-typed model field — doubles that overflow int64, NaN, Infinity, or
-// doubles with a fractional part. We do NOT enforce conceptual minimums
-// (e.g. "afkPromptIntervalSeconds >= 30"). A value of 0 is the legitimate
-// zero-value for departments that never configured the economy; the Go
-// decoder handles it fine, and "repairing" it would touch 99%+ of the
-// population for no benefit.
+// Field spec:
+//   nonsenseFallback — value to install when the field is NaN/Infinity/
+//     non-integer or some unexpected wrapper type. No way to recover the
+//     user's intent in those cases, so we reset to the schema default.
+//   overflowCap       — value to install when the field is a finite integer
+//     that exceeds int64. Used in place of the nonsense fallback because the
+//     user clearly intended a very high number; clamping to the API's
+//     documented cap preserves intent rather than zeroing it out.
+//
+// We do NOT enforce conceptual minimums (e.g. afkPromptIntervalSeconds >= 30)
+// and we do NOT touch finite integers that fit in int64 — even if huge —
+// because the Go decoder reads those without complaint. Caps match what the
+// hardened UpdateDepartmentDetailsHandler now enforces on new writes.
 const DEPT_FIELDS = {
-  basePayPerHour:           { defaultIfBad: 0 },
-  maxSessionMinutes:        { defaultIfBad: 120 },
-  afkPromptIntervalSeconds: { defaultIfBad: 600 },
-  afkGraceSeconds:          { defaultIfBad: 60 },
+  basePayPerHour:           { nonsenseFallback: 0,   overflowCap: 1_000_000_000 }, // cents/hr ($10M/hr)
+  maxSessionMinutes:        { nonsenseFallback: 120, overflowCap: 24 * 60 * 7 },   // 1 week
+  afkPromptIntervalSeconds: { nonsenseFallback: 600, overflowCap: 86400 },         // 1 day
+  afkGraceSeconds:          { nonsenseFallback: 60,  overflowCap: 86400 },         // 1 day
 };
 
 const COMMUNITY_ECONOMY_FIELDS = {
-  defaultStartingBalance: { defaultIfBad: 0 },
-  defaultDueDays:         { defaultIfBad: 14 },
-  contestExtensionDays:   { defaultIfBad: 7 },
+  defaultStartingBalance: { nonsenseFallback: 0,  overflowCap: 1_000_000_000_000 }, // $10B in cents
+  defaultDueDays:         { nonsenseFallback: 14, overflowCap: 3650 },              // 10 years
+  contestExtensionDays:   { nonsenseFallback: 7,  overflowCap: 3650 },
 };
 
-// Anything past this point is unreadable by the Go decoder targeting int64.
-// (Real int64 max is 2^63-1 = 9223372036854775807, but JS can't represent it
-// exactly; MAX_SAFE_INTEGER = 2^53-1 is a safer guard.)
-const INT64_SAFE_MAX = Number.MAX_SAFE_INTEGER;
-const INT64_SAFE_MIN = Number.MIN_SAFE_INTEGER;
+// Actual int64 limits. JS can't represent 2^63-1 exactly (it rounds to
+// 9223372036854776000), but as a *threshold* that approximation is fine —
+// anything strictly greater is unambiguously over the int64 ceiling.
+const INT64_MAX = 9223372036854775807;
+const INT64_MIN = -9223372036854775808;
 
 // isMongoLong matches BSON Long, which mongosh surfaces as an object with
 // .low/.high/.unsigned. Long is the correct int64 wire type for these
@@ -70,29 +75,34 @@ function isMongoLong(v) {
     && "unsigned" in v;
 }
 
-// detectBad returns null if the value is fine, or { newValue, reason } if it
-// needs repair. Conditions treated as fine:
+// detectBad returns null if the value is fine, or { newValue, reason } if
+// it needs repair. Conditions treated as fine:
 //   - field absent
-//   - field is a BSON Long (correct type, always valid)
+//   - field is a BSON Long (correct int64 wire type)
 //   - field is a JS number that is finite, an integer, and in int64 range
-// Everything else (NaN, Infinity, non-integer double, overflowing double,
-// unexpected wrapper) is decoder-breaking and gets reset to the default.
+//     (even if huge — Go decodes it cleanly)
+// Repairs:
+//   - NaN / Infinity / non-integer / unexpected wrapper → nonsenseFallback
+//   - > int64 range → overflowCap (preserves "they wanted a very high value")
 function detectBad(value, spec) {
   if (value === undefined || value === null) return null;
   if (isMongoLong(value)) return null;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      return { newValue: spec.defaultIfBad, reason: `non-finite (${String(value)})` };
+      return { newValue: spec.nonsenseFallback, reason: `non-finite (${String(value)})` };
     }
     if (!Number.isInteger(value)) {
-      return { newValue: spec.defaultIfBad, reason: `non-integer (${value})` };
+      return { newValue: spec.nonsenseFallback, reason: `non-integer (${value})` };
     }
-    if (value > INT64_SAFE_MAX || value < INT64_SAFE_MIN) {
-      return { newValue: spec.defaultIfBad, reason: `overflows int64 (${value})` };
+    if (value > INT64_MAX) {
+      return { newValue: spec.overflowCap, reason: `overflows int64, clamped (${value})` };
     }
-    return null; // ordinary in-range integer double — decoder handles it
+    if (value < INT64_MIN) {
+      return { newValue: spec.nonsenseFallback, reason: `underflows int64 (${value})` };
+    }
+    return null; // ordinary in-range integer (even if very large) — leave alone
   }
-  return { newValue: spec.defaultIfBad, reason: `unexpected type (${typeof value})` };
+  return { newValue: spec.nonsenseFallback, reason: `unexpected type (${typeof value})` };
 }
 
 const cursor = db.communities.find(
