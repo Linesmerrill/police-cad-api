@@ -4853,9 +4853,10 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 	tenCodeID := memberDetails.TenCodeID
 
-	// Check if tenCodeID is empty
+	// No active ten-code (user is "offline") is a normal state, not an error.
+	// Return 200 with null so the metrics dashboard doesn't flag the common case as a 4xx.
 	if tenCodeID == "" {
-		config.InfoStatus("User does not have an active ten code", http.StatusNotFound, w, fmt.Errorf("tenCodeID is empty for user"))
+		writeNullActiveTenCode(w)
 		return
 	}
 
@@ -4865,7 +4866,6 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Find the tenCode by ID
 	var code, description string
 	for _, tenCode := range community.Details.TenCodes {
 		if tenCode.ID == tenCodeIDObjectID {
@@ -4876,11 +4876,14 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if code == "" || description == "" {
-		config.ErrorStatus("TenCode not found in community", http.StatusNotFound, w, fmt.Errorf("tenCode with id %s not found in community tenCodes array", tenCodeID))
+		// Stale pointer (the ten-code was deleted out from under the member).
+		// Treat as "no active code" for the client; log at info so it's still discoverable.
+		zap.S().Infow("Active tenCodeID points at a code that no longer exists in community",
+			"communityId", communityID, "userId", userID, "tenCodeId", tenCodeID)
+		writeNullActiveTenCode(w)
 		return
 	}
 
-	// Return the response
 	response := map[string]string{
 		"code":        code,
 		"description": description,
@@ -4888,6 +4891,12 @@ func (c Community) GetActiveTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+func writeNullActiveTenCode(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("null"))
 }
 
 // GetPaginatedDepartmentsHandler returns a paginated list of departments by communityId
