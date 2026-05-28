@@ -30,6 +30,26 @@ func TestSanitizeRpPromotionData_Valid(t *testing.T) {
 	}
 }
 
+func TestSanitizeRpPromotionData_AcceptsInviteVariants(t *testing.T) {
+	cases := []string{
+		"https://discord.gg/abc123",
+		"https://discord.com/invite/abc123",
+		"https://discordapp.com/invite/abc123",
+		"https://www.discord.com/invite/abc123",
+		"https://ptb.discord.com/invite/abc123",
+		"https://canary.discord.com/invite/abc123",
+	}
+	for _, u := range cases {
+		t.Run(u, func(t *testing.T) {
+			data := validRpData()
+			data.InviteURL = u
+			if err := sanitizeRpPromotionData(&data, rpTiers["free"]); err != nil {
+				t.Errorf("expected %q to be accepted, got: %v", u, err)
+			}
+		})
+	}
+}
+
 func TestSanitizeRpPromotionData_RequiredFields(t *testing.T) {
 	cases := map[string]func(*models.RpPromotionData){
 		"missing server name": func(d *models.RpPromotionData) { d.ServerName = "  " },
@@ -38,6 +58,13 @@ func TestSanitizeRpPromotionData_RequiredFields(t *testing.T) {
 		"no consoles":         func(d *models.RpPromotionData) { d.Consoles = nil },
 		"non-discord invite":  func(d *models.RpPromotionData) { d.InviteURL = "https://example.com/x" },
 		"non-https invite":    func(d *models.RpPromotionData) { d.InviteURL = "http://discord.gg/x" },
+		"channel deep-link": func(d *models.RpPromotionData) {
+			d.InviteURL = "https://discord.com/channels/1508945617169285264/1508948755867635823"
+		},
+		"discord profile URL": func(d *models.RpPromotionData) {
+			d.InviteURL = "https://discord.com/users/123456789"
+		},
+		"discord.gg with no code": func(d *models.RpPromotionData) { d.InviteURL = "https://discord.gg/" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
