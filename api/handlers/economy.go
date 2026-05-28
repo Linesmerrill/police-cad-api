@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -28,6 +29,7 @@ type Economy struct {
 	CivDB  databases.CivilianDatabase
 	CommDB databases.CommunityDatabase
 	ACDB   databases.UserActiveCivilianDatabase // active-civilian pick; nil-safe — auto-pin on first clock-in is skipped when nil.
+	UDB    databases.UserDatabase               // user profile reads — authoritative source for community membership (community.Members map is not).
 }
 
 // ---- helpers ----
@@ -1288,6 +1290,43 @@ type transferRequest struct {
 	Message        string `json:"message,omitempty"`
 }
 
+// isApprovedCommunityMember validates that userID belongs to the given community.
+// The authoritative source is the user profile (`user.communities[]` with
+// `status == "approved"`), with a shortcut for the community owner. We
+// intentionally do NOT consult `community.Details.Members` — that map is only
+// populated as a side effect of setting a 10-code and is frequently missing
+// owners and other legitimate members.
+func (e Economy) isApprovedCommunityMember(ctx context.Context, userID, communityIDHex string, community *models.Community) bool {
+	if userID == "" || communityIDHex == "" {
+		return false
+	}
+	if community != nil && community.Details.OwnerID == userID {
+		return true
+	}
+	if e.UDB == nil {
+		return false
+	}
+	var user models.User
+	// user._id is stored as a hex string on some docs and as an ObjectID on
+	// others — match the dual-lookup pattern used elsewhere in this codebase.
+	if oid, err := primitive.ObjectIDFromHex(userID); err == nil {
+		if derr := e.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&user); derr != nil {
+			user = models.User{}
+		}
+	}
+	if user.ID == "" {
+		if err := e.UDB.FindOne(ctx, bson.M{"_id": userID}).Decode(&user); err != nil {
+			return false
+		}
+	}
+	for _, uc := range user.Details.Communities {
+		if uc.CommunityID == communityIDHex && strings.EqualFold(uc.Status, "approved") {
+			return true
+		}
+	}
+	return false
+}
+
 // Peer-transfer limits. Message limit chosen to keep memos tweet-short so the
 // UI can render them inline without truncation. Max amount caps blast radius
 // of a fat-finger or compromised account.
@@ -1362,7 +1401,10 @@ func (e Economy) TransferHandler(w http.ResponseWriter, r *http.Request) {
 	// Ownership: caller must own the sender civilian. Civilian.UserID is the
 	// owning user; we trust the auth-context userID over anything in the body.
 	if fromCiv.Details.UserID != userID {
-		config.ErrorStatus("forbidden", http.StatusForbidden, w, nil)
+		zap.S().Infow("transfer rejected: caller does not own sender civilian",
+			"callerUserId", userID, "civilianOwnerUserId", fromCiv.Details.UserID,
+			"fromCivilianId", req.FromCivilianID, "toCivilianId", req.ToCivilianID)
+		config.ErrorStatus("you do not own the sender civilian", http.StatusForbidden, w, nil)
 		return
 	}
 	toCiv, err := e.CivDB.FindOne(ctx, bson.M{"_id": toID})
@@ -1390,15 +1432,27 @@ func (e Economy) TransferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !community.Details.Economy.Enabled {
+		zap.S().Infow("transfer rejected: economy disabled",
+			"communityId", commIDHex, "userId", userID,
+			"fromCivilianId", req.FromCivilianID, "toCivilianId", req.ToCivilianID)
 		config.ErrorStatus("economy is disabled for this community", http.StatusForbidden, w, nil)
 		return
 	}
-	// Both users must be current members of the community.
-	if _, ok := community.Details.Members[fromCiv.Details.UserID]; !ok {
+	// Authoritative membership check is the user profile (community.OwnerID +
+	// user.Details.Communities[approved]) — NOT community.Details.Members,
+	// which is a stale, 10-code-driven map. See feedback memory
+	// `community-members-map-unreliable`.
+	if !e.isApprovedCommunityMember(ctx, fromCiv.Details.UserID, commIDHex, community) {
+		zap.S().Infow("transfer rejected: sender not approved community member",
+			"communityId", commIDHex, "senderUserId", fromCiv.Details.UserID,
+			"fromCivilianId", req.FromCivilianID, "toCivilianId", req.ToCivilianID)
 		config.ErrorStatus("sender is not a member of this community", http.StatusForbidden, w, nil)
 		return
 	}
-	if _, ok := community.Details.Members[toCiv.Details.UserID]; !ok {
+	if !e.isApprovedCommunityMember(ctx, toCiv.Details.UserID, commIDHex, community) {
+		zap.S().Infow("transfer rejected: recipient not approved community member",
+			"communityId", commIDHex, "recipientUserId", toCiv.Details.UserID,
+			"fromCivilianId", req.FromCivilianID, "toCivilianId", req.ToCivilianID)
 		config.ErrorStatus("recipient is not a member of this community", http.StatusForbidden, w, nil)
 		return
 	}

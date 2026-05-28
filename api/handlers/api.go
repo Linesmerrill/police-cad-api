@@ -167,6 +167,7 @@ func (a *App) New() *mux.Router {
 		CivDB:  databases.NewCivilianDatabase(a.dbHelper),
 		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 		ACDB:   acDB,
+		UDB:    databases.NewUserDatabase(a.dbHelper),
 	}
 
 	// healthchex
