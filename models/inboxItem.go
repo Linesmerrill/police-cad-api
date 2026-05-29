@@ -9,13 +9,19 @@ type InboxItem struct {
 	CommunityID string             `json:"communityId" bson:"communityId"`
 	UserID      string             `json:"userId" bson:"userId"`         // owning user (recipient for app-level routing)
 	CivilianID  string             `json:"civilianId" bson:"civilianId"` // target civilian whose balance is debited on pay
-	Type        string             `json:"type" bson:"type"`             // "fine" | "fee" | "payroll" | "verdict" | "other"
-	Source      string             `json:"source" bson:"source"`         // "citation" | "admin" | "judicial" | "shop" | "system"
+	Type        string             `json:"type" bson:"type"`             // "fine" | "fee" | "payroll" | "verdict" | "transfer-sent" | "transfer-received" | "other"
+	Source      string             `json:"source" bson:"source"`         // "citation" | "admin" | "judicial" | "shop" | "system" | "peer"
 	Title       string             `json:"title" bson:"title"`
 	Body        string             `json:"body,omitempty" bson:"body,omitempty"`
 	Amount      int64              `json:"amount" bson:"amount"` // signed cents; positive = owed, negative = credit
 	Status      string             `json:"status" bson:"status"` // "pending" | "paid" | "dismissed" | "delinquent" | "contested"
 	IssuedBy    string             `json:"issuedBy,omitempty" bson:"issuedBy,omitempty"`
+	// Peer-transfer fields. Set on transfer-sent / transfer-received items so
+	// the UI can render the counterparty's name + the sender's optional memo.
+	// Unset on system-issued items (fines, fees, payroll, verdicts).
+	CounterpartyCivilianID string `json:"counterpartyCivilianId,omitempty" bson:"counterpartyCivilianId,omitempty"`
+	CounterpartyUserID     string `json:"counterpartyUserId,omitempty" bson:"counterpartyUserId,omitempty"`
+	Memo                   string `json:"memo,omitempty" bson:"memo,omitempty"` // ≤140 chars, set on peer transfers
 	RefType     string             `json:"refType,omitempty" bson:"refType,omitempty"` // e.g. "criminalHistoryId" | "courtCaseId"
 	RefID       string             `json:"refId,omitempty" bson:"refId,omitempty"`
 	DueAt       primitive.DateTime `json:"dueAt,omitempty" bson:"dueAt,omitempty"`
