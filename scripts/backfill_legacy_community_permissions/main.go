@@ -195,7 +195,7 @@ func main() {
 			skippedDecode++
 			continue
 		}
-		if ownerHasAdmin(doc.Details.Roles, owner) {
+		if models.OwnerHasAdmin(doc.Details.Roles, owner) {
 			alreadyFine++
 			continue
 		}
@@ -245,7 +245,7 @@ func main() {
 		actions := []string{}
 
 		newRoles := append([]models.Role{}, doc.Details.Roles...)
-		newRoles = append(newRoles, headAdminRole(owner))
+		newRoles = append(newRoles, models.BuildHeadAdminRole(owner))
 		set["community.roles"] = newRoles
 		actions = append(actions, "add Head Admin role")
 
@@ -377,32 +377,6 @@ func main() {
 	}
 }
 
-// ownerHasAdmin reports whether any role contains ownerID AND has an enabled
-// permission named "administrator".
-func ownerHasAdmin(roles []models.Role, ownerID string) bool {
-	if ownerID == "" {
-		return false
-	}
-	for _, r := range roles {
-		hasOwner := false
-		for _, m := range r.Members {
-			if m == ownerID {
-				hasOwner = true
-				break
-			}
-		}
-		if !hasOwner {
-			continue
-		}
-		for _, p := range r.Permissions {
-			if p.Enabled && strings.EqualFold(p.Name, "administrator") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // ownerHasAdminOnAnotherCommunity returns true if the owner has administrator
 // in any community whose _id is NOT excludeID. Indicates the user migrated
 // successfully and this candidate is likely the abandoned legacy leftover.
@@ -432,28 +406,9 @@ func ownerHasAdminOnAnotherCommunity(ctx context.Context, communities *mongo.Col
 		if err := cur.Decode(&doc); err != nil {
 			continue
 		}
-		if ownerHasAdmin(doc.Details.Roles, ownerID) {
+		if models.OwnerHasAdmin(doc.Details.Roles, ownerID) {
 			return true, nil
 		}
 	}
 	return false, cur.Err()
-}
-
-// headAdminRole mirrors the role stamped by CreateCommunityHandler.
-func headAdminRole(ownerID string) models.Role {
-	return models.Role{
-		ID:      primitive.NewObjectID(),
-		Name:    "Head Admin",
-		Members: []string{ownerID},
-		Permissions: []models.Permission{
-			{ID: primitive.NewObjectID(), Name: "administrator", Description: "Head Admin", Enabled: true},
-			{ID: primitive.NewObjectID(), Name: "manage community settings", Description: "Allows managing community settings", Enabled: false},
-			{ID: primitive.NewObjectID(), Name: "manage community events", Description: "Allows managing community events", Enabled: false},
-			{ID: primitive.NewObjectID(), Name: "manage departments", Description: "Allows managing departments", Enabled: false},
-			{ID: primitive.NewObjectID(), Name: "manage roles", Description: "Allows managing roles", Enabled: false},
-			{ID: primitive.NewObjectID(), Name: "manage members", Description: "Allows managing members", Enabled: false},
-			{ID: primitive.NewObjectID(), Name: "manage bans", Description: "Allows managing bans", Enabled: false},
-			{ID: primitive.NewObjectID(), Name: "administrator", Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.", Enabled: false},
-		},
-	}
 }
