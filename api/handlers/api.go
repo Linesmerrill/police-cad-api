@@ -260,6 +260,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/communities/{id}/transfer-ownership", http.HandlerFunc(adminHandler.AdminTransferOwnershipHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}/remove-member", http.HandlerFunc(adminHandler.AdminRemoveMemberHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{id}/roles", http.HandlerFunc(adminHandler.AdminGetCommunityRolesHandler)).Methods("GET")
+	apiCreate.Handle("/admin/communities/{id}/sync-schema", http.HandlerFunc(adminHandler.AdminSyncCommunitySchemaHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{community_id}/restore-pending-deletion", http.HandlerFunc(c.RestoreCommunityPendingDeletionHandler)).Methods("POST")
 	apiCreate.Handle("/admin/communities/{community_id}/force-delete", http.HandlerFunc(c.ForceDeleteCommunityHandler)).Methods("POST")
 	// Admin-only smoke test for the cron-alert Discord webhook. POST with

@@ -251,6 +251,21 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Self-healing: bring legacy pre-permissions communities up to the current
+	// schema (a Head Admin role for the owner, default reference data, an
+	// initialized members map) so the owner isn't locked out of their own
+	// community. Idempotent — writes only when something is actually missing,
+	// so healthy communities just read. Re-fetch on repair so this response
+	// reflects the healed document.
+	if actions, healErr := applyCommunityBackfill(ctx, c.DB, dbResp); healErr != nil {
+		zap.S().Warnw("failed to heal legacy community schema", "community_id", commID, "error", healErr)
+	} else if len(actions) > 0 {
+		zap.S().Infow("healed legacy community schema", "community_id", commID, "actions", actions)
+		if healed, refErr := c.DB.FindOneIncludingPending(ctx, filter); refErr == nil {
+			dbResp = healed
+		}
+	}
+
 	// Ensure no role has nil Permissions or Members — nil slices serialize as
 	// JSON null, which crashes mobile clients that call .some() on the array.
 	for i := range dbResp.Details.Roles {
@@ -294,6 +309,22 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// applyCommunityBackfill brings a community up to the current schema using the
+// canonical, non-destructive rules in models.BuildCommunityBackfill. It writes
+// only when there is something to repair and returns the list of actions taken
+// (nil when the community was already healthy). Shared by the owner-facing
+// community load path and the admin schema-sync endpoint.
+func applyCommunityBackfill(ctx context.Context, cdb databases.CommunityDatabase, community *models.Community) ([]string, error) {
+	set, actions := models.BuildCommunityBackfill(community)
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	if err := cdb.UpdateOne(ctx, bson.M{"_id": community.ID}, bson.M{"$set": set}); err != nil {
+		return nil, err
+	}
+	return actions, nil
 }
 
 // CreateCommunityHandler creates a new community
@@ -354,65 +385,10 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 		newCommunity.Details.Events = []models.Event{}
 	}
 
-	// Define the Head Admin role and permission
-	headAdminRole := models.Role{
-		ID:      primitive.NewObjectID(),
-		Name:    "Head Admin",
-		Members: []string{newCommunity.Details.OwnerID},
-		Permissions: []models.Permission{
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "administrator",
-				Description: "Head Admin",
-				Enabled:     true,
-			},
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "manage community settings",
-				Description: "Allows managing community settings",
-				Enabled:     false,
-			},
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "manage community events",
-				Description: "Allows managing community events",
-				Enabled:     false,
-			},
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "manage departments",
-				Description: "Allows managing departments",
-				Enabled:     false,
-			},
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "manage roles",
-				Description: "Allows managing roles",
-				Enabled:     false,
-			},
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "manage members",
-				Description: "Allows managing members",
-				Enabled:     false,
-			},
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "manage bans",
-				Description: "Allows managing bans",
-				Enabled:     false,
-			},
-			{
-				ID:          primitive.NewObjectID(),
-				Name:        "administrator",
-				Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.",
-				Enabled:     false,
-			},
-		},
-	}
-
-	// Add the Head Admin role to the community
-	newCommunity.Details.Roles = append(newCommunity.Details.Roles, headAdminRole)
+	// Add the Head Admin role to the community. The canonical role lives in the
+	// models package so create-time and the legacy schema-sync stamp identical
+	// roles (see models/community_backfill.go).
+	newCommunity.Details.Roles = append(newCommunity.Details.Roles, models.BuildHeadAdminRole(newCommunity.Details.OwnerID))
 
 	// Use request context with timeout for all database operations
 	ctx, cancel := api.WithQueryTimeout(r.Context())

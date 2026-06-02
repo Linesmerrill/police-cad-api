@@ -4213,15 +4213,10 @@ func (h Admin) AdminSendEmailHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // isHeadAdminRole identifies the Head Admin role by its permission structure,
-// not by name (since users can rename roles). The Head Admin role has an
-// "administrator" permission with description "Head Admin".
+// not by name (since users can rename roles). Delegates to the canonical
+// implementation in the models package so detection logic lives in one place.
 func isHeadAdminRole(role models.Role) bool {
-	for _, perm := range role.Permissions {
-		if perm.Name == "administrator" && perm.Description == "Head Admin" && perm.Enabled {
-			return true
-		}
-	}
-	return false
+	return models.IsHeadAdminRole(role)
 }
 
 // getClientIP extracts the client IP from the request
@@ -4547,6 +4542,84 @@ func (h Admin) AdminGetCommunityRolesHandler(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"roles": roles,
+	})
+}
+
+// AdminSyncCommunitySchemaHandler brings a legacy community up to the current
+// schema: a Head Admin role granting the owner administrator power (so they can
+// delete/leave/manage their community), plus any default reference data and an
+// initialized members map that pre-permission-system communities never got. It
+// is idempotent and non-destructive — existing values are preserved and a
+// healthy community returns synced=false with no actions and no write.
+func (h Admin) AdminSyncCommunitySchemaHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	communityID := mux.Vars(r)["id"]
+	if communityID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community ID is required"})
+		return
+	}
+
+	// Body is optional — currentUser drives the permission check when provided.
+	var req struct {
+		CurrentUser map[string]interface{} `json:"currentUser"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "insufficient permissions to sync community schema (requires owner or admin role)"})
+		return
+	}
+
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid community ID"})
+		return
+	}
+
+	// IncludingPending so a community can be repaired even while pending deletion
+	// (mirrors AdminCommunityDetailsHandler, which admins use for the same docs).
+	community, err := h.CDB.FindOneIncludingPending(r.Context(), bson.M{"_id": cID})
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "community not found"})
+		return
+	}
+
+	actions, err := applyCommunityBackfill(r.Context(), h.CDB, community)
+	if err != nil {
+		log.Printf("failed to sync community schema for %s: %v", communityID, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to sync community schema"})
+		return
+	}
+
+	if len(actions) > 0 {
+		adminEmail, _ := req.CurrentUser["email"].(string)
+		audit := models.AdminAudit{
+			AdminEmail:    adminEmail,
+			Action:        "community_schema_sync",
+			CommunityID:   communityID,
+			CommunityName: community.Details.Name,
+			After:         map[string]interface{}{"actions": actions},
+			Details:       fmt.Sprintf("Synced legacy community schema: %s", strings.Join(actions, ", ")),
+			Timestamp:     time.Now(),
+			IP:            getClientIP(r),
+		}
+		if _, err := h.AuditDB.InsertOne(r.Context(), audit); err != nil {
+			log.Printf("CRITICAL: failed to write audit log for schema sync: %v", err)
+		}
+		h.trackAdminAction(primitive.NilObjectID, "community_schema_sync", communityID, "community",
+			fmt.Sprintf("Synced legacy community %s: %s", community.Details.Name, strings.Join(actions, ", ")), r)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"synced":  len(actions) > 0,
+		"actions": actions,
 	})
 }
 
