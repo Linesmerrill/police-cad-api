@@ -122,6 +122,10 @@ func (c Community) CreateRankHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !authorizeCommunityAction(w, r, community, "manage departments") {
+		return
+	}
+
 	deptIdx, dept := findDepartment(community, departmentID)
 	if dept == nil {
 		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
@@ -202,6 +206,10 @@ func (c Community) UpdateRankHandler(w http.ResponseWriter, r *http.Request) {
 	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	if !authorizeCommunityAction(w, r, community, "manage departments") {
 		return
 	}
 
@@ -324,6 +332,10 @@ func (c Community) DeleteRankHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !authorizeCommunityAction(w, r, community, "manage departments") {
+		return
+	}
+
 	_, dept := findDepartment(community, departmentID)
 	if dept == nil {
 		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
@@ -412,6 +424,10 @@ func (c Community) ReorderRanksHandler(w http.ResponseWriter, r *http.Request) {
 	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	if !authorizeCommunityAction(w, r, community, "manage departments") {
 		return
 	}
 
@@ -1191,6 +1207,10 @@ func (c Community) AssignMemberRankHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if !authorizeCommunityAction(w, r, community, "manage departments") {
+		return
+	}
+
 	deptIdx, dept := findDepartment(community, departmentID)
 	if dept == nil {
 		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
@@ -1442,6 +1462,10 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if !authorizeCommunityAction(w, r, community, "manage departments") {
+		return
+	}
+
 	deptIdx, dept := findDepartment(community, departmentID)
 	if dept == nil {
 		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
@@ -1650,6 +1674,10 @@ func (c Community) ToggleCustomRequirementHandler(w http.ResponseWriter, r *http
 	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	if !authorizeCommunityAction(w, r, community, "manage departments") {
 		return
 	}
 
