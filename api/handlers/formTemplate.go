@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/api"
@@ -86,6 +87,17 @@ func (h FormTemplate) CreateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	defer cancel()
 
 	if _, err := h.DB.InsertOne(ctx, tpl); err != nil {
+		// The unique (communityID, slug) index rejects a slug already in use by
+		// this community. Surface that as a clean 409 the user can act on rather
+		// than a generic 500.
+		if mongo.IsDuplicateKeyError(err) {
+			config.ErrorStatus(
+				fmt.Sprintf("a form with slug %q already exists in this community", body.Slug),
+				http.StatusConflict, w,
+				fmt.Errorf("duplicate form template slug %q for community %q", body.Slug, body.CommunityID),
+			)
+			return
+		}
 		config.ErrorStatus("failed to create form template", http.StatusInternalServerError, w, err)
 		return
 	}
