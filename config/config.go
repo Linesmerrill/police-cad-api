@@ -2,10 +2,12 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/models"
@@ -51,7 +53,7 @@ func InfoStatus(message string, httpStatusCode int, w http.ResponseWriter, err e
 	w.WriteHeader(httpStatusCode)
 	var errorMsg string
 	if err != nil {
-		errorMsg = err.Error()
+		errorMsg = safeClientError(err)
 	} else {
 		errorMsg = message
 	}
@@ -71,13 +73,36 @@ func ErrorStatus(message string, httpStatusCode int, w http.ResponseWriter, err 
 	w.WriteHeader(httpStatusCode)
 	var errorMsg string
 	if err != nil {
-		errorMsg = err.Error()
+		errorMsg = safeClientError(err)
 	} else {
 		errorMsg = message
 	}
 	b, _ := json.Marshal(models.ErrorMessageResponse{Response: models.MessageError{Message: message, Error: errorMsg}})
 	w.Write(b)
 	return
+}
+
+// safeClientError returns a client-safe representation of err. Raw MongoDB
+// driver errors embed server-side internals — the database name, collection,
+// index names, and document IDs — which must never reach an API client. Those
+// are scrubbed down to a generic string here; the full error is still logged
+// server-side by the caller (ErrorStatus/InfoStatus log via zap before calling
+// this). Application errors built with fmt.Errorf carry no internals and pass
+// through unchanged so callers keep their human-readable messages.
+func safeClientError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if mongo.IsDuplicateKeyError(err) {
+		return "resource already exists"
+	}
+	var writeErr mongo.WriteException
+	var cmdErr mongo.CommandError
+	var bulkErr mongo.BulkWriteException
+	if errors.As(err, &writeErr) || errors.As(err, &cmdErr) || errors.As(err, &bulkErr) {
+		return "a database error occurred"
+	}
+	return err.Error()
 }
 
 // setLogger is a helper function to set the logger based on the environment

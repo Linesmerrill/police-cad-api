@@ -1139,6 +1139,15 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
+
 	// Update the community to add the new role
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$push": bson.M{"community.roles": role}}
@@ -1189,6 +1198,15 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
 
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{
@@ -1242,6 +1260,15 @@ func (c Community) UpdateRoleNameHandler(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
+
 	// Update the role name in the community
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{"$set": bson.M{"community.roles.$.name": requestBody.Name}}
@@ -1279,6 +1306,15 @@ func (c Community) DeleteRoleByIDHandler(w http.ResponseWriter, r *http.Request)
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
 
 	// Update the community to pull the role by ID
 	filter := bson.M{"_id": cID}
@@ -1331,6 +1367,10 @@ func (c Community) ReorderRolesHandler(w http.ResponseWriter, r *http.Request) {
 	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil {
 		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	if !authorizeCommunityAction(w, r, community, "manage roles") {
 		return
 	}
 
@@ -1431,6 +1471,15 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
 
 	// Update the role permissions in the community
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
@@ -2320,10 +2369,22 @@ func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	community, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
+
 	// Update the community to pull the member from the role
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{"$pull": bson.M{"community.roles.$.members": memberID}}
-	err = c.DB.UpdateOne(context.Background(), filter, update)
+	err = c.DB.UpdateOne(ctx, filter, update)
 	if err != nil {
 		config.ErrorStatus("failed to delete role member", http.StatusInternalServerError, w, err)
 		return
@@ -2981,6 +3042,23 @@ func (c Community) GetDepartmentCallSignsHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"departmentCallSigns": callSigns,
 	})
+}
+
+// authorizeCommunityAction verifies the requester (resolved from the request) is the
+// community owner or holds one of the given permissions on the already-loaded community.
+// On failure it writes the appropriate error response (401 if the caller cannot be
+// identified, 403 if they lack permission) and returns false.
+func authorizeCommunityAction(w http.ResponseWriter, r *http.Request, community *models.Community, permissionNames ...string) bool {
+	actorID := resolveActorFromRequest(r)
+	if actorID == "" {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no authenticated user"))
+		return false
+	}
+	if !userHasCommunityPermission(community, actorID, permissionNames...) {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, fmt.Errorf("user %s lacks required permission", actorID))
+		return false
+	}
+	return true
 }
 
 // userHasCommunityPermission checks if a user is the community owner or has a role
