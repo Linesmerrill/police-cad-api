@@ -171,6 +171,18 @@ func rpPromoNormalizeName(s string) string {
 	return rpPromoNonAlnum.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "")
 }
 
+// rpPromoNormalizeInvite canonicalizes a Discord invite for duplicate matching:
+// lowercased, trimmed, scheme/host-prefix removed, and trailing slash dropped,
+// so "https://discord.gg/abc" and "discord.gg/abc/" match.
+func rpPromoNormalizeInvite(s string) string {
+	v := strings.ToLower(strings.TrimSpace(s))
+	v = strings.TrimSuffix(v, "/")
+	for _, prefix := range []string{"https://", "http://", "www.", "discord.gg/", "discord.com/invite/"} {
+		v = strings.TrimPrefix(v, prefix)
+	}
+	return v
+}
+
 // resolveUserContact returns a user's email and username from their ID.
 func resolveUserContact(udb databases.UserDatabase, userID string) (email, username string) {
 	if userID == "" {
@@ -212,10 +224,19 @@ type adminRpPromoItem struct {
 	MessageID     string   `json:"messageId"`
 	MessageLink   string   `json:"messageLink"`
 	Removed       bool     `json:"removed"`
-	OwnerDup      bool     `json:"ownerDup"`
-	NameDup       bool     `json:"nameDup"`
-	InviteDup     bool     `json:"inviteDup"`
 	OwnerBanned   bool     `json:"ownerBanned"`
+
+	// Duplicate grouping. A promo is only flagged when its invite or normalized
+	// server name is shared across 2+ DISTINCT communities — a single community
+	// re-promoting on different days (respecting the cooldown) is legitimate and
+	// never flagged. Members of the same set share DupGroupID so the UI can
+	// group/pair them under one header.
+	DupGroupID        string `json:"dupGroupId,omitempty"`        // stable key, e.g. "inv:<url>" or "name:<norm>"
+	DupGroupType      string `json:"dupGroupType,omitempty"`      // "invite" | "name"
+	DupGroupValue     string `json:"dupGroupValue,omitempty"`     // the shared invite URL or server name, for display
+	DupCommunityCount int    `json:"dupCommunityCount,omitempty"` // distinct communities sharing the key
+	DupAlsoName       bool   `json:"dupAlsoName,omitempty"`       // invite-grouped row that ALSO shares its name cross-community
+	DupAlsoInvite     bool   `json:"dupAlsoInvite,omitempty"`     // name-grouped row that ALSO shares its invite cross-community
 }
 
 type rpPromoAggRow struct {
@@ -273,20 +294,24 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// First pass: tally duplicate keys across the whole set.
-	ownerCount := map[string]int{}
-	inviteCount := map[string]int{}
-	nameCommunities := map[string]map[string]bool{} // normName -> set of communityIds
+	// First pass: tally, per invite and per normalized name, the set of DISTINCT
+	// communities using it. Only cross-community reuse is suspicious — one
+	// community re-promoting on different days (respecting the cooldown) is fine.
+	inviteCommunities := map[string]map[string]bool{} // invite -> set of communityIds
+	nameCommunities := map[string]map[string]bool{}   // normName -> set of communityIds
 	for _, row := range rows {
-		ownerCount[row.OwnerID]++
-		if inv := strings.ToLower(strings.TrimSpace(row.Post.Data.InviteURL)); inv != "" {
-			inviteCount[inv]++
+		cid := row.CommunityID.Hex()
+		if inv := rpPromoNormalizeInvite(row.Post.Data.InviteURL); inv != "" {
+			if inviteCommunities[inv] == nil {
+				inviteCommunities[inv] = map[string]bool{}
+			}
+			inviteCommunities[inv][cid] = true
 		}
 		if nm := rpPromoNormalizeName(row.Post.Data.ServerName); nm != "" {
 			if nameCommunities[nm] == nil {
 				nameCommunities[nm] = map[string]bool{}
 			}
-			nameCommunities[nm][row.CommunityID.Hex()] = true
+			nameCommunities[nm][cid] = true
 		}
 	}
 
@@ -304,17 +329,24 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		return v
 	}
 
-	// Second pass: build items with flags applied.
+	// Second pass: build items, assigning each a duplicate group when its invite
+	// or name is shared across communities. Invite match takes precedence (a
+	// reused invite is the strongest "same server" signal); name is the
+	// fallback. A row records the secondary signal too, so the UI header can say
+	// "same invite & name".
 	items := make([]adminRpPromoItem, 0, len(rows))
 	for _, row := range rows {
 		p := row.Post
-		inv := strings.ToLower(strings.TrimSpace(p.Data.InviteURL))
+		inv := rpPromoNormalizeInvite(p.Data.InviteURL)
 		nm := rpPromoNormalizeName(p.Data.ServerName)
+		dupInvite := inv != "" && len(inviteCommunities[inv]) > 1
+		dupName := nm != "" && len(nameCommunities[nm]) > 1
+
 		postedByName := p.PostedByName
 		if postedByName == "" {
 			postedByName = resolveName(p.PostedBy)
 		}
-		items = append(items, adminRpPromoItem{
+		it := adminRpPromoItem{
 			CommunityID:   row.CommunityID.Hex(),
 			CommunityName: row.CommunityName,
 			OwnerID:       row.OwnerID,
@@ -331,18 +363,43 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 			MessageID:     p.MessageID,
 			MessageLink:   rpPromotionMessageLink(p.ChannelID, p.MessageID),
 			Removed:       p.RemovedAt != nil,
-			OwnerDup:      ownerCount[row.OwnerID] > 1,
-			NameDup:       nm != "" && len(nameCommunities[nm]) > 1,
-			InviteDup:     inv != "" && inviteCount[inv] > 1,
 			OwnerBanned:   banned[row.OwnerID],
-		})
+		}
+		switch {
+		case dupInvite:
+			it.DupGroupID = "inv:" + inv
+			it.DupGroupType = "invite"
+			it.DupGroupValue = p.Data.InviteURL
+			it.DupCommunityCount = len(inviteCommunities[inv])
+			it.DupAlsoName = dupName
+		case dupName:
+			it.DupGroupID = "name:" + nm
+			it.DupGroupType = "name"
+			it.DupGroupValue = p.Data.ServerName
+			it.DupCommunityCount = len(nameCommunities[nm])
+		}
+		items = append(items, it)
 	}
 
-	// Filters (applied in memory so duplicate flags reflect the global set).
+	// Group duplicate-set members adjacently (grouped sets first, newest first
+	// within a set), then the rest newest first. PostedAt is RFC3339 so string
+	// comparison is chronological.
+	sort.SliceStable(items, func(i, j int) bool {
+		gi, gj := items[i].DupGroupID, items[j].DupGroupID
+		if (gi == "") != (gj == "") {
+			return gi != "" // grouped rows first
+		}
+		if gi != gj {
+			return gi < gj // keep a set together
+		}
+		return items[i].PostedAt > items[j].PostedAt // newest first
+	})
+
+	// Filters (applied in memory so duplicate grouping reflects the global set).
 	search := strings.ToLower(strings.TrimSpace(req.Search))
 	filtered := items[:0]
 	for _, it := range items {
-		if req.DuplicatesOnly && !(it.OwnerDup || it.NameDup || it.InviteDup) {
+		if req.DuplicatesOnly && it.DupGroupID == "" {
 			continue
 		}
 		if search != "" {
