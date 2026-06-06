@@ -294,11 +294,18 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// First pass: tally, per invite and per normalized name, the set of DISTINCT
-	// communities using it. Only cross-community reuse is suspicious — one
-	// community re-promoting on different days (respecting the cooldown) is fine.
+	// First pass: tally the set of DISTINCT communities behind each invite and
+	// each name. Only cross-community reuse is suspicious — one community
+	// re-promoting on different days (respecting the cooldown) is fine.
+	//
+	// Invite is owner-agnostic: the same Discord invite under two communities is
+	// literally the same server, whoever owns it. Name is scoped per OWNER
+	// (key = name + ownerID): generic names like "San Andreas State Roleplay"
+	// collide across unrelated communities constantly, so a name match only
+	// signals evasion when the SAME owner is behind both communities (the
+	// "spin up a near-identical community" pattern).
 	inviteCommunities := map[string]map[string]bool{} // invite -> set of communityIds
-	nameCommunities := map[string]map[string]bool{}   // normName -> set of communityIds
+	nameCommunities := map[string]map[string]bool{}   // name+ownerID -> set of communityIds
 	for _, row := range rows {
 		cid := row.CommunityID.Hex()
 		if inv := rpPromoNormalizeInvite(row.Post.Data.InviteURL); inv != "" {
@@ -308,10 +315,11 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 			inviteCommunities[inv][cid] = true
 		}
 		if nm := rpPromoNormalizeName(row.Post.Data.ServerName); nm != "" {
-			if nameCommunities[nm] == nil {
-				nameCommunities[nm] = map[string]bool{}
+			key := nm + "\x00" + row.OwnerID
+			if nameCommunities[key] == nil {
+				nameCommunities[key] = map[string]bool{}
 			}
-			nameCommunities[nm][cid] = true
+			nameCommunities[key][cid] = true
 		}
 	}
 
@@ -339,8 +347,12 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		p := row.Post
 		inv := rpPromoNormalizeInvite(p.Data.InviteURL)
 		nm := rpPromoNormalizeName(p.Data.ServerName)
+		nameKey := ""
+		if nm != "" {
+			nameKey = nm + "\x00" + row.OwnerID
+		}
 		dupInvite := inv != "" && len(inviteCommunities[inv]) > 1
-		dupName := nm != "" && len(nameCommunities[nm]) > 1
+		dupName := nameKey != "" && len(nameCommunities[nameKey]) > 1
 
 		postedByName := p.PostedByName
 		if postedByName == "" {
@@ -373,10 +385,10 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 			it.DupCommunityCount = len(inviteCommunities[inv])
 			it.DupAlsoName = dupName
 		case dupName:
-			it.DupGroupID = "name:" + nm
+			it.DupGroupID = "name:" + nameKey
 			it.DupGroupType = "name"
 			it.DupGroupValue = p.Data.ServerName
-			it.DupCommunityCount = len(nameCommunities[nm])
+			it.DupCommunityCount = len(nameCommunities[nameKey])
 		}
 		items = append(items, it)
 	}
