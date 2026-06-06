@@ -15,10 +15,17 @@ import "go.mongodb.org/mongo-driver/bson/primitive"
 // counts every "active" offense (expired-by-time ones still count) and excludes
 // "reversed" ones (those were overturned on appeal).
 type RpPromoOffense struct {
-	ID             primitive.ObjectID  `json:"_id,omitempty" bson:"_id,omitempty"`
-	UserID         string              `json:"userId" bson:"userId"`                                 // the banned user (a community owner or the posting actor)
-	Username       string              `json:"username,omitempty" bson:"username,omitempty"`         // captured at issue time for the audit trail
-	Email          string              `json:"email,omitempty" bson:"email,omitempty"`               // captured at issue time
+	ID    primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
+	Scope string             `json:"scope" bson:"scope"` // "user" | "community"
+	// User-scoped bans set UserID (the banned poster); community-scoped bans set
+	// CommunityID instead and leave UserID empty, so escalation counts and the
+	// enforcement lookup stay unambiguous. Username/Email are the notified
+	// contact either way (the banned user, or the community's owner).
+	UserID        string `json:"userId,omitempty" bson:"userId,omitempty"`               // banned user (user scope)
+	CommunityID   string `json:"communityId,omitempty" bson:"communityId,omitempty"`     // banned community (community scope)
+	CommunityName string `json:"communityName,omitempty" bson:"communityName,omitempty"` // captured at issue time
+	Username      string `json:"username,omitempty" bson:"username,omitempty"`           // notified contact username
+	Email         string `json:"email,omitempty" bson:"email,omitempty"`                 // notified contact email
 	OffenseNumber  int                 `json:"offenseNumber" bson:"offenseNumber"`                   // 1, 2, 3, 4+ — drives the penalty ladder
 	Reason         string              `json:"reason" bson:"reason"`                                 // admin-supplied reason
 	Evidence       []RpPromoEvidence   `json:"evidence,omitempty" bson:"evidence,omitempty"`         // the promos that justify the ban
@@ -48,4 +55,10 @@ type RpPromoEvidence struct {
 const (
 	RpPromoOffenseStatusActive   = "active"
 	RpPromoOffenseStatusReversed = "reversed"
+)
+
+// RpPromoOffense scope values.
+const (
+	RpPromoOffenseScopeUser      = "user"
+	RpPromoOffenseScopeCommunity = "community"
 )

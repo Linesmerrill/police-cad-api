@@ -15,20 +15,29 @@ type RpPromoOffenseEvidenceLine struct {
 	PostedAt      string // human-readable, already formatted by the caller
 }
 
-// RpPromoOffenseEmailParams is the content for an RP promotion offense email.
-type RpPromoOffenseEmailParams struct {
-	Username      string
-	OffenseNumber int
+// RpPromoOffenseRestriction is one restriction applied to the recipient — their
+// own account, and/or a community they own. A single recipient can have more
+// than one (e.g. the poster who also owns the banned community).
+type RpPromoOffenseRestriction struct {
+	Label         string // e.g. "your account" or the community "Vice City Rejects"
 	PenaltyLabel  string // e.g. "7-day", "30-day", "1-year", "permanent"
-	LiftsAt       string // human-readable date the restriction lifts, or "" if permanent
-	Reason        string // admin-supplied reason / summary of what happened
-	Evidence      []RpPromoOffenseEvidenceLine
-	ToSURL        string // link to the Discord Community Promotion section of the ToS
-	AppealInfo    string // how to appeal (e.g. open a ticket in the Discord assistance channel)
+	LiftsAt       string // human-readable date it lifts, or "" if permanent
+	OffenseNumber int
 }
 
-// rpPromoOffenseLadder describes the full escalation ladder so the email can
-// transparently show the recipient where they are and what comes next.
+// RpPromoOffenseEmailParams is the content for an RP promotion offense email.
+type RpPromoOffenseEmailParams struct {
+	Username     string
+	Restrictions []RpPromoOffenseRestriction
+	Reason       string // admin-supplied reason / summary of what happened
+	Evidence     []RpPromoOffenseEvidenceLine
+	ToSURL       string // link to the Discord Community Promotion section of the ToS
+	AppealInfo   string // how to appeal
+	TestBanner   string // non-empty renders a "this is a test" banner (test sends only)
+}
+
+// rpPromoOffenseLadder describes the full escalation ladder so the recipient can
+// see what comes next.
 var rpPromoOffenseLadder = []string{
 	"1st offense — 7-day restriction",
 	"2nd offense — 30-day restriction",
@@ -37,17 +46,16 @@ var rpPromoOffenseLadder = []string{
 }
 
 // RenderRpPromoOffenseEmail returns the HTML and plain-text bodies for an RP
-// promotion offense notification. The HTML mirrors the branded style of
-// RenderGenericEmail. All user-controlled values are HTML-escaped.
+// promotion offense notification. All user-controlled values are HTML-escaped.
 func RenderRpPromoOffenseEmail(p RpPromoOffenseEmailParams) (htmlBody, textBody string) {
 	return renderRpPromoOffenseHTML(p), renderRpPromoOffenseText(p)
 }
 
-func rpPromoPenaltySentence(p RpPromoOffenseEmailParams) string {
-	if p.LiftsAt == "" || strings.EqualFold(p.PenaltyLabel, "permanent") {
-		return "Your ability to post server promotions has been permanently restricted."
+func rpPromoRestrictionSentence(r RpPromoOffenseRestriction) string {
+	if r.LiftsAt == "" || strings.EqualFold(r.PenaltyLabel, "permanent") {
+		return fmt.Sprintf("Offense #%d — %s is permanently restricted from posting server promotions.", r.OffenseNumber, r.Label)
 	}
-	return fmt.Sprintf("Your ability to post server promotions has been restricted for %s. The restriction lifts on %s.", p.PenaltyLabel, p.LiftsAt)
+	return fmt.Sprintf("Offense #%d — %s is restricted from posting server promotions for %s (lifts %s).", r.OffenseNumber, r.Label, r.PenaltyLabel, r.LiftsAt)
 }
 
 func renderRpPromoOffenseHTML(p RpPromoOffenseEmailParams) string {
@@ -56,6 +64,11 @@ func renderRpPromoOffenseHTML(p RpPromoOffenseEmailParams) string {
 	greeting := "Hello,"
 	if strings.TrimSpace(p.Username) != "" {
 		greeting = "Hello " + html.EscapeString(p.Username) + ","
+	}
+
+	var penalties strings.Builder
+	for _, r := range p.Restrictions {
+		penalties.WriteString("<div style=\"margin-bottom:6px;\">" + html.EscapeString(rpPromoRestrictionSentence(r)) + "</div>")
 	}
 
 	var rows strings.Builder
@@ -74,12 +87,8 @@ func renderRpPromoOffenseHTML(p RpPromoOffenseEmailParams) string {
 	}
 
 	var ladder strings.Builder
-	for i, step := range rpPromoOffenseLadder {
-		style := "color:#9ca3af;"
-		if i+1 == p.OffenseNumber {
-			style = "color:#fbbf24;font-weight:700;" // highlight the current step
-		}
-		ladder.WriteString(fmt.Sprintf(`<li style="%s margin-bottom:4px;">%s</li>`, style, html.EscapeString(step)))
+	for _, step := range rpPromoOffenseLadder {
+		ladder.WriteString(fmt.Sprintf(`<li style="color:#9ca3af; margin-bottom:4px;">%s</li>`, html.EscapeString(step)))
 	}
 
 	reasonBlock := ""
@@ -88,8 +97,11 @@ func renderRpPromoOffenseHTML(p RpPromoOffenseEmailParams) string {
 			strings.ReplaceAll(html.EscapeString(p.Reason), "\n", "<br>"))
 	}
 
-	appeal := html.EscapeString(p.AppealInfo)
-	tosURL := html.EscapeString(p.ToSURL)
+	testBanner := ""
+	if strings.TrimSpace(p.TestBanner) != "" {
+		testBanner = fmt.Sprintf(`<div style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.4); border-radius:8px; padding:12px 14px; margin:0 0 16px; color:#7dd3fc;"><strong>TEST EMAIL</strong> — %s</div>`,
+			html.EscapeString(p.TestBanner))
+	}
 
 	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -116,8 +128,9 @@ func renderRpPromoOffenseHTML(p RpPromoOffenseEmailParams) string {
   <div class="container">
     <div class="header"><h1>%s</h1></div>
     <div class="content">
+      %s
       <p style="margin:0 0 16px;">%s</p>
-      <div class="penalty"><strong>Offense #%d.</strong> %s</div>
+      <div class="penalty">%s</div>
       %s
       <p style="margin:0 0 8px;"><strong>Promotions involved:</strong></p>
       <table>
@@ -135,17 +148,23 @@ func renderRpPromoOffenseHTML(p RpPromoOffenseEmailParams) string {
     </div>
   </div>
 </body>
-</html>`, subject, subject, greeting, p.OffenseNumber, rpPromoPenaltySentence(p), reasonBlock, rows.String(), tosURL, ladder.String(), appeal)
+</html>`, subject, subject, testBanner, greeting, penalties.String(), reasonBlock, rows.String(), html.EscapeString(p.ToSURL), ladder.String(), html.EscapeString(p.AppealInfo))
 }
 
 func renderRpPromoOffenseText(p RpPromoOffenseEmailParams) string {
 	var b strings.Builder
+	if strings.TrimSpace(p.TestBanner) != "" {
+		b.WriteString("*** TEST EMAIL — " + p.TestBanner + " ***\n\n")
+	}
 	if strings.TrimSpace(p.Username) != "" {
 		b.WriteString("Hello " + p.Username + ",\n\n")
 	} else {
 		b.WriteString("Hello,\n\n")
 	}
-	b.WriteString(fmt.Sprintf("Offense #%d. %s\n\n", p.OffenseNumber, rpPromoPenaltySentence(p)))
+	for _, r := range p.Restrictions {
+		b.WriteString(rpPromoRestrictionSentence(r) + "\n")
+	}
+	b.WriteString("\n")
 	if strings.TrimSpace(p.Reason) != "" {
 		b.WriteString("What happened:\n" + p.Reason + "\n\n")
 	}

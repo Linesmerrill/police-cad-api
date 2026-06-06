@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"regexp"
@@ -82,29 +83,50 @@ func rpPromoPenaltyLabel(offenseNumber int) string {
 	}
 }
 
-// activeRpPromoInForceFilter matches offenses that are active AND not past their
-// expiry (a permanent ban has no expiresAt). Used for the enforcement gate.
-func activeRpPromoInForceFilter(now time.Time) bson.M {
+// rpPromoInForceExpiryOr returns the expiry clauses for an in-force ban (active
+// and not past expiry; a permanent ban has no expiresAt).
+func rpPromoInForceExpiryOr(now time.Time) []bson.M {
 	nowDT := primitive.NewDateTimeFromTime(now)
-	return bson.M{
-		"status": models.RpPromoOffenseStatusActive,
-		"$or": []bson.M{
-			{"expiresAt": bson.M{"$exists": false}},
-			{"expiresAt": nil},
-			{"expiresAt": bson.M{"$gt": nowDT}},
-		},
+	return []bson.M{
+		{"expiresAt": bson.M{"$exists": false}},
+		{"expiresAt": nil},
+		{"expiresAt": bson.M{"$gt": nowDT}},
 	}
 }
 
-// activeRpPromoBan returns the in-force ban covering any of the given user IDs,
-// or nil if none are restricted. When multiple apply it returns the most
-// restrictive (a permanent ban, else the one expiring latest).
-func (c Community) activeRpPromoBan(ctx context.Context, userIDs ...string) *models.RpPromoOffense {
-	if c.OffDB == nil || len(userIDs) == 0 {
+// activeRpPromoInForceFilter matches offenses that are active AND not past their
+// expiry. Used for list annotation.
+func activeRpPromoInForceFilter(now time.Time) bson.M {
+	return bson.M{
+		"status": models.RpPromoOffenseStatusActive,
+		"$or":    rpPromoInForceExpiryOr(now),
+	}
+}
+
+// activeRpPromoBan returns the in-force ban covering any of the given user IDs
+// OR the given community, or nil if none are restricted. When multiple apply it
+// returns the most restrictive (a permanent ban, else the one expiring latest).
+func (c Community) activeRpPromoBan(ctx context.Context, communityID string, userIDs ...string) *models.RpPromoOffense {
+	if c.OffDB == nil {
 		return nil
 	}
-	filter := activeRpPromoInForceFilter(time.Now())
-	filter["userId"] = bson.M{"$in": userIDs}
+	subject := []bson.M{}
+	if len(userIDs) > 0 {
+		subject = append(subject, bson.M{"userId": bson.M{"$in": userIDs}})
+	}
+	if communityID != "" {
+		subject = append(subject, bson.M{"communityId": communityID})
+	}
+	if len(subject) == 0 {
+		return nil
+	}
+	filter := bson.M{
+		"status": models.RpPromoOffenseStatusActive,
+		"$and": []bson.M{
+			{"$or": rpPromoInForceExpiryOr(time.Now())},
+			{"$or": subject},
+		},
+	}
 
 	cur, err := c.OffDB.Find(ctx, filter)
 	if err != nil {
@@ -128,25 +150,30 @@ func (c Community) activeRpPromoBan(ctx context.Context, userIDs ...string) *mod
 	return &best
 }
 
-// inForceBannedUserSet returns the set of user IDs currently under an in-force
-// ban, for annotating the promos list in one query rather than per row.
-func (c Community) inForceBannedUserSet(ctx context.Context) map[string]bool {
-	set := map[string]bool{}
+// inForceBannedSets returns the sets of user IDs and community IDs currently
+// under an in-force ban, for annotating the promos list in one query.
+func (c Community) inForceBannedSets(ctx context.Context) (users, communities map[string]bool) {
+	users, communities = map[string]bool{}, map[string]bool{}
 	if c.OffDB == nil {
-		return set
+		return
 	}
 	cur, err := c.OffDB.Find(ctx, activeRpPromoInForceFilter(time.Now()))
 	if err != nil {
-		return set
+		return
 	}
 	var offenses []models.RpPromoOffense
 	if err := cur.All(ctx, &offenses); err != nil {
-		return set
+		return
 	}
 	for _, o := range offenses {
-		set[o.UserID] = true
+		if o.UserID != "" {
+			users[o.UserID] = true
+		}
+		if o.CommunityID != "" {
+			communities[o.CommunityID] = true
+		}
 	}
-	return set
+	return
 }
 
 // countActiveRpPromoOffenses counts a user's upheld (non-reversed) offenses.
@@ -159,6 +186,18 @@ func (c Community) countActiveRpPromoOffenses(ctx context.Context, userID string
 	return c.OffDB.CountDocuments(ctx, bson.M{
 		"userId": userID,
 		"status": models.RpPromoOffenseStatusActive,
+	})
+}
+
+// countActiveRpPromoCommunityOffenses counts a community's upheld offenses, for
+// the community ban escalation ladder.
+func (c Community) countActiveRpPromoCommunityOffenses(ctx context.Context, communityID string) (int64, error) {
+	if c.OffDB == nil {
+		return 0, nil
+	}
+	return c.OffDB.CountDocuments(ctx, bson.M{
+		"communityId": communityID,
+		"status":      models.RpPromoOffenseStatusActive,
 	})
 }
 
@@ -235,8 +274,9 @@ type adminRpPromoItem struct {
 	InviteURL     string   `json:"inviteUrl"`
 	MessageID     string   `json:"messageId"`
 	MessageLink   string   `json:"messageLink"`
-	Removed       bool     `json:"removed"`
-	OwnerBanned   bool     `json:"ownerBanned"`
+	Removed         bool   `json:"removed"`
+	OwnerBanned     bool   `json:"ownerBanned"`
+	CommunityBanned bool   `json:"communityBanned"`
 
 	// Duplicate grouping. A promo is only flagged when its invite or normalized
 	// server name is shared across 2+ DISTINCT communities — a single community
@@ -306,7 +346,7 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	banned := c.inForceBannedUserSet(ctx)
+	bannedUsers, bannedCommunities := c.inForceBannedSets(ctx)
 	nameCache := map[string]string{}
 	resolveName := func(id string) string {
 		if id == "" {
@@ -391,9 +431,10 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 			Consoles:      p.Data.Consoles,
 			InviteURL:     p.Data.InviteURL,
 			MessageID:     p.MessageID,
-			MessageLink:   rpPromotionMessageLink(p.ChannelID, p.MessageID),
-			Removed:       p.RemovedAt != nil,
-			OwnerBanned:   banned[row.OwnerID],
+			MessageLink:     rpPromotionMessageLink(p.ChannelID, p.MessageID),
+			Removed:         p.RemovedAt != nil,
+			OwnerBanned:     bannedUsers[row.OwnerID],
+			CommunityBanned: bannedCommunities[row.CommunityID.Hex()],
 		}
 		switch {
 		case dupInvite:
@@ -597,17 +638,177 @@ func evidenceEmailLines(ev []models.RpPromoEvidence) []templates.RpPromoOffenseE
 	return lines
 }
 
-// AdminRpPromoBanPreviewHandler computes the penalty that would apply and
-// renders the evidence email, without writing anything. Staff (admin or owner).
+// adminRpPromoBanRequest is the shared body for preview / ban / test-email. A
+// ban can target the poster (banUser), the community (banCommunity), or both.
+type adminRpPromoBanRequest struct {
+	adminCurrentUserBody
+	BanUser         bool                        `json:"banUser"`
+	BanCommunity    bool                        `json:"banCommunity"`
+	UserID          string                      `json:"userId"`        // the poster, when banUser
+	CommunityID     string                      `json:"communityId"`   // when banCommunity
+	CommunityName   string                      `json:"communityName"` // hint; resolved server-side too
+	Reason          string                      `json:"reason"`
+	Evidence        []adminRpPromoEvidenceInput `json:"evidence"`
+	RemoveLivePosts bool                        `json:"removeLivePosts"`
+	SendEmail       *bool                       `json:"sendEmail"`
+	TestEmail       string                      `json:"testEmail"` // test-email override recipient
+}
+
+func (r adminRpPromoBanRequest) validate() error {
+	if !r.BanUser && !r.BanCommunity {
+		return fmt.Errorf("select a user and/or a community to ban")
+	}
+	if r.BanUser && strings.TrimSpace(r.UserID) == "" {
+		return fmt.Errorf("userId is required to ban a user")
+	}
+	if r.BanCommunity && strings.TrimSpace(r.CommunityID) == "" {
+		return fmt.Errorf("communityId is required to ban a community")
+	}
+	return nil
+}
+
+// rpPromoRestrictionLine is one restriction applied to a single recipient.
+type rpPromoRestrictionLine struct {
+	Scope         string
+	Label         string
+	OffenseNumber int
+	ExpiresAt     *primitive.DateTime
+}
+
+// rpPromoNotification is the set of restrictions for one email recipient. When
+// the poster also owns the banned community they collapse into one notification.
+type rpPromoNotification struct {
+	Email        string
+	Username     string
+	Restrictions []rpPromoRestrictionLine
+}
+
+// rpPromoBanPlan is the computed outcome of a ban request: the offense
+// document(s) to insert and the deduped per-recipient email notifications.
+type rpPromoBanPlan struct {
+	UserOffense      *models.RpPromoOffense
+	CommunityOffense *models.RpPromoOffense
+	Notifications    []rpPromoNotification
+}
+
+// resolveCommunityOwnerContact returns the owner email/username and the
+// community name for a community, used to notify the owner of a community ban.
+func (c Community) resolveCommunityOwnerContact(ctx context.Context, communityID string) (email, username, communityName string) {
+	objID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return "", "", ""
+	}
+	community, err := c.DB.FindOneIncludingPending(ctx, bson.M{"_id": objID})
+	if err != nil {
+		return "", "", ""
+	}
+	email, username = resolveUserContact(c.UDB, community.Details.OwnerID)
+	return email, username, community.Details.Name
+}
+
+// buildRpPromoBanPlan computes the offense(s) and grouped recipient
+// notifications for a ban request without writing anything.
+func (c Community) buildRpPromoBanPlan(ctx context.Context, req adminRpPromoBanRequest, adminEmail string) *rpPromoBanPlan {
+	now := time.Now()
+	nowDT := primitive.NewDateTimeFromTime(now)
+	evidence := parseEvidence(req.Evidence)
+	reason := strings.TrimSpace(req.Reason)
+	plan := &rpPromoBanPlan{}
+
+	// Group restrictions by recipient email so one person never gets two emails.
+	byEmail := map[string]*rpPromoNotification{}
+	add := func(email, username string, line rpPromoRestrictionLine) {
+		if email == "" {
+			return
+		}
+		n := byEmail[email]
+		if n == nil {
+			n = &rpPromoNotification{Email: email, Username: username}
+			byEmail[email] = n
+		}
+		n.Restrictions = append(n.Restrictions, line)
+	}
+
+	if req.BanUser {
+		prior, _ := c.countActiveRpPromoOffenses(ctx, req.UserID)
+		n := int(prior) + 1
+		exp := rpPromoOffenseExpiry(n, now)
+		email, username := resolveUserContact(c.UDB, req.UserID)
+		plan.UserOffense = &models.RpPromoOffense{
+			Scope: models.RpPromoOffenseScopeUser, UserID: req.UserID, Username: username, Email: email,
+			OffenseNumber: n, Reason: reason, Evidence: evidence, IssuedBy: adminEmail,
+			IssuedAt: nowDT, ExpiresAt: exp, Status: models.RpPromoOffenseStatusActive,
+		}
+		add(email, username, rpPromoRestrictionLine{Scope: "user", Label: "your account", OffenseNumber: n, ExpiresAt: exp})
+	}
+
+	if req.BanCommunity {
+		prior, _ := c.countActiveRpPromoCommunityOffenses(ctx, req.CommunityID)
+		n := int(prior) + 1
+		exp := rpPromoOffenseExpiry(n, now)
+		ownerEmail, ownerName, commName := c.resolveCommunityOwnerContact(ctx, req.CommunityID)
+		if commName == "" {
+			commName = req.CommunityName
+		}
+		plan.CommunityOffense = &models.RpPromoOffense{
+			Scope: models.RpPromoOffenseScopeCommunity, CommunityID: req.CommunityID, CommunityName: commName,
+			Username: ownerName, Email: ownerEmail, OffenseNumber: n, Reason: reason, Evidence: evidence,
+			IssuedBy: adminEmail, IssuedAt: nowDT, ExpiresAt: exp, Status: models.RpPromoOffenseStatusActive,
+		}
+		add(ownerEmail, ownerName, rpPromoRestrictionLine{Scope: "community", Label: `the community "` + commName + `"`, OffenseNumber: n, ExpiresAt: exp})
+	}
+
+	// Stable order (by email) so previews and tests are deterministic.
+	emails := make([]string, 0, len(byEmail))
+	for e := range byEmail {
+		emails = append(emails, e)
+	}
+	sort.Strings(emails)
+	for _, e := range emails {
+		plan.Notifications = append(plan.Notifications, *byEmail[e])
+	}
+	return plan
+}
+
+// renderNotificationEmail builds the email bodies for one recipient notification.
+func renderNotificationEmail(n rpPromoNotification, reason string, ev []models.RpPromoEvidence, testBanner string) (htmlBody, textBody string) {
+	restrictions := make([]templates.RpPromoOffenseRestriction, 0, len(n.Restrictions))
+	for _, l := range n.Restrictions {
+		liftsAt := ""
+		if l.ExpiresAt != nil {
+			liftsAt = l.ExpiresAt.Time().UTC().Format("Jan 2, 2006")
+		}
+		restrictions = append(restrictions, templates.RpPromoOffenseRestriction{
+			Label:         l.Label,
+			PenaltyLabel:  rpPromoPenaltyLabel(l.OffenseNumber),
+			LiftsAt:       liftsAt,
+			OffenseNumber: l.OffenseNumber,
+		})
+	}
+	return templates.RenderRpPromoOffenseEmail(templates.RpPromoOffenseEmailParams{
+		Username:     n.Username,
+		Restrictions: restrictions,
+		Reason:       reason,
+		Evidence:     evidenceEmailLines(ev),
+		ToSURL:       rpPromoModerationToSURL,
+		AppealInfo:   rpPromoModerationAppealInfo,
+		TestBanner:   testBanner,
+	})
+}
+
+func offenseExpiresStr(o *models.RpPromoOffense) string {
+	if o == nil || o.ExpiresAt == nil {
+		return "permanent"
+	}
+	return o.ExpiresAt.Time().UTC().Format(time.RFC3339)
+}
+
+// AdminRpPromoBanPreviewHandler computes the penalty(ies) that would apply and
+// renders the recipient email(s), without writing anything. Staff (admin/owner).
 func (c Community) AdminRpPromoBanPreviewHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	var req struct {
-		adminCurrentUserBody
-		UserID   string                      `json:"userId"`
-		Reason   string                      `json:"reason"`
-		Evidence []adminRpPromoEvidenceInput `json:"evidence"`
-	}
+	var req adminRpPromoBanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
@@ -616,73 +817,59 @@ func (c Community) AdminRpPromoBanPreviewHandler(w http.ResponseWriter, r *http.
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
-	if strings.TrimSpace(req.UserID) == "" {
-		config.ErrorStatus("userId is required", http.StatusBadRequest, w, nil)
+	if err := req.validate(); err != nil {
+		config.ErrorStatus(err.Error(), http.StatusBadRequest, w, err)
 		return
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+	adminEmail, _ := req.CurrentUser["email"].(string)
 
-	prior, err := c.countActiveRpPromoOffenses(ctx, req.UserID)
-	if err != nil {
-		config.ErrorStatus("failed to compute offense history", http.StatusInternalServerError, w, err)
-		return
+	plan := c.buildRpPromoBanPlan(ctx, req, adminEmail)
+	evidence := parseEvidence(req.Evidence)
+
+	notifications := make([]map[string]interface{}, 0, len(plan.Notifications))
+	for _, n := range plan.Notifications {
+		_, textBody := renderNotificationEmail(n, req.Reason, evidence, "")
+		notifications = append(notifications, map[string]interface{}{
+			"email":     n.Email,
+			"username":  n.Username,
+			"emailText": textBody,
+		})
 	}
-	offenseNumber := int(prior) + 1
-	now := time.Now()
-	expiresAt := rpPromoOffenseExpiry(offenseNumber, now)
 
-	email, username := resolveUserContact(c.UDB, req.UserID)
-	htmlBody, textBody := renderOffenseEmail(username, offenseNumber, expiresAt, req.Reason, parseEvidence(req.Evidence))
-
-	expiresStr := ""
-	if expiresAt != nil {
-		expiresStr = expiresAt.Time().UTC().Format(time.RFC3339)
+	resp := map[string]interface{}{"notifications": notifications}
+	if plan.UserOffense != nil {
+		resp["user"] = map[string]interface{}{
+			"offenseNumber": plan.UserOffense.OffenseNumber,
+			"penaltyLabel":  rpPromoPenaltyLabel(plan.UserOffense.OffenseNumber),
+			"expiresAt":     offenseExpiresStr(plan.UserOffense),
+			"email":         plan.UserOffense.Email,
+			"username":      plan.UserOffense.Username,
+		}
 	}
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"offenseNumber":  offenseNumber,
-		"penaltyLabel":   rpPromoPenaltyLabel(offenseNumber),
-		"expiresAt":      expiresStr,
-		"recipientEmail": email,
-		"username":       username,
-		"emailHtml":      htmlBody,
-		"emailText":      textBody,
-	})
+	if plan.CommunityOffense != nil {
+		resp["community"] = map[string]interface{}{
+			"offenseNumber": plan.CommunityOffense.OffenseNumber,
+			"penaltyLabel":  rpPromoPenaltyLabel(plan.CommunityOffense.OffenseNumber),
+			"expiresAt":     offenseExpiresStr(plan.CommunityOffense),
+			"communityName": plan.CommunityOffense.CommunityName,
+			"ownerEmail":    plan.CommunityOffense.Email,
+			"ownerUsername": plan.CommunityOffense.Username,
+		}
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// renderOffenseEmail builds the offense email bodies for both preview and send.
-func renderOffenseEmail(username string, offenseNumber int, expiresAt *primitive.DateTime, reason string, ev []models.RpPromoEvidence) (htmlBody, textBody string) {
-	liftsAt := ""
-	if expiresAt != nil {
-		liftsAt = expiresAt.Time().UTC().Format("Jan 2, 2006")
-	}
-	return templates.RenderRpPromoOffenseEmail(templates.RpPromoOffenseEmailParams{
-		Username:      username,
-		OffenseNumber: offenseNumber,
-		PenaltyLabel:  rpPromoPenaltyLabel(offenseNumber),
-		LiftsAt:       liftsAt,
-		Reason:        reason,
-		Evidence:      evidenceEmailLines(ev),
-		ToSURL:        rpPromoModerationToSURL,
-		AppealInfo:    rpPromoModerationAppealInfo,
-	})
-}
-
-// AdminRpPromoBanHandler issues an escalating ban against a user, optionally
-// removes their live promos from Discord, and sends the evidence email.
-// Staff (admin or owner).
-func (c Community) AdminRpPromoBanHandler(w http.ResponseWriter, r *http.Request) {
+// AdminRpPromoBanTestEmailHandler renders the same email(s) a real ban would
+// send and delivers them to the admin (or a provided testEmail) — no offense is
+// recorded, nothing is enforced, no posts are removed. Lets staff verify the
+// email end-to-end (safe to run against the ignored test accounts). Staff only.
+func (c Community) AdminRpPromoBanTestEmailHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	var req struct {
-		adminCurrentUserBody
-		UserID         string                      `json:"userId"`
-		Reason         string                      `json:"reason"`
-		Evidence       []adminRpPromoEvidenceInput `json:"evidence"`
-		RemoveLivePosts bool                       `json:"removeLivePosts"`
-		SendEmail      *bool                       `json:"sendEmail"`
-	}
+	var req adminRpPromoBanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
@@ -691,8 +878,66 @@ func (c Community) AdminRpPromoBanHandler(w http.ResponseWriter, r *http.Request
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
-	if strings.TrimSpace(req.UserID) == "" {
-		config.ErrorStatus("userId is required", http.StatusBadRequest, w, nil)
+	if err := req.validate(); err != nil {
+		config.ErrorStatus(err.Error(), http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+	adminEmail, _ := req.CurrentUser["email"].(string)
+
+	dest := strings.TrimSpace(req.TestEmail)
+	if dest == "" {
+		dest = adminEmail
+	}
+	if dest == "" {
+		config.ErrorStatus("no test recipient — provide testEmail or sign in with an email", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	plan := c.buildRpPromoBanPlan(ctx, req, adminEmail)
+	evidence := parseEvidence(req.Evidence)
+
+	sent := 0
+	for _, n := range plan.Notifications {
+		realRecipient := n.Email
+		if realRecipient == "" {
+			realRecipient = "(no email on file)"
+		}
+		banner := "This is a test. A real ban would send this to " + realRecipient + "."
+		if err := c.sendNotificationEmail(dest, n, req.Reason, evidence, banner); err != nil {
+			zap.S().Errorw("rp promo moderation: test email failed", "to", dest, "error", err)
+			config.ErrorStatus("failed to send test email", http.StatusBadGateway, w, err)
+			return
+		}
+		sent++
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "test email sent",
+		"sentTo":  dest,
+		"count":   sent,
+	})
+}
+
+// AdminRpPromoBanHandler issues escalating bans against the poster and/or the
+// community, optionally removes their live promos from Discord, and emails each
+// affected party. Staff (admin or owner).
+func (c Community) AdminRpPromoBanHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req adminRpPromoBanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
+		return
+	}
+	if err := req.validate(); err != nil {
+		config.ErrorStatus(err.Error(), http.StatusBadRequest, w, err)
 		return
 	}
 	adminEmail, _ := req.CurrentUser["email"].(string)
@@ -700,78 +945,71 @@ func (c Community) AdminRpPromoBanHandler(w http.ResponseWriter, r *http.Request
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	prior, err := c.countActiveRpPromoOffenses(ctx, req.UserID)
-	if err != nil {
-		config.ErrorStatus("failed to compute offense history", http.StatusInternalServerError, w, err)
-		return
-	}
-	offenseNumber := int(prior) + 1
-	now := time.Now()
-	nowDT := primitive.NewDateTimeFromTime(now)
-	expiresAt := rpPromoOffenseExpiry(offenseNumber, now)
+	plan := c.buildRpPromoBanPlan(ctx, req, adminEmail)
 	evidence := parseEvidence(req.Evidence)
 
-	email, username := resolveUserContact(c.UDB, req.UserID)
-
-	offense := models.RpPromoOffense{
-		UserID:        req.UserID,
-		Username:      username,
-		Email:         email,
-		OffenseNumber: offenseNumber,
-		Reason:        strings.TrimSpace(req.Reason),
-		Evidence:      evidence,
-		IssuedBy:      adminEmail,
-		IssuedAt:      nowDT,
-		ExpiresAt:     expiresAt,
-		Status:        models.RpPromoOffenseStatusActive,
-	}
-
-	// Optionally remove the user's live promos from Discord first, so a partial
-	// failure here surfaces before we record the ban.
+	// Optionally remove the live promos first so a partial failure surfaces
+	// before any ban is recorded.
 	removed := 0
 	if req.RemoveLivePosts {
 		removed = c.removeEvidencePosts(ctx, evidence, adminEmail)
 	}
 
-	// Send the evidence email (default on). A send failure does not block the
-	// ban — the restriction still applies; we just report emailSent=false.
-	emailSent := false
+	// Send one email per affected recipient (default on). Track which recipient
+	// emails succeeded so we can stamp emailSentAt on the matching offense(s).
+	emailsSent := 0
+	sentTo := map[string]bool{}
 	if req.SendEmail == nil || *req.SendEmail {
-		if email != "" {
-			if err := sendOffenseEmail(email, username, offenseNumber, expiresAt, req.Reason, evidence); err != nil {
-				zap.S().Errorw("rp promo moderation: offense email failed", "userId", req.UserID, "error", err)
-			} else {
-				emailSent = true
-				offense.EmailSentAt = &nowDT
+		for _, n := range plan.Notifications {
+			if n.Email == "" {
+				continue
 			}
+			if err := c.sendNotificationEmail(n.Email, n, req.Reason, evidence, ""); err != nil {
+				zap.S().Errorw("rp promo moderation: offense email failed", "to", n.Email, "error", err)
+				continue
+			}
+			emailsSent++
+			sentTo[n.Email] = true
 		}
 	}
 
-	res, err := c.OffDB.InsertOne(ctx, offense)
-	if err != nil {
-		config.ErrorStatus("failed to record the ban", http.StatusInternalServerError, w, err)
-		return
-	}
-	offenseID := ""
-	if oid, ok := res.Decode().(primitive.ObjectID); ok {
-		offenseID = oid.Hex()
+	nowDT := primitive.NewDateTimeFromTime(time.Now())
+	resp := map[string]interface{}{
+		"message":      "ban issued",
+		"emailsSent":   emailsSent,
+		"removedPosts": removed,
 	}
 
-	logAudit(c.ALDB, primitive.NilObjectID, "rp_promotion.banned", "user", "", adminEmail, req.UserID, email,
-		map[string]interface{}{"offenseNumber": offenseNumber, "reason": req.Reason, "removedPosts": removed})
-
-	expiresStr := "permanent"
-	if expiresAt != nil {
-		expiresStr = expiresAt.Time().UTC().Format(time.RFC3339)
+	insert := func(o *models.RpPromoOffense, key, scope, targetID, targetName string) {
+		if o == nil {
+			return
+		}
+		if sentTo[o.Email] {
+			o.EmailSentAt = &nowDT
+		}
+		res, err := c.OffDB.InsertOne(ctx, *o)
+		if err != nil {
+			zap.S().Errorw("rp promo moderation: failed to record offense", "scope", scope, "error", err)
+			return
+		}
+		id := ""
+		if oid, ok := res.Decode().(primitive.ObjectID); ok {
+			id = oid.Hex()
+		}
+		resp[key] = map[string]interface{}{
+			"offenseId":     id,
+			"offenseNumber": o.OffenseNumber,
+			"expiresAt":     offenseExpiresStr(o),
+		}
+		logAudit(c.ALDB, primitive.NilObjectID, "rp_promotion.banned", scope, "", adminEmail, targetID, targetName,
+			map[string]interface{}{"offenseNumber": o.OffenseNumber, "reason": req.Reason, "removedPosts": removed})
 	}
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"message":       "ban issued",
-		"offenseId":     offenseID,
-		"offenseNumber": offenseNumber,
-		"expiresAt":     expiresStr,
-		"emailSent":     emailSent,
-		"removedPosts":  removed,
-	})
+	insert(plan.UserOffense, "user", "user", req.UserID, "")
+	if plan.CommunityOffense != nil {
+		insert(plan.CommunityOffense, "community", "community", req.CommunityID, plan.CommunityOffense.CommunityName)
+	}
+
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // removeEvidencePosts removes from Discord, and marks removed, each evidence
@@ -809,12 +1047,16 @@ func (c Community) removeEvidencePosts(ctx context.Context, evidence []models.Rp
 	return removed
 }
 
-// sendOffenseEmail renders and sends the offense email via SendGrid.
-func sendOffenseEmail(toEmail, username string, offenseNumber int, expiresAt *primitive.DateTime, reason string, ev []models.RpPromoEvidence) error {
-	htmlBody, textBody := renderOffenseEmail(username, offenseNumber, expiresAt, reason, ev)
+// sendNotificationEmail renders a recipient notification and sends it via
+// SendGrid to toEmail (the real recipient, or an override for test sends).
+func (c Community) sendNotificationEmail(toEmail string, n rpPromoNotification, reason string, ev []models.RpPromoEvidence, testBanner string) error {
+	htmlBody, textBody := renderNotificationEmail(n, reason, ev, testBanner)
 	subject := "Action taken on your Lines Police CAD server promotions"
+	if testBanner != "" {
+		subject = "[TEST] " + subject
+	}
 	from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
-	to := mail.NewEmail(username, toEmail)
+	to := mail.NewEmail(n.Username, toEmail)
 	message := mail.NewSingleEmail(from, subject, to, textBody, htmlBody)
 	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
 	resp, err := client.Send(message)
@@ -890,7 +1132,10 @@ func (c Community) AdminListRpPromoOffensesHandler(w http.ResponseWriter, r *htt
 		}
 		out = append(out, map[string]interface{}{
 			"id":            o.ID.Hex(),
+			"scope":         o.Scope,
 			"userId":        o.UserID,
+			"communityId":   o.CommunityID,
+			"communityName": o.CommunityName,
 			"username":      o.Username,
 			"email":         o.Email,
 			"offenseNumber": o.OffenseNumber,

@@ -320,7 +320,7 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 	if actorID != community.Details.OwnerID {
 		banCandidates = append(banCandidates, actorID)
 	}
-	if ban := c.activeRpPromoBan(ctx, banCandidates...); ban != nil {
+	if ban := c.activeRpPromoBan(ctx, communityID, banCandidates...); ban != nil {
 		restrictedUntil := "permanent"
 		if ban.ExpiresAt != nil {
 			restrictedUntil = ban.ExpiresAt.Time().UTC().Format(time.RFC3339)
