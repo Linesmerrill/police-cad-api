@@ -35,10 +35,10 @@ import (
 //	POST /api/v1/admin/rp-promos/offenses            — list offenses (banned-users view)
 //	POST /api/v1/admin/rp-promos/offenses/{id}/reverse — overturn an offense on appeal
 //
-// All are owner-only, authorized via checkAdminPermissions against the
-// self-asserted currentUser in the body — the same pattern every other admin
-// console endpoint uses (the console is only rendered to a session-
-// authenticated admin).
+// All require staff (admin or owner), authorized via
+// checkAdminOrOwnerPermissions against the self-asserted currentUser in the
+// body — the same pattern every other admin console endpoint uses (the console
+// is only rendered to a session-authenticated admin).
 
 const (
 	rpPromoModerationToSURL     = "https://www.linespolice-cad.com/terms-and-conditions"
@@ -171,6 +171,18 @@ func rpPromoNormalizeName(s string) string {
 	return rpPromoNonAlnum.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "")
 }
 
+// rpPromoIgnoredOwners are internal test accounts (by username, lowercased)
+// whose promotions are excluded from duplicate detection so they never produce
+// false-positive flags.
+var rpPromoIgnoredOwners = map[string]bool{
+	"thecandyman": true,
+	"lpswebsite":  true,
+}
+
+func rpPromoIsIgnoredOwner(username string) bool {
+	return rpPromoIgnoredOwners[strings.ToLower(strings.TrimSpace(username))]
+}
+
 // rpPromoNormalizeInvite canonicalizes a Discord invite for duplicate matching:
 // lowercased, trimmed, scheme/host-prefix removed, and trailing slash dropped,
 // so "https://discord.gg/abc" and "discord.gg/abc/" match.
@@ -248,7 +260,7 @@ type rpPromoAggRow struct {
 
 // AdminListRpPromosHandler returns every promotion across all communities,
 // newest first, annotated with advisory duplicate flags and the owner's current
-// ban status. Owner-only.
+// ban status. Staff (admin or owner).
 func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -263,7 +275,7 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
@@ -294,6 +306,20 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	banned := c.inForceBannedUserSet(ctx)
+	nameCache := map[string]string{}
+	resolveName := func(id string) string {
+		if id == "" {
+			return ""
+		}
+		if v, ok := nameCache[id]; ok {
+			return v
+		}
+		v := resolveActorName(c.UDB, id)
+		nameCache[id] = v
+		return v
+	}
+
 	// First pass: tally the set of DISTINCT communities behind each invite and
 	// each name. Only cross-community reuse is suspicious — one community
 	// re-promoting on different days (respecting the cooldown) is fine.
@@ -303,10 +329,14 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 	// (key = name + ownerID): generic names like "San Andreas State Roleplay"
 	// collide across unrelated communities constantly, so a name match only
 	// signals evasion when the SAME owner is behind both communities (the
-	// "spin up a near-identical community" pattern).
+	// "spin up a near-identical community" pattern). Internal test accounts are
+	// skipped entirely so they never produce flags.
 	inviteCommunities := map[string]map[string]bool{} // invite -> set of communityIds
 	nameCommunities := map[string]map[string]bool{}   // name+ownerID -> set of communityIds
 	for _, row := range rows {
+		if rpPromoIsIgnoredOwner(resolveName(row.OwnerID)) {
+			continue
+		}
 		cid := row.CommunityID.Hex()
 		if inv := rpPromoNormalizeInvite(row.Post.Data.InviteURL); inv != "" {
 			if inviteCommunities[inv] == nil {
@@ -323,20 +353,6 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	banned := c.inForceBannedUserSet(ctx)
-	nameCache := map[string]string{}
-	resolveName := func(id string) string {
-		if id == "" {
-			return ""
-		}
-		if v, ok := nameCache[id]; ok {
-			return v
-		}
-		v := resolveActorName(c.UDB, id)
-		nameCache[id] = v
-		return v
-	}
-
 	// Second pass: build items, assigning each a duplicate group when its invite
 	// or name is shared across communities. Invite match takes precedence (a
 	// reused invite is the strongest "same server" signal); name is the
@@ -345,14 +361,16 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 	items := make([]adminRpPromoItem, 0, len(rows))
 	for _, row := range rows {
 		p := row.Post
+		ownerName := resolveName(row.OwnerID)
+		ignored := rpPromoIsIgnoredOwner(ownerName)
 		inv := rpPromoNormalizeInvite(p.Data.InviteURL)
 		nm := rpPromoNormalizeName(p.Data.ServerName)
 		nameKey := ""
 		if nm != "" {
 			nameKey = nm + "\x00" + row.OwnerID
 		}
-		dupInvite := inv != "" && len(inviteCommunities[inv]) > 1
-		dupName := nameKey != "" && len(nameCommunities[nameKey]) > 1
+		dupInvite := !ignored && inv != "" && len(inviteCommunities[inv]) > 1
+		dupName := !ignored && nameKey != "" && len(nameCommunities[nameKey]) > 1
 
 		postedByName := p.PostedByName
 		if postedByName == "" {
@@ -362,7 +380,7 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 			CommunityID:   row.CommunityID.Hex(),
 			CommunityName: row.CommunityName,
 			OwnerID:       row.OwnerID,
-			OwnerName:     resolveName(row.OwnerID),
+			OwnerName:     ownerName,
 			PostID:        p.ID,
 			PostedBy:      p.PostedBy,
 			PostedByName:  postedByName,
@@ -456,7 +474,7 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 }
 
 // AdminDeleteRpPromoHandler removes a single promotion from the Discord channel
-// and marks its history entry removed (retained as evidence). Owner-only.
+// and marks its history entry removed (retained as evidence). Staff (admin or owner).
 func (c Community) AdminDeleteRpPromoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -470,7 +488,7 @@ func (c Community) AdminDeleteRpPromoHandler(w http.ResponseWriter, r *http.Requ
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
@@ -580,7 +598,7 @@ func evidenceEmailLines(ev []models.RpPromoEvidence) []templates.RpPromoOffenseE
 }
 
 // AdminRpPromoBanPreviewHandler computes the penalty that would apply and
-// renders the evidence email, without writing anything. Owner-only.
+// renders the evidence email, without writing anything. Staff (admin or owner).
 func (c Community) AdminRpPromoBanPreviewHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -594,7 +612,7 @@ func (c Community) AdminRpPromoBanPreviewHandler(w http.ResponseWriter, r *http.
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
@@ -653,7 +671,7 @@ func renderOffenseEmail(username string, offenseNumber int, expiresAt *primitive
 
 // AdminRpPromoBanHandler issues an escalating ban against a user, optionally
 // removes their live promos from Discord, and sends the evidence email.
-// Owner-only.
+// Staff (admin or owner).
 func (c Community) AdminRpPromoBanHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -669,7 +687,7 @@ func (c Community) AdminRpPromoBanHandler(w http.ResponseWriter, r *http.Request
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
@@ -816,7 +834,7 @@ func (e *sendgridStatusError) Error() string {
 }
 
 // AdminListRpPromoOffensesHandler lists offenses for the banned-users view,
-// optionally filtered to one user or to currently in-force bans. Owner-only.
+// optionally filtered to one user or to currently in-force bans. Staff (admin or owner).
 func (c Community) AdminListRpPromoOffensesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -829,7 +847,7 @@ func (c Community) AdminListRpPromoOffensesHandler(w http.ResponseWriter, r *htt
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
@@ -892,7 +910,7 @@ func (c Community) AdminListRpPromoOffensesHandler(w http.ResponseWriter, r *htt
 }
 
 // AdminReverseRpPromoOffenseHandler overturns an offense on appeal — it stops
-// counting toward escalation and lifts the ban. Owner-only.
+// counting toward escalation and lifts the ban. Staff (admin or owner).
 func (c Community) AdminReverseRpPromoOffenseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -911,7 +929,7 @@ func (c Community) AdminReverseRpPromoOffenseHandler(w http.ResponseWriter, r *h
 		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
 		return
 	}
-	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
 		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
 		return
 	}
