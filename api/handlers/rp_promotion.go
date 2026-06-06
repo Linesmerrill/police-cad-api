@@ -311,6 +311,30 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 
 	tier := rpPromotionTierForCommunity(community)
 
+	// Moderation gate — a staff admin may ban a user from promoting. The ban is
+	// keyed by user (not community), so we block the post if EITHER the target
+	// community's owner OR the user clicking "post" is currently restricted.
+	// This is what stops the multi-community evasion the per-community cooldown
+	// below cannot catch.
+	banCandidates := []string{community.Details.OwnerID}
+	if actorID != community.Details.OwnerID {
+		banCandidates = append(banCandidates, actorID)
+	}
+	if ban := c.activeRpPromoBan(ctx, banCandidates...); ban != nil {
+		restrictedUntil := "permanent"
+		if ban.ExpiresAt != nil {
+			restrictedUntil = ban.ExpiresAt.Time().UTC().Format(time.RFC3339)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":           "this account is restricted from posting promotions",
+			"restrictedUntil": restrictedUntil,
+			"appealInfo":      "If you believe this is a mistake, open a ticket in the assistance channel of the Lines Police CAD Discord server.",
+		})
+		return
+	}
+
 	// Cooldown gate — one promotion per community per cooldown window.
 	cooldown := rpPromotionCooldown()
 	if rp := community.Details.RpPromotion; rp != nil && rp.LastPostedAt != nil {

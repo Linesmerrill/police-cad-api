@@ -255,3 +255,45 @@ func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, tier
 	_ = json.NewDecoder(resp.Body).Decode(&parsed)
 	return parsed.ID, parsed.ChannelID, nil
 }
+
+// deleteRpPromotionWebhookMessage removes a previously posted promotion from the
+// Discord channel. A webhook can delete its own messages, so no bot token is
+// needed — we issue DELETE {webhookURL}/messages/{messageID}. The webhook URL
+// is of the form https://discord.com/api/webhooks/{id}/{token}; we strip any
+// query string before appending the messages path. A 404 means the message is
+// already gone, which we treat as success (the desired end state is reached).
+func deleteRpPromotionWebhookMessage(webhookURL, messageID string) error {
+	if strings.TrimSpace(webhookURL) == "" {
+		return fmt.Errorf("webhook url not configured")
+	}
+	if strings.TrimSpace(messageID) == "" {
+		return fmt.Errorf("missing message id")
+	}
+
+	base := webhookURL
+	if i := strings.Index(base, "?"); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.TrimRight(base, "/")
+	url := base + "/messages/" + messageID
+
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("build delete request: %w", err)
+	}
+
+	client := &http.Client{Timeout: rpPromoHTTPDeadline}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete from discord: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // already deleted
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("discord returned status %d", resp.StatusCode)
+	}
+	return nil
+}
