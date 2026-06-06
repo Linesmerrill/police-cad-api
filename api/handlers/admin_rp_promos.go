@@ -435,10 +435,16 @@ func (c Community) computeRpPromoItems(ctx context.Context) ([]adminRpPromoItem,
 	// collide across unrelated communities constantly, so a name match only
 	// signals evasion when the SAME owner is behind both communities. Internal
 	// test accounts are skipped entirely so they never produce flags.
+	//
+	// Removed posts are excluded from the tally: a "duplicate" is two or more
+	// LIVE posts sharing an invite/name. Once staff remove the offending posts
+	// (or remove-with-ban), the set drops below two live members and stops being
+	// flagged — so a set never lingers in "possible duplicates" after it's been
+	// actioned. This mirrors the sidebar badge, which also counts live members.
 	inviteCommunities := map[string]map[string]bool{} // invite -> set of communityIds
 	nameCommunities := map[string]map[string]bool{}   // name+ownerID -> set of communityIds
 	for _, row := range rows {
-		if rpPromoIsIgnoredOwner(resolveName(row.OwnerID)) {
+		if rpPromoIsIgnoredOwner(resolveName(row.OwnerID)) || row.Post.RemovedAt != nil {
 			continue
 		}
 		cid := row.CommunityID.Hex()
@@ -470,8 +476,9 @@ func (c Community) computeRpPromoItems(ctx context.Context) ([]adminRpPromoItem,
 		if nm != "" {
 			nameKey = nm + "\x00" + row.OwnerID
 		}
-		dupInvite := !ignored && inv != "" && len(inviteCommunities[inv]) > 1
-		dupName := !ignored && nameKey != "" && len(nameCommunities[nameKey]) > 1
+		removed := p.RemovedAt != nil
+		dupInvite := !ignored && !removed && inv != "" && len(inviteCommunities[inv]) > 1
+		dupName := !ignored && !removed && nameKey != "" && len(nameCommunities[nameKey]) > 1
 
 		postedByName := p.PostedByName
 		if postedByName == "" {
@@ -830,6 +837,14 @@ type rpPromoBanPlan struct {
 	UserOffense      *models.RpPromoOffense
 	CommunityOffense *models.RpPromoOffense
 	Notifications    []rpPromoNotification
+
+	// A scope already under an in-force ban is NOT re-issued — re-banning would
+	// stack a second offense and over-escalate. We surface the existing ban
+	// instead so the UI can disable that scope and the handler can skip it.
+	UserAlreadyInForce      bool
+	UserInForceUntil        string // RFC3339, or "permanent"
+	CommunityAlreadyInForce bool
+	CommunityInForceUntil   string
 }
 
 // resolveCommunityOwnerContact returns the owner email/username and the
@@ -871,32 +886,44 @@ func (c Community) buildRpPromoBanPlan(ctx context.Context, req adminRpPromoBanR
 	}
 
 	if req.BanUser {
-		prior, _ := c.countActiveRpPromoOffenses(ctx, req.UserID)
-		n := int(prior) + 1
-		exp := rpPromoOffenseExpiry(n, now)
-		email, username := resolveUserContact(c.UDB, req.UserID)
-		plan.UserOffense = &models.RpPromoOffense{
-			Scope: models.RpPromoOffenseScopeUser, UserID: req.UserID, Username: username, Email: email,
-			OffenseNumber: n, Reason: reason, Evidence: evidence, IssuedBy: adminEmail,
-			IssuedAt: nowDT, ExpiresAt: exp, Status: models.RpPromoOffenseStatusActive,
+		if existing := c.activeRpPromoBan(ctx, "", req.UserID); existing != nil {
+			// Already restricted — don't stack another offense.
+			plan.UserAlreadyInForce = true
+			plan.UserInForceUntil = offenseExpiresStr(existing)
+		} else {
+			prior, _ := c.countActiveRpPromoOffenses(ctx, req.UserID)
+			n := int(prior) + 1
+			exp := rpPromoOffenseExpiry(n, now)
+			email, username := resolveUserContact(c.UDB, req.UserID)
+			plan.UserOffense = &models.RpPromoOffense{
+				Scope: models.RpPromoOffenseScopeUser, UserID: req.UserID, Username: username, Email: email,
+				OffenseNumber: n, Reason: reason, Evidence: evidence, IssuedBy: adminEmail,
+				IssuedAt: nowDT, ExpiresAt: exp, Status: models.RpPromoOffenseStatusActive,
+			}
+			add(email, username, rpPromoRestrictionLine{Scope: "user", Label: "your account", OffenseNumber: n, ExpiresAt: exp})
 		}
-		add(email, username, rpPromoRestrictionLine{Scope: "user", Label: "your account", OffenseNumber: n, ExpiresAt: exp})
 	}
 
 	if req.BanCommunity {
-		prior, _ := c.countActiveRpPromoCommunityOffenses(ctx, req.CommunityID)
-		n := int(prior) + 1
-		exp := rpPromoOffenseExpiry(n, now)
-		ownerEmail, ownerName, commName := c.resolveCommunityOwnerContact(ctx, req.CommunityID)
-		if commName == "" {
-			commName = req.CommunityName
+		if existing := c.activeRpPromoBan(ctx, req.CommunityID); existing != nil {
+			// Already restricted — don't stack another offense.
+			plan.CommunityAlreadyInForce = true
+			plan.CommunityInForceUntil = offenseExpiresStr(existing)
+		} else {
+			prior, _ := c.countActiveRpPromoCommunityOffenses(ctx, req.CommunityID)
+			n := int(prior) + 1
+			exp := rpPromoOffenseExpiry(n, now)
+			ownerEmail, ownerName, commName := c.resolveCommunityOwnerContact(ctx, req.CommunityID)
+			if commName == "" {
+				commName = req.CommunityName
+			}
+			plan.CommunityOffense = &models.RpPromoOffense{
+				Scope: models.RpPromoOffenseScopeCommunity, CommunityID: req.CommunityID, CommunityName: commName,
+				Username: ownerName, Email: ownerEmail, OffenseNumber: n, Reason: reason, Evidence: evidence,
+				IssuedBy: adminEmail, IssuedAt: nowDT, ExpiresAt: exp, Status: models.RpPromoOffenseStatusActive,
+			}
+			add(ownerEmail, ownerName, rpPromoRestrictionLine{Scope: "community", Label: `the community "` + commName + `"`, OffenseNumber: n, ExpiresAt: exp})
 		}
-		plan.CommunityOffense = &models.RpPromoOffense{
-			Scope: models.RpPromoOffenseScopeCommunity, CommunityID: req.CommunityID, CommunityName: commName,
-			Username: ownerName, Email: ownerEmail, OffenseNumber: n, Reason: reason, Evidence: evidence,
-			IssuedBy: adminEmail, IssuedAt: nowDT, ExpiresAt: exp, Status: models.RpPromoOffenseStatusActive,
-		}
-		add(ownerEmail, ownerName, rpPromoRestrictionLine{Scope: "community", Label: `the community "` + commName + `"`, OffenseNumber: n, ExpiresAt: exp})
 	}
 
 	// Stable order (by email) so previews and tests are deterministic.
@@ -999,6 +1026,15 @@ func (c Community) AdminRpPromoBanPreviewHandler(w http.ResponseWriter, r *http.
 			"ownerEmail":    plan.CommunityOffense.Email,
 			"ownerUsername": plan.CommunityOffense.Username,
 		}
+	}
+	// Scopes already under an in-force ban can't be re-banned (would over-escalate).
+	if plan.UserAlreadyInForce {
+		resp["userAlreadyInForce"] = true
+		resp["userInForceUntil"] = plan.UserInForceUntil
+	}
+	if plan.CommunityAlreadyInForce {
+		resp["communityAlreadyInForce"] = true
+		resp["communityInForceUntil"] = plan.CommunityInForceUntil
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -1119,6 +1155,19 @@ func (c Community) AdminRpPromoBanHandler(w http.ResponseWriter, r *http.Request
 		"message":      "ban issued",
 		"emailsSent":   emailsSent,
 		"removedPosts": removed,
+	}
+	// Scopes already under an in-force ban are reported back (not re-issued) so
+	// the UI can explain why no new offense was recorded for them.
+	if plan.UserAlreadyInForce {
+		resp["userAlreadyInForce"] = true
+		resp["userInForceUntil"] = plan.UserInForceUntil
+	}
+	if plan.CommunityAlreadyInForce {
+		resp["communityAlreadyInForce"] = true
+		resp["communityInForceUntil"] = plan.CommunityInForceUntil
+	}
+	if plan.UserOffense == nil && plan.CommunityOffense == nil {
+		resp["message"] = "already restricted — no new offense issued"
 	}
 
 	insert := func(o *models.RpPromoOffense, key, scope, targetID, targetName string) {
