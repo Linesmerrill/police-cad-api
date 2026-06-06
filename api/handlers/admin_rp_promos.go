@@ -43,7 +43,7 @@ import (
 
 const (
 	rpPromoModerationToSURL     = "https://www.linespolice-cad.com/terms-and-conditions"
-	rpPromoModerationAppealInfo = "If you believe this is a mistake, open a ticket in the assistance channel of the Lines Police CAD Discord server. An admin will review it and can reverse the restriction."
+	rpPromoModerationAppealInfo = "If you believe this is a mistake, you can appeal by opening a ticket in our Discord assistance channel: https://discord.gg/Y9ytW2ZMp4 — an admin will review it and can reverse the restriction."
 
 	rpPromoModerationDefaultLimit = 25
 	rpPromoModerationMaxLimit     = 100
@@ -69,7 +69,8 @@ func rpPromoOffenseExpiry(offenseNumber int, now time.Time) *primitive.DateTime 
 	return &dt
 }
 
-// rpPromoPenaltyLabel is the human label for an offense's restriction length.
+// rpPromoPenaltyLabel is the compact label for an offense's restriction length,
+// used in the admin UI (e.g. "7-day restriction").
 func rpPromoPenaltyLabel(offenseNumber int) string {
 	switch offenseNumber {
 	case 1:
@@ -78,6 +79,21 @@ func rpPromoPenaltyLabel(offenseNumber int) string {
 		return "30-day"
 	case 3:
 		return "1-year"
+	default:
+		return "permanent"
+	}
+}
+
+// rpPromoDurationPhrase is the grammatical duration used in email sentences
+// (e.g. "restricted ... for 7 days").
+func rpPromoDurationPhrase(offenseNumber int) string {
+	switch offenseNumber {
+	case 1:
+		return "7 days"
+	case 2:
+		return "30 days"
+	case 3:
+		return "1 year"
 	default:
 		return "permanent"
 	}
@@ -234,6 +250,77 @@ func rpPromoNormalizeInvite(s string) string {
 	return v
 }
 
+// alertIfRpPromoFlagged checks whether a just-posted promotion is a possible
+// cross-community duplicate (same invite under another community, or same name
+// under another community owned by the same person) and, if so, posts a single
+// review nudge to the staff alerts channel. Best-effort; runs in its own
+// goroutine with a detached context.
+func (c Community) alertIfRpPromoFlagged(communityID, communityName, ownerID string, data models.RpPromotionData) {
+	ownerName := resolveActorName(c.UDB, ownerID)
+	if rpPromoIsIgnoredOwner(ownerName) {
+		return
+	}
+	objID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	matchKind := ""
+	matched := []string{}
+
+	// Same invite under a DIFFERENT community = literally the same server.
+	if strings.TrimSpace(data.InviteURL) != "" {
+		if other, oErr := c.DB.FindOneIncludingPending(ctx, bson.M{
+			"_id":                                       bson.M{"$ne": objID},
+			"community.rpPromotion.history.data.inviteUrl": data.InviteURL,
+		}); oErr == nil && other != nil {
+			matchKind = "same invite"
+			matched = append(matched, other.Details.Name)
+		}
+	}
+
+	// Same normalized name under another community owned by the same person.
+	if matchKind == "" {
+		nm := rpPromoNormalizeName(data.ServerName)
+		if nm != "" {
+			cur, fErr := c.DB.FindIncludingPending(ctx, bson.M{
+				"_id":                            bson.M{"$ne": objID},
+				"community.ownerID":              ownerID,
+				"community.rpPromotion.history.0": bson.M{"$exists": true},
+			})
+			if fErr == nil {
+				var comms []models.Community
+				if cur.All(ctx, &comms) == nil {
+					for _, oc := range comms {
+						if oc.Details.RpPromotion == nil {
+							continue
+						}
+						for _, h := range oc.Details.RpPromotion.History {
+							if rpPromoNormalizeName(h.Data.ServerName) == nm {
+								matchKind = "same name"
+								matched = append(matched, oc.Details.Name)
+								break
+							}
+						}
+						if matchKind != "" {
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if matchKind == "" {
+		return
+	}
+	allNames := append([]string{communityName}, matched...)
+	sendRpPromoFlaggedAlert(data.ServerName, ownerName, matchKind, allNames, data.InviteURL, communityID+"|"+matchKind)
+}
+
 // resolveUserContact returns a user's email and username from their ID.
 func resolveUserContact(udb databases.UserDatabase, userID string) (email, username string) {
 	if userID == "" {
@@ -298,31 +385,11 @@ type rpPromoAggRow struct {
 	Post          models.RpPromotionPost `bson:"post"`
 }
 
-// AdminListRpPromosHandler returns every promotion across all communities,
-// newest first, annotated with advisory duplicate flags and the owner's current
-// ban status. Staff (admin or owner).
-func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var req struct {
-		adminCurrentUserBody
-		Search         string `json:"search"`
-		DuplicatesOnly bool   `json:"duplicatesOnly"`
-		Page           int    `json:"page"`
-		Limit          int    `json:"limit"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
-		return
-	}
-	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
-		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
-		return
-	}
-
-	ctx, cancel := api.WithQueryTimeout(r.Context())
-	defer cancel()
-
+// computeRpPromoItems loads every promotion across all communities (newest
+// first), annotates each with advisory duplicate flags + ban status, and groups
+// duplicate-set members adjacently. Shared by the list endpoint and the
+// flagged-count badge so both apply identical rules.
+func (c Community) computeRpPromoItems(ctx context.Context) ([]adminRpPromoItem, error) {
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{"community.rpPromotion.history.0": bson.M{"$exists": true}}}},
 		{{Key: "$unwind", Value: "$community.rpPromotion.history"}},
@@ -337,13 +404,11 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 
 	cur, err := c.DB.AggregateIncludingPending(ctx, pipeline)
 	if err != nil {
-		config.ErrorStatus("failed to load promotions", http.StatusInternalServerError, w, err)
-		return
+		return nil, err
 	}
 	var rows []rpPromoAggRow
 	if err := cur.All(ctx, &rows); err != nil {
-		config.ErrorStatus("failed to decode promotions", http.StatusInternalServerError, w, err)
-		return
+		return nil, err
 	}
 
 	bannedUsers, bannedCommunities := c.inForceBannedSets(ctx)
@@ -368,9 +433,8 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 	// literally the same server, whoever owns it. Name is scoped per OWNER
 	// (key = name + ownerID): generic names like "San Andreas State Roleplay"
 	// collide across unrelated communities constantly, so a name match only
-	// signals evasion when the SAME owner is behind both communities (the
-	// "spin up a near-identical community" pattern). Internal test accounts are
-	// skipped entirely so they never produce flags.
+	// signals evasion when the SAME owner is behind both communities. Internal
+	// test accounts are skipped entirely so they never produce flags.
 	inviteCommunities := map[string]map[string]bool{} // invite -> set of communityIds
 	nameCommunities := map[string]map[string]bool{}   // name+ownerID -> set of communityIds
 	for _, row := range rows {
@@ -394,10 +458,7 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Second pass: build items, assigning each a duplicate group when its invite
-	// or name is shared across communities. Invite match takes precedence (a
-	// reused invite is the strongest "same server" signal); name is the
-	// fallback. A row records the secondary signal too, so the UI header can say
-	// "same invite & name".
+	// or name is shared across communities (invite preferred, name fallback).
 	items := make([]adminRpPromoItem, 0, len(rows))
 	for _, row := range rows {
 		p := row.Post
@@ -417,20 +478,20 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 			postedByName = resolveName(p.PostedBy)
 		}
 		it := adminRpPromoItem{
-			CommunityID:   row.CommunityID.Hex(),
-			CommunityName: row.CommunityName,
-			OwnerID:       row.OwnerID,
-			OwnerName:     ownerName,
-			PostID:        p.ID,
-			PostedBy:      p.PostedBy,
-			PostedByName:  postedByName,
-			PostedAt:      p.PostedAt.Time().UTC().Format(time.RFC3339),
-			Tier:          p.Tier,
-			ServerName:    p.Data.ServerName,
-			Game:          p.Data.Game,
-			Consoles:      p.Data.Consoles,
-			InviteURL:     p.Data.InviteURL,
-			MessageID:     p.MessageID,
+			CommunityID:     row.CommunityID.Hex(),
+			CommunityName:   row.CommunityName,
+			OwnerID:         row.OwnerID,
+			OwnerName:       ownerName,
+			PostID:          p.ID,
+			PostedBy:        p.PostedBy,
+			PostedByName:    postedByName,
+			PostedAt:        p.PostedAt.Time().UTC().Format(time.RFC3339),
+			Tier:            p.Tier,
+			ServerName:      p.Data.ServerName,
+			Game:            p.Data.Game,
+			Consoles:        p.Data.Consoles,
+			InviteURL:       p.Data.InviteURL,
+			MessageID:       p.MessageID,
 			MessageLink:     rpPromotionMessageLink(p.ChannelID, p.MessageID),
 			Removed:         p.RemovedAt != nil,
 			OwnerBanned:     bannedUsers[row.OwnerID],
@@ -465,6 +526,39 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		}
 		return items[i].PostedAt > items[j].PostedAt // newest first
 	})
+	return items, nil
+}
+
+// AdminListRpPromosHandler returns every promotion across all communities,
+// newest first, annotated with advisory duplicate flags and the owner's current
+// ban status. Staff (admin or owner).
+func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		adminCurrentUserBody
+		Search         string `json:"search"`
+		DuplicatesOnly bool   `json:"duplicatesOnly"`
+		Page           int    `json:"page"`
+		Limit          int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	items, err := c.computeRpPromoItems(ctx)
+	if err != nil {
+		config.ErrorStatus("failed to load promotions", http.StatusInternalServerError, w, err)
+		return
+	}
 
 	// Filters (applied in memory so duplicate grouping reflects the global set).
 	search := strings.ToLower(strings.TrimSpace(req.Search))
@@ -511,6 +605,53 @@ func (c Community) AdminListRpPromosHandler(w http.ResponseWriter, r *http.Reque
 		"totalCount": total,
 		"page":       page,
 		"limit":      limit,
+	})
+}
+
+// AdminRpPromoFlaggedCountHandler returns how many promotions are currently
+// flagged as possible duplicates and how many distinct sets they form — used
+// for the sidebar review badge. Staff (admin or owner).
+func (c Community) AdminRpPromoFlaggedCountHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req adminCurrentUserBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if err := checkAdminOrOwnerPermissions(req.CurrentUser); err != nil {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	items, err := c.computeRpPromoItems(ctx)
+	if err != nil {
+		config.ErrorStatus("failed to load promotions", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Count only sets that still have 2+ LIVE (not removed) members — once an
+	// admin removes the duplicate posts, the set stops counting and the badge
+	// clears, so it reflects what still needs review.
+	liveByGroup := map[string]int{}
+	for _, it := range items {
+		if it.DupGroupID != "" && !it.Removed {
+			liveByGroup[it.DupGroupID]++
+		}
+	}
+	flaggedSets, flaggedPromos := 0, 0
+	for _, n := range liveByGroup {
+		if n >= 2 {
+			flaggedSets++
+			flaggedPromos += n
+		}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"flaggedPromos": flaggedPromos,
+		"flaggedSets":   flaggedSets,
 	})
 }
 
@@ -780,7 +921,7 @@ func renderNotificationEmail(n rpPromoNotification, reason string, ev []models.R
 		}
 		restrictions = append(restrictions, templates.RpPromoOffenseRestriction{
 			Label:         l.Label,
-			PenaltyLabel:  rpPromoPenaltyLabel(l.OffenseNumber),
+			PenaltyLabel:  rpPromoDurationPhrase(l.OffenseNumber),
 			LiftsAt:       liftsAt,
 			OffenseNumber: l.OffenseNumber,
 		})

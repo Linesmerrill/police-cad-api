@@ -51,11 +51,21 @@ func RenderRpPromoOffenseEmail(p RpPromoOffenseEmailParams) (htmlBody, textBody 
 	return renderRpPromoOffenseHTML(p), renderRpPromoOffenseText(p)
 }
 
-func rpPromoRestrictionSentence(r RpPromoOffenseRestriction) string {
-	if r.LiftsAt == "" || strings.EqualFold(r.PenaltyLabel, "permanent") {
-		return fmt.Sprintf("Offense #%d — %s is permanently restricted from posting server promotions.", r.OffenseNumber, r.Label)
+// capitalizeFirst upper-cases the first letter so a label like "your account"
+// reads correctly at the start of a sentence.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
 	}
-	return fmt.Sprintf("Offense #%d — %s is restricted from posting server promotions for %s (lifts %s).", r.OffenseNumber, r.Label, r.PenaltyLabel, r.LiftsAt)
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func rpPromoRestrictionSentence(r RpPromoOffenseRestriction) string {
+	label := capitalizeFirst(r.Label)
+	if r.LiftsAt == "" || strings.EqualFold(r.PenaltyLabel, "permanent") {
+		return fmt.Sprintf("Offense #%d: %s is permanently restricted from posting server promotions.", r.OffenseNumber, label)
+	}
+	return fmt.Sprintf("Offense #%d: %s is restricted from posting server promotions for %s (lifts %s).", r.OffenseNumber, label, r.PenaltyLabel, r.LiftsAt)
 }
 
 func renderRpPromoOffenseHTML(p RpPromoOffenseEmailParams) string {

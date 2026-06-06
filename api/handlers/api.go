@@ -283,6 +283,7 @@ func (a *App) New() *mux.Router {
 
 	// Admin RP server promotion moderation routes (specific before general)
 	apiCreate.Handle("/admin/rp-promos/offenses/{id}/reverse", http.HandlerFunc(c.AdminReverseRpPromoOffenseHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos/flagged-count", http.HandlerFunc(c.AdminRpPromoFlaggedCountHandler)).Methods("POST")
 	apiCreate.Handle("/admin/rp-promos/offenses", http.HandlerFunc(c.AdminListRpPromoOffensesHandler)).Methods("POST")
 	apiCreate.Handle("/admin/rp-promos/ban/preview", http.HandlerFunc(c.AdminRpPromoBanPreviewHandler)).Methods("POST")
 	apiCreate.Handle("/admin/rp-promos/ban/test-email", http.HandlerFunc(c.AdminRpPromoBanTestEmailHandler)).Methods("POST")

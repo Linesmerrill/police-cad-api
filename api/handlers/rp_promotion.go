@@ -400,6 +400,10 @@ func (c Community) PostRpPromotionHandler(w http.ResponseWriter, r *http.Request
 	logAudit(c.ALDB, communityObjID, "rp_promotion.posted", "community", actorID, actorName, "", "",
 		map[string]interface{}{"serverName": data.ServerName, "tier": tier.Key})
 
+	// Nudge staff if this post looks like a possible duplicate. Runs detached so
+	// it never slows the user's request.
+	go c.alertIfRpPromoFlagged(communityID, community.Details.Name, community.Details.OwnerID, data)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
