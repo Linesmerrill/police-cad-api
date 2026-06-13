@@ -208,6 +208,7 @@ type Community struct {
 	PTDB     databases.PushTokenDatabase
 	ALDB     databases.AuditLogDatabase
 	TLDB     databases.ToneLogDatabase
+	OffDB    databases.RpPromoOffenseDatabase
 }
 
 // CommunityHandler returns a community given a communityID

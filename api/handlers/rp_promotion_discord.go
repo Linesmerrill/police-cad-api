@@ -5,11 +5,101 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/models"
 )
+
+// Best-effort alert to the staff "alerts-website" Discord channel when a newly
+// posted promotion looks like a possible duplicate, so staff know to review the
+// Server Promos moderation panel. Reads DISCORD_ALERTS_WEBSITE_WEBHOOK_URL;
+// silent no-op when unset. One alert per (community, match-kind) within a dedup
+// window so a flag isn't announced repeatedly.
+const (
+	rpPromoAlertWebhookEnv  = "DISCORD_ALERTS_WEBSITE_WEBHOOK_URL"
+	rpPromoModerationPanelURL = "https://www.linespolice-cad.com/admin/console#rp-promos"
+	rpPromoAlertDedupWindow = 10 * time.Minute
+)
+
+var (
+	rpPromoAlertMu     sync.Mutex
+	rpPromoAlertRecent = map[string]time.Time{}
+)
+
+// sendRpPromoFlaggedAlert posts a single review-nudge embed to the alerts
+// channel. dedupSig collapses repeats within the dedup window.
+func sendRpPromoFlaggedAlert(serverName, ownerName, matchKind string, communityNames []string, inviteURL, dedupSig string) {
+	webhook := os.Getenv(rpPromoAlertWebhookEnv)
+	if webhook == "" {
+		return
+	}
+
+	now := time.Now()
+	rpPromoAlertMu.Lock()
+	if t, ok := rpPromoAlertRecent[dedupSig]; ok && now.Sub(t) < rpPromoAlertDedupWindow {
+		rpPromoAlertMu.Unlock()
+		return
+	}
+	rpPromoAlertRecent[dedupSig] = now
+	for k, t := range rpPromoAlertRecent {
+		if now.Sub(t) > rpPromoAlertDedupWindow {
+			delete(rpPromoAlertRecent, k)
+		}
+	}
+	rpPromoAlertMu.Unlock()
+
+	desc := fmt.Sprintf("**%s** by **%s** looks like a possible duplicate (%s).\nCommunities: %s",
+		truncRpAlert(serverName, 200), truncRpAlert(ownerName, 100), matchKind, truncRpAlert(strings.Join(communityNames, ", "), 500))
+	if inviteURL != "" {
+		desc += "\nInvite: " + truncRpAlert(inviteURL, 200)
+	}
+	desc += "\n\n[Review in Server Promos](" + rpPromoModerationPanelURL + ")"
+
+	payload := map[string]interface{}{
+		"content": "🚩 A server promotion was flagged for review.",
+		"embeds": []map[string]interface{}{{
+			"title":       "Possible duplicate server promo",
+			"description": desc,
+			"color":       0xfbbf24,
+			"timestamp":   now.UTC().Format(time.RFC3339),
+		}},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		zap.S().Warnw("rp promo flagged alert: marshal failed", "error", err)
+		return
+	}
+
+	go func() {
+		req, rErr := http.NewRequest(http.MethodPost, webhook, bytes.NewReader(body))
+		if rErr != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: rpPromoHTTPDeadline}
+		resp, hErr := client.Do(req)
+		if hErr != nil {
+			zap.S().Warnw("rp promo flagged alert: post failed", "error", hErr)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			zap.S().Warnw("rp promo flagged alert: bad response", "status", resp.StatusCode)
+		}
+	}()
+}
+
+func truncRpAlert(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
+}
 
 // RP server promotion → Discord webhook.
 //
@@ -254,4 +344,46 @@ func sendRpPromotionWebhook(webhookURL string, data models.RpPromotionData, tier
 	// should not fail the user's post, since the message did go through.
 	_ = json.NewDecoder(resp.Body).Decode(&parsed)
 	return parsed.ID, parsed.ChannelID, nil
+}
+
+// deleteRpPromotionWebhookMessage removes a previously posted promotion from the
+// Discord channel. A webhook can delete its own messages, so no bot token is
+// needed — we issue DELETE {webhookURL}/messages/{messageID}. The webhook URL
+// is of the form https://discord.com/api/webhooks/{id}/{token}; we strip any
+// query string before appending the messages path. A 404 means the message is
+// already gone, which we treat as success (the desired end state is reached).
+func deleteRpPromotionWebhookMessage(webhookURL, messageID string) error {
+	if strings.TrimSpace(webhookURL) == "" {
+		return fmt.Errorf("webhook url not configured")
+	}
+	if strings.TrimSpace(messageID) == "" {
+		return fmt.Errorf("missing message id")
+	}
+
+	base := webhookURL
+	if i := strings.Index(base, "?"); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.TrimRight(base, "/")
+	url := base + "/messages/" + messageID
+
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("build delete request: %w", err)
+	}
+
+	client := &http.Client{Timeout: rpPromoHTTPDeadline}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete from discord: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // already deleted
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("discord returned status %d", resp.StatusCode)
+	}
+	return nil
 }

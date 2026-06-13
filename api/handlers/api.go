@@ -54,7 +54,7 @@ func (a *App) New() *mux.Router {
 	sessionDB := databases.NewClockSessionDatabase(a.dbHelper)
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
-	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB}
+	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB, OffDB: databases.NewRpPromoOffenseDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper), ACDB: acDB}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
@@ -280,6 +280,16 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminGetAdminDetailsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/admins/{id}", http.HandlerFunc(adminHandler.AdminDeleteAdminHandler)).Methods("DELETE")
 	apiCreate.Handle("/admin/admins", http.HandlerFunc(adminHandler.AdminGetAllAdminsHandler)).Methods("POST")
+
+	// Admin RP server promotion moderation routes (specific before general)
+	apiCreate.Handle("/admin/rp-promos/offenses/{id}/reverse", http.HandlerFunc(c.AdminReverseRpPromoOffenseHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos/flagged-count", http.HandlerFunc(c.AdminRpPromoFlaggedCountHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos/offenses", http.HandlerFunc(c.AdminListRpPromoOffensesHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos/ban/preview", http.HandlerFunc(c.AdminRpPromoBanPreviewHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos/ban/test-email", http.HandlerFunc(c.AdminRpPromoBanTestEmailHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos/ban", http.HandlerFunc(c.AdminRpPromoBanHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos/delete", http.HandlerFunc(c.AdminDeleteRpPromoHandler)).Methods("POST")
+	apiCreate.Handle("/admin/rp-promos", http.HandlerFunc(c.AdminListRpPromosHandler)).Methods("POST")
 
 	// Other admin routes
 	apiCreate.Handle("/admin/send-reset-email", http.HandlerFunc(adminHandler.SendAdminResetEmailHandler)).Methods("POST")

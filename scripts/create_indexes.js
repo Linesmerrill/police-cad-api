@@ -845,5 +845,28 @@ createIndexSafe(
   }
 );
 
+// RP server promotion moderation: the enforcement gate looks up a user's
+// in-force bans by userId + status on every promotion post, and the admin
+// console lists offenses by user. One compound index covers both.
+createIndexSafe(
+  db.rp_promo_offenses,
+  { userId: 1, status: 1 },
+  {
+    name: "rp_promo_offenses_user_status_idx",
+    background: true
+  }
+);
+
+// Community-scoped bans are looked up by communityId on every promotion post
+// (enforcement gate) and counted for the community escalation ladder.
+createIndexSafe(
+  db.rp_promo_offenses,
+  { communityId: 1, status: 1 },
+  {
+    name: "rp_promo_offenses_community_status_idx",
+    background: true
+  }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

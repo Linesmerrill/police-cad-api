@@ -106,6 +106,14 @@ type RpPromotionPost struct {
 	MessageID string             `json:"messageId,omitempty" bson:"messageId,omitempty"` // Discord message ID
 	ChannelID string             `json:"channelId,omitempty" bson:"channelId,omitempty"` // Discord channel ID, for building a jump link
 	Data      RpPromotionData    `json:"data" bson:"data"`
+
+	// Soft-removal fields, set when a staff admin removes a promotion from the
+	// Discord channel via the moderation console. The entry is retained (not
+	// $pull-ed) so it survives as evidence for any offense issued against the
+	// poster. RemovedAt being non-nil means the live Discord message is gone.
+	RemovedAt    *primitive.DateTime `json:"removedAt,omitempty" bson:"removedAt,omitempty"`
+	RemovedBy    string              `json:"removedBy,omitempty" bson:"removedBy,omitempty"` // admin email
+	RemoveReason string              `json:"removeReason,omitempty" bson:"removeReason,omitempty"`
 }
 
 // RpPromotionData is the structured content of an RP server promotion post.
