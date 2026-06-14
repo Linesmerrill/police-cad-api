@@ -136,3 +136,53 @@ When `API_GATEWAY_KEY` is set, a request is allowed if **any** of these hold:
    heroku config:unset API_GATEWAY_KEY --app police-cad-app-api
    ```
 
+## Write Authentication (block anonymous mutations)
+
+The gateway controls *who can reach* the API; it cannot stop someone who rides
+our own website origin (or spoofs it) from calling a mutating endpoint with a
+victim's `userId`. Many handlers historically performed **no authorization** and
+trusted a `userId` in the request. `RequireWriteAuth` closes the anonymous case:
+every mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) must be authenticated.
+
+A write is allowed when it:
+
+- targets a public endpoint (signup / login / email verification — see
+  `publicWritePaths` in `api/write_auth.go`);
+- presents a valid `X-API-Key` (the website backend's server-to-server calls); or
+- carries a valid bearer token (browser-direct and mobile calls).
+
+Otherwise it gets a `401`. Reads are never affected.
+
+### Persistent token store (prerequisite)
+
+Bearer tokens are now stored in MongoDB (collection `auth_tokens`) instead of an
+in-memory cache, so they **survive restarts and are shared across dynos**. Without
+this, enforcing token validity would 401 every active user after each deploy.
+
+| Var | Where | Purpose |
+| --- | --- | --- |
+| `ENFORCE_WRITE_AUTH` | API | `true` enables write enforcement. **Anything else = disabled (fail-open).** |
+| `AUTH_TOKEN_TTL_HOURS` | API (optional) | Token lifetime; default `720` (30 days). A TTL index purges expired tokens. |
+
+### Rolling it out safely
+
+Do this **after** the gateway key is configured (write enforcement relies on the
+website's `X-API-Key` for server-to-server calls):
+
+1. Deploy this code. Tokens immediately begin persisting to Mongo; nothing is
+   enforced yet (`ENFORCE_WRITE_AUTH` unset).
+2. Confirm `POLICE_CAD_API_KEY` (website) and `API_GATEWAY_KEY` (API) are set and
+   matching, and that logins are writing to the `auth_tokens` collection.
+3. Enable enforcement:
+   ```bash
+   heroku config:set ENFORCE_WRITE_AUTH=true --app police-cad-app-api
+   ```
+4. Rollback instantly if needed:
+   ```bash
+   heroku config:unset ENFORCE_WRITE_AUTH --app police-cad-app-api
+   ```
+
+> This blocks *anonymous* writes. It does NOT yet stop a logged-in user from
+> mutating another user's data (e.g. editing a community they don't own) — that
+> requires per-endpoint ownership checks, the remaining part-2 work.
+

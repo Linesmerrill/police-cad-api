@@ -37,10 +37,11 @@ func main() {
 		defer a.Scheduler.Stop()
 	}
 
-	// Wrap router with metrics middleware, then CORS, then the API gateway.
-	// The gateway is the OUTERMOST layer so it can reject random direct callers
-	// before any other work happens. It is fail-open until API_GATEWAY_KEY is set.
+	// Middleware chain (outermost first): gateway → CORS → write-auth → metrics.
+	// The gateway rejects random direct callers; write-auth rejects
+	// unauthenticated mutations. Both are fail-open until their env flags are set.
 	handler := api.MetricsMiddleware(a.Router)
+	handler = api.RequireWriteAuth(handler)
 	handler = handlers.CorsMiddleware(handler)
 	handler = handlers.ApiKeyGateway(handler)
 
