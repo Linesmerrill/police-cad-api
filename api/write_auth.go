@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 )
@@ -35,6 +36,40 @@ var publicWritePaths = map[string]bool{
 	"/api/v1/verify/resend-verification-code": true,
 }
 
+// writeAllowedOrigins are our own web origins. Browser-initiated writes from the
+// website carry one of these as Origin/Referer, so they're trusted without the
+// secret (the browser has no API token). Mirrors the read gateway's list — kept
+// here because the api package can't import the handlers package.
+var writeAllowedOrigins = []string{
+	"https://www.linespolice-cad.com",
+	"https://linespolice-cad.com",
+	"https://police-cad-dev.herokuapp.com",
+	"http://localhost:8080",
+	"http://localhost:3000",
+	"http://127.0.0.1:8080",
+}
+
+// writeOriginAllowed reports whether the request originates from one of our own
+// web origins (checked via Origin, falling back to Referer).
+func writeOriginAllowed(r *http.Request) bool {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		for _, o := range writeAllowedOrigins {
+			if origin == o {
+				return true
+			}
+		}
+		return false
+	}
+	if referer := r.Header.Get("Referer"); referer != "" {
+		for _, o := range writeAllowedOrigins {
+			if referer == o || strings.HasPrefix(referer, o+"/") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isMutatingMethod(method string) bool {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
@@ -49,8 +84,15 @@ func isMutatingMethod(method string) bool {
 //
 //   - targets a public endpoint (signup / login / email verification);
 //   - presents the first-party gateway secret in X-API-Key (the website backend
-//     makes server-to-server calls this way); or
-//   - carries a valid bearer token (browser-direct and mobile calls).
+//     makes server-to-server calls this way);
+//   - originates from one of our own web origins (browser writes from the
+//     website — its browser JS has no API token, so we trust the Origin/Referer
+//     just like the read gateway does); or
+//   - carries a valid bearer token (mobile calls).
+//
+// This blocks random/tooling writes (curl, python, cross-origin) without the
+// secret or our origin. It does NOT yet stop a user acting from our own site
+// (e.g. via devtools) — that needs per-endpoint ownership checks (part 2).
 //
 // Enforcement is fail-open until ENFORCE_WRITE_AUTH=true. Reads are never
 // affected. NOTE: this depends on the persistent token store (token_store.go) —
@@ -80,7 +122,13 @@ func RequireWriteAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		// Otherwise require a valid bearer token.
+		// Browser writes from our own website (its JS has no API token).
+		if writeOriginAllowed(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Otherwise require a valid bearer token (mobile).
 		if authenticator != nil {
 			if user, err := authenticator.Authenticate(r); err == nil && user != nil {
 				if uid := user.ID(); uid != "" {

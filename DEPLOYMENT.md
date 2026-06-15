@@ -148,10 +148,19 @@ A write is allowed when it:
 
 - targets a public endpoint (signup / login / email verification — see
   `publicWritePaths` in `api/write_auth.go`);
-- presents a valid `X-API-Key` (the website backend's server-to-server calls); or
-- carries a valid bearer token (browser-direct and mobile calls).
+- presents a valid `X-API-Key` (the website backend's server-to-server calls);
+- originates from one of our own web origins via `Origin`/`Referer` (browser
+  writes from the website — its browser JS has no API token, so we trust the
+  origin, same as the read gateway); or
+- carries a valid bearer token (mobile calls).
 
 Otherwise it gets a `401`. Reads are never affected.
+
+> Like the gateway, the Origin/Referer trust is spoofable and does NOT stop a
+> user acting from our own site (e.g. via devtools). It blocks random/tooling
+> writes (curl, python, cross-origin). Stopping a logged-in user from mutating
+> data they don't own requires per-endpoint ownership checks — the remaining
+> part-2 work.
 
 ### Persistent token store (prerequisite)
 
