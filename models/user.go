@@ -1,6 +1,10 @@
 package models
 
-import "go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"encoding/json"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 // User holds the structure for the user collection in mongo
 type User struct {
@@ -9,39 +13,63 @@ type User struct {
 	Version int32       `json:"__v" bson:"__v"`
 }
 
+// MarshalJSON strips secret fields from any JSON representation of a user.
+//
+// The password hash and the password-reset / email-verification tokens are
+// stored on the user document but must never appear in an API response —
+// returning the reset token in particular allowed account takeover (read a
+// user's token, then complete a password reset for them). Because the same
+// UserDetails struct is used to decode signup requests, we can't simply drop
+// the json tags; this Marshaler only affects OUTPUT (json.Marshal). Input
+// decoding (json.Unmarshal) and all database reads/writes (bson) are
+// unaffected, so signup still reads the password and the reset flow — which
+// queries the token directly in the DB — keeps working.
+func (u UserDetails) MarshalJSON() ([]byte, error) {
+	// alias drops the methods on UserDetails so json.Marshal uses the default
+	// struct encoding (and doesn't recurse into this method).
+	type alias UserDetails
+	a := alias(u)
+	a.Password = ""
+	a.ResetPasswordToken = ""
+	a.ResetPasswordExpires = nil
+	a.EmailVerificationToken = ""
+	a.EmailVerificationExpires = nil
+	return json.Marshal(a)
+}
+
 // UserDetails holds the structure for the inner user structure as defined in the user collection in mongo
 type UserDetails struct {
-	Address               string                `json:"address" bson:"address"`
-	ActiveCommunity       string                `json:"activeCommunity" bson:"activeCommunity"` // will be deprecated, use lastAccessedCommunity and communities
-	CallSign              string                `json:"callSign" bson:"callSign"`
-	DispatchStatus        string                `json:"dispatchStatus" bson:"dispatchStatus"`
-	DispatchStatusSetBy   string                `json:"dispatchStatusSetBy" bson:"dispatchStatusSetBy"`
-	LastAccessedCommunity LastAccessedCommunity `json:"lastAccessedCommunity" bson:"lastAccessedCommunity"`
-	Email                 string                `json:"email" bson:"email"`
-	Name                  string                `json:"name" bson:"name"`
-	Notes                 []Note                `json:"notes" bson:"notes"`
-	Username              string                `json:"username" bson:"username"`
-	Password              string                `json:"password" bson:"password"`
-	ProfilePicture        string                `json:"profilePicture" bson:"profilePicture"`
-	BackgroundImage       string                `json:"backgroundImage" bson:"backgroundImage"`
-	Friends               []Friend              `json:"friends" bson:"friends"`
-	Notifications         []Notification        `json:"notifications" bson:"notifications"`
-	Communities           []UserCommunity       `json:"communities" bson:"communities"`
-	IsOnline              bool                  `json:"isOnline" bson:"isOnline"`
-	Subscription          Subscription          `json:"subscription" bson:"subscription"`
-	IsDeactivated         bool                  `json:"isDeactivated" bson:"isDeactivated"`
-	DeactivatedAt         interface{}           `json:"deactivatedAt" bson:"deactivatedAt"`
-	RestoreUntil          interface{}           `json:"restoreUntil" bson:"restoreUntil"`
-	DeactivationReason    string                `json:"deactivationReason,omitempty" bson:"deactivationReason,omitempty"`
-	DeactivatedByAdminID  string                `json:"deactivatedByAdminId,omitempty" bson:"deactivatedByAdminId,omitempty"`
+	Address                  string                `json:"address" bson:"address"`
+	ActiveCommunity          string                `json:"activeCommunity" bson:"activeCommunity"` // will be deprecated, use lastAccessedCommunity and communities
+	CallSign                 string                `json:"callSign" bson:"callSign"`
+	DispatchStatus           string                `json:"dispatchStatus" bson:"dispatchStatus"`
+	DispatchStatusSetBy      string                `json:"dispatchStatusSetBy" bson:"dispatchStatusSetBy"`
+	LastAccessedCommunity    LastAccessedCommunity `json:"lastAccessedCommunity" bson:"lastAccessedCommunity"`
+	Email                    string                `json:"email" bson:"email"`
+	Name                     string                `json:"name" bson:"name"`
+	Notes                    []Note                `json:"notes" bson:"notes"`
+	Username                 string                `json:"username" bson:"username"`
+	Password                 string                `json:"password" bson:"password"`
+	ProfilePicture           string                `json:"profilePicture" bson:"profilePicture"`
+	BackgroundImage          string                `json:"backgroundImage" bson:"backgroundImage"`
+	Friends                  []Friend              `json:"friends" bson:"friends"`
+	Notifications            []Notification        `json:"notifications" bson:"notifications"`
+	Communities              []UserCommunity       `json:"communities" bson:"communities"`
+	IsOnline                 bool                  `json:"isOnline" bson:"isOnline"`
+	Subscription             Subscription          `json:"subscription" bson:"subscription"`
+	IsDeactivated            bool                  `json:"isDeactivated" bson:"isDeactivated"`
+	DeactivatedAt            interface{}           `json:"deactivatedAt" bson:"deactivatedAt"`
+	RestoreUntil             interface{}           `json:"restoreUntil" bson:"restoreUntil"`
+	DeactivationReason       string                `json:"deactivationReason,omitempty" bson:"deactivationReason,omitempty"`
+	DeactivatedByAdminID     string                `json:"deactivatedByAdminId,omitempty" bson:"deactivatedByAdminId,omitempty"`
 	ResetPasswordToken       string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires     interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	EmailVerified            *bool                 `json:"emailVerified" bson:"emailVerified"`
 	EmailVerificationToken   string                `json:"emailVerificationToken" bson:"emailVerificationToken"`
 	EmailVerificationExpires interface{}           `json:"emailVerificationExpires" bson:"emailVerificationExpires"`
 	DismissedTutorials       []string              `json:"dismissedTutorials,omitempty" bson:"dismissedTutorials,omitempty"`
-	CreatedAt             interface{}           `json:"createdAt" bson:"createdAt"`
-	UpdatedAt             interface{}           `json:"updatedAt" bson:"updatedAt"`
+	CreatedAt                interface{}           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt                interface{}           `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Note holds the structure for a note
