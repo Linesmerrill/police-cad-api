@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
-	"go.uber.org/zap"
 )
 
 // enforceWriteAuthEnv toggles write enforcement. Fail-open until set to "true"
@@ -139,10 +137,6 @@ func RequireWriteAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		zap.S().Warnw("write auth: rejected unauthenticated write",
-			"path", r.URL.Path,
-			"method", r.Method,
-			"ua", r.Header.Get("User-Agent"))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"unauthorized","message":"A valid login is required to perform this action."}`))

@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
-	"go.uber.org/zap"
 )
 
 // apiGatewayKeyEnv is the name of the Heroku config var that holds the shared
@@ -99,7 +97,6 @@ func ApiKeyGateway(next http.Handler) http.Handler {
 			}
 			// A wrong key is a hard reject — don't fall through to the lenient
 			// browser/mobile heuristics.
-			zap.S().Warnw("api gateway: invalid X-API-Key", "path", r.URL.Path, "ua", r.Header.Get("User-Agent"))
 			gatewayForbidden(w)
 			return
 		}
@@ -114,10 +111,6 @@ func ApiKeyGateway(next http.Handler) http.Handler {
 		//    tool. Mobile-app traffic (and other unknown non-browser clients)
 		//    falls through and is allowed — see the doc comment above.
 		if looksLikeBrowserOrTool(r.Header.Get("User-Agent")) {
-			zap.S().Warnw("api gateway: blocked direct access",
-				"path", r.URL.Path,
-				"ua", r.Header.Get("User-Agent"),
-				"origin", r.Header.Get("Origin"))
 			gatewayForbidden(w)
 			return
 		}

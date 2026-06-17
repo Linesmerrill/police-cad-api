@@ -13,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/databases"
 )
@@ -81,13 +80,11 @@ func (s *mongoTokenStore) ensureIndexes() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{
+	// Best-effort and idempotent; ignore the result.
+	_, _ = coll.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys:    bson.D{{Key: "expiresAt", Value: 1}},
 		Options: options.Index().SetExpireAfterSeconds(0).SetName("ttl_expiresAt"),
 	})
-	if err != nil {
-		zap.S().Warnw("auth token store: failed to ensure TTL index", "error", err)
-	}
 }
 
 // Load returns the auth.Info for a token, checking the L1 cache before Mongo.
@@ -105,7 +102,6 @@ func (s *mongoTokenStore) Load(key string, r *http.Request) (interface{}, bool, 
 		if err == mongo.ErrNoDocuments {
 			return nil, false, nil
 		}
-		zap.S().Warnw("auth token store: load failed", "error", err)
 		return nil, false, err
 	}
 
@@ -140,7 +136,6 @@ func (s *mongoTokenStore) Store(key string, value interface{}, r *http.Request) 
 		options.Update().SetUpsert(true),
 	)
 	if err != nil {
-		zap.S().Errorw("auth token store: persist failed", "error", err)
 		return err
 	}
 
