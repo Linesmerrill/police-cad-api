@@ -2109,6 +2109,27 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 			actorID := resolveActorFromRequest(r)
 			logAudit(u.ALDB, cID, "member.approved", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
 		}
+
+		// Once a join request is resolved (approved or declined), clear the
+		// matching community-level join_request notifications from every admin
+		// who received one. Notification cleanup was previously client-driven and
+		// per-notification, so duplicate or cross-session notifications lingered
+		// as "requesting to join" until each surface manually refetched. This
+		// mirrors the cleanup already done on request cancellation and on
+		// department join-request resolution.
+		if requestBody.Status == "approved" || requestBody.Status == "declined" {
+			notifMatch := bson.M{
+				"type":       "join_request",
+				"sentFromID": userID,
+				"data1":      requestBody.CommunityID,
+				"data3":      "", // community-level request only (department requests carry data3)
+			}
+			notifFilter := bson.M{"user.notifications": bson.M{"$elemMatch": notifMatch}}
+			notifUpdate := bson.M{"$pull": bson.M{"user.notifications": notifMatch}}
+			// Best-effort cleanup — never fail the resolution if this errors.
+			_, _ = u.DB.UpdateMany(ctx, notifFilter, notifUpdate)
+		}
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"message": "Community status updated successfully"}`))
 		return
