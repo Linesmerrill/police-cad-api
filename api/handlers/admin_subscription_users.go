@@ -1098,22 +1098,15 @@ func nonSubDuration(productID string) time.Duration {
 	return 0
 }
 
-// planFromStripePriceID mirrors the API's own price-id → plan mapping.
-// Returns ("", false) for unknown ids so the UI can show the raw price id.
+// planFromStripePriceID mirrors the API's own price-id → plan mapping by
+// delegating to the single source of truth (mapStripePriceIDToPlan), which
+// understands both V1 (original) and V2 (post-price-drop) price ids.
+// Converts the mapper's "unknown" sentinel to ("", false) so the admin UI
+// can fall back to showing the raw price id for genuinely unmapped prices.
 func planFromStripePriceID(priceID string) (string, bool) {
-	switch priceID {
-	case os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID"):
-		return "base", false
-	case os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID"):
-		return "base", true
-	case os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID"):
-		return "premium", false
-	case os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID"):
-		return "premium", true
-	case os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID"):
-		return "premium_plus", false
-	case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
-		return "premium_plus", true
+	plan, isAnnual := mapStripePriceIDToPlan(priceID)
+	if plan == "unknown" {
+		return "", false
 	}
-	return "", false
+	return plan, isAnnual
 }
