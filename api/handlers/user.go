@@ -3830,28 +3830,14 @@ func (u User) handleCheckoutSessionCompleted(event stripe.Event) error {
 		return fmt.Errorf("failed to get subscription: %v", err)
 	}
 
-	// Map the Price ID back to the tier and billing interval
-	plan := "unknown"
-	isAnnual := false
-	switch sub.Items.Data[0].Price.ID {
-	case os.Getenv("STRIPE_BASE_MONTHLY_PRICE_ID"):
-		plan = "base"
-		isAnnual = false
-	case os.Getenv("STRIPE_BASE_ANNUAL_PRICE_ID"):
-		plan = "base"
-		isAnnual = true
-	case os.Getenv("STRIPE_PREMIUM_MONTHLY_PRICE_ID"):
-		plan = "premium"
-		isAnnual = false
-	case os.Getenv("STRIPE_PREMIUM_ANNUAL_PRICE_ID"):
-		plan = "premium"
-		isAnnual = true
-	case os.Getenv("STRIPE_PREMIUM_PLUS_MONTHLY_PRICE_ID"):
-		plan = "premium_plus"
-		isAnnual = false
-	case os.Getenv("STRIPE_PREMIUM_PLUS_ANNUAL_PRICE_ID"):
-		plan = "premium_plus"
-		isAnnual = true
+	// Map the Price ID back to the tier and billing interval. Uses the
+	// shared V1+V2-aware mapper so post-price-drop (V2) price ids resolve
+	// correctly — an inline V1-only switch here previously wrote
+	// plan="unknown" for migrated/new-price subscriptions.
+	plan, isAnnual := mapStripePriceIDToPlan(sub.Items.Data[0].Price.ID)
+	if plan == "unknown" {
+		zap.S().Warnf("handleCheckoutSessionCompleted: unmapped Stripe price id %q for user %s (sub %s) — storing plan=unknown",
+			sub.Items.Data[0].Price.ID, userID, sub.ID)
 	}
 
 	// Update user subscription in database
