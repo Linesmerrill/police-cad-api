@@ -37,9 +37,13 @@ func main() {
 		defer a.Scheduler.Stop()
 	}
 
-	// Wrap router with metrics middleware, then CORS
+	// Middleware chain (outermost first): gateway → CORS → write-auth → metrics.
+	// The gateway rejects random direct callers; write-auth rejects
+	// unauthenticated mutations. Both are fail-open until their env flags are set.
 	handler := api.MetricsMiddleware(a.Router)
+	handler = api.RequireWriteAuth(handler)
 	handler = handlers.CorsMiddleware(handler)
+	handler = handlers.ApiKeyGateway(handler)
 
 	// Configure HTTP server with timeouts to prevent resource exhaustion
 	server := &http.Server{

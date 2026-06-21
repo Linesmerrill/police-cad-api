@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/linesmerrill/police-cad-api/models"
@@ -34,7 +36,7 @@ type App struct {
 func (a *App) New() *mux.Router {
 	// setup go-guardian for middleware
 	m := api.MiddlewareDB{DB: databases.NewUserDatabase(a.dbHelper)}
-	m.SetupGoGuardian()
+	m.SetupGoGuardian(a.dbHelper)
 
 	r := mux.NewRouter()
 
@@ -658,7 +660,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CallHandler))).Methods("GET")
 	apiCreate.Handle("/calls", api.Middleware(http.HandlerFunc(call.CreateCallHandler))).Methods("POST")
 	apiCreate.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandler))).Methods("GET") // Deprecated: use /api/v2/calls/community/{community_id}
-	apiV2.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandlerV2))).Methods("GET")        // v2 with pagination support
+	apiV2.Handle("/calls/community/{community_id}", api.Middleware(http.HandlerFunc(call.CallsByCommunityIDHandlerV2))).Methods("GET")   // v2 with pagination support
 
 	apiCreate.Handle("/bolo/{bolo_id}", api.Middleware(http.HandlerFunc(bolo.GetBoloByIDHandler))).Methods("GET")
 	apiCreate.Handle("/bolo/{bolo_id}", api.Middleware(http.HandlerFunc(bolo.UpdateBoloHandler))).Methods("PUT")
@@ -922,9 +924,10 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 // PII, no auth context.
 //
 // Top-level fields:
-//   alive: bool — does the scheduler have any registered jobs?
-//   nowAt: ISO timestamp of the response (anchor for staleness math)
-//   jobs:  { [jobName]: JobStat } — see scheduler.JobStat
+//
+//	alive: bool — does the scheduler have any registered jobs?
+//	nowAt: ISO timestamp of the response (anchor for staleness math)
+//	jobs:  { [jobName]: JobStat } — see scheduler.JobStat
 func (a *App) schedulerHealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if a.Scheduler == nil {
@@ -944,19 +947,51 @@ func (a *App) schedulerHealthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// isAllowedCorsOrigin reports whether we should echo this Origin back in the
+// Access-Control-Allow-Origin header. We trust our own site on any
+// linespolice-cad.com host (apex, www, app, or a Cloudflare-fronted subdomain),
+// the dev Heroku app, and local development hosts.
+//
+// We must echo the EXACT origin (never "*") because we also send
+// Access-Control-Allow-Credentials: true, and the browser rejects the illegal
+// "*" + credentials combination — which is what was silently breaking every
+// browser fetch from the site (mobile is native, so it was unaffected).
+func isAllowedCorsOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	switch {
+	case host == "linespolice-cad.com" || strings.HasSuffix(host, ".linespolice-cad.com"):
+		return true
+	case host == "police-cad-dev.herokuapp.com":
+		return true
+	case host == "localhost" || host == "127.0.0.1":
+		return true
+	}
+	return false
+}
+
 // CorsMiddleware is a middleware that adds CORS headers to the response
 func CorsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if os.Getenv("ENV") == "local" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		} else if os.Getenv("ENV") == "development" {
-			w.Header().Set("Access-Control-Allow-Origin", "https://police-cad-dev.herokuapp.com")
+		// Echo the request's Origin when it's one of our own domains. Falls back
+		// to the canonical site origin (a SPECIFIC origin, never "*") so the
+		// Allow-Credentials: true header stays valid.
+		origin := r.Header.Get("Origin")
+		if isAllowedCorsOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
 		} else {
 			w.Header().Set("Access-Control-Allow-Origin", "https://www.linespolice-cad.com")
 		}
+		w.Header().Add("Vary", "Origin")
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-API-Key")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		// Handle preflight requests

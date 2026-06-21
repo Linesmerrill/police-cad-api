@@ -32,7 +32,15 @@ type MiddlewareDB struct {
 }
 
 var authenticator auth.Authenticator
-var cache store.Cache
+
+// basicCache caches successful basic-auth (login) credential checks. It stays
+// in-memory because losing it on restart only costs one extra bcrypt per login.
+var basicCache store.Cache
+
+// tokenCache holds bearer tokens. It is backed by MongoDB (see token_store.go)
+// so tokens survive restarts and are shared across dynos — a prerequisite for
+// enforcing token validity on writes.
+var tokenCache store.Cache
 
 // authenticatedUserIDContextKey is a type for storing authenticated user ID in context
 type authenticatedUserIDContextKey struct{}
@@ -88,7 +96,7 @@ func Middleware(next http.Handler) http.Handler {
 			zap.S().Infow("auth/token: authentication successful",
 				"email", email,
 				"username", user.UserName())
-			
+
 			// Extract user ID from the authenticated user and add it to request context
 			// This ensures CreateToken can access it without another DB lookup
 			// The auth.Info interface stores the user ID that was set in ValidateUser
@@ -97,7 +105,7 @@ func Middleware(next http.Handler) http.Handler {
 				ctx := withAuthenticatedUserID(r.Context(), userID)
 				r = r.WithContext(ctx)
 			}
-			
+
 			next.ServeHTTP(w, r)
 
 		} else {
@@ -135,12 +143,12 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 	// OPTIMIZATION: Get user ID from context (set by ValidateUser) to avoid duplicate DB query
 	// ValidateUser already looked up the user and validated credentials
 	userID := GetAuthenticatedUserIDFromContext(r.Context())
-	
+
 	if userID == "" {
 		// Fallback: if user ID not in context, do DB lookup (shouldn't happen in normal flow)
 		zap.S().Warnw("CreateToken: user ID not found in context, falling back to DB lookup",
 			"email", email)
-		
+
 		ctx, cancel := WithQueryTimeout(r.Context())
 		defer cancel()
 
@@ -176,25 +184,29 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBody)
 }
 
-// SetupGoGuardian sets up the go-guardian middleware
-func (m MiddlewareDB) SetupGoGuardian() {
+// SetupGoGuardian sets up the go-guardian middleware. The basic strategy uses
+// an in-memory cache (a bcrypt optimization), while the bearer strategy uses a
+// MongoDB-backed token store so tokens survive restarts and work across dynos.
+func (m MiddlewareDB) SetupGoGuardian(dbHelper databases.DatabaseHelper) {
 	authenticator = auth.New()
-	cache = store.NewFIFO(context.Background(), time.Hour*24*365*100) // 100 years ttl
-	basicStrategy := basic.New(m.ValidateUser, cache)
-	tokenStrategy := bearer.New(bearer.NoOpAuthenticate, cache)
+	basicCache = store.NewFIFO(context.Background(), time.Hour*24*365*100) // 100 years ttl
+	tokenCache = newMongoTokenStore(dbHelper)
+	basicStrategy := basic.New(m.ValidateUser, basicCache)
+	tokenStrategy := bearer.New(bearer.NoOpAuthenticate, tokenCache)
 
 	authenticator.EnableStrategy(basic.StrategyKey, basicStrategy)
 	authenticator.EnableStrategy(bearer.CachedStrategyKey, tokenStrategy)
 }
 
-// InvalidateAuthCache removes a user's cached credentials from the auth cache.
-// This should be called when a user's password is changed to ensure they must
-// re-authenticate with the new password.
+// InvalidateAuthCache removes a user's cached basic-auth credentials so they
+// must re-authenticate with their new password after a change. Bearer tokens
+// are keyed by token (not email) and are unaffected here, matching prior
+// behavior.
 func InvalidateAuthCache(email string) error {
-	if cache == nil {
+	if basicCache == nil {
 		return nil
 	}
-	return cache.Delete(strings.ToLower(email), nil)
+	return basicCache.Delete(strings.ToLower(email), nil)
 }
 
 // ValidateUser validates a user
