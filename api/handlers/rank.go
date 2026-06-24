@@ -856,11 +856,13 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 
 	// Medical Reports Created — EMS/Fire
 	if needMetric("medical_reports_created") {
+		// Medical reports are stored under the "report" key (model: MedicalReport.Report
+		// with bson:"report"), so the match paths use that prefix — not "medicalReport".
 		count, err := c.runCountPipeline(ctx, "medicalreports", bson.A{
 			bson.M{"$match": applySince(bson.M{
-				"medicalReport.activeCommunityID": communityID,
-				"medicalReport.reportingEmsID":    userID,
-			}, "medicalReport")},
+				"report.activeCommunityID": communityID,
+				"report.reportingEmsID":    userID,
+			}, "report")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {

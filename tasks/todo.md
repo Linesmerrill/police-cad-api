@@ -53,4 +53,7 @@ all-time and since-promotion numbers with progress labeled "since promotion".
 - Logic lives server-side; clients just render returned values + flag.
 
 ## Review
-(to be filled in after implementation)
+- Implemented across API (PR #133), website (PR #943), mobile (production).
+- Fixed pre-existing `medical_reports_created` metric bug: pipeline matched
+  `medicalReport.*` but docs are stored under `report.*` (MedicalReport.Report,
+  bson:"report"), so the metric always counted 0. Now uses the `report` prefix.
