@@ -546,19 +546,26 @@ type OfficerMetric struct {
 	MetricType   string `json:"metricType"`
 	DisplayName  string `json:"displayName"`
 	CurrentValue int    `json:"currentValue"`
+	// AllTimeValue is the lifetime total. When reset-stats-on-promotion is off it
+	// equals CurrentValue; when on, CurrentValue counts since the last promotion
+	// while AllTimeValue still shows the lifetime figure for context.
+	AllTimeValue int `json:"allTimeValue"`
 }
 
 // RankProgress shows progress toward a single requirement
 type RankProgress struct {
-	MetricType    string  `json:"metricType"`
-	DisplayName   string  `json:"displayName"`
-	CurrentValue  int     `json:"currentValue"`
-	Threshold     int     `json:"threshold"`
-	Percentage    float64 `json:"percentage"`
-	Met           bool    `json:"met"`
-	IsCustom      bool    `json:"isCustom,omitempty"`
-	CustomLabel   string  `json:"customLabel,omitempty"`
-	RequirementID string  `json:"requirementId,omitempty"`
+	MetricType   string  `json:"metricType"`
+	DisplayName  string  `json:"displayName"`
+	CurrentValue int     `json:"currentValue"`
+	Threshold    int     `json:"threshold"`
+	Percentage   float64 `json:"percentage"`
+	Met          bool    `json:"met"`
+	// AllTimeValue mirrors OfficerMetric.AllTimeValue for the requirement's metric;
+	// 0 for custom requirements.
+	AllTimeValue  int    `json:"allTimeValue"`
+	IsCustom      bool   `json:"isCustom,omitempty"`
+	CustomLabel   string `json:"customLabel,omitempty"`
+	RequirementID string `json:"requirementId,omitempty"`
 }
 
 // containsString checks if a string slice contains a value.
@@ -569,6 +576,33 @@ func containsString(slice []string, val string) bool {
 		}
 	}
 	return false
+}
+
+// rankStatsSince returns the lower-bound time for counting a member's metrics, or
+// nil to count all-time. When the community has reset-stats-on-promotion enabled and
+// the member has a recorded rank-assignment time, metrics are counted from that point
+// forward. Members without a RankAssignedAt (e.g. those still on the default rank) fall
+// back to all-time so they aren't unfairly zeroed out.
+func rankStatsSince(community *models.Community, member models.MemberStatus) *time.Time {
+	if community == nil || !community.Details.RankSettings.ResetStatsOnPromotion {
+		return nil
+	}
+	if member.RankAssignedAt == 0 {
+		return nil
+	}
+	t := member.RankAssignedAt.Time()
+	return &t
+}
+
+// findMember returns the index and a copy of the member matching userID in a department,
+// or (-1, zero) if not present.
+func findMember(dept *models.Department, userID string) (int, models.MemberStatus) {
+	for i, m := range dept.Members {
+		if m.UserID == userID {
+			return i, m
+		}
+	}
+	return -1, models.MemberStatus{}
 }
 
 // ensureRequirementIDs assigns IDs to any requirements that don't have one.
@@ -598,7 +632,10 @@ func checkAllRequirementsMet(reqs []models.RankRequirement, metricsMap map[strin
 }
 
 // buildRequirementProgress builds RankProgress entries for a set of requirements.
-func buildRequirementProgress(reqs []models.RankRequirement, metricsMap map[string]int, customMet []string) []RankProgress {
+// metricsMap drives eligibility and the progress bar (since-promotion counts in reset
+// mode); allTimeMap supplies the lifetime figure shown alongside. Pass the same map for
+// both when reset mode is off.
+func buildRequirementProgress(reqs []models.RankRequirement, metricsMap, allTimeMap map[string]int, customMet []string) []RankProgress {
 	var progress []RankProgress
 	for _, req := range reqs {
 		if req.MetricType == "custom" {
@@ -633,6 +670,7 @@ func buildRequirementProgress(reqs []models.RankRequirement, metricsMap map[stri
 				MetricType:   req.MetricType,
 				DisplayName:  models.MetricTypeDisplayNames[req.MetricType],
 				CurrentValue: current,
+				AllTimeValue: allTimeMap[req.MetricType],
 				Threshold:    req.Threshold,
 				Percentage:   pct,
 				Met:          current >= req.Threshold,
@@ -645,8 +683,22 @@ func buildRequirementProgress(reqs []models.RankRequirement, metricsMap map[stri
 // computeOfficerMetrics aggregates metric values for a given officer in a department.
 // deptType filters which pipelines to run (e.g. "police", "ems", "fire", "dispatch", "judicial").
 // If deptType is empty, all pipelines run (backward compat).
-func (c Community) computeOfficerMetrics(ctx context.Context, communityID, departmentID, userID, deptType string) (map[string]int, error) {
+//
+// When since is non-nil, only records created at or after that time are counted
+// (used by "reset stats on promotion" mode to measure progress since the member's
+// last rank assignment). A nil since counts all-time, preserving historical behavior.
+func (c Community) computeOfficerMetrics(ctx context.Context, communityID, departmentID, userID, deptType string, since *time.Time) (map[string]int, error) {
 	metrics := make(map[string]int)
+
+	// applySince adds a createdAt lower-bound to a metric's $match when since is set.
+	// prefix is the document path that holds the createdAt field for that metric
+	// (e.g. "arrestReport", "civilian.criminalHistory").
+	applySince := func(match bson.M, prefix string) bson.M {
+		if since != nil {
+			match[prefix+".createdAt"] = bson.M{"$gte": primitive.NewDateTimeFromTime(*since)}
+		}
+		return match
+	}
 
 	// Build set of relevant metric types for this department
 	relevant := make(map[string]bool)
@@ -676,11 +728,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 		pipeline := bson.A{
 			bson.M{"$match": bson.M{"civilian.activeCommunityID": communityID}},
 			bson.M{"$unwind": "$civilian.criminalHistory"},
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"civilian.criminalHistory.officerID":    userID,
 				"civilian.criminalHistory.type":         entry.crimHistType,
 				"civilian.criminalHistory.departmentId": departmentID,
-			}},
+			}, "civilian.criminalHistory")},
 			bson.M{"$count": "total"},
 		}
 		count, err := c.runCountPipeline(ctx, "civilians", pipeline)
@@ -693,11 +745,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Arrests Made — from arrestreports collection
 	if needMetric("arrests_made") {
 		count, err := c.runCountPipeline(ctx, "arrestreports", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"arrestReport.activeCommunityID": communityID,
 				"arrestReport.officerID":         userID,
 				"arrestReport.departmentId":      departmentID,
-			}},
+			}, "arrestReport")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -709,11 +761,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Calls Created
 	if needMetric("calls_created") {
 		count, err := c.runCountPipeline(ctx, "calls", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"call.communityID": communityID,
 				"call.createdByID": userID,
 				"call.departments": departmentID,
-			}},
+			}, "call")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -725,11 +777,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Calls Responded
 	if needMetric("calls_responded") {
 		count, err := c.runCountPipeline(ctx, "calls", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"call.communityID": communityID,
 				"call.assignedTo":  userID,
 				"call.departments": departmentID,
-			}},
+			}, "call")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -741,11 +793,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Calls Cleared
 	if needMetric("calls_cleared") {
 		count, err := c.runCountPipeline(ctx, "calls", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"call.communityID":       communityID,
 				"call.clearingOfficerID": userID,
 				"call.departments":       departmentID,
-			}},
+			}, "call")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -757,11 +809,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// BOLOs Created
 	if needMetric("bolos_created") {
 		count, err := c.runCountPipeline(ctx, "bolos", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"bolo.communityID":  communityID,
 				"bolo.reportedByID": userID,
 				"bolo.departmentID": departmentID,
-			}},
+			}, "bolo")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -773,11 +825,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Warrants Requested
 	if needMetric("warrants_requested") {
 		count, err := c.runCountPipeline(ctx, "warrants", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"warrant.activeCommunityID":   communityID,
 				"warrant.requestingOfficerID": userID,
 				"warrant.departmentId":        departmentID,
-			}},
+			}, "warrant")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -789,11 +841,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Warrants Executed
 	if needMetric("warrants_executed") {
 		count, err := c.runCountPipeline(ctx, "warrants", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"warrant.activeCommunityID":  communityID,
 				"warrant.executingOfficerID": userID,
 				"warrant.departmentId":       departmentID,
-			}},
+			}, "warrant")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -804,11 +856,13 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 
 	// Medical Reports Created — EMS/Fire
 	if needMetric("medical_reports_created") {
+		// Medical reports are stored under the "report" key (model: MedicalReport.Report
+		// with bson:"report"), so the match paths use that prefix — not "medicalReport".
 		count, err := c.runCountPipeline(ctx, "medicalreports", bson.A{
-			bson.M{"$match": bson.M{
-				"medicalReport.activeCommunityID": communityID,
-				"medicalReport.reportingEmsID":    userID,
-			}},
+			bson.M{"$match": applySince(bson.M{
+				"report.activeCommunityID": communityID,
+				"report.reportingEmsID":    userID,
+			}, "report")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -820,10 +874,10 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Calls Dispatched — Dispatch (same as calls_created but scoped for dispatch departments)
 	if needMetric("calls_dispatched") {
 		count, err := c.runCountPipeline(ctx, "calls", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"call.communityID": communityID,
 				"call.createdByID": userID,
-			}},
+			}, "call")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -835,10 +889,10 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Warrants Reviewed — Judicial (judge who reviewed the warrant)
 	if needMetric("warrants_reviewed") {
 		count, err := c.runCountPipeline(ctx, "warrants", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"warrant.activeCommunityID": communityID,
 				"warrant.judgeID":           userID,
-			}},
+			}, "warrant")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -850,11 +904,11 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	// Court Cases Completed — Judicial
 	if needMetric("court_cases_completed") {
 		count, err := c.runCountPipeline(ctx, "courtcases", bson.A{
-			bson.M{"$match": bson.M{
+			bson.M{"$match": applySince(bson.M{
 				"courtCase.communityID": communityID,
 				"courtCase.judgeID":     userID,
 				"courtCase.status":      "completed",
-			}},
+			}, "courtCase")},
 			bson.M{"$count": "total"},
 		})
 		if err != nil {
@@ -864,6 +918,25 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 	}
 
 	return metrics, nil
+}
+
+// computeOfficerMetricsDual returns both the all-time metrics and the "current" metrics
+// used for requirement evaluation. When since is nil (reset-stats mode off, or no
+// baseline), current is identical to all-time and only one aggregation pass runs.
+// When since is set, current counts records from that point forward.
+func (c Community) computeOfficerMetricsDual(ctx context.Context, communityID, departmentID, userID, deptType string, since *time.Time) (allTime, current map[string]int, err error) {
+	allTime, err = c.computeOfficerMetrics(ctx, communityID, departmentID, userID, deptType, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if since == nil {
+		return allTime, allTime, nil
+	}
+	current, err = c.computeOfficerMetrics(ctx, communityID, departmentID, userID, deptType, since)
+	if err != nil {
+		return nil, nil, err
+	}
+	return allTime, current, nil
 }
 
 // runCountPipeline runs an aggregation pipeline and returns the count from the first result's "total" field.
@@ -909,11 +982,14 @@ func (c Community) GetOfficerStatsHandler(w http.ResponseWriter, r *http.Request
 	}
 	_, dept := findDepartment(community, departmentID)
 	deptType := ""
+	var since *time.Time
 	if dept != nil {
 		deptType = getDepartmentType(dept)
+		_, member := findMember(dept, userID)
+		since = rankStatsSince(community, member)
 	}
 
-	metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, userID, deptType)
+	allTimeMap, currentMap, err := c.computeOfficerMetricsDual(ctx, communityID, departmentID, userID, deptType, since)
 	if err != nil {
 		config.ErrorStatus("failed to compute officer metrics", http.StatusInternalServerError, w, err)
 		return
@@ -929,15 +1005,17 @@ func (c Community) GetOfficerStatsHandler(w http.ResponseWriter, r *http.Request
 		metrics = append(metrics, OfficerMetric{
 			MetricType:   mt.Type,
 			DisplayName:  mt.DisplayName,
-			CurrentValue: metricsMap[mt.Type],
+			CurrentValue: currentMap[mt.Type],
+			AllTimeValue: allTimeMap[mt.Type],
 		})
 	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"userId":       userID,
-		"departmentId": departmentID,
-		"metrics":      metrics,
+		"userId":                userID,
+		"departmentId":          departmentID,
+		"metrics":               metrics,
+		"resetStatsOnPromotion": since != nil,
 	})
 }
 
@@ -1010,8 +1088,12 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Compute metrics
-	metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, userID, getDepartmentType(dept))
+	// Compute metrics. In reset-stats mode, evalMap counts only since the member's
+	// current rank assignment (drives promotion eligibility + the progress bar) while
+	// allTimeMap keeps the lifetime totals for display. Off mode: the two are identical.
+	resetMode := community.Details.RankSettings.ResetStatsOnPromotion
+	since := rankStatsSince(community, *memberStatus)
+	allTimeMap, evalMap, err := c.computeOfficerMetricsDual(ctx, communityID, departmentID, userID, getDepartmentType(dept), since)
 	if err != nil {
 		config.ErrorStatus("failed to compute officer metrics", http.StatusInternalServerError, w, err)
 		return
@@ -1060,27 +1142,51 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		previousRank = &prevCopy
 	}
 
-	// Auto-promotion check: try to promote to the highest eligible rank
+	// Auto-promotion check.
 	promoted := false
-	for i := range ranks {
-		// Only consider ranks above current (lower displayOrder = higher rank)
-		if ranks[i].DisplayOrder >= currentRankOrder {
-			continue
+	if resetMode {
+		// Reset-stats mode: promote at most ONE step (to the immediate next rank up).
+		// Because stats are measured since the last promotion, eligibility for any
+		// higher rank can only be earned after this promotion's fresh count, which
+		// prevents the instant chain-promotion all-time totals allow.
+		var next *models.Rank
+		for i := len(ranks) - 1; i >= 0; i-- {
+			if ranks[i].DisplayOrder < currentRankOrder {
+				next = &ranks[i]
+				break
+			}
 		}
-		if !ranks[i].AutoPromote {
-			continue
-		}
-		// Check if all requirements are met (tracked + custom)
-		allMet := len(ranks[i].Requirements) > 0 && checkAllRequirementsMet(ranks[i].Requirements, metricsMap, memberStatus.CustomRequirementsMet)
-		if allMet {
-			// Promote to this rank
-			memberStatus.RankID = ranks[i].ID.Hex()
+		if next != nil && next.AutoPromote && len(next.Requirements) > 0 &&
+			checkAllRequirementsMet(next.Requirements, evalMap, memberStatus.CustomRequirementsMet) {
+			memberStatus.RankID = next.ID.Hex()
 			memberStatus.RankAssignedAt = primitive.NewDateTimeFromTime(time.Now())
 			memberStatus.RankAssignmentType = "auto"
-			currentRank = &ranks[i]
-			currentRankOrder = ranks[i].DisplayOrder
+			currentRank = next
+			currentRankOrder = next.DisplayOrder
 			promoted = true
-			// Continue to check for even higher ranks
+		}
+	} else {
+		// All-time mode: promote to the highest eligible rank in one pass.
+		for i := range ranks {
+			// Only consider ranks above current (lower displayOrder = higher rank)
+			if ranks[i].DisplayOrder >= currentRankOrder {
+				continue
+			}
+			if !ranks[i].AutoPromote {
+				continue
+			}
+			// Check if all requirements are met (tracked + custom)
+			allMet := len(ranks[i].Requirements) > 0 && checkAllRequirementsMet(ranks[i].Requirements, evalMap, memberStatus.CustomRequirementsMet)
+			if allMet {
+				// Promote to this rank
+				memberStatus.RankID = ranks[i].ID.Hex()
+				memberStatus.RankAssignedAt = primitive.NewDateTimeFromTime(time.Now())
+				memberStatus.RankAssignmentType = "auto"
+				currentRank = &ranks[i]
+				currentRankOrder = ranks[i].DisplayOrder
+				promoted = true
+				// Continue to check for even higher ranks
+			}
 		}
 	}
 
@@ -1091,10 +1197,26 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 			fmt.Sprintf("community.departments.%d.members.%d.rankAssignedAt", deptIdx, memberIdx):     memberStatus.RankAssignedAt,
 			fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx): memberStatus.RankAssignmentType,
 		}
+		// In reset-stats mode, met custom requirements belong to the rank the member
+		// just earned, so clear them for a fresh start. In all-time mode they persist
+		// (you keep what you earned), matching the historical behavior.
+		if resetMode {
+			setFields[fmt.Sprintf("community.departments.%d.members.%d.customRequirementsMet", deptIdx, memberIdx)] = []string{}
+		}
 		err = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": setFields})
 		if err != nil {
 			config.ErrorStatus("failed to persist auto-promotion", http.StatusInternalServerError, w, err)
 			return
+		}
+		if resetMode {
+			// Mirror the reset in-memory and recompute the progress metrics against the
+			// new rank-assignment time so the next-rank progress starts fresh.
+			memberStatus.CustomRequirementsMet = nil
+			newSince := memberStatus.RankAssignedAt.Time()
+			if evalMap, err = c.computeOfficerMetrics(ctx, communityID, departmentID, userID, getDepartmentType(dept), &newSince); err != nil {
+				config.ErrorStatus("failed to recompute officer metrics", http.StatusInternalServerError, w, err)
+				return
+			}
 		}
 		logAudit(c.ALDB, cID, "rank.auto_promoted", "rank", userID, "", memberStatus.RankID, currentRank.Name, map[string]interface{}{
 			"departmentId": departmentID,
@@ -1121,14 +1243,15 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		metricsResponse = append(metricsResponse, OfficerMetric{
 			MetricType:   mt.Type,
 			DisplayName:  mt.DisplayName,
-			CurrentValue: metricsMap[mt.Type],
+			CurrentValue: evalMap[mt.Type],
+			AllTimeValue: allTimeMap[mt.Type],
 		})
 	}
 
 	// Build progress toward next rank
 	var progress []RankProgress
 	if nextRank != nil {
-		progress = buildRequirementProgress(nextRank.Requirements, metricsMap, memberStatus.CustomRequirementsMet)
+		progress = buildRequirementProgress(nextRank.Requirements, evalMap, allTimeMap, memberStatus.CustomRequirementsMet)
 	}
 
 	allMet := len(progress) > 0
@@ -1172,6 +1295,7 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 		"previousRank":        previousRank,
 		"rankAssignedAt":      memberStatus.RankAssignedAt,
 		"rankAssignmentType":  memberStatus.RankAssignmentType,
+		"resetStatsOnPromotion": resetMode,
 	})
 }
 
@@ -1276,6 +1400,13 @@ func (c Community) AssignMemberRankHandler(w http.ResponseWriter, r *http.Reques
 		fmt.Sprintf("community.departments.%d.members.%d.rankId", deptIdx, memberIdx):             requestBody.RankID,
 		fmt.Sprintf("community.departments.%d.members.%d.rankAssignedAt", deptIdx, memberIdx):     primitive.NewDateTimeFromTime(time.Now()),
 		fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx): "manual",
+	}
+
+	// In reset-stats mode, when the rank actually changes, clear met custom requirements
+	// so the new rank starts fresh. In all-time mode they persist (you keep what you
+	// earned). Re-assigning the same rank never clears them.
+	if community.Details.RankSettings.ResetStatsOnPromotion && requestBody.RankID != dept.Members[memberIdx].RankID {
+		setFields[fmt.Sprintf("community.departments.%d.members.%d.customRequirementsMet", deptIdx, memberIdx)] = []string{}
 	}
 
 	err = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": setFields})
@@ -1384,15 +1515,17 @@ func (c Community) GetPendingPromotionsHandler(w http.ResponseWriter, r *http.Re
 			continue
 		}
 
-		// Compute metrics for this member
-		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID, getDepartmentType(dept))
+		// Compute metrics for this member. In reset-stats mode, eligibility is measured
+		// since the member's last promotion; all-time totals ride along for display.
+		since := rankStatsSince(community, member)
+		allTimeMap, metricsMap, err := c.computeOfficerMetricsDual(ctx, communityID, departmentID, member.UserID, getDepartmentType(dept), since)
 		if err != nil {
 			continue
 		}
 
 		// Check progress toward next rank — show in pending if all TRACKED metrics are met
 		// (custom requirements can be toggled by admin from the pending promotions panel)
-		progress := buildRequirementProgress(nextRank.Requirements, metricsMap, member.CustomRequirementsMet)
+		progress := buildRequirementProgress(nextRank.Requirements, metricsMap, allTimeMap, member.CustomRequirementsMet)
 		trackedMet := true
 		for _, req := range nextRank.Requirements {
 			if req.MetricType != "custom" && metricsMap[req.MetricType] < req.Threshold {
@@ -1480,8 +1613,11 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 	promotedCount := 0
 	setFields := bson.M{}
 
+	resetMode := community.Details.RankSettings.ResetStatsOnPromotion
+
 	for memberIdx, member := range dept.Members {
-		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID, getDepartmentType(dept))
+		since := rankStatsSince(community, member)
+		metricsMap, err := c.computeOfficerMetrics(ctx, communityID, departmentID, member.UserID, getDepartmentType(dept), since)
 		if err != nil {
 			continue // skip members we can't compute metrics for
 		}
@@ -1498,17 +1634,34 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 		bestRankOrder := currentRankOrder
 		var bestRankName string
 
-		for i := range ranks {
-			if ranks[i].DisplayOrder >= bestRankOrder {
-				continue
+		if resetMode {
+			// One step only: stats reset on promotion, so higher ranks can't be earned
+			// in the same pass. Consider just the immediate next rank up.
+			for i := len(ranks) - 1; i >= 0; i-- {
+				if ranks[i].DisplayOrder >= currentRankOrder {
+					continue
+				}
+				if ranks[i].AutoPromote && len(ranks[i].Requirements) > 0 &&
+					checkAllRequirementsMet(ranks[i].Requirements, metricsMap, member.CustomRequirementsMet) {
+					bestRankID = ranks[i].ID.Hex()
+					bestRankOrder = ranks[i].DisplayOrder
+					bestRankName = ranks[i].Name
+				}
+				break // only the immediate next rank is a candidate
 			}
-			if !ranks[i].AutoPromote || len(ranks[i].Requirements) == 0 {
-				continue
-			}
-			if checkAllRequirementsMet(ranks[i].Requirements, metricsMap, member.CustomRequirementsMet) {
-				bestRankID = ranks[i].ID.Hex()
-				bestRankOrder = ranks[i].DisplayOrder
-				bestRankName = ranks[i].Name
+		} else {
+			for i := range ranks {
+				if ranks[i].DisplayOrder >= bestRankOrder {
+					continue
+				}
+				if !ranks[i].AutoPromote || len(ranks[i].Requirements) == 0 {
+					continue
+				}
+				if checkAllRequirementsMet(ranks[i].Requirements, metricsMap, member.CustomRequirementsMet) {
+					bestRankID = ranks[i].ID.Hex()
+					bestRankOrder = ranks[i].DisplayOrder
+					bestRankName = ranks[i].Name
+				}
 			}
 		}
 
@@ -1516,6 +1669,11 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 			setFields[fmt.Sprintf("community.departments.%d.members.%d.rankId", deptIdx, memberIdx)] = bestRankID
 			setFields[fmt.Sprintf("community.departments.%d.members.%d.rankAssignedAt", deptIdx, memberIdx)] = primitive.NewDateTimeFromTime(time.Now())
 			setFields[fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx)] = "auto"
+			// In reset-stats mode, clear met custom requirements so progress toward the
+			// new rank starts fresh. In all-time mode they persist (you keep what you earned).
+			if resetMode {
+				setFields[fmt.Sprintf("community.departments.%d.members.%d.customRequirementsMet", deptIdx, memberIdx)] = []string{}
+			}
 			promotedCount++
 
 			logAudit(c.ALDB, cID, "rank.auto_promoted", "rank", member.UserID, "", bestRankID, bestRankName, map[string]interface{}{
@@ -1614,8 +1772,9 @@ func (c Community) GetPendingPromotionCountsHandler(w http.ResponseWriter, r *ht
 				continue
 			}
 
-			// Compute metrics for this member
-			metricsMap, err := c.computeOfficerMetrics(ctx, communityID, deptID, member.UserID, getDepartmentType(&dept))
+			// Compute metrics for this member (since-promotion when reset-stats mode is on)
+			since := rankStatsSince(community, member)
+			metricsMap, err := c.computeOfficerMetrics(ctx, communityID, deptID, member.UserID, getDepartmentType(&dept), since)
 			if err != nil {
 				continue
 			}
