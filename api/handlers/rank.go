@@ -1090,12 +1090,18 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 			fmt.Sprintf("community.departments.%d.members.%d.rankId", deptIdx, memberIdx):             memberStatus.RankID,
 			fmt.Sprintf("community.departments.%d.members.%d.rankAssignedAt", deptIdx, memberIdx):     memberStatus.RankAssignedAt,
 			fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx): memberStatus.RankAssignmentType,
+			// Reset met custom requirements: they belong to the rank the member just earned,
+			// so progress toward the new rank starts fresh (admins must re-verify).
+			fmt.Sprintf("community.departments.%d.members.%d.customRequirementsMet", deptIdx, memberIdx): []string{},
 		}
 		err = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": setFields})
 		if err != nil {
 			config.ErrorStatus("failed to persist auto-promotion", http.StatusInternalServerError, w, err)
 			return
 		}
+		// Mirror the reset in-memory so the progress built below for the new
+		// next rank reflects the cleared state rather than the old met requirements.
+		memberStatus.CustomRequirementsMet = nil
 		logAudit(c.ALDB, cID, "rank.auto_promoted", "rank", userID, "", memberStatus.RankID, currentRank.Name, map[string]interface{}{
 			"departmentId": departmentID,
 		})
@@ -1276,6 +1282,13 @@ func (c Community) AssignMemberRankHandler(w http.ResponseWriter, r *http.Reques
 		fmt.Sprintf("community.departments.%d.members.%d.rankId", deptIdx, memberIdx):             requestBody.RankID,
 		fmt.Sprintf("community.departments.%d.members.%d.rankAssignedAt", deptIdx, memberIdx):     primitive.NewDateTimeFromTime(time.Now()),
 		fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx): "manual",
+	}
+
+	// When the rank actually changes, reset met custom requirements: they belonged
+	// to the prior rank's progress, so the new rank starts fresh. Re-assigning the
+	// same rank leaves the existing met requirements untouched.
+	if requestBody.RankID != dept.Members[memberIdx].RankID {
+		setFields[fmt.Sprintf("community.departments.%d.members.%d.customRequirementsMet", deptIdx, memberIdx)] = []string{}
 	}
 
 	err = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": setFields})
@@ -1516,6 +1529,8 @@ func (c Community) CheckAllPromotionsHandler(w http.ResponseWriter, r *http.Requ
 			setFields[fmt.Sprintf("community.departments.%d.members.%d.rankId", deptIdx, memberIdx)] = bestRankID
 			setFields[fmt.Sprintf("community.departments.%d.members.%d.rankAssignedAt", deptIdx, memberIdx)] = primitive.NewDateTimeFromTime(time.Now())
 			setFields[fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx)] = "auto"
+			// Reset met custom requirements so progress toward the new rank starts fresh.
+			setFields[fmt.Sprintf("community.departments.%d.members.%d.customRequirementsMet", deptIdx, memberIdx)] = []string{}
 			promotedCount++
 
 			logAudit(c.ALDB, cID, "rank.auto_promoted", "rank", member.UserID, "", bestRankID, bestRankName, map[string]interface{}{
