@@ -69,6 +69,7 @@ type CommunityDetails struct {
 	MostWantedVisibleFields       []string                `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
 	MostWantedCustomFields        []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
 	Economy                       EconomySettings         `json:"economy" bson:"economy"`
+	RankSettings                  RankSettings            `json:"rankSettings" bson:"rankSettings"`
 	// RpPromotion holds the community's last "RP server promotion" Discord post
 	// and the timestamp used to enforce the once-per-cooldown posting gate.
 	// Pointer so legacy communities that never promoted serialize it as absent.
@@ -257,6 +258,16 @@ type RankRequirement struct {
 	MetricType  string `json:"metricType" bson:"metricType"`                       // e.g. "citations_issued" or "custom"
 	Threshold   int    `json:"threshold" bson:"threshold"`                         // e.g. 50 (ignored for custom)
 	CustomLabel string `json:"customLabel,omitempty" bson:"customLabel,omitempty"` // free-text label for custom requirements
+}
+
+// RankSettings holds community-wide rank/promotion configuration.
+type RankSettings struct {
+	// ResetStatsOnPromotion, when true, measures rank requirement progress from the
+	// member's most recent rank assignment (MemberStatus.RankAssignedAt) instead of
+	// all-time. Promotions then require a fresh count of metrics per rank, and met
+	// custom requirements are cleared on promotion. Default false preserves the
+	// historical all-time behavior so existing communities are unaffected.
+	ResetStatsOnPromotion bool `json:"resetStatsOnPromotion" bson:"resetStatsOnPromotion"`
 }
 
 // Rank defines a configurable LEO rank within a department
