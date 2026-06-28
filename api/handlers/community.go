@@ -3633,6 +3633,26 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 	}
 	logAudit(c.ALDB, cID, auditAction, "department", actorID, resolveActorName(c.UDB, actorID), requestBody.UserID, resolveActorName(c.UDB, requestBody.UserID), map[string]interface{}{"departmentId": departmentID})
 
+	// Once the request is resolved (approved or declined), clear the matching
+	// join_request notifications from every admin who received one. Otherwise the
+	// notification lingers as "requesting to join" for all other staff until each
+	// surface manually refetches — so multiple staff can spend time acting on a
+	// request that was already handled. Department notifications carry
+	// data1=communityId and data3=departmentId. Mirrors the cleanup done on
+	// request cancellation (user.go) and community-level resolution.
+	if requestBody.Status == "approved" || requestBody.Status == "declined" {
+		notifMatch := bson.M{
+			"type":       "join_request",
+			"sentFromID": requestBody.UserID,
+			"data1":      communityID,
+			"data3":      departmentID,
+		}
+		notifFilter := bson.M{"user.notifications": bson.M{"$elemMatch": notifMatch}}
+		notifUpdate := bson.M{"$pull": bson.M{"user.notifications": notifMatch}}
+		// Best-effort cleanup — never fail the resolution if this errors.
+		_, _ = c.UDB.UpdateMany(ctx, notifFilter, notifUpdate)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Department join request updated successfully"}`))
 }
