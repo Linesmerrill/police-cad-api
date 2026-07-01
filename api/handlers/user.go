@@ -5811,6 +5811,41 @@ func (u User) DismissTutorialHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
+// SetAlertSoundsEnabledHandler toggles the per-user master switch for CAD alert
+// sounds (new-call/warrant/attach tones). Defaults off; users opt in.
+// PUT /api/v1/user/{userId}/alert-sounds-enabled  body: {"enabled": bool}
+func (u User) SetAlertSoundsEnabledHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("invalid body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
+		"$set": bson.M{"user.alertSoundsEnabled": body.Enabled},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to update alert sounds setting", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "enabled": body.Enabled})
+}
+
 // ChangeEmailHandler is the legacy v1 email-change endpoint (password-only verification). Kept
 // in place for backward compatibility while clients migrate to the verified v2 flow on
 // PendingVerification.{Request,Confirm}EmailChangeHandler. Plan to delete after migration.

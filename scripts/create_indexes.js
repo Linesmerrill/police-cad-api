@@ -868,5 +868,16 @@ createIndexSafe(
   }
 );
 
+// Platform "What's New" changelog: the per-user launch modal fetches active
+// posts newest-first, so index active + publishedAt to serve that query.
+createIndexSafe(
+  db.changelogPosts,
+  { active: 1, publishedAt: -1 },
+  {
+    name: "changelog_active_published_idx",
+    background: true
+  }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

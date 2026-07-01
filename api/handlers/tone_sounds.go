@@ -42,11 +42,14 @@ func (c Community) GetToneSoundsHandler(w http.ResponseWriter, r *http.Request) 
 		"success":  true,
 		"sounds":   sounds,
 		"defaults": map[string]string{
-			"leo":       community.Details.DefaultToneLeo,
-			"fd":        community.Details.DefaultToneFd,
-			"ems":       community.Details.DefaultToneEms,
-			"panic":     community.Details.DefaultPanicSound,
-			"signal100": community.Details.DefaultSignal100Sound,
+			"leo":          community.Details.DefaultToneLeo,
+			"fd":           community.Details.DefaultToneFd,
+			"ems":          community.Details.DefaultToneEms,
+			"panic":        community.Details.DefaultPanicSound,
+			"signal100":    community.Details.DefaultSignal100Sound,
+			"newCall":      community.Details.DefaultNewCallSound,
+			"warrantAlert": community.Details.DefaultWarrantAlertSound,
+			"attach":       community.Details.DefaultAttachSound,
 		},
 	})
 }
@@ -199,6 +202,15 @@ func (c Community) DeleteToneSoundHandler(w http.ResponseWriter, r *http.Request
 		if community.Details.DefaultSignal100Sound == soundKey {
 			unsetFields["community.defaultSignal100Sound"] = ""
 		}
+		if community.Details.DefaultNewCallSound == soundKey {
+			unsetFields["community.defaultNewCallSound"] = ""
+		}
+		if community.Details.DefaultWarrantAlertSound == soundKey {
+			unsetFields["community.defaultWarrantAlertSound"] = ""
+		}
+		if community.Details.DefaultAttachSound == soundKey {
+			unsetFields["community.defaultAttachSound"] = ""
+		}
 	}
 	if len(unsetFields) > 0 {
 		_ = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, bson.M{"$unset": unsetFields})
@@ -258,8 +270,14 @@ func (c Community) SetToneDefaultHandler(w http.ResponseWriter, r *http.Request)
 		field = "community.defaultPanicSound"
 	case "signal100":
 		field = "community.defaultSignal100Sound"
+	case "newCall":
+		field = "community.defaultNewCallSound"
+	case "warrantAlert":
+		field = "community.defaultWarrantAlertSound"
+	case "attach":
+		field = "community.defaultAttachSound"
 	default:
-		config.ErrorStatus("template must be 'leo', 'fd', 'ems', 'panic', or 'signal100'", http.StatusBadRequest, w, fmt.Errorf("invalid template: %s", request.Template))
+		config.ErrorStatus("template must be 'leo', 'fd', 'ems', 'panic', 'signal100', 'newCall', 'warrantAlert', or 'attach'", http.StatusBadRequest, w, fmt.Errorf("invalid template: %s", request.Template))
 		return
 	}
 

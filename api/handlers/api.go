@@ -102,6 +102,10 @@ func (a *App) New() *mux.Router {
 	cloudinaryHandler := CloudinaryHandler{}
 	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	betaFeedback := BetaFeedback{DB: databases.NewBetaFeedbackDatabase(a.dbHelper)}
+	changelog := Changelog{
+		DB:  databases.NewChangelogPostDatabase(a.dbHelper),
+		UDB: databases.NewUserDatabase(a.dbHelper),
+	}
 	announcement := Announcement{
 		ADB:  databases.NewAnnouncementDatabase(a.dbHelper),
 		UDB:  databases.NewUserDatabase(a.dbHelper),
@@ -476,6 +480,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{userId}/prioritized-communities", api.Middleware(http.HandlerFunc(u.GetPrioritizedCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/user/{userId}/prioritized-communities", api.Middleware(http.HandlerFunc(u.FetchPrioritizedCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/dismiss-tutorial", api.Middleware(http.HandlerFunc(u.DismissTutorialHandler))).Methods("PUT")
+	apiCreate.Handle("/user/{userId}/alert-sounds-enabled", api.Middleware(http.HandlerFunc(u.SetAlertSoundsEnabledHandler))).Methods("PUT")
+	apiCreate.Handle("/user/{userId}/announcements", api.Middleware(http.HandlerFunc(changelog.GetUserAnnouncementsHandler))).Methods("GET")
+	apiCreate.Handle("/user/{userId}/mark-announcement-seen", api.Middleware(http.HandlerFunc(changelog.MarkAnnouncementSeenHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/remove-community", api.Middleware(http.HandlerFunc(u.RemoveCommunityFromUserHandler))).Methods("DELETE")
 	apiCreate.Handle("/user/{userId}/ban-community", api.Middleware(http.HandlerFunc(u.BanUserFromCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/user/{userId}/unban-community", api.Middleware(http.HandlerFunc(u.UnbanUserFromCommunityHandler))).Methods("POST")
@@ -524,6 +531,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/beta-dashboard-metrics", http.HandlerFunc(userPrefs.GetBetaDashboardMetricsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/beta-dashboard-metrics/daily", http.HandlerFunc(userPrefs.GetBetaDashboardMetricsDailyHandler)).Methods("GET")
 	apiCreate.Handle("/beta-feedback", http.HandlerFunc(betaFeedback.CreateBetaFeedbackHandler)).Methods("POST")
+	apiCreate.Handle("/admin/changelog", http.HandlerFunc(changelog.CreateChangelogPostHandler)).Methods("POST")
+	apiCreate.Handle("/admin/changelog", http.HandlerFunc(changelog.ListChangelogPostsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/beta-feedback", http.HandlerFunc(betaFeedback.ListBetaFeedbackHandler)).Methods("GET")
 	apiCreate.Handle("/admin/beta-feedback/{id}", http.HandlerFunc(betaFeedback.ResolveBetaFeedbackHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/beta-feedback/{id}", http.HandlerFunc(betaFeedback.DeleteBetaFeedbackHandler)).Methods("DELETE")
