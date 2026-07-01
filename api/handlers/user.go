@@ -2108,6 +2108,23 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 			// Audit log: member approved (joined via request approval)
 			actorID := resolveActorFromRequest(r)
 			logAudit(u.ALDB, cID, "member.approved", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
+
+			// Defense-in-depth for members orphaned before RemoveCommunityFromUser/
+			// BanUserFromCommunity cleared department membership: a re-added user
+			// could still carry stale entries in community.departments[].members,
+			// silently regaining (private) department access and erroring on open.
+			// Clear them on re-approval so re-added users start with no department
+			// access until explicitly re-granted. Best-effort — never block approval.
+			if community, err := u.CDB.FindOne(ctx, communityFilter); err == nil && community != nil {
+				for _, dept := range community.Details.Departments {
+					deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
+					deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
+					if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
+						zap.S().Warnw("failed to clear stale department membership on re-approval",
+							"community_id", requestBody.CommunityID, "user_id", userID, "department_id", dept.ID.Hex(), "error", err)
+					}
+				}
+			}
 		}
 
 		// Once a join request is resolved (approved or declined), clear the
@@ -2434,6 +2451,20 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Remove the user from every department's members. Without this, department
+	// membership (especially in private/approval-required departments) survived a
+	// community removal — on re-add the user silently regained access without
+	// re-approval, and opening such a department errored. Mirror the roles loop
+	// above, using the same per-department $pull as RemoveUserFromDepartmentHandler.
+	for _, dept := range community.Details.Departments {
+		deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
+		deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
+		if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
+			config.ErrorStatus("failed to remove user from department members", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
 	// Audit log — distinguish kick (admin removed member) vs leave (self-initiated)
 	actorID := resolveActorFromRequest(r)
 	if actorID != "" && actorID != userID {
@@ -2540,6 +2571,22 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 		}); err != nil {
 			zap.S().Warnw("failed to decrement membersCount on ban",
 				"community_id", requestBody.CommunityID, "user_id", userID, "error", err)
+		}
+	}
+
+	// Strip the banned user from every department's members so they can't retain
+	// (private) department access — the community-level ban status alone doesn't
+	// clear department membership. Best-effort: the ban itself already succeeded,
+	// so a transient failure here shouldn't 500 the request (mirrors the
+	// membersCount handling above); it's logged for follow-up.
+	if community, err := u.CDB.FindOne(ctx, communityFilter); err == nil && community != nil {
+		for _, dept := range community.Details.Departments {
+			deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
+			deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
+			if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
+				zap.S().Warnw("failed to remove banned user from department members",
+					"community_id", requestBody.CommunityID, "user_id", userID, "department_id", dept.ID.Hex(), "error", err)
+			}
 		}
 	}
 
