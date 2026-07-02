@@ -793,10 +793,30 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	}
 	defer cursor.Close(ctx)
 
-	var communities []models.Community
-	if err = cursor.All(ctx, &communities); err != nil {
+	// Decode per-document rather than cursor.All: a single malformed community
+	// (e.g. a legacy field whose BSON type no longer matches the struct) must not
+	// fail the entire admin search. Skip the bad doc and log its id/name + the
+	// decode error (which names the offending field path) so the data can be
+	// repaired, instead of 500-ing every search that happens to match it.
+	communities := []models.Community{}
+	for cursor.Next(ctx) {
+		var comm models.Community
+		if decErr := cursor.DecodeCurrent(&comm); decErr != nil {
+			var meta struct {
+				ID      interface{} `bson:"_id"`
+				Details struct {
+					Name string `bson:"name"`
+				} `bson:"community"`
+			}
+			_ = cursor.DecodeCurrent(&meta)
+			log.Printf("[admin community search] skipping undecodable community id=%v name=%q: %v", meta.ID, meta.Details.Name, decErr)
+			continue
+		}
+		communities = append(communities, comm)
+	}
+	if cErr := cursor.Err(); cErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to decode communities"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to iterate communities"})
 		return
 	}
 
