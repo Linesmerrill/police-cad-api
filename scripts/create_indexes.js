@@ -539,6 +539,36 @@ createIndexSafe(
   }
 );
 
+// TTL on tone_logs.createdAt: tone triggers are an activity feed — the only
+// reader (GetToneLogHandler) always sorts createdAt desc and caps at <=100, so
+// nothing reads rows older than the recent window. Auto-remove after 30 days to
+// keep this high-write collection bounded. Unlike the pendingVerifications TTL
+// (expireAfterSeconds: 0 on a stored expiresAt), this deletes 30 days *after*
+// the createdAt timestamp. createdAt is always written as a BSON Date, so every
+// row is covered; rows missing/with a non-date createdAt are simply ignored.
+createIndexSafe(
+  db.tone_logs,
+  { "createdAt": 1 },
+  {
+    name: "tone_logs_created_at_ttl",
+    expireAfterSeconds: 2592000, // 30 days
+    background: true
+  }
+);
+
+// Query index for the tone log feed: GetToneLogHandler filters by communityId
+// and sorts createdAt desc. Without this the read scans the whole collection
+// and sorts in memory. (Separate from the single-field TTL index above, which
+// MongoDB requires for expiry.)
+createIndexSafe(
+  db.tone_logs,
+  { "communityId": 1, "createdAt": -1 },
+  {
+    name: "tone_logs_community_createdAt_idx",
+    background: true
+  }
+);
+
 // MEDIUM PRIORITY: Invite Code + Remaining Uses Index (Performance Advisor)
 // Expected Impact: 0.71 queries/hour
 // Avg Execution Time: 1047 ms, Avg Docs Scanned: 6680
