@@ -10,7 +10,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
@@ -61,7 +60,7 @@ func (b Bolo) FetchDepartmentBolosHandler(w http.ResponseWriter, r *http.Request
 	departmentID := r.URL.Query().Get("departmentId")
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
-		zap.S().Warnf("limit not set, using default of %v, err: %v", Limit|10, err)
+		// Omitting ?limit is the normal default case; don't warn on it.
 		Limit = 10
 	}
 	limit64 := int64(Limit)
