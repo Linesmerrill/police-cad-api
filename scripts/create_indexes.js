@@ -939,5 +939,15 @@ createIndexSafe(
   { name: "civilian_community_searchname_idx", background: true }
 );
 
+// Officer metrics: the "arrests made" count filters arrestreports by
+// activeCommunityID + departmentId + officerID (rank.go runMetrics). No existing
+// index covered it, so it was a full ~29k-doc collection scan per officer-stats
+// load. (Atlas Performance Advisor suggestion.)
+createIndexSafe(
+  db.arrestreports,
+  { "arrestReport.activeCommunityID": 1, "arrestReport.departmentId": 1, "arrestReport.officerID": 1 },
+  { name: "arrestreports_community_dept_officer_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
