@@ -96,16 +96,8 @@ createIndexSafe(
   }
 );
 
-// MEDIUM PRIORITY: Community Visibility Index
-// DONE
-createIndexSafe(
-  db.communities,
-  { "community.visibility": 1 }, 
-  {
-    name: "community_visibility_idx",
-    background: true
-  }
-);
+// Removed community_visibility_idx — redundant prefix of the community_visibility_*
+// compound indexes below (Atlas Performance Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Vehicle Registered Owner Index (for /vehicles/registered-owner/{id})
 // DONE
@@ -129,17 +121,9 @@ createIndexSafe(
   }
 );
 
-// CRITICAL: Vehicle Active Community ID Index (single field for queries filtering only by activeCommunityID)
-// Needed for queries that filter by activeCommunityID without userID
-// This fixes Query Targeting alerts for vehicles queries
-createIndexSafe(
-  db.vehicles,
-  { "vehicle.activeCommunityID": 1 },
-  {
-    name: "vehicle_active_community_idx",
-    background: true
-  }
-);
+// Removed vehicle_active_community_idx — redundant prefix of the
+// vehicle_activeCommunityID_{make,model,vin}_idx compounds (Atlas Performance
+// Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Civilian User ID Index (for /civilians/user/{id})
 // DONE
@@ -164,17 +148,10 @@ createIndexSafe(
   }
 );
 
-// CRITICAL: Civilian Active Community ID Index (single field for queries filtering only by activeCommunityID)
-// Needed for queries that filter by activeCommunityID without approvalStatus
-// This fixes Query Targeting alerts for civilians queries
-createIndexSafe(
-  db.civilians,
-  { "civilian.activeCommunityID": 1 },
-  {
-    name: "civilian_active_community_idx",
-    background: true
-  }
-);
+// Removed civilian_active_community_idx — redundant prefix of the
+// civilian_pending_approvals_idx / civilian_activeCommunityID_name_idx /
+// civilian_community_searchname_idx compounds (Atlas Performance Advisor).
+// Dropped from prod 2026-07.
 
 // CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
 // The query uses $or with both fields, so we need separate indexes for each
@@ -199,14 +176,9 @@ createIndexSafe(
     background: true
   }
 );
-createIndexSafe(
-  db.firearms,
-  { "firearm.linkedCivilianID": 1 },
-  {
-    name: "firearm_linked_civilian_id_idx",
-    background: true
-  }
-);
+// Removed firearm_linked_civilian_id_idx — redundant prefix of the
+// firearm_registered_owner_idx compound { linkedCivilianID, registeredOwnerID }
+// (Atlas Performance Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Firearm Active Community ID Index (for queries filtering by activeCommunityID)
 // Needed for queries that filter by activeCommunityID
@@ -242,27 +214,13 @@ createIndexSafe(
   }
 );
 
-// MEDIUM PRIORITY: Community Tags Index (for tag-based queries)
-// DONE
-createIndexSafe(
-  db.communities,
-  { "community.tags": 1 },
-  {
-    name: "community_tags_idx",
-    background: true
-  }
-);
+// Removed community_tags_idx — hidden in prod and a redundant prefix of the
+// community_tags_visibility_name_idx compound below (Atlas Performance Advisor).
+// Dropped from prod 2026-07.
 
-// CRITICAL: Community Tags + Visibility Compound Index (for /communities/tag/{tag})
-// DONE
-createIndexSafe(
-  db.communities,
-  { "community.tags": 1, "community.visibility": 1 },
-  {
-    name: "community_tags_visibility_idx",
-    background: true
-  }
-);
+// Removed community_tags_visibility_idx — hidden in prod and a redundant prefix
+// of the community_tags_visibility_name_idx compound below (Atlas Performance
+// Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Community Tags + Visibility + Name Compound Index (for /communities/tag/{tag} with sorting)
 // MongoDB was using visibility+name index and filtering tags in memory (5.4s slow!)
@@ -424,29 +382,13 @@ createIndexSafe(
 // Based on MongoDB Performance Advisor analysis of slow queries
 // ============================================================================
 
-// HIGH PRIORITY: User Username + _id Index (Performance Advisor)
-// Expected Impact: Can reduce up to 269.1 MB of disk reads from 13.08 queries/hour
-// Avg Execution Time: 44474 ms, Avg Docs Scanned: 705303
-createIndexSafe(
-  db.users,
-  { "user.username": 1, "_id": 1 },
-  {
-    name: "user_username_id_idx",
-    background: true
-  }
-);
+// Removed user_username_id_idx — redundant prefix of the
+// user_username_id_deactivated_idx compound { username, _id, isDeactivated }
+// (Atlas Performance Advisor). Dropped from prod 2026-07.
 
-// HIGH PRIORITY: User Name + _id Index (Performance Advisor)
-// Expected Impact: Can reduce up to 269.1 MB of disk reads from 13.08 queries/hour
-// Avg Execution Time: 44474 ms, Avg Docs Scanned: 705303
-createIndexSafe(
-  db.users,
-  { "user.name": 1, "_id": 1 },
-  {
-    name: "user_name_id_idx",
-    background: true
-  }
-);
+// Removed user_name_id_idx — redundant prefix of the
+// user_name_id_deactivated_idx compound { name, _id, isDeactivated }
+// (Atlas Performance Advisor). Dropped from prod 2026-07.
 
 // HIGH PRIORITY: User Email Index (Performance Advisor)
 // Expected Impact: Can reduce up to 306.8 MB of disk reads from 9.46 queries/hour
