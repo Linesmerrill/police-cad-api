@@ -65,9 +65,25 @@ func InfoStatus(message string, httpStatusCode int, w http.ResponseWriter, err e
 // ErrorStatus is a useful function that will log, write http headers and body for a
 // give message, status code and err
 func ErrorStatus(message string, httpStatusCode int, w http.ResponseWriter, err error) {
-	if err != nil {
+	// Only genuine server faults (5xx) warrant Error level, which the production
+	// zap config decorates with a full multi-KB stacktrace. Client errors (4xx)
+	// and "no documents" not-found conditions are expected — at Error level each
+	// occurrence carries a stacktrace, so a client looping on such a response
+	// (e.g. polling a stale/placeholder ID) floods the logs and burns the quota.
+	// Log those at Warn instead (Warn is below zap's stacktrace threshold, so no
+	// stacktrace) while still returning the same HTTP status/body to the caller.
+	clientFault := httpStatusCode >= 400 && httpStatusCode < 500
+	notFound := err != nil && errors.Is(err, mongo.ErrNoDocuments)
+	switch {
+	case clientFault || notFound:
+		if err != nil {
+			zap.S().Warnw(message, "error", err, "status", httpStatusCode)
+		} else {
+			zap.S().Warnw(message, "status", httpStatusCode)
+		}
+	case err != nil:
 		zap.S().Errorw(message, "error", err)
-	} else {
+	default:
 		zap.S().Error(message)
 	}
 	w.WriteHeader(httpStatusCode)
