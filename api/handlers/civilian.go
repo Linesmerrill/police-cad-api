@@ -328,20 +328,22 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 }
 
 func getPage(Page int, r *http.Request) int {
-	if r.URL.Query().Get("page") == "" {
-		zap.S().Warnf("page not set, using default of %v", Page)
-	} else {
-		var err error
-		Page, err = strconv.Atoi(r.URL.Query().Get("page"))
-		if err != nil {
-			zap.S().Warnf(fmt.Sprintf("warning parsing page number: %v", err))
-		}
-		if Page < 0 {
-			zap.S().Warnf(fmt.Sprintf("cannot process page number less than 1. Got: %v", Page))
-			return 0
-		}
+	// Omitting ?page is the normal default case, not a warnable event — logging
+	// it warned on nearly every paginated request (a shared helper across many
+	// handlers). Only a malformed value is worth a note, at Debug.
+	raw := r.URL.Query().Get("page")
+	if raw == "" {
+		return Page
 	}
-	return Page
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		zap.S().Debugf("invalid page %q, using default %v", raw, Page)
+		return Page
+	}
+	if parsed < 0 {
+		return 0
+	}
+	return parsed
 }
 
 // CreateCivilianHandler creates a civilian
