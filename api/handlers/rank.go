@@ -1912,9 +1912,19 @@ func (c Community) sendPromotionEligibleNotification(ctx context.Context, commun
 		return
 	}
 
-	// Look up owner by userID field (auth ID), not _id
+	// Look up the owner by _id. community.OwnerID IS the owner's user _id, so
+	// filtering on a (nonexistent) top-level "userID" field matched nothing and
+	// full-scanned the entire users collection (~830K docs) on every call.
+	// Query by _id — string first, then ObjectID — mirroring the owner lookup in
+	// AdminCommunitySearchHandler so both storage formats are covered.
 	var owner models.User
-	if err := c.UDB.FindOne(ctx, bson.M{"userID": ownerID}).Decode(&owner); err != nil {
+	err := c.UDB.FindOne(ctx, bson.M{"_id": ownerID}).Decode(&owner)
+	if err != nil {
+		if oid, oidErr := primitive.ObjectIDFromHex(ownerID); oidErr == nil {
+			err = c.UDB.FindOne(ctx, bson.M{"_id": oid}).Decode(&owner)
+		}
+	}
+	if err != nil {
 		return
 	}
 	ownerObjID := owner.ID // string hex of _id

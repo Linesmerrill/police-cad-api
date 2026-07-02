@@ -868,5 +868,104 @@ createIndexSafe(
   }
 );
 
+// ---------------------------------------------------------------------------
+// Atlas Performance Advisor recommendations (2026-07-01 incident).
+// The users collection (~800K-1.4M docs) was being FULL-SCANNED by user
+// lookup/search queries (email equality, name/username regex, admin search),
+// reading multiple GB/query and saturating the M20's IOPS -> site-wide latency
+// spike (even trivial writes hit ~1s). These indexes turn those scans into
+// seeks. Keep this in sync with what's accepted in Atlas -> Performance Advisor.
+// NOTE: the user name/username/email lookups are ALSO getting a code-side fix
+// (collation-aware email lookup + $text/anchored search) so several of the
+// overlapping user indexes below can be pruned once that ships.
+// ---------------------------------------------------------------------------
+
+// User lookup by username + email (login/create/check-user, admin user search).
+// Advisor: up to 6.8 GB disk reads/execution eliminated.
+createIndexSafe(
+  db.users,
+  { "user.username": 1, "user.email": 1 },
+  { name: "user_username_email_idx", background: true }
+);
+
+// Paginated user search filtered by active status (username / name shapes).
+// Advisor: ~1.4M docs scanned -> seek; 774 MB / 652 MB reads eliminated.
+createIndexSafe(
+  db.users,
+  { "user.username": 1, "_id": 1, "user.isDeactivated": 1 },
+  { name: "user_username_id_deactivated_idx", background: true }
+);
+createIndexSafe(
+  db.users,
+  { "user.name": 1, "_id": 1, "user.isDeactivated": 1 },
+  { name: "user_name_id_deactivated_idx", background: true }
+);
+
+// Additional user search shapes surfaced by the Advisor (name+email,
+// username+name, callSign+name).
+createIndexSafe(
+  db.users,
+  { "user.name": 1, "user.email": 1 },
+  { name: "user_name_email_idx", background: true }
+);
+createIndexSafe(
+  db.users,
+  { "user.username": 1, "user.name": 1 },
+  { name: "user_username_name_idx", background: true }
+);
+createIndexSafe(
+  db.users,
+  { "user.callSign": 1, "user.name": 1 },
+  { name: "user_callsign_name_idx", background: true }
+);
+
+// Admin community search & pending-deletion listing sort/filter by name +
+// pendingDeletionAt + visibility (Advisor: 5.75 q/hr with in-memory sort).
+createIndexSafe(
+  db.communities,
+  { "community.pendingDeletionAt": 1, "community.visibility": 1 },
+  { name: "community_pending_visibility_idx", background: true }
+);
+createIndexSafe(
+  db.communities,
+  { "community.name": 1, "community.pendingDeletionAt": 1, "community.visibility": 1 },
+  { name: "community_name_pending_visibility_idx", background: true }
+);
+
+// RP promo duplicate detection looks up communities by a posted invite URL.
+createIndexSafe(
+  db.communities,
+  { "community.rpPromotion.history.data.inviteUrl": 1, "_id": 1 },
+  { name: "community_rppromo_invite_url_idx", background: true }
+);
+
+// Licenses queried by activeCommunityID (Advisor: ~404K docs scanned).
+createIndexSafe(
+  db.licenses,
+  { "license.activeCommunityID": 1 },
+  { name: "license_active_community_idx", background: true }
+);
+
+// Audit log community view sorts by createdAt desc within a community.
+createIndexSafe(
+  db.audit_logs,
+  { communityId: 1, createdAt: -1 },
+  { name: "audit_logs_community_created_idx", background: true }
+);
+
+// Medical reports queried by community + reporting EMS.
+createIndexSafe(
+  db.medicalreports,
+  { "report.activeCommunityID": 1, "report.reportingEmsID": 1 },
+  { name: "medicalreports_community_ems_idx", background: true }
+);
+
+// Civilian search-by-name within a community.
+createIndexSafe(
+  db.civilians,
+  { "civilian.activeCommunityID": 1, "civilian.searchName": 1 },
+  { name: "civilian_community_searchname_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
