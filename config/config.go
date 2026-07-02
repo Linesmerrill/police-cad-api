@@ -113,7 +113,15 @@ func setLogger(env string) (*zap.Logger, error) {
 		return zap.NewDevelopment()
 	} else if env == "local" {
 		return zap.NewExample(), nil
-	} else {
-		return zap.NewExample(), fmt.Errorf("cannot find ENV var so defaulting to debug level logging")
 	}
+	// Fail closed: an unset or unrecognized LOG_LEVEL must never enable
+	// debug-level logging in production. zap.NewExample() logs at Debug with no
+	// sampling, so on a high-traffic dyno the per-request Debugf calls across the
+	// handlers flood the log pipeline (a month of quota in hours). Default to the
+	// production logger (Info level + sampling) so a missing/typo'd env var is safe.
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return logger, err
+	}
+	return logger, fmt.Errorf("LOG_LEVEL unset or unrecognized (%q); defaulting to production logger", env)
 }
