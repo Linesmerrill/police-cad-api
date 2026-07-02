@@ -680,7 +680,20 @@ type communitySearchRequest struct {
 
 type communitySearchResponse struct {
 	Communities []models.AdminCommunityResult `json:"communities"`
-	Pagination map[string]interface{}        `json:"pagination"`
+	Pagination  map[string]interface{}        `json:"pagination"`
+	// Skipped surfaces communities that matched the search but couldn't be
+	// decoded (e.g. a legacy field whose BSON type no longer fits the struct),
+	// so an admin can see and repair the exact problem from the dashboard
+	// instead of digging through server logs. Empty/omitted when all matches
+	// decoded cleanly.
+	Skipped []skippedCommunity `json:"skipped,omitempty"`
+}
+
+// skippedCommunity describes a search match that failed to decode.
+type skippedCommunity struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Error string `json:"error"`
 }
 
 // AdminCommunitySearchHandler searches for communities by name
@@ -799,6 +812,7 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	// decode error (which names the offending field path) so the data can be
 	// repaired, instead of 500-ing every search that happens to match it.
 	communities := []models.Community{}
+	skipped := []skippedCommunity{}
 	for cursor.Next(ctx) {
 		var comm models.Community
 		if decErr := cursor.DecodeCurrent(&comm); decErr != nil {
@@ -810,6 +824,13 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 			}
 			_ = cursor.DecodeCurrent(&meta)
 			log.Printf("[admin community search] skipping undecodable community id=%v name=%q: %v", meta.ID, meta.Details.Name, decErr)
+			// Surface it in the response so an admin can see + fix the exact
+			// field from the dashboard rather than the logs.
+			skipped = append(skipped, skippedCommunity{
+				ID:    fmt.Sprintf("%v", meta.ID),
+				Name:  meta.Details.Name,
+				Error: decErr.Error(),
+			})
 			continue
 		}
 		communities = append(communities, comm)
@@ -887,6 +908,7 @@ func (h Admin) AdminCommunitySearchHandler(w http.ResponseWriter, r *http.Reques
 	_ = json.NewEncoder(w).Encode(communitySearchResponse{
 		Communities: results,
 		Pagination:  pagination,
+		Skipped:     skipped,
 	})
 }
 
