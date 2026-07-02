@@ -19,11 +19,17 @@ function createIndexSafe(collection, key, options) {
     }
   }
 
-  // Check if index with same key pattern already exists
-  const exists = indexes.some(idx => JSON.stringify(idx.key) === keyStr);
+  // Consider an index present if the key pattern matches OR the name matches.
+  // The name check is essential for TEXT indexes: Mongo rewrites their key to an
+  // internal { _fts: "text", _ftsx: 1 } (the real fields move into `weights`), so
+  // the key pattern we pass never matches getIndexes(). Without the name check
+  // every run re-issues createIndex for text indexes — a harmless no-op that
+  // misleadingly prints "Created".
+  const existingIdx = indexes.find(idx =>
+    JSON.stringify(idx.key) === keyStr || (options.name && idx.name === options.name)
+  );
 
-  if (exists) {
-    const existingIdx = indexes.find(idx => JSON.stringify(idx.key) === keyStr);
+  if (existingIdx) {
     print(`⚠️  Index already exists: ${existingIdx.name} (skipping ${options.name || 'unnamed'})`);
     return;
   }
@@ -937,6 +943,16 @@ createIndexSafe(
   db.civilians,
   { "civilian.activeCommunityID": 1, "civilian.searchName": 1 },
   { name: "civilian_community_searchname_idx", background: true }
+);
+
+// Officer metrics: the "arrests made" count filters arrestreports by
+// activeCommunityID + departmentId + officerID (rank.go runMetrics). No existing
+// index covered it, so it was a full ~29k-doc collection scan per officer-stats
+// load. (Atlas Performance Advisor suggestion.)
+createIndexSafe(
+  db.arrestreports,
+  { "arrestReport.activeCommunityID": 1, "arrestReport.departmentId": 1, "arrestReport.officerID": 1 },
+  { name: "arrestreports_community_dept_officer_idx", background: true }
 );
 
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
