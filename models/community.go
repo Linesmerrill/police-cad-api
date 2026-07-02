@@ -23,31 +23,35 @@ import (
 type Cents int64
 
 // UnmarshalBSONValue implements defensive decoding for Cents. See the type doc.
+// Never panics and never returns an error: uses the non-panicking ...OK()
+// accessors, and any missing / null / undefined / unexpected / corrupt value
+// decodes to 0. (A missing field never calls this at all and stays the zero
+// value; there is no null int64 in Go, and the int64(...) conversions callers
+// do are pure numeric casts that cannot panic.)
 func (c *Cents) UnmarshalBSONValue(t bsontype.Type, data []byte) error {
 	rv := bson.RawValue{Type: t, Value: data}
+	*c = 0
 	switch t {
 	case bsontype.Int32:
-		*c = Cents(rv.Int32())
+		if n, ok := rv.Int32OK(); ok {
+			*c = Cents(n)
+		}
 	case bsontype.Int64:
-		*c = Cents(rv.Int64())
+		if n, ok := rv.Int64OK(); ok {
+			*c = Cents(n)
+		}
 	case bsontype.Double:
-		d := rv.Double()
-		if math.IsNaN(d) || math.IsInf(d, 0) || d > math.MaxInt64 || d < math.MinInt64 {
-			*c = 0
-		} else {
+		if d, ok := rv.DoubleOK(); ok && !math.IsNaN(d) && !math.IsInf(d, 0) &&
+			d <= math.MaxInt64 && d >= math.MinInt64 {
 			*c = Cents(d)
 		}
 	case bsontype.String:
-		s := strings.TrimSpace(strings.TrimPrefix(rv.StringValue(), "$"))
-		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-			*c = Cents(n)
-		} else {
-			*c = 0
+		if s, ok := rv.StringValueOK(); ok {
+			s = strings.TrimSpace(strings.TrimPrefix(s, "$"))
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+				*c = Cents(n)
+			}
 		}
-	case bsontype.Null, bsontype.Undefined:
-		*c = 0
-	default:
-		*c = 0
 	}
 	return nil
 }
