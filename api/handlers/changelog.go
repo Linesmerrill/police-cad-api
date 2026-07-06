@@ -40,6 +40,15 @@ func (c Changelog) CreateChangelogPostHandler(w http.ResponseWriter, r *http.Req
 		config.ErrorStatus("failed to decode request", http.StatusBadRequest, w, err)
 		return
 	}
+
+	// Server-side admin gate: this writes staff-authored trusted HTML shown to
+	// every user, so don't rely on the admin console hiding the panel. Requires
+	// the owner role, like the other admin-console write endpoints.
+	if err := checkAdminPermissions(req.CurrentUser); err != nil {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, err)
+		return
+	}
+
 	req.Title = strings.TrimSpace(req.Title)
 	req.Body = strings.TrimSpace(req.Body)
 	if req.Title == "" || req.Body == "" {

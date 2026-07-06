@@ -33,4 +33,7 @@ type CreateChangelogPostRequest struct {
 	Surfaces []string `json:"surfaces"`
 	// Active defaults to true when omitted (see handler).
 	Active *bool `json:"active"`
+	// CurrentUser carries the acting admin's roles for the server-side admin
+	// gate, matching the other admin-console write endpoints.
+	CurrentUser map[string]interface{} `json:"currentUser"`
 }
