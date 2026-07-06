@@ -68,6 +68,14 @@ func (a ArrestReport) CreateArrestReportHandler(w http.ResponseWriter, r *http.R
 	newArrestReport.ID = primitive.NewObjectID()
 	newArrestReport.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
+	// Recompute the canonical fine + jail-time totals from the structured charge
+	// list so stored values never depend on the submitting client's own math.
+	newArrestReport.Details.SentenceMode = models.NormalizeSentenceMode(newArrestReport.Details.SentenceMode)
+	tf, ts, tl := models.ComputeArrestTotals(newArrestReport.Details.ChargesList, newArrestReport.Details.SentenceMode)
+	newArrestReport.Details.TotalFine = tf
+	newArrestReport.Details.TotalJailTimeSeconds = ts
+	newArrestReport.Details.TotalJailTimeLabel = tl
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -104,6 +112,24 @@ func (a ArrestReport) UpdateArrestReportHandler(w http.ResponseWriter, r *http.R
 	update := bson.M{}
 	for key, value := range updatedDetails {
 		update["arrestReport."+key] = value
+	}
+
+	// When the update touches the charge list, recompute the canonical totals
+	// server-side (overriding anything the client sent) so stored fine/jail-time
+	// values never drift from the authoritative math. The edit form always
+	// resubmits chargesList alongside sentenceMode.
+	if raw, ok := updatedDetails["chargesList"]; ok {
+		var charges []models.ArrestCharge
+		if b, mErr := json.Marshal(raw); mErr == nil {
+			_ = json.Unmarshal(b, &charges)
+		}
+		mode, _ := updatedDetails["sentenceMode"].(string)
+		mode = models.NormalizeSentenceMode(mode)
+		tf, ts, tl := models.ComputeArrestTotals(charges, mode)
+		update["arrestReport.sentenceMode"] = mode
+		update["arrestReport.totalFine"] = tf
+		update["arrestReport.totalJailTimeSeconds"] = ts
+		update["arrestReport.totalJailTimeLabel"] = tl
 	}
 
 	// Set updatedAt to the current time
