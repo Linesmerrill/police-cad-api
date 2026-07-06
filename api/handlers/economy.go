@@ -50,12 +50,12 @@ func resolveDepartmentEconomy(community *models.Community, deptID, rankID string
 	if dept == nil {
 		return nil, 0, "", 0, 0, false
 	}
-	payRate = dept.BasePayPerHour
+	payRate = int64(dept.BasePayPerHour)
 	if rankID != "" {
 		for i := range dept.Ranks {
 			if dept.Ranks[i].ID.Hex() == rankID {
 				if dept.Ranks[i].PayRatePerHour > 0 {
-					payRate = dept.Ranks[i].PayRatePerHour
+					payRate = int64(dept.Ranks[i].PayRatePerHour)
 				}
 				break
 			}

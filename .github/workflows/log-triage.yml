@@ -1,0 +1,62 @@
+name: SWO Log Triage
+
+# Scans SolarWinds Observability logs for police-cad-app-api on a schedule,
+# aggregates errors / bad endpoints / retry loops, and flags issues with a
+# severity + proposed action. Runs on GitHub's runners (which can reach the SWO
+# API) rather than the app dyno.
+#
+# Setup: add repo secret SWO_API_TOKEN (a SolarWinds API token). Optionally add
+# DISCORD_WEBHOOK to have findings posted to a channel.
+
+on:
+  schedule:
+    - cron: "0 14 * * *" # daily 14:00 UTC
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Look-back window in hours"
+        default: "24"
+
+permissions:
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run triage
+        id: run
+        env:
+          SWO_API_TOKEN: ${{ secrets.SWO_API_TOKEN }}
+        run: |
+          if [ -z "$SWO_API_TOKEN" ]; then
+            echo "::error::SWO_API_TOKEN secret is not set"; exit 1
+          fi
+          python3 scripts/swo_log_triage.py \
+            --hours "${{ github.event.inputs.hours || '24' }}" \
+            --markdown report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swo-log-triage
+          path: report.md
+
+      - name: Post findings to Discord
+        if: ${{ always() && env.DISCORD_WEBHOOK != '' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          # Only ping the channel when the report actually flagged something.
+          if grep -q "Triage findings" report.md; then
+            content=$(head -c 1800 report.md | python3 -c 'import json,sys; print(json.dumps({"content": sys.stdin.read()}))')
+            curl -s -H "Content-Type: application/json" -d "$content" "$DISCORD_WEBHOOK" >/dev/null || true
+          fi

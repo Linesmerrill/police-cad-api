@@ -65,9 +65,25 @@ func InfoStatus(message string, httpStatusCode int, w http.ResponseWriter, err e
 // ErrorStatus is a useful function that will log, write http headers and body for a
 // give message, status code and err
 func ErrorStatus(message string, httpStatusCode int, w http.ResponseWriter, err error) {
-	if err != nil {
+	// Only genuine server faults (5xx) warrant Error level, which the production
+	// zap config decorates with a full multi-KB stacktrace. Client errors (4xx)
+	// and "no documents" not-found conditions are expected — at Error level each
+	// occurrence carries a stacktrace, so a client looping on such a response
+	// (e.g. polling a stale/placeholder ID) floods the logs and burns the quota.
+	// Log those at Warn instead (Warn is below zap's stacktrace threshold, so no
+	// stacktrace) while still returning the same HTTP status/body to the caller.
+	clientFault := httpStatusCode >= 400 && httpStatusCode < 500
+	notFound := err != nil && errors.Is(err, mongo.ErrNoDocuments)
+	switch {
+	case clientFault || notFound:
+		if err != nil {
+			zap.S().Warnw(message, "error", err, "status", httpStatusCode)
+		} else {
+			zap.S().Warnw(message, "status", httpStatusCode)
+		}
+	case err != nil:
 		zap.S().Errorw(message, "error", err)
-	} else {
+	default:
 		zap.S().Error(message)
 	}
 	w.WriteHeader(httpStatusCode)
@@ -113,7 +129,15 @@ func setLogger(env string) (*zap.Logger, error) {
 		return zap.NewDevelopment()
 	} else if env == "local" {
 		return zap.NewExample(), nil
-	} else {
-		return zap.NewExample(), fmt.Errorf("cannot find ENV var so defaulting to debug level logging")
 	}
+	// Fail closed: an unset or unrecognized LOG_LEVEL must never enable
+	// debug-level logging in production. zap.NewExample() logs at Debug with no
+	// sampling, so on a high-traffic dyno the per-request Debugf calls across the
+	// handlers flood the log pipeline (a month of quota in hours). Default to the
+	// production logger (Info level + sampling) so a missing/typo'd env var is safe.
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return logger, err
+	}
+	return logger, fmt.Errorf("LOG_LEVEL unset or unrecognized (%q); defaulting to production logger", env)
 }

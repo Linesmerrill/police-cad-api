@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -9,6 +10,51 @@ import (
 	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+// Cents is a monetary amount in cents (hourly pay, etc.) that decodes
+// DEFENSIVELY from BSON. A community once had a rank payRatePerHour of 1e32 (a
+// bad value written via the website's Mongoose path) stored as a BSON double;
+// decoding it into a plain int64 overflowed and made the ENTIRE community fail
+// to decode — 500ing every community-scoped read (page load, panic alerts,
+// units, signal-100, ...). Accept int32/int64/double/string and clamp anything
+// non-finite or out of int64 range to 0, so a single bad value can never brick
+// a community again. Underlying type stays int64, so callers convert with
+// int64(...) and JSON still serializes as a plain number.
+type Cents int64
+
+// UnmarshalBSONValue implements defensive decoding for Cents. See the type doc.
+// Never panics and never returns an error: uses the non-panicking ...OK()
+// accessors, and any missing / null / undefined / unexpected / corrupt value
+// decodes to 0. (A missing field never calls this at all and stays the zero
+// value; there is no null int64 in Go, and the int64(...) conversions callers
+// do are pure numeric casts that cannot panic.)
+func (c *Cents) UnmarshalBSONValue(t bsontype.Type, data []byte) error {
+	rv := bson.RawValue{Type: t, Value: data}
+	*c = 0
+	switch t {
+	case bsontype.Int32:
+		if n, ok := rv.Int32OK(); ok {
+			*c = Cents(n)
+		}
+	case bsontype.Int64:
+		if n, ok := rv.Int64OK(); ok {
+			*c = Cents(n)
+		}
+	case bsontype.Double:
+		if d, ok := rv.DoubleOK(); ok && !math.IsNaN(d) && !math.IsInf(d, 0) &&
+			d <= math.MaxInt64 && d >= math.MinInt64 {
+			*c = Cents(d)
+		}
+	case bsontype.String:
+		if s, ok := rv.StringValueOK(); ok {
+			s = strings.TrimSpace(strings.TrimPrefix(s, "$"))
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+				*c = Cents(n)
+			}
+		}
+	}
+	return nil
+}
 
 // Community holds the structure for the community collection in mongo
 type Community struct {
@@ -283,7 +329,7 @@ type Rank struct {
 	AutoPromote    bool               `json:"autoPromote" bson:"autoPromote"`
 	CanViewStats   bool               `json:"canViewStats" bson:"canViewStats"`     // can view department metrics
 	IsDefault      bool               `json:"isDefault" bson:"isDefault"`           // unranked members get this rank
-	PayRatePerHour int64              `json:"payRatePerHour" bson:"payRatePerHour"` // Economy: hourly pay in cents; 0 falls back to Department.BasePayPerHour
+	PayRatePerHour Cents              `json:"payRatePerHour" bson:"payRatePerHour"` // Economy: hourly pay in cents; 0 falls back to Department.BasePayPerHour. Cents = defensive decode (see type doc).
 }
 
 // Department holds the structure for a department
@@ -307,7 +353,7 @@ type Department struct {
 	RestrictCivilianRecordDeletion *bool `json:"restrictCivilianRecordDeletion,omitempty" bson:"restrictCivilianRecordDeletion,omitempty"`
 	// Economy fields
 	EconomyEnabled           bool               `json:"economyEnabled" bson:"economyEnabled"`
-	BasePayPerHour           int64              `json:"basePayPerHour" bson:"basePayPerHour"`                     // cents/hr, fallback if rank pay is 0
+	BasePayPerHour           Cents              `json:"basePayPerHour" bson:"basePayPerHour"`                     // cents/hr, fallback if rank pay is 0. Cents = defensive decode (see type doc).
 	MaxSessionMinutes        int                `json:"maxSessionMinutes" bson:"maxSessionMinutes"`               // default 120
 	AfkPromptIntervalSeconds int                `json:"afkPromptIntervalSeconds" bson:"afkPromptIntervalSeconds"` // e.g. 600
 	AfkGraceSeconds          int                `json:"afkGraceSeconds" bson:"afkGraceSeconds"`                   // e.g. 60

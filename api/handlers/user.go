@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -984,6 +985,15 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 	dbResp := models.User{}
 	err = u.DB.FindOne(ctx, filter).Decode(&dbResp)
 	if err != nil {
+		// A missing user is an expected condition, not a server error: clients
+		// can poll with a stale or placeholder ID. Return 404 logged at Info
+		// (no stacktrace) so a client stuck polling a non-existent ID can't
+		// flood the logs with 500 + stacktrace lines. Reserve 500/Error for
+		// genuine database failures.
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			config.InfoStatus("user not found", http.StatusNotFound, w, nil)
+			return
+		}
 		config.ErrorStatus("failed to fetch user notifications", http.StatusInternalServerError, w, fmt.Errorf("failed to fetch user notifications: %w", err))
 		return
 	}

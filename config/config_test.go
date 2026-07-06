@@ -23,9 +23,28 @@ func TestNew(t *testing.T) {
 }
 
 func TestErrorStatus(t *testing.T) {
+	// The log level ErrorStatus chooses (Warn for 4xx/not-found, Error for 5xx)
+	// must not change the HTTP status or body it returns to the caller.
+	t.Run("client error still returns status and body", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		ErrorStatus("error it borked", http.StatusBadRequest, rec, errors.New("bad request"))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "error it borked")
+	})
 
-	ErrorStatus("error it borked", http.StatusBadRequest, httptest.NewRecorder(), errors.New("bad request"))
-	assert.True(t, true)
+	t.Run("not found returns status and body", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		ErrorStatus("user not found", http.StatusNotFound, rec, mongo.ErrNoDocuments)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Contains(t, rec.Body.String(), "user not found")
+	})
+
+	t.Run("server fault returns status and body", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		ErrorStatus("boom", http.StatusInternalServerError, rec, errors.New("db down"))
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "boom")
+	})
 }
 
 // rawMongoLeak mimics the server-side detail a real Mongo driver error carries:
@@ -83,8 +102,12 @@ func TestSetLoggerSetsLocalLogger(t *testing.T) {
 	assert.True(t, l.Core().Enabled(0))
 }
 
-func TestSetLoggerCannotFindEnv(t *testing.T) {
+func TestSetLoggerDefaultsToProductionOnUnknownEnv(t *testing.T) {
 	l, err := setLogger("asdf")
-	assert.Equal(t, err, fmt.Errorf("cannot find ENV var so defaulting to debug level logging"))
-	assert.True(t, l.Core().Enabled(0))
+	// An unset/unrecognized LOG_LEVEL must fail closed to the production logger
+	// (never debug), while still surfacing the misconfiguration via an error.
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "defaulting to production logger")
+	assert.True(t, l.Core().Enabled(2))   // ErrorLevel enabled (production = Info+)
+	assert.False(t, l.Core().Enabled(-1)) // DebugLevel must be OFF
 }

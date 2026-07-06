@@ -19,11 +19,17 @@ function createIndexSafe(collection, key, options) {
     }
   }
 
-  // Check if index with same key pattern already exists
-  const exists = indexes.some(idx => JSON.stringify(idx.key) === keyStr);
+  // Consider an index present if the key pattern matches OR the name matches.
+  // The name check is essential for TEXT indexes: Mongo rewrites their key to an
+  // internal { _fts: "text", _ftsx: 1 } (the real fields move into `weights`), so
+  // the key pattern we pass never matches getIndexes(). Without the name check
+  // every run re-issues createIndex for text indexes — a harmless no-op that
+  // misleadingly prints "Created".
+  const existingIdx = indexes.find(idx =>
+    JSON.stringify(idx.key) === keyStr || (options.name && idx.name === options.name)
+  );
 
-  if (exists) {
-    const existingIdx = indexes.find(idx => JSON.stringify(idx.key) === keyStr);
+  if (existingIdx) {
     print(`⚠️  Index already exists: ${existingIdx.name} (skipping ${options.name || 'unnamed'})`);
     return;
   }
@@ -96,16 +102,8 @@ createIndexSafe(
   }
 );
 
-// MEDIUM PRIORITY: Community Visibility Index
-// DONE
-createIndexSafe(
-  db.communities,
-  { "community.visibility": 1 }, 
-  {
-    name: "community_visibility_idx",
-    background: true
-  }
-);
+// Removed community_visibility_idx — redundant prefix of the community_visibility_*
+// compound indexes below (Atlas Performance Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Vehicle Registered Owner Index (for /vehicles/registered-owner/{id})
 // DONE
@@ -129,17 +127,9 @@ createIndexSafe(
   }
 );
 
-// CRITICAL: Vehicle Active Community ID Index (single field for queries filtering only by activeCommunityID)
-// Needed for queries that filter by activeCommunityID without userID
-// This fixes Query Targeting alerts for vehicles queries
-createIndexSafe(
-  db.vehicles,
-  { "vehicle.activeCommunityID": 1 },
-  {
-    name: "vehicle_active_community_idx",
-    background: true
-  }
-);
+// Removed vehicle_active_community_idx — redundant prefix of the
+// vehicle_activeCommunityID_{make,model,vin}_idx compounds (Atlas Performance
+// Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Civilian User ID Index (for /civilians/user/{id})
 // DONE
@@ -164,17 +154,10 @@ createIndexSafe(
   }
 );
 
-// CRITICAL: Civilian Active Community ID Index (single field for queries filtering only by activeCommunityID)
-// Needed for queries that filter by activeCommunityID without approvalStatus
-// This fixes Query Targeting alerts for civilians queries
-createIndexSafe(
-  db.civilians,
-  { "civilian.activeCommunityID": 1 },
-  {
-    name: "civilian_active_community_idx",
-    background: true
-  }
-);
+// Removed civilian_active_community_idx — redundant prefix of the
+// civilian_pending_approvals_idx / civilian_activeCommunityID_name_idx /
+// civilian_community_searchname_idx compounds (Atlas Performance Advisor).
+// Dropped from prod 2026-07.
 
 // CRITICAL: Firearm Registered Owner Index (for /firearms/registered-owner/{id})
 // The query uses $or with both fields, so we need separate indexes for each
@@ -199,14 +182,9 @@ createIndexSafe(
     background: true
   }
 );
-createIndexSafe(
-  db.firearms,
-  { "firearm.linkedCivilianID": 1 },
-  {
-    name: "firearm_linked_civilian_id_idx",
-    background: true
-  }
-);
+// Removed firearm_linked_civilian_id_idx — redundant prefix of the
+// firearm_registered_owner_idx compound { linkedCivilianID, registeredOwnerID }
+// (Atlas Performance Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Firearm Active Community ID Index (for queries filtering by activeCommunityID)
 // Needed for queries that filter by activeCommunityID
@@ -242,27 +220,13 @@ createIndexSafe(
   }
 );
 
-// MEDIUM PRIORITY: Community Tags Index (for tag-based queries)
-// DONE
-createIndexSafe(
-  db.communities,
-  { "community.tags": 1 },
-  {
-    name: "community_tags_idx",
-    background: true
-  }
-);
+// Removed community_tags_idx — hidden in prod and a redundant prefix of the
+// community_tags_visibility_name_idx compound below (Atlas Performance Advisor).
+// Dropped from prod 2026-07.
 
-// CRITICAL: Community Tags + Visibility Compound Index (for /communities/tag/{tag})
-// DONE
-createIndexSafe(
-  db.communities,
-  { "community.tags": 1, "community.visibility": 1 },
-  {
-    name: "community_tags_visibility_idx",
-    background: true
-  }
-);
+// Removed community_tags_visibility_idx — hidden in prod and a redundant prefix
+// of the community_tags_visibility_name_idx compound below (Atlas Performance
+// Advisor). Dropped from prod 2026-07.
 
 // CRITICAL: Community Tags + Visibility + Name Compound Index (for /communities/tag/{tag} with sorting)
 // MongoDB was using visibility+name index and filtering tags in memory (5.4s slow!)
@@ -424,29 +388,13 @@ createIndexSafe(
 // Based on MongoDB Performance Advisor analysis of slow queries
 // ============================================================================
 
-// HIGH PRIORITY: User Username + _id Index (Performance Advisor)
-// Expected Impact: Can reduce up to 269.1 MB of disk reads from 13.08 queries/hour
-// Avg Execution Time: 44474 ms, Avg Docs Scanned: 705303
-createIndexSafe(
-  db.users,
-  { "user.username": 1, "_id": 1 },
-  {
-    name: "user_username_id_idx",
-    background: true
-  }
-);
+// Removed user_username_id_idx — redundant prefix of the
+// user_username_id_deactivated_idx compound { username, _id, isDeactivated }
+// (Atlas Performance Advisor). Dropped from prod 2026-07.
 
-// HIGH PRIORITY: User Name + _id Index (Performance Advisor)
-// Expected Impact: Can reduce up to 269.1 MB of disk reads from 13.08 queries/hour
-// Avg Execution Time: 44474 ms, Avg Docs Scanned: 705303
-createIndexSafe(
-  db.users,
-  { "user.name": 1, "_id": 1 },
-  {
-    name: "user_name_id_idx",
-    background: true
-  }
-);
+// Removed user_name_id_idx — redundant prefix of the
+// user_name_id_deactivated_idx compound { name, _id, isDeactivated }
+// (Atlas Performance Advisor). Dropped from prod 2026-07.
 
 // HIGH PRIORITY: User Email Index (Performance Advisor)
 // Expected Impact: Can reduce up to 306.8 MB of disk reads from 9.46 queries/hour
@@ -535,6 +483,36 @@ createIndexSafe(
     name: "pending_verifications_expires_at_ttl",
     expireAfterSeconds: 0,
     partialFilterExpression: { expiresAt: { $exists: true } },
+    background: true
+  }
+);
+
+// TTL on tone_logs.createdAt: tone triggers are an activity feed — the only
+// reader (GetToneLogHandler) always sorts createdAt desc and caps at <=100, so
+// nothing reads rows older than the recent window. Auto-remove after 30 days to
+// keep this high-write collection bounded. Unlike the pendingVerifications TTL
+// (expireAfterSeconds: 0 on a stored expiresAt), this deletes 30 days *after*
+// the createdAt timestamp. createdAt is always written as a BSON Date, so every
+// row is covered; rows missing/with a non-date createdAt are simply ignored.
+createIndexSafe(
+  db.tone_logs,
+  { "createdAt": 1 },
+  {
+    name: "tone_logs_created_at_ttl",
+    expireAfterSeconds: 2592000, // 30 days
+    background: true
+  }
+);
+
+// Query index for the tone log feed: GetToneLogHandler filters by communityId
+// and sorts createdAt desc. Without this the read scans the whole collection
+// and sorts in memory. (Separate from the single-field TTL index above, which
+// MongoDB requires for expiry.)
+createIndexSafe(
+  db.tone_logs,
+  { "communityId": 1, "createdAt": -1 },
+  {
+    name: "tone_logs_community_createdAt_idx",
     background: true
   }
 );
@@ -877,6 +855,115 @@ createIndexSafe(
     name: "changelog_active_published_idx",
     background: true
   }
+);
+
+// ---------------------------------------------------------------------------
+// Atlas Performance Advisor recommendations (2026-07-01 incident).
+// The users collection (~800K-1.4M docs) was being FULL-SCANNED by user
+// lookup/search queries (email equality, name/username regex, admin search),
+// reading multiple GB/query and saturating the M20's IOPS -> site-wide latency
+// spike (even trivial writes hit ~1s). These indexes turn those scans into
+// seeks. Keep this in sync with what's accepted in Atlas -> Performance Advisor.
+// NOTE: the user name/username/email lookups are ALSO getting a code-side fix
+// (collation-aware email lookup + $text/anchored search) so several of the
+// overlapping user indexes below can be pruned once that ships.
+// ---------------------------------------------------------------------------
+
+// User lookup by username + email (login/create/check-user, admin user search).
+// Advisor: up to 6.8 GB disk reads/execution eliminated.
+createIndexSafe(
+  db.users,
+  { "user.username": 1, "user.email": 1 },
+  { name: "user_username_email_idx", background: true }
+);
+
+// Paginated user search filtered by active status (username / name shapes).
+// Advisor: ~1.4M docs scanned -> seek; 774 MB / 652 MB reads eliminated.
+createIndexSafe(
+  db.users,
+  { "user.username": 1, "_id": 1, "user.isDeactivated": 1 },
+  { name: "user_username_id_deactivated_idx", background: true }
+);
+createIndexSafe(
+  db.users,
+  { "user.name": 1, "_id": 1, "user.isDeactivated": 1 },
+  { name: "user_name_id_deactivated_idx", background: true }
+);
+
+// Additional user search shapes surfaced by the Advisor (name+email,
+// username+name, callSign+name).
+createIndexSafe(
+  db.users,
+  { "user.name": 1, "user.email": 1 },
+  { name: "user_name_email_idx", background: true }
+);
+createIndexSafe(
+  db.users,
+  { "user.username": 1, "user.name": 1 },
+  { name: "user_username_name_idx", background: true }
+);
+createIndexSafe(
+  db.users,
+  { "user.callSign": 1, "user.name": 1 },
+  { name: "user_callsign_name_idx", background: true }
+);
+
+// Admin community search & pending-deletion listing sort/filter by name +
+// pendingDeletionAt + visibility (Advisor: 5.75 q/hr with in-memory sort).
+createIndexSafe(
+  db.communities,
+  { "community.pendingDeletionAt": 1, "community.visibility": 1 },
+  { name: "community_pending_visibility_idx", background: true }
+);
+createIndexSafe(
+  db.communities,
+  { "community.name": 1, "community.pendingDeletionAt": 1, "community.visibility": 1 },
+  { name: "community_name_pending_visibility_idx", background: true }
+);
+
+// RP promo duplicate detection looks up communities by a posted invite URL.
+createIndexSafe(
+  db.communities,
+  { "community.rpPromotion.history.data.inviteUrl": 1, "_id": 1 },
+  { name: "community_rppromo_invite_url_idx", background: true }
+);
+
+// Licenses queried by activeCommunityID (Advisor: ~404K docs scanned).
+createIndexSafe(
+  db.licenses,
+  { "license.activeCommunityID": 1 },
+  { name: "license_active_community_idx", background: true }
+);
+
+// Audit log community view sorts by createdAt desc within a community.
+createIndexSafe(
+  db.audit_logs,
+  { communityId: 1, createdAt: -1 },
+  { name: "audit_logs_community_created_idx", background: true }
+);
+
+// Medical reports queried by community + reporting EMS.
+createIndexSafe(
+  db.medicalreports,
+  { "report.activeCommunityID": 1, "report.reportingEmsID": 1 },
+  { name: "medicalreports_community_ems_idx", background: true }
+);
+
+// Civilian search-by-name within a community.
+createIndexSafe(
+  db.civilians,
+  { "civilian.activeCommunityID": 1, "civilian.searchName": 1 },
+  { name: "civilian_community_searchname_idx", background: true }
+);
+
+// Officer metrics: the "arrests made" count filters arrestreports by
+// activeCommunityID + departmentId + officerID (rank.go runMetrics). No existing
+// index covered it, so it was a full ~29k-doc collection scan per officer-stats
+// load. (Atlas Performance Advisor suggestion.)
+createIndexSafe(
+  db.arrestreports,
+  { "arrestReport.activeCommunityID": 1, "arrestReport.departmentId": 1, "arrestReport.officerID": 1 },
+  { name: "arrestreports_community_dept_officer_idx", background: true }
 );
 
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
