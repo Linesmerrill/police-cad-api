@@ -1,5 +1,5 @@
 {
-  "_note": "Human/LLM-curated triage annotations keyed by feature-request id. Regenerating the doc (generate.py) merges these with live API data. When new requests appear, add entries here; entries for ids no longer active are ignored. Categories: quick_win | easy | full_feature | probably_not. Scope: website | api | mobile | bot.",
+  "_note": "Human/LLM-curated triage annotations keyed by feature-request id. Regenerating the doc (generate.py) merges these with live API data. When new requests appear, add entries here; entries for ids no longer active are ignored. Categories: quick_win | easy | full_feature | probably_not. Scope: website | api | mobile | bot. Optional `prs`: list of open PR refs like \"police-cad-api#138\" — renders a '🔀 In Progress (open PRs)' section + inline badge, and drops the item from 'Suggested next up'. Remove the ref once merged.",
   "triage": {
     "6a4a242d40e035ad466bffdf": {
       "category": "quick_win",
@@ -164,6 +164,7 @@
       "possible_duplicate": "none"
     },
     "69dfdb973077f4083243d50f": {
+      "prs": ["police-cad-api#138"],
       "category": "quick_win",
       "scope": ["mobile"],
       "effort": "M",
@@ -254,6 +255,7 @@
       "possible_duplicate": "none"
     },
     "69f97d85e5da87ac3ad736f2": {
+      "prs": ["police-cad-api#138", "police-cad#946"],
       "category": "quick_win",
       "scope": ["website", "mobile"],
       "effort": "S",
@@ -362,6 +364,7 @@
       "possible_duplicate": "Job system; Custom Civilian Jobs + Buyable Items; Items; Department Divisions"
     },
     "6a22ceb8e3d6d8b3c13e77b0": {
+      "prs": ["police-cad-api#138", "police-cad#946"],
       "category": "full_feature",
       "scope": ["website", "mobile", "api"],
       "effort": "M",
@@ -416,6 +419,7 @@
       "possible_duplicate": "none"
     },
     "69c21fa43e63368d91d72f35": {
+      "prs": ["police-cad-api#138", "police-cad#946"],
       "category": "quick_win",
       "scope": ["website", "mobile"],
       "effort": "S",
