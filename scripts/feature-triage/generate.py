@@ -29,6 +29,7 @@ TRIAGE_FILE = ROOT / "triage.json"
 OUT_FILE = ROOT.parent.parent / "docs" / "feature-triage.md"
 
 SITE = os.environ.get("FR_SITE_BASE", "https://www.linespolice-cad.com")
+GH = os.environ.get("FR_GH_BASE", "https://github.com/Linesmerrill")
 
 SCOPE_ICON = {"website": "🌐", "api": "⚙️", "mobile": "📱", "bot": "🤖"}
 CATEGORY_META = {
@@ -63,6 +64,18 @@ def fr_link(fr):
 
 def esc(text):
     return (text or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def pr_links(prs):
+    """Render triage `prs` refs (e.g. "police-cad-api#138") as linked PR numbers."""
+    parts = []
+    for ref in prs or []:
+        if "#" in ref:
+            repo, num = ref.split("#", 1)
+            parts.append(f"[{ref}]({GH}/{repo}/pull/{num})")
+        else:
+            parts.append(ref)
+    return ", ".join(parts)
 
 
 def main():
@@ -109,7 +122,7 @@ def main():
 
     # ---- Suggested next up -------------------------------------------------
     candidates = [p for p in (buckets["quick_win"] + buckets["easy"])
-                  if p[0].get("status") == "open"]
+                  if p[0].get("status") == "open" and not p[1].get("prs")]
     candidates.sort(key=lambda pair: priority(pair[0]), reverse=True)
     w("## 🎯 Suggested next up")
     w("")
@@ -125,6 +138,22 @@ def main():
     else:
         w("_None triaged yet._")
     w("")
+
+    # ---- In progress (open PRs) -------------------------------------------
+    in_progress = [(fr, t) for cat in CATEGORY_ORDER for (fr, t) in buckets[cat]
+                   if t.get("prs")]
+    in_progress.sort(key=lambda pair: priority(pair[0]), reverse=True)
+    if in_progress:
+        w("## 🔀 In Progress (open PRs)")
+        w("")
+        w("_Feature requests with open PRs — track these through to merge._")
+        w("")
+        w("| Feature | PRs | Effort | Scope |")
+        w("|---|---|:--:|---|")
+        for fr, t in in_progress:
+            w(f"| {fr_link(fr)} | {pr_links(t.get('prs'))} | "
+              f"{t.get('effort','?')} | {scope_str(t.get('scope'))} |")
+        w("")
 
     # ---- Summary ----------------------------------------------------------
     w("## 📊 Summary")
@@ -169,6 +198,8 @@ def main():
             status = fr.get("status", "open")
             check = "x" if status == "released" else " "
             badge = STATUS_BADGE.get(status, "")
+            if t.get("prs"):
+                badge += " 🔀 PR open"
             assessment = esc(t.get("rationale", ""))
             risks = esc(t.get("risks_or_deps", ""))
             dup = esc(t.get("possible_duplicate", ""))
