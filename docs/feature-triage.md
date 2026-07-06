@@ -1,6 +1,6 @@
 # Feature Request Triage — Living Doc
 
-_Auto-generated 2026-07-06 17:04 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
+_Auto-generated 2026-07-06 17:24 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
 
 **49** active requests · **233** total upvotes · **28** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
 
@@ -17,21 +17,20 @@ Highest-value low-effort items (quick wins & easy), by priority:
 | 4 | [Arrest Fine and Time Calculation](https://www.linespolice-cad.com/feature-requests/6a26a6569bde5da5f0e17848) | 4 | 0 | M | ⚙️ 🌐 📱 api/website/mobile |
 | 4 | [Mobile Sound](https://www.linespolice-cad.com/feature-requests/69dfdb973077f4083243d50f) | 4 | 0 | M | 📱 mobile |
 | 4 | [Default Images](https://www.linespolice-cad.com/feature-requests/69b433b6e0ccd21fa051d877) | 4 | 0 | M | ⚙️ 🌐 📱 api/website/mobile |
+| 3 | [Have Police/CIV Departments able to see and fully read the Penal Code](https://www.linespolice-cad.com/feature-requests/6a4a242d40e035ad466bffdf) | 3 | 0 | S | 🌐 📱 website/mobile |
 | 3 | [Warrant Screaming system](https://www.linespolice-cad.com/feature-requests/69f97d85e5da87ac3ad736f2) | 3 | 0 | S | 🌐 📱 website/mobile |
 | 3 | [Insurance Info](https://www.linespolice-cad.com/feature-requests/6a3d7bab5f546057cdcb5e0b) | 3 | 0 | M | ⚙️ 🌐 📱 api/website/mobile |
-| 2 | [being able to make how much money is in someones account](https://www.linespolice-cad.com/feature-requests/6a408470a8212db5c3869f9a) | 2 | 0 | S | ⚙️ 🌐 api/website |
 
 ## 📊 Summary
 
 | Category | Count | Upvotes |
 |---|---:|---:|
-| ⚡ Quick Wins | 7 | 23 |
+| ⚡ Quick Wins | 8 | 26 |
 | 🟢 Easy / Low-Hanging | 3 | 8 |
 | 🏗️ Full Features | 32 | 172 |
 | 🚫 Probably Shouldn't Add | 6 | 27 |
-| ⚠️ Untriaged | 1 | 3 |
 
-**Surface impact** (active triaged items touching each surface): 🌐 website 38 · ⚙️ api 38 · 📱 mobile 36 · 🤖 bot 8
+**Surface impact** (active triaged items touching each surface): 🌐 website 39 · ⚙️ api 38 · 📱 mobile 37 · 🤖 bot 8
 
 ## ⚡ Quick Wins
 
@@ -43,6 +42,7 @@ _Low/moderate effort, clear value — tackle these first._
 |   | [Send more money to players](https://www.linespolice-cad.com/feature-requests/6a29d46a69d1034101c666a0) | 4 | 0 | M | ⚙️ 🌐 📱 api/website/mobile | insomniacgaming2 | Owner ability to add/remove money from player accounts. The economy + wallet + transaction ledger already exist, so this is an admin balance-adjust action + a small UI, with a ledger entry for auditability. Clear owner demand (appears twice). _Risks/deps: Write an audit/ledger entry so manual adjustments are traceable._ _Possible dup: being able to make how much money is in someones account_ |
 |   | [Arrest Fine and Time Calculation](https://www.linespolice-cad.com/feature-requests/6a26a6569bde5da5f0e17848) | 4 | 0 | M | ⚙️ 🌐 📱 api/website/mobile | Speed_r6 | Auto-calculate total fine + jail time when charges are added to an arrest, and store the totals on the record. penalCode amounts already exist, so this is summation + display + persistence — removes a real, repeated manual pain point. Effectively the MVP of the sentencing-calculator request. _Risks/deps: Handle concurrent vs consecutive time (align with sentencing request)._ _Possible dup: Sentencing Calculator and Plea Deal System_ |
 |   | [Mobile Sound](https://www.linespolice-cad.com/feature-requests/69dfdb973077f4083243d50f) | 4 | 0 | M | 📱 mobile | DOJ:RP \| CAD Manager | Alert sounds on the mobile dashboards. expo-av is already integrated and mobile already plays panic + signal-100 sounds; the gap is sounds for new calls/BOLOs/dispatch tones. Reuses the established pattern, so relatively cheap. Anchors the broader audio cluster. _Risks/deps: Respect a user volume/mute setting; avoid overlapping playback._ _Possible dup: Audio Notifications for 911...; Dispatch 911 Call Tone; Warrant Screaming system_ |
+|   | [Have Police/CIV Departments able to see and fully read the Penal Code](https://www.linespolice-cad.com/feature-requests/6a4a242d40e035ad466bffdf) | 3 | 0 | S | 🌐 📱 website/mobile | AquaoTaco | A read-only penal-code reference for officers (and optionally civilians) — a place to read the FULL code without the current truncation. penalCodes already live on the community and are fetched for citations/forms, so this is a display surface (a scrollable/searchable list near the police dashboard quick actions), not new data or plumbing. The requester explicitly wants read-only access WITHOUT granting Judicial (edit) access, so it's purely additive with no permission risk. _Risks/deps: Show full text (no '...' truncation) with scroll/search for long codes; gate civilian visibility behind a per-community toggle (some want CIVs to read it, some not)._ |
 |   | [Warrant Screaming system](https://www.linespolice-cad.com/feature-requests/69f97d85e5da87ac3ad736f2) | 3 | 0 | S | 🌐 📱 website/mobile | Sergant W. O'CONNOR | Play a sound/alert when a looked-up person has an active warrant. Sound infra already exists; this is a small wiring job on the search/lookup result. Cheap, adds a safety/immersion cue. Part of the audio cluster. _Risks/deps: Reuse existing alert-sound manager; make it toggleable._ _Possible dup: Audio Notifications for 911..._ |
 |   | [being able to make how much money is in someones account](https://www.linespolice-cad.com/feature-requests/6a408470a8212db5c3869f9a) | 2 | 0 | S | ⚙️ 🌐 api/website | Deadpool12 | Set a player's account balance from server settings. Duplicate of 'Send more money to players'; economy + ledger exist, so it's a small admin balance-set action. Fold into that one. _Risks/deps: Write a ledger entry for the manual set._ _Possible dup: Send more money to players_ |
 |   | [Dispatch 911 Call Tone](https://www.linespolice-cad.com/feature-requests/69c21fa43e63368d91d72f35) | 1 | 0 | S | 🌐 📱 website/mobile | Josevf479 | Play a tone/page for dispatch when a new 911 call arrives so a busy dispatcher doesn't miss it. Sound + socket infra already exist (calls already broadcast), so it's a small wiring job. Part of the audio cluster; build alongside Mobile Sound / Audio Notifications. _Risks/deps: Make it toggleable; respect volume settings._ _Possible dup: Audio Notifications for 911...; Mobile Sound_ |
@@ -108,14 +108,6 @@ _Out of scope, infeasible, or cost far outweighs value._
 |   | [Login system](https://www.linespolice-cad.com/feature-requests/69f7d4433f57679bdb425d9c) | 1 | 2 | M | — | Sergant W. O'CONNOR | A per-department username/password login screen. Staff explained the existing 10-code online/offline (Signal 41/42) already handles department presence in real time. The clarified ask (a password gate per department) adds friction and a parallel auth model with little added value. _Risks/deps: Duplicates existing auth/presence; UX friction._ |
 |   | [Road names on map](https://www.linespolice-cad.com/feature-requests/6a182462c10fe9084bebc99a) | 4 | 0 | L | — | Grim | Road names on the map. Maps are static community-uploaded images (no vector/tile layer), so real road labeling would need either a vector-map refactor or manual per-map overlays. Simplest path is a community workaround: upload a map image that already includes street names. Low effort-to-value as a platform feature. _Risks/deps: Static-image map architecture; per-game-map street data unavailable._ |
 |   | [being able to have a radio to talk to other on that Department and to switch radio fincracy](https://www.linespolice-cad.com/feature-requests/6a4085ea449dcf2c86523949) | 2 | 0 | XL | — | Deadpool12 | In-app voice radio with channels 1–100 and a panic button. Same voice-infra reasoning staff used to decline the other radio requests. The panic sub-feature already exists via the panic button. _Risks/deps: Voice infra cost/reliability._ _Possible dup: Radio; Chat Radios_ |
-
-## ⚠️ Untriaged (new since last triage)
-
-_Add an entry to `triage.json` for each, then re-run._
-
-| Feature | ▲ | 💬 | Requested by |
-|---|---:|---:|---|
-| [Have Police/CIV Departments able to see and fully read the Penal Code](https://www.linespolice-cad.com/feature-requests/6a4a242d40e035ad466bffdf) | 3 | 0 | AquaoTaco |
 
 ## ✅ Recently Shipped
 

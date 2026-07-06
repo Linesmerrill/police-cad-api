@@ -1,6 +1,15 @@
 {
   "_note": "Human/LLM-curated triage annotations keyed by feature-request id. Regenerating the doc (generate.py) merges these with live API data. When new requests appear, add entries here; entries for ids no longer active are ignored. Categories: quick_win | easy | full_feature | probably_not. Scope: website | api | mobile | bot.",
   "triage": {
+    "6a4a242d40e035ad466bffdf": {
+      "category": "quick_win",
+      "scope": ["website", "mobile"],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "A read-only penal-code reference for officers (and optionally civilians) — a place to read the FULL code without the current truncation. penalCodes already live on the community and are fetched for citations/forms, so this is a display surface (a scrollable/searchable list near the police dashboard quick actions), not new data or plumbing. The requester explicitly wants read-only access WITHOUT granting Judicial (edit) access, so it's purely additive with no permission risk.",
+      "risks_or_deps": "Show full text (no '...' truncation) with scroll/search for long codes; gate civilian visibility behind a per-community toggle (some want CIVs to read it, some not).",
+      "possible_duplicate": "none"
+    },
     "6a13d4bf07d208ef76c64182": {
       "category": "full_feature",
       "scope": ["api", "website", "mobile", "bot"],
