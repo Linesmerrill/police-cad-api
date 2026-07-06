@@ -70,6 +70,10 @@ type UserDetails struct {
 	DismissedTutorials       []string              `json:"dismissedTutorials,omitempty" bson:"dismissedTutorials,omitempty"`
 	AlertSoundsEnabled       bool                  `json:"alertSoundsEnabled" bson:"alertSoundsEnabled"`
 	SeenAnnouncements        []string              `json:"seenAnnouncements,omitempty" bson:"seenAnnouncements,omitempty"`
+	// QuickActionUsage counts how many times the user has tapped each department
+	// dashboard quick action (keyed by a stable action slug). Powers the "Most
+	// used" row; stored on the user doc so it follows the user across devices.
+	QuickActionUsage         map[string]int        `json:"quickActionUsage,omitempty" bson:"quickActionUsage,omitempty"`
 	CreatedAt                interface{}           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt                interface{}           `json:"updatedAt" bson:"updatedAt"`
 }

@@ -5903,6 +5903,55 @@ func (u User) SetAlertSoundsEnabledHandler(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "enabled": body.Enabled})
 }
 
+// quickActionKeyRe restricts quick-action slugs to lowercase alphanumerics and
+// dashes. This is a hard guard: the slug is interpolated into a Mongo field path
+// ("user.quickActionUsage.<key>"), so anything containing dots or operator
+// characters could reach unintended fields. Reject rather than sanitize.
+var quickActionKeyRe = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+
+// RecordQuickActionUsageHandler increments the per-user tap counter for a single
+// department-dashboard quick action, powering the "Most used" row. The counter
+// map lives on the user doc so the ranking follows the user across devices.
+// POST /api/v1/user/{userId}/quick-action-usage  body: {"actionKey": "person-search"}
+func (u User) RecordQuickActionUsageHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	var body struct {
+		ActionKey string `json:"actionKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("invalid body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	key := strings.TrimSpace(body.ActionKey)
+	if !quickActionKeyRe.MatchString(key) {
+		config.ErrorStatus("invalid action key", http.StatusBadRequest, w,
+			errors.New("actionKey must match ^[a-z0-9-]{1,64}$"))
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
+		"$inc": bson.M{"user.quickActionUsage." + key: 1},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to record quick action usage", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
 // ChangeEmailHandler is the legacy v1 email-change endpoint (password-only verification). Kept
 // in place for backward compatibility while clients migrate to the verified v2 flow on
 // PendingVerification.{Request,Confirm}EmailChangeHandler. Plan to delete after migration.

@@ -481,6 +481,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/user/{userId}/prioritized-communities", api.Middleware(http.HandlerFunc(u.FetchPrioritizedCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/dismiss-tutorial", api.Middleware(http.HandlerFunc(u.DismissTutorialHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/alert-sounds-enabled", api.Middleware(http.HandlerFunc(u.SetAlertSoundsEnabledHandler))).Methods("PUT")
+	apiCreate.Handle("/user/{userId}/quick-action-usage", api.Middleware(http.HandlerFunc(u.RecordQuickActionUsageHandler))).Methods("POST")
 	apiCreate.Handle("/user/{userId}/announcements", api.Middleware(http.HandlerFunc(changelog.GetUserAnnouncementsHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/mark-announcement-seen", api.Middleware(http.HandlerFunc(changelog.MarkAnnouncementSeenHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/remove-community", api.Middleware(http.HandlerFunc(u.RemoveCommunityFromUserHandler))).Methods("DELETE")
