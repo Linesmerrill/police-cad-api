@@ -235,6 +235,12 @@ func TestUser_BanUserFromCommunityHandler_PriorStatusApproved_DecrementsCount(t 
 		bson.M{"$inc": bson.M{"community.membersCount": -1}},
 	).Return(nil)
 
+	// Ban also clears department membership: it loads the community then $pulls
+	// the user from each department. Return a community with no departments so
+	// the cleanup loop is a no-op for this count-focused test.
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{}, nil)
+
 	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
 
 	u := handlers.User{
@@ -281,6 +287,10 @@ func TestUser_BanUserFromCommunityHandler_PriorStatusPending_DoesNotDecrement(t 
 		bson.M{"_id": communityObjectID},
 		bson.M{"$addToSet": bson.M{"community.banList": userID}},
 	).Return(nil)
+
+	// Ban clears department membership (loads community, then $pulls per dept).
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{}, nil)
 
 	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
 
@@ -398,6 +408,10 @@ func TestUser_BanUserFromCommunityHandler_DecrementFailureIsNonFatal(t *testing.
 		bson.M{"_id": communityObjectID},
 		bson.M{"$inc": bson.M{"community.membersCount": -1}},
 	).Return(errors.New("transient mongo error"))
+
+	// Ban clears department membership (loads community, then $pulls per dept).
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{}, nil)
 
 	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
 

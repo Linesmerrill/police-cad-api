@@ -846,6 +846,17 @@ createIndexSafe(
   }
 );
 
+// Platform "What's New" changelog: the per-user launch modal fetches active
+// posts newest-first, so index active + publishedAt to serve that query.
+createIndexSafe(
+  db.changelogPosts,
+  { active: 1, publishedAt: -1 },
+  {
+    name: "changelog_active_published_idx",
+    background: true
+  }
+);
+
 // ---------------------------------------------------------------------------
 // Atlas Performance Advisor recommendations (2026-07-01 incident).
 // The users collection (~800K-1.4M docs) was being FULL-SCANNED by user

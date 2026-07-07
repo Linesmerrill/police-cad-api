@@ -2118,6 +2118,23 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 			// Audit log: member approved (joined via request approval)
 			actorID := resolveActorFromRequest(r)
 			logAudit(u.ALDB, cID, "member.approved", "member", actorID, resolveActorName(u.DB, actorID), userID, resolveActorName(u.DB, userID), nil)
+
+			// Defense-in-depth for members orphaned before RemoveCommunityFromUser/
+			// BanUserFromCommunity cleared department membership: a re-added user
+			// could still carry stale entries in community.departments[].members,
+			// silently regaining (private) department access and erroring on open.
+			// Clear them on re-approval so re-added users start with no department
+			// access until explicitly re-granted. Best-effort — never block approval.
+			if community, err := u.CDB.FindOne(ctx, communityFilter); err == nil && community != nil {
+				for _, dept := range community.Details.Departments {
+					deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
+					deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
+					if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
+						zap.S().Warnw("failed to clear stale department membership on re-approval",
+							"community_id", requestBody.CommunityID, "user_id", userID, "department_id", dept.ID.Hex(), "error", err)
+					}
+				}
+			}
 		}
 
 		// Once a join request is resolved (approved or declined), clear the
@@ -2444,6 +2461,20 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Remove the user from every department's members. Without this, department
+	// membership (especially in private/approval-required departments) survived a
+	// community removal — on re-add the user silently regained access without
+	// re-approval, and opening such a department errored. Mirror the roles loop
+	// above, using the same per-department $pull as RemoveUserFromDepartmentHandler.
+	for _, dept := range community.Details.Departments {
+		deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
+		deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
+		if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
+			config.ErrorStatus("failed to remove user from department members", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
 	// Audit log — distinguish kick (admin removed member) vs leave (self-initiated)
 	actorID := resolveActorFromRequest(r)
 	if actorID != "" && actorID != userID {
@@ -2550,6 +2581,22 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 		}); err != nil {
 			zap.S().Warnw("failed to decrement membersCount on ban",
 				"community_id", requestBody.CommunityID, "user_id", userID, "error", err)
+		}
+	}
+
+	// Strip the banned user from every department's members so they can't retain
+	// (private) department access — the community-level ban status alone doesn't
+	// clear department membership. Best-effort: the ban itself already succeeded,
+	// so a transient failure here shouldn't 500 the request (mirrors the
+	// membersCount handling above); it's logged for follow-up.
+	if community, err := u.CDB.FindOne(ctx, communityFilter); err == nil && community != nil {
+		for _, dept := range community.Details.Departments {
+			deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
+			deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
+			if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
+				zap.S().Warnw("failed to remove banned user from department members",
+					"community_id", requestBody.CommunityID, "user_id", userID, "department_id", dept.ID.Hex(), "error", err)
+			}
 		}
 	}
 
@@ -5814,6 +5861,90 @@ func (u User) DismissTutorialHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		config.ErrorStatus("failed to dismiss tutorial", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// SetAlertSoundsEnabledHandler toggles the per-user master switch for CAD alert
+// sounds (new-call/warrant/attach tones). Defaults off; users opt in.
+// PUT /api/v1/user/{userId}/alert-sounds-enabled  body: {"enabled": bool}
+func (u User) SetAlertSoundsEnabledHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("invalid body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
+		"$set": bson.M{"user.alertSoundsEnabled": body.Enabled},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to update alert sounds setting", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "enabled": body.Enabled})
+}
+
+// quickActionKeyRe restricts quick-action slugs to lowercase alphanumerics and
+// dashes. This is a hard guard: the slug is interpolated into a Mongo field path
+// ("user.quickActionUsage.<key>"), so anything containing dots or operator
+// characters could reach unintended fields. Reject rather than sanitize.
+var quickActionKeyRe = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+
+// RecordQuickActionUsageHandler increments the per-user tap counter for a single
+// department-dashboard quick action, powering the "Most used" row. The counter
+// map lives on the user doc so the ranking follows the user across devices.
+// POST /api/v1/user/{userId}/quick-action-usage  body: {"actionKey": "person-search"}
+func (u User) RecordQuickActionUsageHandler(w http.ResponseWriter, r *http.Request) {
+	userID := mux.Vars(r)["userId"]
+
+	var body struct {
+		ActionKey string `json:"actionKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("invalid body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	key := strings.TrimSpace(body.ActionKey)
+	if !quickActionKeyRe.MatchString(key) {
+		config.ErrorStatus("invalid action key", http.StatusBadRequest, w,
+			errors.New("actionKey must match ^[a-z0-9-]{1,64}$"))
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.ErrorStatus("invalid user ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
+		"$inc": bson.M{"user.quickActionUsage." + key: 1},
+	})
+	if err != nil {
+		config.ErrorStatus("failed to record quick action usage", http.StatusInternalServerError, w, err)
 		return
 	}
 
