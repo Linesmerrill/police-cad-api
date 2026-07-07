@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -22,10 +23,44 @@ import (
 
 // CourtSession exported for testing purposes
 type CourtSession struct {
-	DB   databases.CourtSessionDatabase
-	CCDB databases.CourtCaseDatabase
-	ChDB databases.CourtChatDatabase
-	UDB  databases.UserDatabase
+	DB     databases.CourtSessionDatabase
+	CCDB   databases.CourtCaseDatabase
+	ChDB   databases.CourtChatDatabase
+	UDB    databases.UserDatabase
+	CommDB databases.CommunityDatabase // for owner/admin checks when force-ending a session
+}
+
+// authorizeEndSession decides whether the requester may end the given session.
+// The session's own judge can always end it. Otherwise the requester must be the
+// owner or an "administrator" of the session's community. On failure it writes the
+// appropriate error response (401/403) and returns false.
+func (cs CourtSession) authorizeEndSession(ctx context.Context, w http.ResponseWriter, r *http.Request, session *models.CourtSession) bool {
+	actorID := resolveActorFromRequest(r)
+	if actorID == "" {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no authenticated user"))
+		return false
+	}
+	// Owning judge can always end their own session.
+	if session.Details.JudgeID != "" && actorID == session.Details.JudgeID {
+		return true
+	}
+	// Otherwise require owner/administrator of the session's community.
+	if session.Details.CommunityID == "" || cs.CommDB == nil {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, fmt.Errorf("user %s cannot end this session", actorID))
+		return false
+	}
+	commOID, err := primitive.ObjectIDFromHex(session.Details.CommunityID)
+	if err != nil {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, fmt.Errorf("invalid community id on session"))
+		return false
+	}
+	community, err := cs.CommDB.FindOne(ctx, bson.M{"_id": commOID})
+	if err != nil || community == nil {
+		config.ErrorStatus("insufficient permissions", http.StatusForbidden, w, fmt.Errorf("community not found for session"))
+		return false
+	}
+	// authorizeCommunityAction writes its own 401/403 on failure (owner or "administrator").
+	return authorizeCommunityAction(w, r, community)
 }
 
 // CreateCourtSessionHandler creates a new court session with a docket
@@ -339,6 +374,11 @@ func (cs CourtSession) EndCourtSessionHandler(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		config.ErrorStatus("failed to find court session", http.StatusNotFound, w, err)
 		return
+	}
+
+	// Only the owning judge, or the community owner/administrator, may end a session.
+	if !cs.authorizeEndSession(ctx, w, r, existing) {
+		return // authorizeEndSession already wrote the 401/403 response
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())

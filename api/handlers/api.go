@@ -160,10 +160,11 @@ func (a *App) New() *mux.Router {
 		}
 	}()
 	courtSessionHandler := CourtSession{
-		DB:   databases.NewCourtSessionDatabase(a.dbHelper),
-		CCDB: databases.NewCourtCaseDatabase(a.dbHelper),
-		ChDB: databases.NewCourtChatDatabase(a.dbHelper),
-		UDB:  databases.NewUserDatabase(a.dbHelper),
+		DB:     databases.NewCourtSessionDatabase(a.dbHelper),
+		CCDB:   databases.NewCourtCaseDatabase(a.dbHelper),
+		ChDB:   databases.NewCourtChatDatabase(a.dbHelper),
+		UDB:    databases.NewUserDatabase(a.dbHelper),
+		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
 
 	// Economy handler (clock-in/out, heartbeat, wallet, inbox)
