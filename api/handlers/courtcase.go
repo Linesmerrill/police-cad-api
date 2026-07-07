@@ -446,10 +446,11 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	var resolveData struct {
-		Resolutions []models.CaseResolution `json:"resolutions"`
-		JudgeID     string                  `json:"judgeID"`
-		JudgeName   string                  `json:"judgeName"`
-		JudgeNotes  string                  `json:"judgeNotes"`
+		Resolutions  []models.CaseResolution `json:"resolutions"`
+		JudgeID      string                  `json:"judgeID"`
+		JudgeName    string                  `json:"judgeName"`
+		JudgeNotes   string                  `json:"judgeNotes"`
+		SentenceMode string                  `json:"sentenceMode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&resolveData); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -460,18 +461,42 @@ func (cc CourtCase) ResolveCourtCaseHandler(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 
 	now := primitive.NewDateTimeFromTime(time.Now())
+	mode := models.NormalizeSentenceMode(resolveData.SentenceMode)
 
-	// Set resolvedAt on each resolution
 	for i := range resolveData.Resolutions {
-		resolveData.Resolutions[i].ResolvedAt = now
+		res := &resolveData.Resolutions[i]
+		res.ResolvedAt = now
+
+		// Derive each charge's back-compat Verdict from its Disposition so the
+		// source-record write-back further down still sets the right fine status
+		// (reduced/amended still count as upheld charges).
+		for j := range res.ChargeResolutions {
+			switch strings.ToLower(strings.TrimSpace(res.ChargeResolutions[j].Disposition)) {
+			case models.DispositionDismissed:
+				res.ChargeResolutions[j].Verdict = models.DispositionDismissed
+			case models.DispositionUpheld, models.DispositionReduced, models.DispositionAmended:
+				res.ChargeResolutions[j].Verdict = models.DispositionUpheld
+			}
+		}
+
+		// Server-authoritative per-item sentencing totals from the dispositions.
+		res.TotalFine, res.TotalJailTimeSeconds, res.TotalJailTimeLabel =
+			models.ComputeResolutionTotals(res.ChargeResolutions, mode)
 	}
+
+	// Case-wide final-judgment totals across every charge.
+	caseFine, caseSeconds, caseLabel := models.ComputeCourtCaseTotals(resolveData.Resolutions, mode)
 
 	update := bson.M{
 		"$set": bson.M{
-			"courtCase.resolutions": resolveData.Resolutions,
-			"courtCase.judgeNotes":  resolveData.JudgeNotes,
-			"courtCase.status":      "completed",
-			"courtCase.updatedAt":   now,
+			"courtCase.resolutions":          resolveData.Resolutions,
+			"courtCase.judgeNotes":           resolveData.JudgeNotes,
+			"courtCase.status":               "completed",
+			"courtCase.sentenceMode":         mode,
+			"courtCase.totalFine":            caseFine,
+			"courtCase.totalJailTimeSeconds": caseSeconds,
+			"courtCase.totalJailTimeLabel":   caseLabel,
+			"courtCase.updatedAt":            now,
 		},
 		"$push": bson.M{
 			"courtCase.history": models.CourtCaseHistoryEntry{
