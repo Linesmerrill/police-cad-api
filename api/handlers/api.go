@@ -680,7 +680,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/bolos", api.Middleware(http.HandlerFunc(bolo.FetchDepartmentBolosHandler))).Methods("GET")
 
 	// Most Wanted routes
-	mostWanted := MostWanted{DB: databases.NewMostWantedDatabase(a.dbHelper), CivDB: databases.NewCivilianDatabase(a.dbHelper)}
+	mostWanted := MostWanted{DB: databases.NewMostWantedDatabase(a.dbHelper), CivDB: databases.NewCivilianDatabase(a.dbHelper), ALDB: alDB, UDB: databases.NewUserDatabase(a.dbHelper)}
 	apiV2.Handle("/community/{communityId}/most-wanted", api.Middleware(http.HandlerFunc(mostWanted.FetchMostWantedHandler))).Methods("GET")
 	apiCreate.Handle("/most-wanted/reorder", api.Middleware(http.HandlerFunc(mostWanted.ReorderMostWantedHandler))).Methods("PUT")
 	apiCreate.Handle("/most-wanted/{entry_id}", api.Middleware(http.HandlerFunc(mostWanted.GetMostWantedByIDHandler))).Methods("GET")
