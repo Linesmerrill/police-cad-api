@@ -22,6 +22,8 @@ import (
 type MostWanted struct {
 	DB    databases.MostWantedDatabase
 	CivDB databases.CivilianDatabase
+	ALDB  databases.AuditLogDatabase
+	UDB   databases.UserDatabase
 }
 
 // FetchMostWantedHandler returns a paginated list of most wanted entries for a community
@@ -248,6 +250,19 @@ func (mw MostWanted) CreateMostWantedHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	actorID := req.AddedByUserID
+	if actorID == "" {
+		actorID = resolveActorFromRequest(r)
+	}
+	if cObjID, err := primitive.ObjectIDFromHex(req.CommunityID); err == nil {
+		name, _ := snapshot["name"].(string)
+		logAudit(mw.ALDB, cObjID, "most_wanted.created", "most_wanted", actorID, resolveActorName(mw.UDB, actorID), entry.ID.Hex(), name, map[string]interface{}{
+			"civilianID": req.CivilianID,
+			"stars":      stars,
+			"charges":    entry.Details.Charges,
+		})
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "most wanted entry created successfully",
@@ -275,6 +290,10 @@ func (mw MostWanted) UpdateMostWantedHandler(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Fetch the existing entry up front — used both to refresh the civilian
+	// snapshot and to give the audit log community/name/old-status context.
+	existing, existingErr := mw.DB.FindOne(ctx, bson.M{"_id": eID})
+
 	update := bson.M{}
 	for key, value := range updatedFields {
 		update["mostWanted."+key] = value
@@ -290,16 +309,13 @@ func (mw MostWanted) UpdateMostWantedHandler(w http.ResponseWriter, r *http.Requ
 				update["mostWanted.civilianSnapshot"] = buildCivilianSnapshot(civ)
 			}
 		}
-	} else {
+	} else if existingErr == nil && existing.Details.CivilianID != "" {
 		// Refresh snapshot from existing civilianID on the entry
-		existing, err := mw.DB.FindOne(ctx, bson.M{"_id": eID})
-		if err == nil && existing.Details.CivilianID != "" {
-			civID, err := primitive.ObjectIDFromHex(existing.Details.CivilianID)
+		civID, err := primitive.ObjectIDFromHex(existing.Details.CivilianID)
+		if err == nil {
+			civ, err := mw.CivDB.FindOne(ctx, bson.M{"_id": civID})
 			if err == nil {
-				civ, err := mw.CivDB.FindOne(ctx, bson.M{"_id": civID})
-				if err == nil {
-					update["mostWanted.civilianSnapshot"] = buildCivilianSnapshot(civ)
-				}
+				update["mostWanted.civilianSnapshot"] = buildCivilianSnapshot(civ)
 			}
 		}
 	}
@@ -309,6 +325,26 @@ func (mw MostWanted) UpdateMostWantedHandler(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		config.ErrorStatus("failed to update most wanted entry", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	if existingErr == nil {
+		if cObjID, cerr := primitive.ObjectIDFromHex(existing.Details.CommunityID); cerr == nil {
+			actorID := resolveActorFromRequest(r)
+			changed := make([]string, 0, len(updatedFields))
+			for k := range updatedFields {
+				changed = append(changed, k)
+			}
+			action := "most_wanted.updated"
+			details := map[string]interface{}{"changedFields": changed}
+			// A status change (e.g. active -> captured/removed) is a distinct,
+			// audit-worthy event, so give it its own action string.
+			if newStatus, ok := updatedFields["status"].(string); ok && newStatus != existing.Details.Status {
+				action = "most_wanted.status_changed"
+				details["fromStatus"] = existing.Details.Status
+				details["toStatus"] = newStatus
+			}
+			logAudit(mw.ALDB, cObjID, action, "most_wanted", actorID, resolveActorName(mw.UDB, actorID), entryID, snapshotName(existing), details)
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -328,11 +364,23 @@ func (mw MostWanted) DeleteMostWantedHandler(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Fetch the entry before deleting so the audit log has community/name context.
+	existing, existingErr := mw.DB.FindOne(ctx, bson.M{"_id": eID})
+
 	filter := bson.M{"_id": eID}
 	err = mw.DB.DeleteOne(ctx, filter)
 	if err != nil {
 		config.ErrorStatus("failed to delete most wanted entry", http.StatusInternalServerError, w, err)
 		return
+	}
+
+	if existingErr == nil {
+		if cObjID, cerr := primitive.ObjectIDFromHex(existing.Details.CommunityID); cerr == nil {
+			actorID := resolveActorFromRequest(r)
+			logAudit(mw.ALDB, cObjID, "most_wanted.deleted", "most_wanted", actorID, resolveActorName(mw.UDB, actorID), entryID, snapshotName(existing), map[string]interface{}{
+				"civilianID": existing.Details.CivilianID,
+			})
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -381,8 +429,27 @@ func (mw MostWanted) ReorderMostWantedHandler(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	if cObjID, err := primitive.ObjectIDFromHex(req.CommunityID); err == nil {
+		actorID := resolveActorFromRequest(r)
+		logAudit(mw.ALDB, cObjID, "most_wanted.reordered", "most_wanted", actorID, resolveActorName(mw.UDB, actorID), "", "", map[string]interface{}{
+			"count": len(req.Order),
+		})
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "most wanted list reordered successfully"})
+}
+
+// snapshotName returns the civilian's display name from a most wanted entry's
+// denormalized snapshot, or "" when unavailable. Used as the audit log target name.
+func snapshotName(entry *models.MostWantedEntry) string {
+	if entry == nil || entry.Details.CivilianSnapshot == nil {
+		return ""
+	}
+	if n, ok := entry.Details.CivilianSnapshot["name"].(string); ok {
+		return n
+	}
+	return ""
 }
 
 // buildCivilianSnapshot creates a map of civilian fields for denormalized storage
