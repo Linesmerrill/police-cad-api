@@ -1209,6 +1209,17 @@ func (c Community) UpdateRoleMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// The Head Admin role is owner-only by design; its membership changes only
+	// via ownership transfer. Reject attempts to add members to it. The web and
+	// mobile clients already hide the add-member control for this role, so this
+	// is the server-side backstop (legacy communities predate the client lock).
+	for _, role := range community.Details.Roles {
+		if role.ID == rID && models.IsHeadAdminRole(role) {
+			config.ErrorStatus("cannot add members to the Head Admin role; change it via ownership transfer", http.StatusForbidden, w, nil)
+			return
+		}
+	}
+
 	filter := bson.M{"_id": cID, "community.roles._id": rID}
 	update := bson.M{
 		"$addToSet": bson.M{

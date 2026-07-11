@@ -1,6 +1,24 @@
 {
   "_note": "Human/LLM-curated triage annotations keyed by feature-request id. Regenerating the doc (generate.py) merges these with live API data. When new requests appear, add entries here; entries for ids no longer active are ignored. Categories: quick_win | easy | full_feature | probably_not. Scope: website | api | mobile | bot. Optional `prs`: list of open PR refs like \"police-cad-api#138\" — renders a '🔀 In Progress (open PRs)' section + inline badge, and drops the item from 'Suggested next up'. Remove the ref once merged.",
   "triage": {
+    "6a4da63764527e6069820926": {
+      "category": "full_feature",
+      "scope": ["api", "website", "mobile"],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "A court-scoped 'DOJ Portal' / Attorney Access role so District/Defense Attorneys can view and participate in court cases WITHOUT full Judicial edit rights (which today risk accidental or intentional changes to court records). Leans on the existing community permission model (userHasCommunityPermission / roles); the net-new is a distinct role + a read/participate court surface. Split from the shipped 'Automatic Sentencing Calculation'; part of the DOJ-permissions cluster.",
+      "risks_or_deps": "Design a court-scoped role distinct from Judicial (read/participate, not edit records); reuse the permission model + authorizeCommunityAction.",
+      "possible_duplicate": "Courts Department Update (attorney role); Automatic Sentencing Calculation (parent, shipped)"
+    },
+    "6a4da63764527e6069820927": {
+      "category": "full_feature",
+      "scope": ["api", "website", "mobile"],
+      "effort": "L",
+      "confidence": "med",
+      "rationale": "Plea-deal + prosecutor workflow building on the shipped per-charge disposition + Final Judgment system: a prosecutor proposes a plea (reduced/amended charges + agreed fine/jail), the defendant/defense accepts or rejects, and the judge finalizes, with totals auto-updating from the agreed charges. The sentencing math already exists; the net-new is the negotiation state machine + roles. Split from the shipped 'Sentencing Calculator and Plea Deal System'.",
+      "risks_or_deps": "Negotiation/state model + prosecutor & defense roles; overlaps the court cluster. Pairs with the DOJ Portal role.",
+      "possible_duplicate": "Court Improvement Suggestion; Courts Department Update; DOJ Portal / Attorney Access Role"
+    },
     "6a4c3ab0e948c039f9ca138a": {
       "category": "full_feature",
       "scope": ["api", "website", "mobile"],
