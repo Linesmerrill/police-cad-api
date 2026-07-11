@@ -236,10 +236,10 @@ func (c Community) UpdateRankHandler(w http.ResponseWriter, r *http.Request) {
 	prefix := fmt.Sprintf("community.departments.%d.ranks.%d.", deptIdx, rankIdx)
 
 	allowedFields := map[string]string{
-		"name":         prefix + "name",
-		"prefix":       prefix + "prefix",
-		"requirements": prefix + "requirements",
-		"autoPromote":  prefix + "autoPromote",
+		"name":           prefix + "name",
+		"prefix":         prefix + "prefix",
+		"requirements":   prefix + "requirements",
+		"autoPromote":    prefix + "autoPromote",
 		"canViewStats":   prefix + "canViewStats",
 		"isDefault":      prefix + "isDefault",
 		"payRatePerHour": prefix + "payRatePerHour",
@@ -728,8 +728,15 @@ func (c Community) computeOfficerMetrics(ctx context.Context, communityID, depar
 		pipeline := bson.A{
 			bson.M{"$match": bson.M{"civilian.activeCommunityID": communityID}},
 			bson.M{"$unwind": "$civilian.criminalHistory"},
+			// Credit the reporting officer (officerID) OR any attached/assisting
+			// officer (assistingOfficerIDs array) so multi-officer tickets count
+			// for everyone listed. The $or matches at most one doc per citation,
+			// so a reporting officer who is also listed isn't double-counted.
 			bson.M{"$match": applySince(bson.M{
-				"civilian.criminalHistory.officerID":    userID,
+				"$or": bson.A{
+					bson.M{"civilian.criminalHistory.officerID": userID},
+					bson.M{"civilian.criminalHistory.assistingOfficerIDs": userID},
+				},
 				"civilian.criminalHistory.type":         entry.crimHistType,
 				"civilian.criminalHistory.departmentId": departmentID,
 			}, "civilian.criminalHistory")},
@@ -1128,7 +1135,7 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 				typePath := fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx)
 				_ = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": bson.M{
 					rankPath: memberStatus.RankID,
-					typePath:  memberStatus.RankAssignmentType,
+					typePath: memberStatus.RankAssignmentType,
 				}})
 				break
 			}
@@ -1284,17 +1291,17 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"userId":              userID,
-		"departmentId":        departmentID,
-		"currentRank":         currentRank,
-		"nextRank":            nextRank,
-		"metrics":             metricsResponse,
-		"progress":            progress,
-		"allRequirementsMet":  allMet,
-		"promoted":            promoted,
-		"previousRank":        previousRank,
-		"rankAssignedAt":      memberStatus.RankAssignedAt,
-		"rankAssignmentType":  memberStatus.RankAssignmentType,
+		"userId":                userID,
+		"departmentId":          departmentID,
+		"currentRank":           currentRank,
+		"nextRank":              nextRank,
+		"metrics":               metricsResponse,
+		"progress":              progress,
+		"allRequirementsMet":    allMet,
+		"promoted":              promoted,
+		"previousRank":          previousRank,
+		"rankAssignedAt":        memberStatus.RankAssignedAt,
+		"rankAssignmentType":    memberStatus.RankAssignmentType,
 		"resetStatsOnPromotion": resetMode,
 	})
 }
