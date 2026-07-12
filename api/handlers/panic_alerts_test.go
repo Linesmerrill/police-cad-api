@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gorilla/mux"
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,7 @@ func TestCreatePanicAlertHandler(t *testing.T) {
 		name           string
 		communityID    string
 		requestBody    map[string]interface{}
+		authUserID     string // token-verified actor injected into context (optional)
 		expectedStatus int
 		expectedError  string
 		mockSetup      func(*mocks.CommunityDatabase)
@@ -98,6 +100,24 @@ func TestCreatePanicAlertHandler(t *testing.T) {
 				}, nil)
 			},
 		},
+		{
+			name:        "banned user cannot bypass with a forged body userId",
+			communityID: "507f1f77bcf86cd799439011",
+			requestBody: map[string]interface{}{
+				"userId":         "someoneelse", // forged — not on the ban list
+				"username":       "6A-404",
+				"callSign":       "6A-404",
+				"departmentType": "police",
+			},
+			authUserID:     "banneduser", // token-verified real identity, banned
+			expectedStatus: http.StatusForbidden,
+			expectedError:  "banned",
+			mockSetup: func(mockDB *mocks.CommunityDatabase) {
+				mockDB.On("FindOne", mock.Anything, mock.Anything).Return(&models.Community{
+					Details: models.CommunityDetails{BanList: []string{"banneduser"}},
+				}, nil)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -121,6 +141,11 @@ func TestCreatePanicAlertHandler(t *testing.T) {
 
 			// Set up mux vars
 			req = mux.SetURLVars(req, map[string]string{"communityId": tt.communityID})
+
+			// Seed the token-verified actor the middleware would normally set.
+			if tt.authUserID != "" {
+				req = req.WithContext(api.WithAuthenticatedUserID(req.Context(), tt.authUserID))
+			}
 
 			// Call handler
 			handler.CreatePanicAlertHandler(w, req)

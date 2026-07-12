@@ -2318,6 +2318,25 @@ func userBannedFromCommunity(community *models.Community, userID string) bool {
 	return contains(community.Details.BanList, userID)
 }
 
+// rejectIfBanned writes a 403 and returns true if the acting user is banned from
+// the community. It checks BOTH the actor id supplied in the request body AND the
+// authenticated (bearer-token) user id from the request context. The authenticated
+// id is token-verified and cannot be forged, so checking it stops a banned user
+// from bypassing the ban by putting someone else's id in the request body. (When
+// no bearer token is present — e.g. the website's static API token — only the
+// body id is available; closing that residual gap is the broader auth-hardening
+// effort tracked separately.) Uses InfoStatus so a banned client retrying in a
+// loop doesn't flood the error logs with stacktraces.
+func rejectIfBanned(w http.ResponseWriter, r *http.Request, community *models.Community, bodyUserID, action string) bool {
+	authID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userBannedFromCommunity(community, bodyUserID) ||
+		(authID != "" && userBannedFromCommunity(community, authID)) {
+		config.InfoStatus("banned user blocked from "+action, http.StatusForbidden, w, nil)
+		return true
+	}
+	return false
+}
+
 // sortDepartmentsByUserPreferences sorts departments based on user's custom order preference
 func (c Community) sortDepartmentsByUserPreferences(ctx context.Context, departments []models.Department, userID, communityID string) []models.Department {
 	// If no userID provided, return departments as-is
@@ -7152,8 +7171,7 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		config.ErrorStatus("community not found", http.StatusNotFound, w, cErr)
 		return
 	}
-	if userBannedFromCommunity(comm, request.UserID) {
-		config.InfoStatus("banned user blocked from triggering a panic alert", http.StatusForbidden, w, nil)
+	if rejectIfBanned(w, r, comm, request.UserID, "triggering a panic alert") {
 		return
 	}
 
@@ -8354,8 +8372,7 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 		config.ErrorStatus("community not found", http.StatusNotFound, w, fetchErr)
 		return
 	}
-	if userBannedFromCommunity(existing, request.UserID) {
-		config.InfoStatus("banned user blocked from activating signal 100", http.StatusForbidden, w, nil)
+	if rejectIfBanned(w, r, existing, request.UserID, "activating signal 100") {
 		return
 	}
 

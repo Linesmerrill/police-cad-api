@@ -56,8 +56,7 @@ func (c Community) SendToneHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("community not found", http.StatusNotFound, w, cErr)
 		return
 	}
-	if userBannedFromCommunity(community, request.TriggeredByID) {
-		config.InfoStatus("banned user blocked from sending a tone", http.StatusForbidden, w, nil)
+	if rejectIfBanned(w, r, community, request.TriggeredByID, "sending a tone") {
 		return
 	}
 
