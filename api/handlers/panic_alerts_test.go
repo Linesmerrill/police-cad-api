@@ -73,7 +73,29 @@ func TestCreatePanicAlertHandler(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "failed to create panic alert",
 			mockSetup: func(mockDB *mocks.CommunityDatabase) {
+				// Ban-check load happens first; return a clean community so the
+				// user isn't banned, then fail the write.
+				mockDB.On("FindOne", mock.Anything, mock.Anything).Return(&models.Community{}, nil)
 				mockDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("database error"))
+			},
+		},
+		{
+			name:        "banned user is blocked",
+			communityID: "507f1f77bcf86cd799439011",
+			requestBody: map[string]interface{}{
+				"userId":         "banneduser",
+				"username":       "6A-404",
+				"callSign":       "6A-404",
+				"departmentType": "police",
+			},
+			expectedStatus: http.StatusForbidden,
+			expectedError:  "banned",
+			mockSetup: func(mockDB *mocks.CommunityDatabase) {
+				// User is on the community ban list → panic must be rejected and
+				// no write should occur (no UpdateOne mock set).
+				mockDB.On("FindOne", mock.Anything, mock.Anything).Return(&models.Community{
+					Details: models.CommunityDetails{BanList: []string{"banneduser"}},
+				}, nil)
 			},
 		},
 	}
