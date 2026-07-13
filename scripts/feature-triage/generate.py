@@ -80,7 +80,12 @@ def pr_links(prs):
 
 def main():
     snap = json.loads(DATA_FILE.read_text())
-    triage = json.loads(TRIAGE_FILE.read_text()).get("triage", {})
+    triage_doc = json.loads(TRIAGE_FILE.read_text())
+    triage = triage_doc.get("triage", {})
+    # Unfiled asks: ideas captured (e.g. from Discord) that don't have a formal
+    # feature request yet, so they can't be keyed by id in `triage`. Held here
+    # until they're filed on the site (then move them into `triage`).
+    unfiled = triage_doc.get("unfiled", [])
     active = snap.get("requests", [])
     shipped = snap.get("shipped", [])
 
@@ -225,6 +230,27 @@ def main():
             author = esc((fr.get("author") or {}).get("username", "unknown"))
             w(f"| {fr_link(fr)} | {fr.get('upvoteCount',0)} | "
               f"{fr.get('commentCount',0)} | {author} |")
+        w("")
+
+    # ---- Unfiled asks -----------------------------------------------------
+    if unfiled:
+        w("## 📥 Unfiled Asks (not yet feature requests)")
+        w("")
+        w("_Captured from Discord/DMs before a formal request exists — file them "
+          "on the site to add upvotes, then move the entry into `triage`._")
+        w("")
+        w("| Ask | Source | Effort | Scope | Notes |")
+        w("|---|---|:--:|---|---|")
+        for u in unfiled:
+            notes = esc(u.get("rationale", ""))
+            risks = esc(u.get("risks_or_deps", ""))
+            rel = esc(u.get("possible_relation", ""))
+            if risks:
+                notes += f" _Risks/deps: {risks}_"
+            if rel:
+                notes += f" _Related: {rel}_"
+            w(f"| {esc(u.get('title','(untitled)'))} | {esc(u.get('source',''))} | "
+              f"{u.get('effort','?')} | {scope_str(u.get('scope'))} | {notes} |")
         w("")
 
     # ---- Shipped ----------------------------------------------------------

@@ -1,6 +1,6 @@
 # Feature Request Triage — Living Doc
 
-_Auto-generated 2026-07-08 01:22 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
+_Auto-generated 2026-07-12 04:03 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
 
 **45** active requests · **216** total upvotes · **36** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
 
@@ -102,6 +102,15 @@ _Out of scope, infeasible, or cost far outweighs value._
 |   | [Login system](https://www.linespolice-cad.com/feature-requests/69f7d4433f57679bdb425d9c) | 1 | 2 | M | — | Sergant W. O'CONNOR | A per-department username/password login screen. Staff explained the existing 10-code online/offline (Signal 41/42) already handles department presence in real time. The clarified ask (a password gate per department) adds friction and a parallel auth model with little added value. _Risks/deps: Duplicates existing auth/presence; UX friction._ |
 |   | [Road names on map](https://www.linespolice-cad.com/feature-requests/6a182462c10fe9084bebc99a) | 4 | 0 | L | — | Grim | Road names on the map. Maps are static community-uploaded images (no vector/tile layer), so real road labeling would need either a vector-map refactor or manual per-map overlays. Simplest path is a community workaround: upload a map image that already includes street names. Low effort-to-value as a platform feature. _Risks/deps: Static-image map architecture; per-game-map street data unavailable._ |
 |   | [being able to have a radio to talk to other on that Department and to switch radio fincracy](https://www.linespolice-cad.com/feature-requests/6a4085ea449dcf2c86523949) | 2 | 0 | XL | — | Deadpool12 | In-app voice radio with channels 1–100 and a panic button. Same voice-infra reasoning staff used to decline the other radio requests. The panic sub-feature already exists via the panic button. _Risks/deps: Voice infra cost/reliability._ _Possible dup: Radio; Chat Radios_ |
+
+## 📥 Unfiled Asks (not yet feature requests)
+
+_Captured from Discord/DMs before a formal request exists — file them on the site to add upvotes, then move the entry into `triage`._
+
+| Ask | Source | Effort | Scope | Notes |
+|---|---|:--:|---|---|
+| Charge quantity / multiple counts (with drug unit weights) | DNYGUNZ (Discord); refines an earlier customer ask | M | ⚙️ 🌐 📱 api/website/mobile | When creating a penal code/violation, prompt whether it has a quantity and what unit: a plain COUNT (scam cards, 'two counts of murder') or a WEIGHT unit (oz/lb/kilo for drugs). When charging, the officer enters the quantity and the CAD multiplies fine and jail time per unit (penalty defined per-unit). Add the count to the report. Data path already exists (ArrestCharge + server-side ComputeArrestTotals); net-new is quantity+unit on the applied charge plus hasQuantity/unit on the penal-code definition. _Risks/deps: Multiply in ComputeArrestTotals (server = source of truth); quantity optional + backward-compatible; a 'Life' sentence stays Life regardless of count._ _Related: Extends the shipped Sentencing Calculator / Arrest Fine and Time Calculation_ |
+| Increase report narrative character limit (500 -> 1000) | DNYGUNZ (Discord) | S | ⚙️ 🌐 📱 api/website/mobile | The report narrative caps at 500 chars and most reports exceed it. Double to ~1000. Scope to the arrest/police report narrative field specifically (maxlength=500 is reused on ~15 textareas across calls/BOLOs/notes/911 - do NOT blanket-raise) and check for a server-side cap. _Risks/deps: Confirm the exact narrative field(s) and verify no server-side validation truncates at 500._ |
 
 ## ✅ Recently Shipped
 
