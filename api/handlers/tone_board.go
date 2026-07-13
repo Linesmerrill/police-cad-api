@@ -49,6 +49,17 @@ func (c Community) SendToneHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject banned users so a ban stops them from broadcasting tones. Load the
+	// community once and reuse it for the sound-URL lookup below.
+	community, cErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if cErr != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, cErr)
+		return
+	}
+	if rejectIfBanned(w, r, community, request.TriggeredByID, "sending a tone") {
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 
 	toneLog := models.ToneLog{
@@ -71,10 +82,9 @@ func (c Community) SendToneHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve tone sound URL for custom tones
+	// Resolve tone sound URL for custom tones (community loaded above)
 	var toneSoundUrl string
-	community, cErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
-	if cErr == nil {
+	{
 		// Build custom sound lookup
 		for _, s := range community.Details.CustomToneSounds {
 			if s.Key == request.ToneType {

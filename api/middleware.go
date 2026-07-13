@@ -58,6 +58,13 @@ func withAuthenticatedUserID(ctx context.Context, userID string) context.Context
 	return context.WithValue(ctx, authenticatedUserIDContextKey{}, userID)
 }
 
+// WithAuthenticatedUserID returns a context carrying the authenticated user ID.
+// Exported so callers/tests can seed the token-verified actor the middleware
+// would normally set from a Bearer token.
+func WithAuthenticatedUserID(ctx context.Context, userID string) context.Context {
+	return withAuthenticatedUserID(ctx, userID)
+}
+
 // Middleware adds some basic header authentication around accessing the routes
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
