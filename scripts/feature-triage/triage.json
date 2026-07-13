@@ -478,5 +478,25 @@
       "risks_or_deps": "Currently in beta_testing — in flight.",
       "possible_duplicate": "Restrict who can suspend or revoke licenses"
     }
-  }
+  },
+  "unfiled": [
+    {
+      "title": "Charge quantity / multiple counts (with drug unit weights)",
+      "source": "DNYGUNZ (Discord); refines an earlier customer ask",
+      "scope": ["api", "website", "mobile"],
+      "effort": "M",
+      "rationale": "When creating a penal code/violation, prompt whether it has a quantity and what unit: a plain COUNT (scam cards, 'two counts of murder') or a WEIGHT unit (oz/lb/kilo for drugs). When charging, the officer enters the quantity and the CAD multiplies fine and jail time per unit (penalty defined per-unit). Add the count to the report. Data path already exists (ArrestCharge + server-side ComputeArrestTotals); net-new is quantity+unit on the applied charge plus hasQuantity/unit on the penal-code definition.",
+      "risks_or_deps": "Multiply in ComputeArrestTotals (server = source of truth); quantity optional + backward-compatible; a 'Life' sentence stays Life regardless of count.",
+      "possible_relation": "Extends the shipped Sentencing Calculator / Arrest Fine and Time Calculation"
+    },
+    {
+      "title": "Increase report narrative character limit (500 -> 1000)",
+      "source": "DNYGUNZ (Discord)",
+      "scope": ["api", "website", "mobile"],
+      "effort": "S",
+      "rationale": "The report narrative caps at 500 chars and most reports exceed it. Double to ~1000. Scope to the arrest/police report narrative field specifically (maxlength=500 is reused on ~15 textareas across calls/BOLOs/notes/911 - do NOT blanket-raise) and check for a server-side cap.",
+      "risks_or_deps": "Confirm the exact narrative field(s) and verify no server-side validation truncates at 500.",
+      "possible_relation": ""
+    }
+  ]
 }

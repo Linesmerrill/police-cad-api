@@ -2306,6 +2306,37 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+// userBannedFromCommunity reports whether the given user is on the community's
+// ban list. The community-wide broadcast handlers (panic, signal-100, tones)
+// must consult this so a ban actually stops a user from triggering alerts —
+// otherwise a banned user's client keeps the community context and can keep
+// spamming these endpoints (the ban list was previously never checked here).
+func userBannedFromCommunity(community *models.Community, userID string) bool {
+	if community == nil || userID == "" {
+		return false
+	}
+	return contains(community.Details.BanList, userID)
+}
+
+// rejectIfBanned writes a 403 and returns true if the acting user is banned from
+// the community. It checks BOTH the actor id supplied in the request body AND the
+// authenticated (bearer-token) user id from the request context. The authenticated
+// id is token-verified and cannot be forged, so checking it stops a banned user
+// from bypassing the ban by putting someone else's id in the request body. (When
+// no bearer token is present — e.g. the website's static API token — only the
+// body id is available; closing that residual gap is the broader auth-hardening
+// effort tracked separately.) Uses InfoStatus so a banned client retrying in a
+// loop doesn't flood the error logs with stacktraces.
+func rejectIfBanned(w http.ResponseWriter, r *http.Request, community *models.Community, bodyUserID, action string) bool {
+	authID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userBannedFromCommunity(community, bodyUserID) ||
+		(authID != "" && userBannedFromCommunity(community, authID)) {
+		config.InfoStatus("banned user blocked from "+action, http.StatusForbidden, w, nil)
+		return true
+	}
+	return false
+}
+
 // sortDepartmentsByUserPreferences sorts departments based on user's custom order preference
 func (c Community) sortDepartmentsByUserPreferences(ctx context.Context, departments []models.Department, userID, communityID string) []models.Department {
 	// If no userID provided, return departments as-is
@@ -7132,6 +7163,18 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Reject banned users. Load the community once (also reused for the panic
+	// sound URL below) and block if the acting user is on the ban list — a
+	// banned user's client can otherwise keep spamming panic alerts.
+	comm, cErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if cErr != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, cErr)
+		return
+	}
+	if rejectIfBanned(w, r, comm, request.UserID, "triggering a panic alert") {
+		return
+	}
+
 	// Generate unique alert ID
 	alertID := primitive.NewObjectID().Hex()
 
@@ -7171,15 +7214,13 @@ func (c Community) CreatePanicAlertHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Resolve custom panic sound URL (if community has one configured)
+	// Resolve custom panic sound URL (community already loaded above)
 	var panicSoundUrl string
-	if comm, cErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID}); cErr == nil {
-		if key := comm.Details.DefaultPanicSound; key != "" {
-			for _, s := range comm.Details.CustomToneSounds {
-				if s.Key == key {
-					panicSoundUrl = s.URL
-					break
-				}
+	if key := comm.Details.DefaultPanicSound; key != "" {
+		for _, s := range comm.Details.CustomToneSounds {
+			if s.Key == key {
+				panicSoundUrl = s.URL
+				break
 			}
 		}
 	}
@@ -8323,13 +8364,22 @@ func (c Community) ActivateSignal100Handler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Load the community up front so we can (a) reject banned users and (b)
+	// dedupe. Without the ban check a banned user's client can keep activating
+	// Signal 100.
+	existing, fetchErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID})
+	if fetchErr != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, fetchErr)
+		return
+	}
+	if rejectIfBanned(w, r, existing, request.UserID, "activating signal 100") {
+		return
+	}
+
 	// Check if signal 100 is already active to avoid duplicate push notifications.
 	// The website POSTs to this endpoint AND emits a socket event that also calls
 	// this endpoint, so we need to guard against sending notifications twice.
-	wasAlreadyActive := false
-	if existing, fetchErr := c.DB.FindOne(context.Background(), bson.M{"_id": cID}); fetchErr == nil {
-		wasAlreadyActive = existing.Details.Signal100.Active || existing.Details.ActiveSignal100
-	}
+	wasAlreadyActive := existing.Details.Signal100.Active || existing.Details.ActiveSignal100
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
