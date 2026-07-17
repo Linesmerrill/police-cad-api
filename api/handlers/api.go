@@ -311,6 +311,7 @@ func (a *App) New() *mux.Router {
 
 	// Unauthenticated forgot-password (6-digit code) flow.
 	apiCreate.Handle("/user/forgot-password/request-code", http.HandlerFunc(pv.ForgotPasswordRequestCodeHandler)).Methods("POST")
+	apiCreate.Handle("/user/forgot-password/verify-code", http.HandlerFunc(pv.ForgotPasswordVerifyCodeHandler)).Methods("POST")
 	apiCreate.Handle("/user/forgot-password/reset", http.HandlerFunc(pv.ForgotPasswordResetHandler)).Methods("POST")
 
 	apiCreate.Handle("/community", api.Middleware(http.HandlerFunc(c.CreateCommunityHandler))).Methods("POST")

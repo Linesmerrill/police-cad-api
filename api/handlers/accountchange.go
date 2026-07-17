@@ -519,6 +519,72 @@ func (pv PendingVerification) ForgotPasswordResetHandler(w http.ResponseWriter, 
 	writeJSONOK(w, "Password updated successfully")
 }
 
+// ForgotPasswordVerifyCodeHandler checks a reset code WITHOUT consuming it, so the app can advance
+// to the new-password step only once the code is known-good. The code is finally consumed by
+// ForgotPasswordResetHandler. A wrong code still increments attempts (brute force stays bounded).
+// Errors are generic so they don't reveal whether an account exists.
+func (pv PendingVerification) ForgotPasswordVerifyCodeHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+		Code  string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+	email := strings.TrimSpace(strings.ToLower(body.Email))
+	if email == "" || strings.TrimSpace(body.Code) == "" {
+		writeJSONError(w, http.StatusBadRequest, "Email and verification code are required")
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	user := models.User{}
+	if err := pv.UDB.FindOne(ctx, bson.M{"user.email": email}).Decode(&user); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid or expired verification code")
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(user.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid or expired verification code")
+		return
+	}
+
+	pending, err := pv.PVDB.FindOne(ctx, bson.M{"userID": uID, "purpose": models.PurposePasswordReset})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			writeJSONError(w, http.StatusBadRequest, "Invalid or expired verification code")
+			return
+		}
+		config.ErrorStatus("failed to find pending reset", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if expired := timeFromBSON(pending.ExpiresAt); !expired.IsZero() && time.Now().After(expired) {
+		_ = pv.PVDB.DeleteOne(ctx, bson.M{"_id": pending.ID})
+		writeJSONError(w, http.StatusBadRequest, "Verification code expired. Request a new one.")
+		return
+	}
+
+	if pending.Attempts >= sensitiveMaxRetries {
+		_ = pv.PVDB.DeleteOne(ctx, bson.M{"_id": pending.ID})
+		writeJSONError(w, http.StatusBadRequest, "Too many attempts. Request a new code.")
+		return
+	}
+
+	if !codesEqualConstantTime(pending.Code, body.Code) {
+		_ = pv.PVDB.UpdateOne(ctx, bson.M{"_id": pending.ID}, bson.M{"$inc": bson.M{"attempts": 1}})
+		writeJSONError(w, http.StatusBadRequest, "Invalid verification code")
+		return
+	}
+
+	// Valid — leave the row in place for ForgotPasswordResetHandler to consume.
+	writeJSONOK(w, "Code verified")
+}
+
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

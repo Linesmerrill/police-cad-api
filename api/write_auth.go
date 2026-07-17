@@ -33,6 +33,7 @@ var publicWritePaths = map[string]bool{
 	"/api/v1/verify/verify-code":                true,
 	"/api/v1/verify/resend-verification-code":   true,
 	"/api/v1/user/forgot-password/request-code": true, // forgot password: request 6-digit code
+	"/api/v1/user/forgot-password/verify-code":  true, // forgot password: check code before advancing
 	"/api/v1/user/forgot-password/reset":        true, // forgot password: submit code + new password
 }
 
