@@ -55,6 +55,18 @@ func (h FormTemplate) CreateFormTemplateHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Normalize legacy single-department gate fields (sent by older clients)
+	// into the per-department RankGates shape, then validate against the
+	// community's departments/ranks.
+	gates := body.EffectiveRankGates()
+	if err := h.validateRankGates(ctx, body.CommunityID, gates); err != nil {
+		config.ErrorStatus("invalid rank gate", http.StatusBadRequest, w, err)
+		return
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 	tplID := primitive.NewObjectID()
 
@@ -62,18 +74,16 @@ func (h FormTemplate) CreateFormTemplateHandler(w http.ResponseWriter, r *http.R
 		ID: tplID,
 		Details: models.FormTemplateDetails{
 			CommunityID:      body.CommunityID,
-			DepartmentID:     body.DepartmentID,
 			Name:             body.Name,
 			Slug:             body.Slug,
 			Description:      body.Description,
 			Icon:             body.Icon,
 			CurrentVersion:   1,
-			NumberFormat:       defaultIfBlank(body.NumberFormat, "RR-{YYYY}-{NNNNNN}"),
-			VisibleToRoles:     body.VisibleToRoles,
-			EditableByRoles:    body.EditableByRoles,
-			VisibleToRankRule:  body.VisibleToRankRule,
-			EditableByRankRule: body.EditableByRankRule,
-			LinkableEntities:   body.LinkableEntities,
+			NumberFormat:     defaultIfBlank(body.NumberFormat, "RR-{YYYY}-{NNNNNN}"),
+			VisibleToRoles:   body.VisibleToRoles,
+			EditableByRoles:  body.EditableByRoles,
+			RankGates:        gates,
+			LinkableEntities: body.LinkableEntities,
 			IsHidden:         false,
 			DefaultSlug:      "",
 			IsArchived:       false,
@@ -82,9 +92,6 @@ func (h FormTemplate) CreateFormTemplateHandler(w http.ResponseWriter, r *http.R
 			CreatedBy:        api.GetAuthenticatedUserIDFromContext(r.Context()),
 		},
 	}
-
-	ctx, cancel := api.WithQueryTimeout(r.Context())
-	defer cancel()
 
 	if _, err := h.DB.InsertOne(ctx, tpl); err != nil {
 		// The unique (communityID, slug) index rejects a slug already in use by
@@ -151,6 +158,17 @@ func (h FormTemplate) FormTemplateByIDHandler(w http.ResponseWriter, r *http.Req
 		view.Sections = sections
 	}
 
+	// When a userId is supplied, enforce rank-gated visibility on the
+	// single fetch and annotate CanEdit. No user (admin builder) => no gate.
+	if userID := r.URL.Query().Get("userId"); userID != "" {
+		allowed := h.applyUserAccess(ctx, view.CommunityID, userID, []models.FormTemplateView{view})
+		if len(allowed) == 0 {
+			config.InfoStatus("form template not visible to user", http.StatusForbidden, w, fmt.Errorf("user %q cannot view template %q", userID, tplID))
+			return
+		}
+		view = allowed[0]
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(view)
 }
@@ -167,19 +185,20 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	}
 
 	var body struct {
-		Name               *string              `json:"name,omitempty"`
-		Description        *string              `json:"description,omitempty"`
-		Icon               *string              `json:"icon,omitempty"`
-		NumberFormat       *string              `json:"numberFormat,omitempty"`
-		VisibleToRoles     *[]string            `json:"visibleToRoles,omitempty"`
-		EditableByRoles    *[]string            `json:"editableByRoles,omitempty"`
-		VisibleToRankRule  *models.RankRule     `json:"visibleToRankRule,omitempty"`
-		EditableByRankRule *models.RankRule     `json:"editableByRankRule,omitempty"`
-		ClearVisibleRank   *bool                `json:"clearVisibleRankRule,omitempty"`
-		ClearEditableRank  *bool                `json:"clearEditableRankRule,omitempty"`
-		LinkableEntities   *[]string            `json:"linkableEntities,omitempty"`
-		IsArchived         *bool                `json:"isArchived,omitempty"`
-		Sections           []models.FormSection `json:"sections"`
+		Name               *string                      `json:"name,omitempty"`
+		Description        *string                      `json:"description,omitempty"`
+		Icon               *string                      `json:"icon,omitempty"`
+		NumberFormat       *string                      `json:"numberFormat,omitempty"`
+		VisibleToRoles     *[]string                    `json:"visibleToRoles,omitempty"`
+		EditableByRoles    *[]string                    `json:"editableByRoles,omitempty"`
+		RankGates          *[]models.DepartmentRankGate `json:"rankGates,omitempty"`
+		VisibleToRankRule  *models.RankRule             `json:"visibleToRankRule,omitempty"`
+		EditableByRankRule *models.RankRule             `json:"editableByRankRule,omitempty"`
+		ClearVisibleRank   *bool                        `json:"clearVisibleRankRule,omitempty"`
+		ClearEditableRank  *bool                        `json:"clearEditableRankRule,omitempty"`
+		LinkableEntities   *[]string                    `json:"linkableEntities,omitempty"`
+		IsArchived         *bool                        `json:"isArchived,omitempty"`
+		Sections           []models.FormSection         `json:"sections"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -193,6 +212,13 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		config.ErrorStatus("form template not found", http.StatusNotFound, w, err)
 		return
+	}
+
+	if body.RankGates != nil {
+		if err := h.validateRankGates(ctx, existing.Details.CommunityID, *body.RankGates); err != nil {
+			config.ErrorStatus("invalid rank gate", http.StatusBadRequest, w, err)
+			return
+		}
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
@@ -233,18 +259,33 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 	if body.EditableByRoles != nil {
 		set["formTemplate.editableByRoles"] = *body.EditableByRoles
 	}
-	if body.VisibleToRankRule != nil {
-		set["formTemplate.visibleToRankRule"] = body.VisibleToRankRule
-	}
-	if body.EditableByRankRule != nil {
-		set["formTemplate.editableByRankRule"] = body.EditableByRankRule
-	}
 	unset := bson.M{}
-	if body.ClearVisibleRank != nil && *body.ClearVisibleRank {
+	if body.RankGates != nil {
+		// New per-department shape: full replace. Also drop any legacy
+		// single-department fields so a normalized row never carries both.
+		gates := *body.RankGates
+		if len(gates) == 0 {
+			unset["formTemplate.rankGates"] = ""
+		} else {
+			set["formTemplate.rankGates"] = gates
+		}
+		unset["formTemplate.departmentId"] = ""
 		unset["formTemplate.visibleToRankRule"] = ""
-	}
-	if body.ClearEditableRank != nil && *body.ClearEditableRank {
 		unset["formTemplate.editableByRankRule"] = ""
+	} else {
+		// Legacy single-department set/clear path (older clients).
+		if body.VisibleToRankRule != nil {
+			set["formTemplate.visibleToRankRule"] = body.VisibleToRankRule
+		}
+		if body.EditableByRankRule != nil {
+			set["formTemplate.editableByRankRule"] = body.EditableByRankRule
+		}
+		if body.ClearVisibleRank != nil && *body.ClearVisibleRank {
+			unset["formTemplate.visibleToRankRule"] = ""
+		}
+		if body.ClearEditableRank != nil && *body.ClearEditableRank {
+			unset["formTemplate.editableByRankRule"] = ""
+		}
 	}
 	if body.LinkableEntities != nil {
 		set["formTemplate.linkableEntities"] = *body.LinkableEntities
@@ -348,9 +389,9 @@ func (h FormTemplate) HideDefaultFormTemplateHandler(w http.ResponseWriter, r *h
 			"formTemplate.updatedAt":   now,
 		},
 		"$setOnInsert": bson.M{
-			"_id":                     primitive.NewObjectID(),
-			"formTemplate.createdAt":  now,
-			"formTemplate.createdBy":  api.GetAuthenticatedUserIDFromContext(r.Context()),
+			"_id":                    primitive.NewObjectID(),
+			"formTemplate.createdAt": now,
+			"formTemplate.createdBy": api.GetAuthenticatedUserIDFromContext(r.Context()),
 		},
 		"$inc": bson.M{"__v": 0},
 	}
@@ -373,6 +414,7 @@ func (h FormTemplate) FormTemplatesByCommunityHandlerV2(w http.ResponseWriter, r
 	communityID := mux.Vars(r)["community_id"]
 	includeArchived := r.URL.Query().Get("includeArchived") == "true"
 	includeHidden := r.URL.Query().Get("includeHidden") == "true"
+	userID := r.URL.Query().Get("userId")
 
 	Limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || Limit <= 0 {
@@ -390,6 +432,9 @@ func (h FormTemplate) FormTemplatesByCommunityHandlerV2(w http.ResponseWriter, r
 	}
 
 	views := h.mergeTemplatesAndDefaults(ctx, stored, includeArchived, includeHidden)
+	// When a userId is supplied, hide forms the user's rank can't see and
+	// annotate CanEdit. Omitted for the admin builder, which passes no user.
+	views = h.applyUserAccess(ctx, communityID, userID, views)
 
 	// Pagination over the merged list.
 	totalCount := int64(len(views))
@@ -421,6 +466,7 @@ func (h FormTemplate) FormTemplatesByCommunityHandlerV2(w http.ResponseWriter, r
 func (h FormTemplate) FormTemplatesByDepartmentHandlerV2(w http.ResponseWriter, r *http.Request) {
 	deptID := mux.Vars(r)["dept_id"]
 	communityID := r.URL.Query().Get("communityID")
+	userID := r.URL.Query().Get("userId")
 	if communityID == "" {
 		config.ErrorStatus("communityID query param is required", http.StatusBadRequest, w, fmt.Errorf("missing communityID"))
 		return
@@ -457,6 +503,7 @@ func (h FormTemplate) FormTemplatesByDepartmentHandlerV2(w http.ResponseWriter, 
 			enabled = append(enabled, v)
 		}
 	}
+	enabled = h.applyUserAccess(ctx, communityID, userID, enabled)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -515,6 +562,34 @@ func (h FormTemplate) mergeTemplatesAndDefaults(ctx context.Context, stored []mo
 	return out
 }
 
+// applyUserAccess filters a merged view list down to the templates the given
+// user may see and annotates each with CanEdit. When userID is empty (e.g.
+// the admin builder fetch) the list is returned unchanged and CanEdit is left
+// nil, so callers that don't pass a user keep seeing every template.
+func (h FormTemplate) applyUserAccess(ctx context.Context, communityID, userID string, views []models.FormTemplateView) []models.FormTemplateView {
+	if userID == "" || h.CommDB == nil {
+		return views
+	}
+	commID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return views
+	}
+	community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil {
+		return views
+	}
+	out := make([]models.FormTemplateView, 0, len(views))
+	for _, v := range views {
+		if !helpers.UserCanSeeForm(community, userID, v.RankGates) {
+			continue
+		}
+		canEdit := helpers.UserCanEditForm(community, userID, v.RankGates)
+		v.CanEdit = &canEdit
+		out = append(out, v)
+	}
+	return out
+}
+
 func (h FormTemplate) fetchVersionSections(ctx context.Context, formTemplateID string, version int32) ([]models.FormSection, error) {
 	v, err := h.VDB.FindOne(ctx, bson.M{
 		"formTemplateVersion.formTemplateID": formTemplateID,
@@ -541,27 +616,77 @@ func (h FormTemplate) fetchVersionSections(ctx context.Context, formTemplateID s
 }
 
 func storedTemplateToView(t models.FormTemplate) models.FormTemplateView {
-	return models.FormTemplateView{
-		ID:                 t.ID.Hex(),
-		CommunityID:        t.Details.CommunityID,
-		DepartmentID:       t.Details.DepartmentID,
-		Name:               t.Details.Name,
-		Slug:               t.Details.Slug,
-		Description:        t.Details.Description,
-		Icon:               t.Details.Icon,
-		CurrentVersion:     t.Details.CurrentVersion,
-		NumberFormat:       t.Details.NumberFormat,
-		VisibleToRoles:     t.Details.VisibleToRoles,
-		EditableByRoles:    t.Details.EditableByRoles,
-		VisibleToRankRule:  t.Details.VisibleToRankRule,
-		EditableByRankRule: t.Details.EditableByRankRule,
-		LinkableEntities:   t.Details.LinkableEntities,
-		IsDefault:          false,
-		IsHidden:           t.Details.IsHidden,
-		IsArchived:         t.Details.IsArchived,
-		CreatedAt:          t.Details.CreatedAt,
-		UpdatedAt:          t.Details.UpdatedAt,
+	gates := t.Details.EffectiveRankGates()
+	view := models.FormTemplateView{
+		ID:               t.ID.Hex(),
+		CommunityID:      t.Details.CommunityID,
+		Name:             t.Details.Name,
+		Slug:             t.Details.Slug,
+		Description:      t.Details.Description,
+		Icon:             t.Details.Icon,
+		CurrentVersion:   t.Details.CurrentVersion,
+		NumberFormat:     t.Details.NumberFormat,
+		VisibleToRoles:   t.Details.VisibleToRoles,
+		EditableByRoles:  t.Details.EditableByRoles,
+		RankGates:        gates,
+		LinkableEntities: t.Details.LinkableEntities,
+		IsDefault:        false,
+		IsHidden:         t.Details.IsHidden,
+		IsArchived:       t.Details.IsArchived,
+		CreatedAt:        t.Details.CreatedAt,
+		UpdatedAt:        t.Details.UpdatedAt,
 	}
+	// Mirror the first gate into the legacy single-department fields so
+	// older clients that still read them keep working during rollout.
+	if len(gates) > 0 {
+		view.DepartmentID = gates[0].DepartmentID
+		view.VisibleToRankRule = gates[0].VisibleToRankRule
+		view.EditableByRankRule = gates[0].EditableByRankRule
+	}
+	return view
+}
+
+// validateRankGates checks that each gate targets a real department in the
+// community and that every anchor rank belongs to that department. An empty
+// gate list is valid (no rank gating). When the community DB is unavailable
+// validation is skipped rather than blocking the write.
+func (h FormTemplate) validateRankGates(ctx context.Context, communityID string, gates []models.DepartmentRankGate) error {
+	if len(gates) == 0 || h.CommDB == nil {
+		return nil
+	}
+	commID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return fmt.Errorf("invalid community id")
+	}
+	community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil {
+		return fmt.Errorf("community not found")
+	}
+	seen := map[string]bool{}
+	for _, g := range gates {
+		if g.DepartmentID == "" {
+			return fmt.Errorf("rank gate is missing departmentId")
+		}
+		if seen[g.DepartmentID] {
+			return fmt.Errorf("duplicate rank gate for department %s", g.DepartmentID)
+		}
+		seen[g.DepartmentID] = true
+		dept := helpers.FindDepartment(community, g.DepartmentID)
+		if dept == nil {
+			return fmt.Errorf("department %s not found in community", g.DepartmentID)
+		}
+		for _, rule := range []*models.RankRule{g.VisibleToRankRule, g.EditableByRankRule} {
+			if rule.IsEmpty() {
+				continue
+			}
+			for _, rid := range rule.AnchorRankIDs {
+				if helpers.FindRank(dept, rid) == nil {
+					return fmt.Errorf("rank %s does not belong to department %s", rid, g.DepartmentID)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func defaultIfBlank(s, fallback string) string {
