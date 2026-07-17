@@ -345,3 +345,158 @@ func TestConfirmPasswordChange_HappyPath_HashesAndUpdates(t *testing.T) {
 	mockUDB.AssertCalled(t, "UpdateOne", mock.Anything, bson.M{"_id": uID}, mock.Anything)
 	mockPVDB.AssertCalled(t, "DeleteOne", mock.Anything, bson.M{"_id": rowID})
 }
+
+// -----------------------------------------------------------------------------
+// ForgotPassword (unauthenticated reset) handlers
+// -----------------------------------------------------------------------------
+
+// stubUserFindByEmail wires UDB.FindOne({"user.email": email}) → user document (or a decode error).
+func stubUserFindByEmail(mockUserDB *mocks.UserDatabase, email string, user *models.User, decodeErr error) {
+	mr := &mocks.SingleResultHelper{}
+	if decodeErr != nil {
+		mr.On("Decode", mock.Anything).Return(decodeErr)
+	} else {
+		mr.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+			ptr := args.Get(0).(*models.User)
+			*ptr = *user
+		}).Return(nil)
+	}
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"user.email": email}).Return(mr)
+}
+
+func TestForgotPasswordRequestCode_InvalidEmail_Returns400(t *testing.T) {
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"email":"not-an-email"}`, nil)
+	http.HandlerFunc(pv.ForgotPasswordRequestCodeHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	mockUDB.AssertNotCalled(t, "FindOne", mock.Anything, mock.Anything)
+}
+
+// An unknown email must still return 200 (generic) and never store a code — no enumeration.
+func TestForgotPasswordRequestCode_UnknownEmail_Returns200_NoStore(t *testing.T) {
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+	stubUserFindByEmail(mockUDB, "ghost@example.com", nil, mongo.ErrNoDocuments)
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"email":"ghost@example.com"}`, nil)
+	http.HandlerFunc(pv.ForgotPasswordRequestCodeHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	mockPVDB.AssertNotCalled(t, "InsertOne", mock.Anything, mock.Anything)
+	mockPVDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestForgotPasswordRequestCode_HappyPath_StoresCodeAndReturns200(t *testing.T) {
+	uID := primitive.NewObjectID()
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+	stubUserFindByEmail(mockUDB, "user@example.com", &models.User{
+		ID: uID.Hex(), Details: models.UserDetails{Email: "user@example.com"},
+	}, nil)
+	// Rate-limit FindOne and upsert FindOne (same filter) both find no prior row.
+	mockPVDB.On("FindOne", mock.Anything, bson.M{"userID": uID, "purpose": models.PurposePasswordReset}).
+		Return((*models.PendingVerification)(nil), mongo.ErrNoDocuments)
+	mockPVDB.On("InsertOne", mock.Anything, mock.AnythingOfType("models.PendingVerification")).
+		Return(&mocks.InsertOneResultHelper{}, nil)
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"email":"user@example.com"}`, nil)
+	http.HandlerFunc(pv.ForgotPasswordRequestCodeHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	mockPVDB.AssertCalled(t, "InsertOne", mock.Anything, mock.AnythingOfType("models.PendingVerification"))
+}
+
+func TestForgotPasswordReset_ShortPassword_Returns400(t *testing.T) {
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"email":"user@example.com","code":"123456","newPassword":"short"}`, nil)
+	http.HandlerFunc(pv.ForgotPasswordResetHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	mockUDB.AssertNotCalled(t, "FindOne", mock.Anything, mock.Anything)
+}
+
+func TestForgotPasswordReset_NoPendingRow_Returns400(t *testing.T) {
+	uID := primitive.NewObjectID()
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+	stubUserFindByEmail(mockUDB, "user@example.com", &models.User{
+		ID: uID.Hex(), Details: models.UserDetails{Email: "user@example.com"},
+	}, nil)
+	mockPVDB.On("FindOne", mock.Anything, bson.M{"userID": uID, "purpose": models.PurposePasswordReset}).
+		Return((*models.PendingVerification)(nil), mongo.ErrNoDocuments)
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"email":"user@example.com","code":"123456","newPassword":"a-good-password"}`, nil)
+	http.HandlerFunc(pv.ForgotPasswordResetHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	mockUDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestForgotPasswordReset_WrongCode_IncrementsAttempts(t *testing.T) {
+	uID := primitive.NewObjectID()
+	rowID := primitive.NewObjectID()
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+	future := primitive.NewDateTimeFromTime(time.Now().Add(10 * time.Minute))
+	stubUserFindByEmail(mockUDB, "user@example.com", &models.User{
+		ID: uID.Hex(), Details: models.UserDetails{Email: "user@example.com"},
+	}, nil)
+	mockPVDB.On("FindOne", mock.Anything, bson.M{"userID": uID, "purpose": models.PurposePasswordReset}).
+		Return(&models.PendingVerification{
+			ID: rowID, UserID: uID, Purpose: models.PurposePasswordReset,
+			Code: "999999", Email: "user@example.com", Attempts: 0, ExpiresAt: future,
+		}, nil)
+	mockPVDB.On("UpdateOne", mock.Anything, bson.M{"_id": rowID}, bson.M{"$inc": bson.M{"attempts": 1}}).Return(nil)
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"email":"user@example.com","code":"123456","newPassword":"a-good-password"}`, nil)
+	http.HandlerFunc(pv.ForgotPasswordResetHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	mockUDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+	mockPVDB.AssertCalled(t, "UpdateOne", mock.Anything, bson.M{"_id": rowID}, bson.M{"$inc": bson.M{"attempts": 1}})
+}
+
+func TestForgotPasswordReset_HappyPath_UpdatesPassword(t *testing.T) {
+	uID := primitive.NewObjectID()
+	rowID := primitive.NewObjectID()
+	mockUDB := &mocks.UserDatabase{}
+	mockPVDB := &mocks.PendingVerificationDatabase{}
+	future := primitive.NewDateTimeFromTime(time.Now().Add(10 * time.Minute))
+	stubUserFindByEmail(mockUDB, "user@example.com", &models.User{
+		ID: uID.Hex(), Details: models.UserDetails{Email: "user@example.com"},
+	}, nil)
+	mockPVDB.On("FindOne", mock.Anything, bson.M{"userID": uID, "purpose": models.PurposePasswordReset}).
+		Return(&models.PendingVerification{
+			ID: rowID, UserID: uID, Purpose: models.PurposePasswordReset,
+			Code: "123456", Email: "user@example.com", Attempts: 0, ExpiresAt: future,
+		}, nil)
+	mockUDB.On("UpdateOne", mock.Anything, bson.M{"_id": uID}, mock.Anything).
+		Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockPVDB.On("DeleteOne", mock.Anything, bson.M{"_id": rowID}).Return(nil)
+
+	pv := handlers.PendingVerification{PVDB: mockPVDB, UDB: mockUDB}
+	rr := httptest.NewRecorder()
+	req := newJSONRequest(t, "POST", `{"email":"user@example.com","code":"123456","newPassword":"a-good-password"}`, nil)
+	http.HandlerFunc(pv.ForgotPasswordResetHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	mockUDB.AssertCalled(t, "UpdateOne", mock.Anything, bson.M{"_id": uID}, mock.Anything)
+	mockPVDB.AssertCalled(t, "DeleteOne", mock.Anything, bson.M{"_id": rowID})
+}

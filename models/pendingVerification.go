@@ -8,6 +8,7 @@ const (
 	PurposeSignup         = "signup"
 	PurposeEmailChange    = "email_change"
 	PurposePasswordChange = "password_change"
+	PurposePasswordReset  = "password_reset"
 )
 
 // PendingVerification holds the structure for the pending verification collection in MongoDB

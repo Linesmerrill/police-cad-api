@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/linesmerrill/police-cad-api/api"
@@ -349,6 +350,171 @@ func (pv PendingVerification) ConfirmPasswordChangeHandler(w http.ResponseWriter
 			HTML:      templates.RenderPasswordChangedNotice(),
 		})
 	}
+
+	writeJSONOK(w, "Password updated successfully")
+}
+
+// ForgotPasswordRequestCodeHandler starts an UNAUTHENTICATED password reset. Given an email, if a
+// matching account exists it mails a 6-digit code (purpose=password_reset). It always returns 200
+// with a generic message — whether or not the account exists, and even when rate-limited — so the
+// endpoint can't be used to discover which emails are registered.
+func (pv PendingVerification) ForgotPasswordRequestCodeHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+	email := strings.TrimSpace(strings.ToLower(body.Email))
+	if email == "" || !strings.Contains(email, "@") {
+		writeJSONError(w, http.StatusBadRequest, "A valid email is required")
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Generic success — returned in every non-error branch below so callers can't tell a
+	// registered email from an unregistered one.
+	genericOK := func() {
+		writeJSONOK(w, "If an account exists for that email, a reset code has been sent.")
+	}
+
+	user := models.User{}
+	if err := pv.UDB.FindOne(ctx, bson.M{"user.email": email}).Decode(&user); err != nil {
+		// No account — respond OK without sending, so the endpoint can't confirm registration.
+		if err != mongo.ErrNoDocuments {
+			zap.S().Warnf("forgot-password user lookup failed for %s: %v", email, err)
+		}
+		genericOK()
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(user.ID)
+	if err != nil {
+		// Legacy non-ObjectID _id we can't drive through the sensitive-code flow — respond OK
+		// without sending. (Those rare users still have the website token reset.)
+		genericOK()
+		return
+	}
+
+	// Silently skip the send when rate-limited so the generic response is preserved.
+	if err := checkSensitiveCodeRateLimit(ctx, pv.PVDB, uID, models.PurposePasswordReset); err != nil {
+		genericOK()
+		return
+	}
+
+	code, err := generateNumericCode()
+	if err != nil {
+		config.ErrorStatus("failed to generate reset code", http.StatusInternalServerError, w, err)
+		return
+	}
+	if err := upsertSensitiveCode(ctx, pv.PVDB, uID, models.PurposePasswordReset, email, "", code); err != nil {
+		config.ErrorStatus("failed to store reset code", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	sendSensitiveEmailAsync(sensitiveEmail{
+		To:        email,
+		Subject:   "Lines Police CAD: Password Reset Code",
+		PlainText: "Your password reset code is: " + code + ". This code expires in 15 minutes. If you did not request this, you can safely ignore this email.",
+		HTML:      templates.RenderPasswordChangeCode(code),
+	})
+
+	genericOK()
+}
+
+// ForgotPasswordResetHandler completes an UNAUTHENTICATED reset. Given email + 6-digit code +
+// newPassword, it verifies the code (purpose=password_reset) and sets the new password. Errors are
+// generic ("invalid or expired code") so they don't reveal whether the account exists.
+func (pv PendingVerification) ForgotPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email       string `json:"email"`
+		Code        string `json:"code"`
+		NewPassword string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+	email := strings.TrimSpace(strings.ToLower(body.Email))
+	if email == "" || strings.TrimSpace(body.Code) == "" {
+		writeJSONError(w, http.StatusBadRequest, "Email and verification code are required")
+		return
+	}
+	if len(body.NewPassword) < minPasswordLength {
+		writeJSONError(w, http.StatusBadRequest, "New password must be at least 6 characters")
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	user := models.User{}
+	if err := pv.UDB.FindOne(ctx, bson.M{"user.email": email}).Decode(&user); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid or expired verification code")
+		return
+	}
+
+	uID, err := primitive.ObjectIDFromHex(user.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid or expired verification code")
+		return
+	}
+
+	pending, err := pv.PVDB.FindOne(ctx, bson.M{"userID": uID, "purpose": models.PurposePasswordReset})
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			writeJSONError(w, http.StatusBadRequest, "Invalid or expired verification code")
+			return
+		}
+		config.ErrorStatus("failed to find pending reset", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if expired := timeFromBSON(pending.ExpiresAt); !expired.IsZero() && time.Now().After(expired) {
+		_ = pv.PVDB.DeleteOne(ctx, bson.M{"_id": pending.ID})
+		writeJSONError(w, http.StatusBadRequest, "Verification code expired. Request a new one.")
+		return
+	}
+
+	if pending.Attempts >= sensitiveMaxRetries {
+		_ = pv.PVDB.DeleteOne(ctx, bson.M{"_id": pending.ID})
+		writeJSONError(w, http.StatusBadRequest, "Too many attempts. Request a new code.")
+		return
+	}
+
+	if !codesEqualConstantTime(pending.Code, body.Code) {
+		_ = pv.PVDB.UpdateOne(ctx, bson.M{"_id": pending.ID}, bson.M{"$inc": bson.M{"attempts": 1}})
+		writeJSONError(w, http.StatusBadRequest, "Invalid verification code")
+		return
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		config.ErrorStatus("failed to hash new password", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	if _, err := pv.UDB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
+		"$set": bson.M{
+			"user.password":  string(hashed),
+			"user.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+		},
+	}); err != nil {
+		config.ErrorStatus("failed to update password", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	_ = pv.PVDB.DeleteOne(ctx, bson.M{"_id": pending.ID})
+
+	sendSensitiveEmailAsync(sensitiveEmail{
+		To:        email,
+		Subject:   "Lines Police CAD: Your Password Was Changed",
+		PlainText: "The password on your Lines Police CAD account was just reset. If this wasn't you, contact support immediately at https://www.linespolice-cad.com/contact-us.",
+		HTML:      templates.RenderPasswordChangedNotice(),
+	})
 
 	writeJSONOK(w, "Password updated successfully")
 }
