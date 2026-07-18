@@ -4,7 +4,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-
 // Civilian holds the structure for the civilian collection in mongo
 type Civilian struct {
 	ID      primitive.ObjectID `json:"_id" bson:"_id"`
@@ -27,6 +26,7 @@ type CivilianDetails struct {
 	CriminalHistory      []CriminalHistory  `json:"criminalHistory" bson:"criminalHistory"`
 	Gender               string             `json:"gender" bson:"gender"`
 	Address              string             `json:"address" bson:"address"`
+	Phone                string             `json:"phone,omitempty" bson:"phone,omitempty"` // optional contact phone; prefill source for citations
 	Race                 string             `json:"race" bson:"race"`
 	HairColor            string             `json:"hairColor" bson:"hairColor"`
 	Weight               string             `json:"weight" bson:"weight"` // TODO may need to change the database definition
@@ -44,10 +44,10 @@ type CivilianDetails struct {
 	Occupation           string             `json:"occupation" bson:"occupation"`
 	FirearmLicense       string             `json:"firearmLicense" bson:"firearmLicense"`
 	ActiveCommunityID    string             `json:"activeCommunityID" bson:"activeCommunityID"`
-	Deceased              bool              `json:"deceased" bson:"deceased"`
+	Deceased             bool               `json:"deceased" bson:"deceased"`
 	UserID               string             `json:"userID" bson:"userID"`
-	Balance              int64              `json:"balance" bson:"balance"`                         // Economy: balance in cents
-	BalanceInitialized   bool               `json:"balanceInitialized" bson:"balanceInitialized"`   // Economy: true once lazy-backfilled
+	Balance              int64              `json:"balance" bson:"balance"`                       // Economy: balance in cents
+	BalanceInitialized   bool               `json:"balanceInitialized" bson:"balanceInitialized"` // Economy: true once lazy-backfilled
 	CreatedAt            primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
@@ -64,14 +64,29 @@ type CriminalHistory struct {
 	Status       string             `json:"status" bson:"status"`           // "", "contested", "dismissed"
 	DismissedBy  string             `json:"dismissedBy" bson:"dismissedBy"` // judge name when dismissed
 	CourtCaseID  string             `json:"courtCaseID" bson:"courtCaseID"` // linked court case ID
-	CreatedAt    primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt    primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	// Ticket-format fields (all optional). See tasks/ticket-format-pd.md.
+	Phone               string             `json:"phone,omitempty" bson:"phone,omitempty"`                             // violator contact phone (autofills from civilian, editable)
+	StopLocation        string             `json:"stopLocation,omitempty" bson:"stopLocation,omitempty"`               // location of the stop
+	IncidentTime        string             `json:"incidentTime,omitempty" bson:"incidentTime,omitempty"`               // time of the stop (date is CreatedAt)
+	OfficerBadge        string             `json:"officerBadge,omitempty" bson:"officerBadge,omitempty"`               // reporting officer badge/callsign
+	AssistingOfficerIDs []string           `json:"assistingOfficerIDs,omitempty" bson:"assistingOfficerIDs,omitempty"` // additional attached officers; each is credited in stats
+	Vehicle             *CitationVehicle   `json:"vehicle,omitempty" bson:"vehicle,omitempty"`                         // optional vehicle block
+	CreatedAt           primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt           primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// CitationVehicle holds the optional vehicle block on a ticket/citation
+type CitationVehicle struct {
+	Plate string `json:"plate,omitempty" bson:"plate,omitempty"`
+	Make  string `json:"make,omitempty" bson:"make,omitempty"`
+	Model string `json:"model,omitempty" bson:"model,omitempty"`
+	Color string `json:"color,omitempty" bson:"color,omitempty"`
 }
 
 // Fine holds the structure for the fine
 type Fine struct {
-	FineType   string `json:"fineType" bson:"fineType"`           // Speeding, Public Intoxication, etc.
-	FineAmount int    `json:"fineAmount" bson:"fineAmount"`       // 125, 150, etc.
-	Category   string `json:"category" bson:"category"`           // Misdemeanor, Felony, etc.
+	FineType   string `json:"fineType" bson:"fineType"`                 // Speeding, Public Intoxication, etc.
+	FineAmount int    `json:"fineAmount" bson:"fineAmount"`             // 125, 150, etc.
+	Category   string `json:"category" bson:"category"`                 // Misdemeanor, Felony, etc.
 	Status     string `json:"status,omitempty" bson:"status,omitempty"` // "" (open) | "upheld" | "dismissed" — set by judge per-charge resolution
 }
