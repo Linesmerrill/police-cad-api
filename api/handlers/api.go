@@ -309,6 +309,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/verify/verify-code", http.HandlerFunc(pv.VerifyCodeHandler)).Methods("POST")
 	apiCreate.Handle("/verify/resend-verification-code", http.HandlerFunc(pv.ResendVerificationCodeHandler)).Methods("POST")
 
+	// Unauthenticated forgot-password (6-digit code) flow.
+	apiCreate.Handle("/user/forgot-password/request-code", http.HandlerFunc(pv.ForgotPasswordRequestCodeHandler)).Methods("POST")
+	apiCreate.Handle("/user/forgot-password/verify-code", http.HandlerFunc(pv.ForgotPasswordVerifyCodeHandler)).Methods("POST")
+	apiCreate.Handle("/user/forgot-password/reset", http.HandlerFunc(pv.ForgotPasswordResetHandler)).Methods("POST")
+
 	apiCreate.Handle("/community", api.Middleware(http.HandlerFunc(c.CreateCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/subscribe", api.Middleware(http.HandlerFunc(c.SubscribeCommunityHandler))).Methods("POST")
 	apiCreate.Handle("/community/cancel-subscription", api.Middleware(http.HandlerFunc(c.CancelCommunitySubscriptionHandler))).Methods("POST")

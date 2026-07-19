@@ -25,13 +25,16 @@ const (
 // present either a valid bearer token (browser + mobile) or the first-party
 // gateway secret (website backend, server-to-server).
 var publicWritePaths = map[string]bool{
-	"/api/v1/auth/token":                      true, // login (HTTP basic auth)
-	"/api/v1/auth/logout":                     true, // revoke (carries its own token)
-	"/api/v1/user/create-user":                true, // signup
-	"/api/v1/user/check-user":                 true, // email-exists check during signup
-	"/api/v1/verify/send-verification-code":   true,
-	"/api/v1/verify/verify-code":              true,
-	"/api/v1/verify/resend-verification-code": true,
+	"/api/v1/auth/token":                        true, // login (HTTP basic auth)
+	"/api/v1/auth/logout":                       true, // revoke (carries its own token)
+	"/api/v1/user/create-user":                  true, // signup
+	"/api/v1/user/check-user":                   true, // email-exists check during signup
+	"/api/v1/verify/send-verification-code":     true,
+	"/api/v1/verify/verify-code":                true,
+	"/api/v1/verify/resend-verification-code":   true,
+	"/api/v1/user/forgot-password/request-code": true, // forgot password: request 6-digit code
+	"/api/v1/user/forgot-password/verify-code":  true, // forgot password: check code before advancing
+	"/api/v1/user/forgot-password/reset":        true, // forgot password: submit code + new password
 }
 
 // writeAllowedOrigins are our own web origins. Browser-initiated writes from the
