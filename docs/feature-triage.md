@@ -1,8 +1,8 @@
 # Feature Request Triage — Living Doc
 
-_Auto-generated 2026-07-13 17:55 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
+_Auto-generated 2026-07-20 18:04 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
 
-**40** active requests · **212** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
+**44** active requests · **221** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
 
 **Legend** — Scope: 🌐 website · ⚙️ API · 📱 mobile · 🤖 bot. Effort: S (<1d) · M (few days) · L (1–2wk) · XL (multi-wk). Priority = upvotes + 2×comments.
 
@@ -24,9 +24,9 @@ Highest-value low-effort items (quick wins & easy), by priority:
 |---|---:|---:|
 | ⚡ Quick Wins | 2 | 9 |
 | 🟢 Easy / Low-Hanging | 3 | 8 |
-| 🏗️ Full Features | 30 | 167 |
-| 🚫 Probably Shouldn't Add | 4 | 26 |
-| ⚠️ Untriaged | 1 | 2 |
+| 🏗️ Full Features | 30 | 169 |
+| 🚫 Probably Shouldn't Add | 4 | 27 |
+| ⚠️ Untriaged | 5 | 8 |
 
 **Surface impact** (active triaged items touching each surface): 🌐 website 33 · ⚙️ api 34 · 📱 mobile 31 · 🤖 bot 6
 
@@ -58,8 +58,8 @@ _Substantial builds — plan and phase these._
 |   | [Items, custom looting and crafting](https://www.linespolice-cad.com/feature-requests/6a13d4bf07d208ef76c64182) | 46 | 11 | XL | ⚙️ 🌐 📱 🤖 api/website/mobile/bot | Cryptic | Highest-voted request (46). The custom-items + shop + inventory core aligns with the economy/inventory system staff already said is planned. But the full FiveM scope (looting, crafting, hunger/thirst) is a big lane change for a CAD — a commenter even said 'this is a cad system not a fivem addon'. Recommend carving an MVP: custom items + shops + inventory tied to the existing economy, and defer hunger/crafting/looting. _Risks/deps: Scope creep; pay-to-win concerns raised in comments; depends on economy system (already shipped)._ _Possible dup: Custom Civilian Jobs + Buyable Items; Job system; Department Overhaul_ |
 |   | [Parity with Emergency Response Liberty County (Roblox)](https://www.linespolice-cad.com/feature-requests/69a90489f5524b2c4aa0834b) | 18 | 7 | XL | ⚙️ 🌐 📱 api/website/mobile | Josevf479 | ER:LC PRC API can supply live player lists, callsigns, locations, join/leave logs and some in-game commands — enabling live unit tracking, duty logging and CAD-to-game announcements. No RP data (civilians/warrants) is exposed, so it's about bringing live game state in, not syncing records. Staff already publicly deferred pending stronger demand; requester notes plates + emergency calls were recently added to the API. _Risks/deps: Poll-based external API needs background services/infra; gauge demand before committing. Phase as MVP (status/players/commands) → live map._ _Possible dup: A FiveM Addon for the cad/ticket system_ |
 |   | [Link characters](https://www.linespolice-cad.com/feature-requests/69aca7d24794df4f176b596d) | 9 | 5 | M | ⚙️ 🌐 📱 api/website/mobile | Braids | Link civilian profiles for relationships (spouse, family). Contained: a relationship reference on the civilian model plus UI to set/display it. Positive reception incl. staff ('cool concept'); 9 votes, 4 comments of agreement. _Risks/deps: Decide directionality/consent (mutual link vs one-way)._ |
+|   | [Ticket Format for the PD](https://www.linespolice-cad.com/feature-requests/6a3d4781bd5933e6c9b8badf) | 12 | 2 | M | ⚙️ 🌐 📱 api/website/mobile | Real_Halx | Adds a richer, realistic ticket/citation format with extra fields (e.g. phone number for follow-ups) that carry into court. Citations already exist; this extends the citation model + issue forms across surfaces. Solid votes (9) for a moderate change. _Risks/deps: Coordinate field changes with the court/case view so judges see the added info._ |
 |   | [‼️Role Syncing‼️](https://www.linespolice-cad.com/feature-requests/69d32a709c76e1ecb185684a) | 9 | 2 | L | 🌐 ⚙️ 🤖 website/api/bot | Cryptic | Sync Discord roles → CAD community roles on join. Discord OAuth linking exists but only with 'identify' scope; needs expanded scope (guilds/roles), a community↔guild mapping, a Discord-role→CAD-role mapping table, and auto-enroll logic. Staff flagged a caveat: syncing roles still requires re-adding members + setting permissions. _Risks/deps: OAuth scope expansion; new mapping config UI; permission edge cases._ |
-|   | [Ticket Format for the PD](https://www.linespolice-cad.com/feature-requests/6a3d4781bd5933e6c9b8badf) | 10 | 1 | M | ⚙️ 🌐 📱 api/website/mobile | Real_Halx | Adds a richer, realistic ticket/citation format with extra fields (e.g. phone number for follow-ups) that carry into court. Citations already exist; this extends the citation model + issue forms across surfaces. Solid votes (9) for a moderate change. _Risks/deps: Coordinate field changes with the court/case view so judges see the added info._ |
 |   | [Give Police a option to see someone's medical history](https://www.linespolice-cad.com/feature-requests/69a8879367bba4188404c58f) | 5 | 2 | M | ⚙️ 🌐 📱 api/website/mobile | Dukk | Toggle to let police view medical history on servers without EMS/Fire. Staff framed it as a configurable, per-department component under the planned Custom Departments work. Medical history already exists (EMS); this is a permission/visibility toggle + surfacing it to police. _Risks/deps: Ties into Custom Departments plan; privacy toggle default off._ |
 |   | [DMV, guns](https://www.linespolice-cad.com/feature-requests/69c43fbf12dc46d46229c7b4) | 7 | 0 | L | ⚙️ 🌐 📱 api/website/mobile | Rorrry | DMV/firearm approval workflow: approve/deny vehicle registrations, emissions tests, and firearm applications, with a chat to arrange appointments. Confirmed no approval state exists today for vehicles or firearms (only civilians have approvalStatus) — so this adds a new approval lifecycle + a coordination chat. 7 votes. _Risks/deps: New approval state machine + notifications; chat overlaps the general chat request._ _Possible dup: Courts Department Update (DMV part); Department Overhaul (licensing)_ |
 |   | [Civilian/Police Records Issue/Suggestion](https://www.linespolice-cad.com/feature-requests/69fa8e161ce52768aea34994) 🧪 in beta | 5 | 1 | M | ⚙️ 🌐 📱 api/website/mobile | ShanRocky | Restrict civilians from deleting their own records and give supervisor roles controlled delete/manage (with bulk options). Staff agreed ('should have added from the beginning') and it's already in beta. Permission model + records exist; this gates deletion + adds supervisor tooling. _Risks/deps: Currently in beta_testing — in flight._ _Possible dup: Restrict who can suspend or revoke licenses_ |
@@ -92,8 +92,8 @@ _Out of scope, infeasible, or cost far outweighs value._
 
 | ✓ | Feature | ▲ | 💬 | Effort | Scope | Requested by | Assessment |
 |:--:|---|---:|---:|:--:|---|---|---|
+|   | [Chat Radios](https://www.linespolice-cad.com/feature-requests/6a1a90926f9bc001b6b14c03) | 14 | 0 | XL | — | Grim | Per-department voice chat. Same reasoning staff gave on the 'Radio' request: TeamSpeak/Discord already do voice exceptionally well, and building/operating a voice platform across web+mobile+bot is a large infra commitment that doesn't fit the quality bar. _Risks/deps: Voice infra cost/reliability._ _Possible dup: Radio; being able to have a radio to talk to others_ |
 |   | [BodyCams](https://www.linespolice-cad.com/feature-requests/69e5345eac5d3728a866664b) | 8 | 3 | XL | — | Rorrry | Body cams. Staff already explained the core blocker: consoles can't be captured externally, and the referenced demo relies on Roblox screen-share on PC. Only viable for PC/FiveM communities, so functionality is inherently limited. Not a fit as a general feature. _Risks/deps: Platform capture limitations are external and not solvable by us._ |
-|   | [Chat Radios](https://www.linespolice-cad.com/feature-requests/6a1a90926f9bc001b6b14c03) | 13 | 0 | XL | — | Grim | Per-department voice chat. Same reasoning staff gave on the 'Radio' request: TeamSpeak/Discord already do voice exceptionally well, and building/operating a voice platform across web+mobile+bot is a large infra commitment that doesn't fit the quality bar. _Risks/deps: Voice infra cost/reliability._ _Possible dup: Radio; being able to have a radio to talk to others_ |
 |   | [Login system](https://www.linespolice-cad.com/feature-requests/69f7d4433f57679bdb425d9c) | 1 | 2 | M | — | Sergant W. O'CONNOR | A per-department username/password login screen. Staff explained the existing 10-code online/offline (Signal 41/42) already handles department presence in real time. The clarified ask (a password gate per department) adds friction and a parallel auth model with little added value. _Risks/deps: Duplicates existing auth/presence; UX friction._ |
 |   | [Road names on map](https://www.linespolice-cad.com/feature-requests/6a182462c10fe9084bebc99a) | 4 | 0 | L | — | Grim | Road names on the map. Maps are static community-uploaded images (no vector/tile layer), so real road labeling would need either a vector-map refactor or manual per-map overlays. Simplest path is a community workaround: upload a map image that already includes street names. Low effort-to-value as a platform feature. _Risks/deps: Static-image map architecture; per-game-map street data unavailable._ |
 
@@ -103,7 +103,11 @@ _Add an entry to `triage.json` for each, then re-run._
 
 | Feature | ▲ | 💬 | Requested by |
 |---|---:|---:|---|
+| [Economy Jobs](https://www.linespolice-cad.com/feature-requests/6a557f9c2bc5e283b5375406) | 2 | 0 | BurnedBinkie860 |
+| [internal complaint form](https://www.linespolice-cad.com/feature-requests/6a55555e8ef6ef7b43ae9aef) | 2 | 0 | joeyjohn90 |
 | [Bail Bondsman](https://www.linespolice-cad.com/feature-requests/6a4e4ce1b4e78b4c04891d70) | 2 | 0 | Odin |
+| [Permission-Based External API for Community Websites](https://www.linespolice-cad.com/feature-requests/6a5924230bf718aca20fce2a) | 1 | 0 | Jonathan |
+| [Forms](https://www.linespolice-cad.com/feature-requests/6a58145a8d51e059fe204e05) | 1 | 0 | Sergant W. O'CONNOR |
 
 ## 📥 Unfiled Asks (not yet feature requests)
 
