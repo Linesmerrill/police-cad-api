@@ -236,10 +236,10 @@ func (c Community) UpdateRankHandler(w http.ResponseWriter, r *http.Request) {
 	prefix := fmt.Sprintf("community.departments.%d.ranks.%d.", deptIdx, rankIdx)
 
 	allowedFields := map[string]string{
-		"name":         prefix + "name",
-		"prefix":       prefix + "prefix",
-		"requirements": prefix + "requirements",
-		"autoPromote":  prefix + "autoPromote",
+		"name":           prefix + "name",
+		"prefix":         prefix + "prefix",
+		"requirements":   prefix + "requirements",
+		"autoPromote":    prefix + "autoPromote",
 		"canViewStats":   prefix + "canViewStats",
 		"isDefault":      prefix + "isDefault",
 		"payRatePerHour": prefix + "payRatePerHour",
@@ -1121,14 +1121,20 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 			if ranks[i].IsDefault {
 				currentRank = &ranks[i]
 				currentRankOrder = ranks[i].DisplayOrder
-				// Persist the default rank assignment
+				// Persist the default rank assignment. Stamp rankAssignedAt too —
+				// without it rankStatsSince() falls back to all-time forever, so the
+				// member's progress never resets and they can chain-promote off
+				// lifetime totals even with reset-stats-on-promotion enabled.
 				memberStatus.RankID = ranks[i].ID.Hex()
 				memberStatus.RankAssignmentType = "auto"
+				memberStatus.RankAssignedAt = primitive.NewDateTimeFromTime(time.Now())
 				rankPath := fmt.Sprintf("community.departments.%d.members.%d.rankId", deptIdx, memberIdx)
 				typePath := fmt.Sprintf("community.departments.%d.members.%d.rankAssignmentType", deptIdx, memberIdx)
+				assignedPath := fmt.Sprintf("community.departments.%d.members.%d.rankAssignedAt", deptIdx, memberIdx)
 				_ = c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": bson.M{
-					rankPath: memberStatus.RankID,
-					typePath:  memberStatus.RankAssignmentType,
+					rankPath:     memberStatus.RankID,
+					typePath:     memberStatus.RankAssignmentType,
+					assignedPath: memberStatus.RankAssignedAt,
 				}})
 				break
 			}
@@ -1284,17 +1290,17 @@ func (c Community) GetRankProgressHandler(w http.ResponseWriter, r *http.Request
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"userId":              userID,
-		"departmentId":        departmentID,
-		"currentRank":         currentRank,
-		"nextRank":            nextRank,
-		"metrics":             metricsResponse,
-		"progress":            progress,
-		"allRequirementsMet":  allMet,
-		"promoted":            promoted,
-		"previousRank":        previousRank,
-		"rankAssignedAt":      memberStatus.RankAssignedAt,
-		"rankAssignmentType":  memberStatus.RankAssignmentType,
+		"userId":                userID,
+		"departmentId":          departmentID,
+		"currentRank":           currentRank,
+		"nextRank":              nextRank,
+		"metrics":               metricsResponse,
+		"progress":              progress,
+		"allRequirementsMet":    allMet,
+		"promoted":              promoted,
+		"previousRank":          previousRank,
+		"rankAssignedAt":        memberStatus.RankAssignedAt,
+		"rankAssignmentType":    memberStatus.RankAssignmentType,
 		"resetStatsOnPromotion": resetMode,
 	})
 }
