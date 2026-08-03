@@ -313,10 +313,13 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rankID, found := findUserMembership(dept, userID)
-	// Public departments (approvalRequired=false) treat any community member
-	// as implicitly eligible — no explicit join required.
+	// Public departments (approvalRequired=false) treat any approved community
+	// member as implicitly eligible — no explicit join required. Use the
+	// authoritative membership source (community owner + user.Communities
+	// status=approved); the community.Members map is only populated after a
+	// user sets a 10-code, so relying on it 403s legitimate members.
 	if !found && !dept.ApprovalRequired {
-		if _, inCommunity := community.Details.Members[userID]; inCommunity {
+		if e.isApprovedCommunityMember(ctx, userID, req.CommunityID, community) {
 			found = true
 		}
 	}
