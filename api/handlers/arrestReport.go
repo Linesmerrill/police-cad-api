@@ -279,11 +279,15 @@ func (a ArrestReport) GetArrestReportsByArresteeIDHandler(w http.ResponseWriter,
 	findChan := make(chan findResult, 1)
 	countChan := make(chan countResult, 1)
 
-	// Fetch paginated data (async)
+	// Fetch paginated data (async). The sort is required, not cosmetic: without
+	// it skip/limit runs over Mongo's natural order, so a client walking more
+	// than one page can see duplicated or dropped reports. Most-recent-first
+	// matches GetArrestReportsByCommunityHandler.
 	go func() {
 		dbResp, err := a.DB.Find(ctx, filter, &options.FindOptions{
 			Limit: &limit64,
 			Skip:  &skip,
+			Sort:  bson.M{"_id": -1},
 		})
 		findChan <- findResult{reports: dbResp, err: err}
 	}()
