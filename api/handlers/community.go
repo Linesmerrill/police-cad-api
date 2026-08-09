@@ -5655,40 +5655,19 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Check if current user is the owner
+	// Ownership IS the authorization for this endpoint. The owner is the
+	// community's ultimate authority and can always hand it over.
+	//
+	// This used to carry a second gate requiring the owner to also be a member
+	// of a role literally named "Head Admin" with "administrator" enabled. That
+	// gate produced only false 403s: owners can rename roles (see
+	// models.IsHeadAdminRole, which is why the canonical check is by permission
+	// structure and never by name), and a community whose owner holds no admin
+	// role at all is the legacy shape BuildCommunityBackfill repairs rather than
+	// an unauthorized caller. Being the owner is already strictly stronger than
+	// holding administrator, so the check gated nothing it did not already have.
 	if community.Details.OwnerID != transferRequest.CurrentUserID {
 		config.ErrorStatus("only the current owner can transfer ownership", http.StatusForbidden, w, fmt.Errorf("user is not the community owner"))
-		return
-	}
-
-	// Check if current user has Head Admin role with administrator permission enabled
-	hasPermission := false
-	for _, role := range community.Details.Roles {
-		if role.Name == "Head Admin" {
-			// Check if current user is a member of this role
-			isMember := false
-			for _, member := range role.Members {
-				if member == transferRequest.CurrentUserID {
-					isMember = true
-					break
-				}
-			}
-
-			if isMember {
-				// Check if administrator permission is enabled
-				for _, permission := range role.Permissions {
-					if permission.Name == "administrator" && permission.Enabled {
-						hasPermission = true
-						break
-					}
-				}
-			}
-			break
-		}
-	}
-
-	if !hasPermission {
-		config.ErrorStatus("user does not have permission to transfer ownership", http.StatusForbidden, w, fmt.Errorf("user lacks required permissions"))
 		return
 	}
 
@@ -5715,36 +5694,51 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 		},
 	}
 
-	// Update the Head Admin role members to include the new owner
-	// Find the Head Admin role and update its members
-	for i, role := range community.Details.Roles {
-		if role.Name == "Head Admin" {
-			// Remove current owner from members if they're not the new owner
-			if transferRequest.CurrentUserID != transferRequest.NewOwnerID {
-				// Remove current owner from members
-				var newMembers []string
-				for _, member := range role.Members {
-					if member != transferRequest.CurrentUserID {
-						newMembers = append(newMembers, member)
-					}
-				}
-				// Add new owner to members if not already present
-				hasNewOwner := false
-				for _, member := range newMembers {
-					if member == transferRequest.NewOwnerID {
-						hasNewOwner = true
-						break
-					}
-				}
-				if !hasNewOwner {
-					newMembers = append(newMembers, transferRequest.NewOwnerID)
-				}
+	// Hand the admin role over along with ownership, so the new owner can
+	// actually administer what they now own.
+	//
+	// The role is located by permission structure (models.IsHeadAdminRole), not
+	// by the name "Head Admin", because owners can rename roles — matching on
+	// the name silently found nothing and left the new owner locked out of their
+	// own community. If the community has no admin role at all (legacy shape),
+	// stamp the canonical one onto the new owner rather than transferring them
+	// into a community they cannot manage.
+	//
+	// The whole roles array is written at once, as BuildCommunityBackfill does,
+	// keeping the write atomic and avoiding positional-path pitfalls.
+	if transferRequest.CurrentUserID != transferRequest.NewOwnerID {
+		newRoles := append([]models.Role{}, community.Details.Roles...)
 
-				// Update the role members
-				update["$set"].(bson.M)[fmt.Sprintf("community.roles.%d.members", i)] = newMembers
+		headAdminIdx := -1
+		for i := range newRoles {
+			if models.IsHeadAdminRole(newRoles[i]) {
+				headAdminIdx = i
+				break
 			}
-			break
 		}
+
+		if headAdminIdx >= 0 {
+			// Drop the outgoing owner, ensure the incoming one is present.
+			hasNewOwner := false
+			members := make([]string, 0, len(newRoles[headAdminIdx].Members)+1)
+			for _, member := range newRoles[headAdminIdx].Members {
+				if member == transferRequest.CurrentUserID {
+					continue
+				}
+				if member == transferRequest.NewOwnerID {
+					hasNewOwner = true
+				}
+				members = append(members, member)
+			}
+			if !hasNewOwner {
+				members = append(members, transferRequest.NewOwnerID)
+			}
+			newRoles[headAdminIdx].Members = members
+		} else {
+			newRoles = append(newRoles, models.BuildHeadAdminRole(transferRequest.NewOwnerID))
+		}
+
+		update["$set"].(bson.M)["community.roles"] = newRoles
 	}
 
 	// Apply the update
