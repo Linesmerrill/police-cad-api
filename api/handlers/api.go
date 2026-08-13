@@ -855,6 +855,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/content-creators/analytics", http.HandlerFunc(contentCreator.AdminGetAnalyticsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/content-creators/grace-period", http.HandlerFunc(contentCreator.AdminGetGracePeriodCreatorsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/content-creators/sync-all", http.HandlerFunc(contentCreator.AdminTriggerSyncAllHandler)).Methods("POST")
+	// Dry run by default; pass ?send=true to actually deliver.
+	apiCreate.Handle("/admin/content-creators/notify-tier-upgrade", http.HandlerFunc(contentCreator.AdminNotifyTierUpgradeHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")

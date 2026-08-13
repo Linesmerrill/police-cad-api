@@ -27,6 +27,48 @@ import (
 	"go.uber.org/zap"
 )
 
+// What the Content Creator Program grants. Kept here so the personal and
+// community halves are changed in one place rather than as scattered literals.
+//
+// The two use different vocabularies on purpose: a user's subscription plan is
+// a tier key (free/base/premium/premium_plus) while a community's
+// subscription.plan is a BOOST tier key (basic/standard/premium/elite) — see
+// the Discover ranking in user.go. The program previously wrote "base" to both,
+// which is not a valid boost tier, so the community half was granting a value
+// the boost system does not recognise.
+const (
+	ccProgramUserPlan      = models.TierPremiumPlus // highest user subscription tier
+	ccProgramCommunityPlan = "premium"              // community BOOST tier, not "premium_plus"
+)
+
+// ccProgramSubscriptionID is the marker written to subscription.id for anything
+// the program grants. Revocation matches on this prefix rather than on the plan
+// name, so changing what the program grants can never orphan an existing grant.
+const ccProgramSubscriptionPrefix = "cc_program_"
+
+// ccProgramGrantFilter matches only subscriptions this program created, so a
+// creator's own paid subscription is never deactivated when they leave.
+func ccProgramGrantFilter(field string) bson.M {
+	return bson.M{field: bson.M{"$regex": "^" + ccProgramSubscriptionPrefix}}
+}
+
+// isProgramGrant reports whether a subscription was created by this program
+// rather than bought by its holder.
+func isProgramGrant(sub models.Subscription) bool {
+	return strings.HasPrefix(sub.ID, ccProgramSubscriptionPrefix)
+}
+
+// isSelfFundedSubscription reports whether the holder is paying for this
+// subscription themselves. Those must never be overwritten or deactivated by
+// the program: our marker would replace the Stripe / app-store id while the
+// billing kept running, leaving money with nothing pointing at it.
+//
+// An inactive subscription is not self-funded for our purposes — a lapsed
+// record is safe to replace with a grant.
+func isSelfFundedSubscription(sub models.Subscription) bool {
+	return sub.Active && sub.ID != "" && !isProgramGrant(sub)
+}
+
 // ContentCreator handler struct for content creator endpoints
 type ContentCreator struct {
 	AppDB   databases.ContentCreatorApplicationDatabase
@@ -103,6 +145,95 @@ func (cc ContentCreator) sendApplicationSubmittedEmail(ctx context.Context, user
 			zap.S().Errorw("failed to send application submitted email", "error", err, "userId", userID.Hex())
 		}
 	}()
+}
+
+// ccProgramAnnualValue is the combined yearly saving quoted to creators:
+// Premium Plus at $99/yr plus a Premium community boost at $8/mo. Both are the
+// prices actually charged, not the struck-through "full" prices.
+const ccProgramAnnualValue = "$195"
+
+// AdminNotifyTierUpgradeHandler emails active creators that their program
+// benefits have been raised to the top tier. This is a deliberate one-off
+// announcement, not part of any automated flow, so it is admin-triggered.
+//
+// Defaults to a DRY RUN: it reports exactly who would be contacted and sends
+// nothing. Sending requires ?send=true, so the recipient list is always
+// reviewable before a single message goes out.
+//
+// Only creators with an active profile are targeted. Someone whose application
+// is still pending has not been accepted, so telling them they "have been
+// upgraded" would be wrong — approve them first and the normal approval email
+// covers it.
+func (cc ContentCreator) AdminNotifyTierUpgradeHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	send := r.URL.Query().Get("send") == "true"
+
+	cursor, err := cc.CCDB.Find(ctx, bson.M{"status": bson.M{"$in": []string{"active", "warned"}}})
+	if err != nil {
+		config.ErrorStatus("failed to list creators", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var creators []models.ContentCreator
+	if err := cursor.All(ctx, &creators); err != nil {
+		config.ErrorStatus("failed to decode creators", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	type recipient struct {
+		DisplayName string `json:"displayName"`
+		Email       string `json:"email"`
+		Status      string `json:"status"`
+		Sent        bool   `json:"sent"`
+		Error       string `json:"error,omitempty"`
+	}
+	recipients := make([]recipient, 0, len(creators))
+
+	for _, creator := range creators {
+		if creator.UserID == nil {
+			continue // creator left the platform; no account to email
+		}
+		var user struct {
+			Details struct {
+				Email    string `bson:"email"`
+				Username string `bson:"username"`
+			} `bson:"user"`
+		}
+		if err := cc.UDB.FindOne(ctx, bson.M{"_id": *creator.UserID}).Decode(&user); err != nil || user.Details.Email == "" {
+			recipients = append(recipients, recipient{DisplayName: creator.DisplayName, Status: creator.Status, Error: "no email on file"})
+			continue
+		}
+
+		rec := recipient{DisplayName: creator.DisplayName, Email: user.Details.Email, Status: creator.Status}
+		if send {
+			subject := "Your Creator benefits just got bigger - Lines Police CAD"
+			htmlContent := templates.RenderCreatorTierUpgradeEmail(creator.DisplayName, ccProgramAnnualValue)
+			plainText := fmt.Sprintf(
+				"Great news %s! Your Content Creator Program benefits are being raised to Premium Plus, our highest tier, free of charge. That is a value of %s saved every year. Premium Plus on your account (unlimited communities, no ads, verified badge) plus a Premium boost for one community you manage. Your account is already upgraded. Keep up the awesome work, we appreciate you. View your benefits at https://www.linespolice-cad.com/content-creators/me",
+				creator.DisplayName, ccProgramAnnualValue,
+			)
+			if err := sendContentCreatorEmail(user.Details.Email, creator.DisplayName, subject, htmlContent, plainText); err != nil {
+				rec.Error = err.Error()
+				zap.S().Errorw("failed to send creator tier upgrade email", "error", err, "creatorId", creator.ID.Hex())
+			} else {
+				rec.Sent = true
+				zap.S().Infow("sent creator tier upgrade email", "creatorId", creator.ID.Hex(), "displayName", creator.DisplayName)
+			}
+		}
+		recipients = append(recipients, rec)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"dryRun":      !send,
+		"annualValue": ccProgramAnnualValue,
+		"count":       len(recipients),
+		"recipients":  recipients,
+	})
 }
 
 // sendAdminNewApplicationEmail sends notification to all active admins
@@ -912,9 +1043,9 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 	}
 	cc.EntDB.UpdateMany(ctx, bson.M{"contentCreatorId": creator.ID, "active": true}, entitlementUpdate)
 
-	// Deactivate subscriptions for revoked entitlements
-	// Only deactivate if the subscription is "base" or "free" (from the program)
-	// Don't touch higher-tier paid subscriptions
+	// Deactivate subscriptions for revoked entitlements.
+	// Only touch subscriptions the program itself created (cc_program_ id);
+	// a creator's own paid subscription is left alone.
 	subscriptionDeactivate := bson.M{
 		"$set": bson.M{
 			"community.subscription.active":    false,
@@ -928,18 +1059,18 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 		},
 	}
 	for _, ent := range entitlements {
+		// Match the cc_program_ marker on the subscription id, NOT the plan name.
+		// Keying off the plan meant that changing what the program grants would
+		// silently strand every existing grant as un-revokable, and it could
+		// also catch a creator's own self-funded base plan.
 		if ent.TargetType == "community" {
-			// Only deactivate if plan is "base" or "free" (from program)
-			cc.CDB.UpdateOne(ctx, bson.M{
-				"_id": ent.TargetID,
-				"community.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
-			}, subscriptionDeactivate)
+			filter := ccProgramGrantFilter("community.subscription.id")
+			filter["_id"] = ent.TargetID
+			cc.CDB.UpdateOne(ctx, filter, subscriptionDeactivate)
 		} else if ent.TargetType == "user" {
-			// Only deactivate if plan is "base" or "free" (from program)
-			cc.UDB.UpdateOne(ctx, bson.M{
-				"_id": ent.TargetID,
-				"user.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
-			}, userSubscriptionDeactivate)
+			filter := ccProgramGrantFilter("user.subscription.id")
+			filter["_id"] = ent.TargetID
+			cc.UDB.UpdateOne(ctx, filter, userSubscriptionDeactivate)
 		}
 	}
 
@@ -1194,7 +1325,13 @@ func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r
 	}
 
 	// Check if community already has an active paid subscription (not free or base)
-	if community.Details.Subscription.Active && community.Details.Subscription.Plan != "" && community.Details.Subscription.Plan != "base" && community.Details.Subscription.Plan != "free" {
+	// Refuse only when the community is on a boost someone is PAYING for. A
+	// leftover program grant (cc_program_ id) is ours to replace; "base" is the
+	// value the program used to write before it granted a real boost tier.
+	existingSub := community.Details.Subscription
+	selfFundedBoost := isSelfFundedSubscription(existingSub) &&
+		existingSub.Plan != "" && existingSub.Plan != "base" && existingSub.Plan != "free"
+	if selfFundedBoost {
 		config.ErrorStatus("this community already has an active subscription", http.StatusConflict, w, nil)
 		return
 	}
@@ -1207,7 +1344,7 @@ func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r
 		ContentCreatorID: creator.ID,
 		TargetType:       "community",
 		TargetID:         communityObjID,
-		Plan:             "base",
+		Plan:             ccProgramCommunityPlan,
 		Source:           "content_creator_program",
 		Active:           true,
 		GrantedAt:        now,
@@ -1224,9 +1361,9 @@ func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r
 	// Update the community subscription
 	subscriptionUpdate := bson.M{
 		"$set": bson.M{
-			"community.subscription.plan":      "base",
+			"community.subscription.plan":      ccProgramCommunityPlan,
 			"community.subscription.active":    true,
-			"community.subscription.id":        "cc_program_" + creator.ID.Hex(),
+			"community.subscription.id":        ccProgramSubscriptionPrefix + creator.ID.Hex(),
 			"community.subscription.createdAt": now,
 			"community.subscription.updatedAt": now,
 		},
@@ -1788,7 +1925,7 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		ContentCreatorID: creator.ID,
 		TargetType:       "user",
 		TargetID:         application.UserID,
-		Plan:             "base",
+		Plan:             ccProgramUserPlan,
 		Source:           "content_creator_program",
 		Active:           true,
 		GrantedAt:        now,
@@ -1798,19 +1935,28 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	}
 	cc.EntDB.InsertOne(ctx, personalEntitlement)
 
-	// Only grant Base subscription if user doesn't already have a higher-tier plan
-	// Check user's current subscription first
+	// The program now grants the top tier, so there is no "higher plan" left to
+	// protect against. What must be protected is a subscription the creator is
+	// PAYING for: overwriting subscription.id with our cc_program_ marker would
+	// detach the Stripe / app-store record while the charges keep running, and
+	// nothing would link the money to the account any more.
+	//
+	// So a paying creator keeps their own subscription untouched. The
+	// entitlement above is still recorded, which is what the admin console reads,
+	// so the grant is visible and can be settled deliberately (cancel, refund,
+	// or let it lapse and pick the free grant up afterwards).
 	var currentUser models.User
 	shouldUpdateSubscription := true
 	if err := cc.UDB.FindOne(ctx, bson.M{"_id": application.UserID}).Decode(&currentUser); err == nil {
-		currentPlan := currentUser.Details.Subscription.Plan
-		// Don't overwrite if user has a higher-tier plan (premium, premium_plus, etc.)
-		higherTierPlans := map[string]bool{"premium": true, "premium_plus": true, "enterprise": true}
-		if higherTierPlans[currentPlan] {
+		sub := currentUser.Details.Subscription
+		if isSelfFundedSubscription(sub) {
 			shouldUpdateSubscription = false
-			zap.S().Infow("skipping subscription update - user already has higher tier plan",
+			zap.S().Warnw("content creator approved while holding a paid subscription - left untouched, needs manual settlement",
 				"userId", application.UserID.Hex(),
-				"currentPlan", currentPlan,
+				"creatorId", creator.ID.Hex(),
+				"currentPlan", sub.Plan,
+				"subscriptionSource", sub.Source,
+				"subscriptionId", sub.ID,
 			)
 		}
 	}
@@ -1818,9 +1964,9 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	if shouldUpdateSubscription {
 		subscriptionUpdate := bson.M{
 			"$set": bson.M{
-				"user.subscription.plan":      "base",
+				"user.subscription.plan":      ccProgramUserPlan,
 				"user.subscription.active":    true,
-				"user.subscription.id":        "cc_program_" + creator.ID.Hex(),
+				"user.subscription.id":        ccProgramSubscriptionPrefix + creator.ID.Hex(),
 				"user.subscription.createdAt": now,
 				"user.subscription.updatedAt": now,
 			},
@@ -2183,9 +2329,9 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 	}
 	cc.EntDB.UpdateMany(ctx, bson.M{"contentCreatorId": creatorObjID, "active": true}, entitlementUpdate)
 
-	// Deactivate subscriptions for revoked entitlements
-	// Only deactivate if the subscription is "base" or "free" (from the program)
-	// Don't touch higher-tier paid subscriptions
+	// Deactivate subscriptions for revoked entitlements.
+	// Only touch subscriptions the program itself created (cc_program_ id);
+	// a creator's own paid subscription is left alone.
 	subscriptionDeactivate := bson.M{
 		"$set": bson.M{
 			"community.subscription.active":    false,
@@ -2199,18 +2345,18 @@ func (cc ContentCreator) AdminRemoveCreatorHandler(w http.ResponseWriter, r *htt
 		},
 	}
 	for _, ent := range entitlements {
+		// Match the cc_program_ marker on the subscription id, NOT the plan name.
+		// Keying off the plan meant that changing what the program grants would
+		// silently strand every existing grant as un-revokable, and it could
+		// also catch a creator's own self-funded base plan.
 		if ent.TargetType == "community" {
-			// Only deactivate if plan is "base" or "free" (from program)
-			cc.CDB.UpdateOne(ctx, bson.M{
-				"_id": ent.TargetID,
-				"community.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
-			}, subscriptionDeactivate)
+			filter := ccProgramGrantFilter("community.subscription.id")
+			filter["_id"] = ent.TargetID
+			cc.CDB.UpdateOne(ctx, filter, subscriptionDeactivate)
 		} else if ent.TargetType == "user" {
-			// Only deactivate if plan is "base" or "free" (from program)
-			cc.UDB.UpdateOne(ctx, bson.M{
-				"_id": ent.TargetID,
-				"user.subscription.plan": bson.M{"$in": []string{"base", "free", ""}},
-			}, userSubscriptionDeactivate)
+			filter := ccProgramGrantFilter("user.subscription.id")
+			filter["_id"] = ent.TargetID
+			cc.UDB.UpdateOne(ctx, filter, userSubscriptionDeactivate)
 		}
 	}
 
@@ -2393,9 +2539,12 @@ func (cc ContentCreator) getCreatorEntitlements(ctx context.Context, creatorID p
 	for _, ent := range entitlements {
 		if ent.TargetType == "user" {
 			summary.PersonalPlan = true
-			// Check if user has a higher plan than base - if so, entitlement is a fallback
+			// The entitlement is a "fallback" when the creator is on a plan they
+			// hold independently of the program. Now that the program grants the
+			// top tier, only a plan ABOVE what we grant would qualify — and there
+			// is none — so this is true only while a self-funded plan is active.
 			currentPlan := summary.CurrentUserPlan
-			if currentPlan != "" && currentPlan != "free" && currentPlan != "base" {
+			if currentPlan != "" && currentPlan != "free" && currentPlan != ccProgramUserPlan {
 				summary.PersonalPlanFallback = true
 			}
 		} else if ent.TargetType == "community" {
