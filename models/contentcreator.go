@@ -309,7 +309,10 @@ type CreateContentCreatorApplicationRequest struct {
 	PrimaryPlatform string                   `json:"primaryPlatform" validate:"required,oneof=twitch youtube tiktok other"`
 	Platforms       []ContentCreatorPlatform `json:"platforms" validate:"required,min=1,max=5"`
 	Description     string                   `json:"description" validate:"required,min=50,max=1000"` // for admin evaluation
-	Bio             string                   `json:"bio" validate:"required,min=20,max=500"`          // for public profile
+	// Bio is optional here and collected after acceptance, on the creator's own
+	// profile. Most applications are declined, and writing public-profile copy
+	// for a profile that never exists is wasted effort.
+	Bio string `json:"bio" validate:"omitempty,max=500"`
 }
 
 // ReviewApplicationRequest is the request body for approving/rejecting an application

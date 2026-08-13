@@ -219,7 +219,7 @@ func RenderApplicationApprovedEmail(displayName string) string {
       </div>
 
       <div class="note-box">
-        <p>💡 <strong>Next Step:</strong> Visit your Creator Dashboard to claim your free Premium boost for one of your communities!</p>
+        <p>💡 <strong>Next:</strong> your Creator Dashboard has a short setup list waiting - write your profile bio, add a picture, and point your free Premium boost at one of your communities. Your public profile is live from now, so it is worth a few minutes.</p>
       </div>
 
       <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Go to Creator Dashboard</a>

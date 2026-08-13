@@ -997,11 +997,10 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Validate bio length
-	if len(req.Bio) < 20 {
-		config.ErrorStatus("bio must be at least 20 characters", http.StatusBadRequest, w, nil)
-		return
-	}
+	// Bio is optional at submission. It is public-profile copy, and asking
+	// someone to write it before we have accepted them is asking most people to
+	// write it for nothing. They are prompted for it on their creator profile
+	// once approved, where they can also edit it whenever they like.
 	if len(req.Bio) > 500 {
 		config.ErrorStatus("bio must be at most 500 characters", http.StatusBadRequest, w, nil)
 		return
