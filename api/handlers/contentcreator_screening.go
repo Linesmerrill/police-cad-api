@@ -2,13 +2,20 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
+
+	"github.com/gorilla/mux"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.uber.org/zap"
 
+	"github.com/linesmerrill/police-cad-api/api"
+	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/linesmerrill/police-cad-api/platforms"
 )
@@ -100,6 +107,121 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 		}
 	}
 	return screened, nil
+}
+
+// AdminOverrideCheckHandler lets an admin pass or fail an individual check by
+// hand.
+//
+// Automation cannot cover everything — TikTok has no public API, a platform can
+// be down for days, and a reviewer may know something the checks cannot see. The
+// automated result is never the last word; a human can always override any
+// single step in either direction, and the override records who did it.
+func (cc ContentCreator) AdminOverrideCheckHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	adminIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+
+	appObjID, err := primitive.ObjectIDFromHex(mux.Vars(r)["id"])
+	if err != nil {
+		config.ErrorStatus("invalid application ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var req struct {
+		Key      string `json:"key"`      // channel_resolves | ownership | followers
+		Platform string `json:"platform"` // "" matches the aggregate followers check
+		Handle   string `json:"handle"`
+		Status   string `json:"status"` // passed | failed
+		Reason   string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	if req.Status != models.CheckPassed && req.Status != models.CheckFailed {
+		config.ErrorStatus("status must be passed or failed", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	app, err := cc.AppDB.FindOne(ctx, bson.M{"_id": appObjID})
+	if err != nil || app == nil {
+		config.ErrorStatus("application not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" && req.Status == models.CheckPassed {
+		reason = "Confirmed by our team."
+	}
+
+	matched := false
+	checks := make([]models.ApplicationCheck, len(app.Checks))
+	copy(checks, app.Checks)
+	for i := range checks {
+		if checks[i].Key != req.Key {
+			continue
+		}
+		// Platform/handle narrow the match when the same check exists per
+		// platform. An empty platform in the request matches any.
+		if req.Platform != "" && checks[i].Platform != req.Platform {
+			continue
+		}
+		if req.Handle != "" && checks[i].Handle != req.Handle {
+			continue
+		}
+		checks[i].Status = req.Status
+		checks[i].Reason = reason
+		checks[i].CheckedAt = &now
+		matched = true
+	}
+	if !matched {
+		config.ErrorStatus("no matching check on this application", http.StatusNotFound, w, nil)
+		return
+	}
+
+	// An override can be the thing that makes an application reviewable, so
+	// recompute rather than leaving the old verdict in place.
+	passed := true
+	for _, c := range checks {
+		if c.Status == models.CheckFailed || c.Status == models.CheckPending {
+			passed = false
+			break
+		}
+	}
+
+	set := bson.M{"checks": checks, "checksPassed": passed, "updatedAt": now}
+	notifyNow := passed && app.AdminNotifiedAt == nil
+	if notifyNow {
+		set["adminNotifiedAt"] = now
+	}
+	if err := cc.AppDB.UpdateOne(ctx, bson.M{"_id": appObjID}, bson.M{"$set": set}); err != nil {
+		config.ErrorStatus("failed to record override", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	zap.S().Infow("admin overrode application check",
+		"applicationId", appObjID.Hex(), "check", req.Key, "platform", req.Platform,
+		"status", req.Status, "adminId", adminIDStr)
+
+	if notifyNow {
+		total := 0
+		for _, p := range app.Platforms {
+			total += p.FollowerCount
+		}
+		cc.notifyAdminsApplicationReady(ctx, app, total)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true, "checksPassed": passed, "checks": checks,
+	})
 }
 
 // indexOfPlatform finds a platform's position for follower lookup.

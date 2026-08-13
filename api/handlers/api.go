@@ -864,6 +864,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-start", http.HandlerFunc(contentCreator.StartChannelVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-check", http.HandlerFunc(contentCreator.CheckChannelVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creator-applications/{id}/platforms/{index}/verify", http.HandlerFunc(contentCreator.AdminVerifyPlatformHandler)).Methods("POST")
+	// Manual pass/fail of any individual automated check, for platforms with no
+	// public API or when a reviewer knows something the checks cannot see.
+	apiCreate.Handle("/admin/content-creator-applications/{id}/checks/override", http.HandlerFunc(contentCreator.AdminOverrideCheckHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")
