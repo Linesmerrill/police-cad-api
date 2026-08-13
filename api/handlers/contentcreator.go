@@ -110,6 +110,9 @@ type ContentCreator struct {
 	UDB     databases.UserDatabase
 	CDB     databases.CommunityDatabase
 	AdminDB databases.AdminDatabase
+	// AuditDB records manual admin intervention in application screening, so an
+	// override always has a trail showing who made it and why.
+	AuditDB databases.AdminAuditDatabase
 }
 
 // getUserIDFromRequest extracts the user ID from the X-User-ID header (set by Express proxy)

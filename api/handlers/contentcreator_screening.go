@@ -205,9 +205,18 @@ func (cc ContentCreator) AdminOverrideCheckHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	cc.auditScreening(r, app, "creator_application_check_override", map[string]interface{}{
+		"key":          req.Key,
+		"platform":     req.Platform,
+		"handle":       req.Handle,
+		"status":       req.Status,
+		"reason":       reason,
+		"checksPassed": passed,
+	}, fmt.Sprintf("Manually marked %s as %s for %s: %s", req.Key, req.Status, app.DisplayName, reason))
+
 	zap.S().Infow("admin overrode application check",
 		"applicationId", appObjID.Hex(), "check", req.Key, "platform", req.Platform,
-		"status", req.Status, "adminId", adminIDStr)
+		"status", req.Status, "adminId", adminIDStr, "reason", reason)
 
 	if notifyNow {
 		total := 0
@@ -222,6 +231,141 @@ func (cc ContentCreator) AdminOverrideCheckHandler(w http.ResponseWriter, r *htt
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true, "checksPassed": passed, "checks": checks,
 	})
+}
+
+// AdminRescreenApplicationHandler re-runs the automated checks for one
+// application immediately, instead of waiting up to 4 hours for the next sweep.
+//
+// The common case is an applicant saying "I've added the code now" — a reviewer
+// should be able to act on that straight away rather than telling them to wait.
+// Optionally narrows to a single check via ?key=, so one stuck step can be
+// retried without re-hitting every platform.
+func (cc ContentCreator) AdminRescreenApplicationHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	adminIDStr, _ := getUserIDFromRequest(r)
+
+	appObjID, err := primitive.ObjectIDFromHex(mux.Vars(r)["id"])
+	if err != nil {
+		config.ErrorStatus("invalid application ID", http.StatusBadRequest, w, err)
+		return
+	}
+	app, err := cc.AppDB.FindOne(ctx, bson.M{"_id": appObjID})
+	if err != nil || app == nil {
+		config.ErrorStatus("application not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	onlyKey := strings.TrimSpace(r.URL.Query().Get("key"))
+	res := screenApplication(ctx, app, platforms.For)
+	now := primitive.NewDateTimeFromTime(time.Now())
+
+	checks := res.Checks
+	if onlyKey != "" {
+		// Keep every other check as it was and splice in only the re-run one, so
+		// retrying a stuck step cannot quietly undo an admin override elsewhere.
+		merged := make([]models.ApplicationCheck, 0, len(app.Checks))
+		for _, existing := range app.Checks {
+			if existing.Key != onlyKey {
+				merged = append(merged, existing)
+			}
+		}
+		for _, fresh := range res.Checks {
+			if fresh.Key == onlyKey {
+				merged = append(merged, fresh)
+			}
+		}
+		checks = merged
+	}
+
+	passed := true
+	for _, c := range checks {
+		if c.Status == models.CheckFailed || c.Status == models.CheckPending {
+			passed = false
+			break
+		}
+	}
+
+	set := bson.M{
+		"checks":          checks,
+		"checksPassed":    passed,
+		"checksLastRunAt": now,
+		"updatedAt":       now,
+	}
+	for idx := range res.OwnershipVerified {
+		p := fmt.Sprintf("platforms.%d.", idx)
+		set[p+"verificationStatus"] = models.PlatformVerified
+		set[p+"verificationMethod"] = "api"
+		set[p+"verifiedAt"] = now
+		set[p+"verificationCode"] = ""
+	}
+	for idx, count := range res.FollowerCounts {
+		p := fmt.Sprintf("platforms.%d.", idx)
+		if app.Platforms[idx].ReportedFollowerCount == 0 {
+			set[p+"reportedFollowerCount"] = app.Platforms[idx].FollowerCount
+		}
+		set[p+"followerCount"] = count
+	}
+	notifyNow := passed && app.AdminNotifiedAt == nil
+	if notifyNow {
+		set["adminNotifiedAt"] = now
+	}
+
+	if err := cc.AppDB.UpdateOne(ctx, bson.M{"_id": appObjID}, bson.M{"$set": set}); err != nil {
+		config.ErrorStatus("failed to persist screening", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	cc.auditScreening(r, app, "creator_application_rescreen", map[string]interface{}{
+		"key":          onlyKey,
+		"checksPassed": passed,
+	}, fmt.Sprintf("Re-ran %s checks for %s", orAll(onlyKey), app.DisplayName))
+
+	zap.S().Infow("admin re-screened creator application",
+		"applicationId", appObjID.Hex(), "key", onlyKey, "adminId", adminIDStr, "passed", passed)
+
+	if notifyNow {
+		total := 0
+		for _, p := range app.Platforms {
+			total += p.FollowerCount
+		}
+		cc.notifyAdminsApplicationReady(ctx, app, total)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true, "checksPassed": passed, "checks": checks,
+	})
+}
+
+func orAll(key string) string {
+	if key == "" {
+		return "all"
+	}
+	return key
+}
+
+// auditScreening records manual intervention in screening to the admin audit
+// trail, so an override or retry can always be traced to a person and a reason.
+func (cc ContentCreator) auditScreening(r *http.Request, app *models.ContentCreatorApplication, action string, after map[string]interface{}, details string) {
+	if cc.AuditDB == nil {
+		return
+	}
+	adminIDStr, _ := getUserIDFromRequest(r)
+	audit := models.AdminAudit{
+		AdminID:   adminIDStr,
+		Action:    action,
+		Before:    map[string]interface{}{"checksPassed": app.ChecksPassed},
+		After:     after,
+		Details:   details,
+		Timestamp: time.Now(),
+		IP:        getClientIP(r),
+	}
+	if _, err := cc.AuditDB.InsertOne(r.Context(), audit); err != nil {
+		zap.S().Errorw("failed to write screening audit log", "action", action, "error", err)
+	}
 }
 
 // indexOfPlatform finds a platform's position for follower lookup.
@@ -377,7 +521,7 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	default:
 		res.Checks = append(res.Checks, models.ApplicationCheck{
 			Key: models.CheckFollowers, Status: models.CheckFailed,
-			Reason: fmt.Sprintf("Your largest channel has %d followers. The programme needs at least %d.",
+			Reason: fmt.Sprintf("Your largest channel has %d followers. The program needs at least %d.",
 				bestFollowers, models.MinFollowers),
 			CheckedAt: &now,
 		})

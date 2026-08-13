@@ -95,7 +95,7 @@ func TestNewChannelVerificationCode(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		code, err := newChannelVerificationCode()
 		assert.NoError(t, err)
-		assert.True(t, strings.HasPrefix(code, "LPC-VERIFY-"), "codes must be recognisable in a bio")
+		assert.True(t, strings.HasPrefix(code, "LPC-VERIFY-"), "codes must be recognizable in a bio")
 		assert.Len(t, code, len("LPC-VERIFY-")+channelCodeLen)
 		assert.False(t, seen[code], "codes must not repeat")
 		seen[code] = true

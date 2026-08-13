@@ -826,6 +826,7 @@ func (a *App) New() *mux.Router {
 		UDB:     databases.NewUserDatabase(a.dbHelper),
 		CDB:     databases.NewCommunityDatabase(a.dbHelper),
 		AdminDB: databases.NewAdminDatabase(a.dbHelper),
+		AuditDB: databases.NewAdminAuditDatabase(a.dbHelper),
 	}
 
 	// Public content creator routes (no auth required)
@@ -867,6 +868,9 @@ func (a *App) New() *mux.Router {
 	// Manual pass/fail of any individual automated check, for platforms with no
 	// public API or when a reviewer knows something the checks cannot see.
 	apiCreate.Handle("/admin/content-creator-applications/{id}/checks/override", http.HandlerFunc(contentCreator.AdminOverrideCheckHandler)).Methods("POST")
+	// Re-run checks on demand rather than waiting for the 4-hourly sweep.
+	// Optional ?key= narrows it to one check.
+	apiCreate.Handle("/admin/content-creator-applications/{id}/rescreen", http.HandlerFunc(contentCreator.AdminRescreenApplicationHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")
