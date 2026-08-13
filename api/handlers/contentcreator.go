@@ -66,6 +66,24 @@ func ccProgramPlanFor(targetType string) string {
 	}
 }
 
+// ccProgramIssueGrantFilter matches a target that has no LIVE self-funded
+// subscription, so issuing a fresh grant can never clobber one somebody bought
+// between the read that chose this path and the write that follows it.
+//
+// subField is the id path, e.g. "user.subscription.id".
+func ccProgramIssueGrantFilter(targetID primitive.ObjectID, subField string) bson.M {
+	activeField := strings.TrimSuffix(subField, ".id") + ".active"
+	return bson.M{
+		"_id": targetID,
+		"$or": []bson.M{
+			{activeField: bson.M{"$ne": true}},
+			{subField: ""},
+			{subField: bson.M{"$exists": false}},
+			{subField: bson.M{"$regex": "^" + ccProgramSubscriptionPrefix}},
+		},
+	}
+}
+
 // isProgramGrant reports whether a subscription was created by this program
 // rather than bought by its holder.
 func isProgramGrant(sub models.Subscription) bool {
@@ -203,14 +221,19 @@ func (cc ContentCreator) AdminBackfillCreatorTiersHandler(w http.ResponseWriter,
 	}
 
 	type change struct {
-		EntitlementID  string `json:"entitlementId"`
-		TargetType     string `json:"targetType"`
-		TargetID       string `json:"targetId"`
-		FromPlan       string `json:"fromPlan"`
-		ToPlan         string `json:"toPlan"`
-		SubscriptionOp string `json:"subscriptionOp"` // upgraded | left-alone-self-funded | not-a-program-grant
-		Applied        bool   `json:"applied"`
-		Error          string `json:"error,omitempty"`
+		EntitlementID string `json:"entitlementId"`
+		TargetType    string `json:"targetType"`
+		TargetID      string `json:"targetId"`
+		FromPlan      string `json:"fromPlan"`
+		ToPlan        string `json:"toPlan"`
+		// upgraded (ours, raise the plan) | granted (nothing live, issue one) |
+		// left-alone-self-funded (they are paying, never touch it)
+		SubscriptionOp string `json:"subscriptionOp"`
+		// Set on "granted" when a dead subscription id is being replaced, so the
+		// dry run shows exactly what is about to be overwritten.
+		ReplacingSubscriptionID string `json:"replacingSubscriptionId,omitempty"`
+		Applied                 bool   `json:"applied"`
+		Error                   string `json:"error,omitempty"`
 	}
 	changes := make([]change, 0, len(entitlements))
 	alreadyCurrent := 0
@@ -258,9 +281,12 @@ func (cc ContentCreator) AdminBackfillCreatorTiersHandler(w http.ResponseWriter,
 		case isProgramGrant(currentSub):
 			ch.SubscriptionOp = "upgraded"
 		default:
-			// No live grant on the record (lapsed, empty, or never applied).
-			// Raise the entitlement but do not resurrect a subscription.
-			ch.SubscriptionOp = "not-a-program-grant"
+			// The entitlement is active but nothing live backs it: the record is
+			// empty, or holds a lapsed subscription. Issue the grant, otherwise
+			// the creator holds an entitlement they cannot actually use — which
+			// is the state this backfill exists to repair.
+			ch.SubscriptionOp = "granted"
+			ch.ReplacingSubscriptionID = currentSub.ID
 		}
 
 		if apply {
@@ -272,12 +298,31 @@ func (cc ContentCreator) AdminBackfillCreatorTiersHandler(w http.ResponseWriter,
 				ch.Applied = true
 			}
 
-			if ch.Error == "" && ch.SubscriptionOp == "upgraded" {
-				// Re-assert the cc_program_ prefix in the filter so a record that
-				// changed hands between the read above and this write is still safe.
-				filter := ccProgramGrantFilter(subField)
-				filter["_id"] = ent.TargetID
-				update := bson.M{"$set": bson.M{planField: target}}
+			if ch.Error == "" && (ch.SubscriptionOp == "upgraded" || ch.SubscriptionOp == "granted") {
+				var filter bson.M
+				var update bson.M
+
+				if ch.SubscriptionOp == "upgraded" {
+					// Re-assert the cc_program_ prefix in the filter so a record that
+					// changed hands between the read above and this write is still safe.
+					filter = ccProgramGrantFilter(subField)
+					filter["_id"] = ent.TargetID
+					update = bson.M{"$set": bson.M{planField: target}}
+				} else {
+					// Issuing a fresh grant. The filter re-checks that nothing
+					// ACTIVE and self-funded is sitting there, so a subscription
+					// bought between the read and this write is never clobbered.
+					filter = ccProgramIssueGrantFilter(ent.TargetID, subField)
+					prefix := strings.TrimSuffix(subField, ".id")
+					update = bson.M{"$set": bson.M{
+						planField:             target,
+						subField:              ccProgramSubscriptionPrefix + ent.ContentCreatorID.Hex(),
+						prefix + ".active":    true,
+						prefix + ".createdAt": now,
+						prefix + ".updatedAt": now,
+					}}
+				}
+
 				var uErr error
 				if ent.TargetType == "user" {
 					_, uErr = cc.UDB.UpdateOne(ctx, filter, update)
@@ -290,7 +335,8 @@ func (cc ContentCreator) AdminBackfillCreatorTiersHandler(w http.ResponseWriter,
 			}
 			zap.S().Infow("creator tier backfill",
 				"entitlementId", ent.ID.Hex(), "targetType", ent.TargetType,
-				"from", ent.Plan, "to", target, "subscriptionOp", ch.SubscriptionOp)
+				"from", ent.Plan, "to", target, "subscriptionOp", ch.SubscriptionOp,
+				"replacingSubscriptionId", ch.ReplacingSubscriptionID)
 		}
 
 		changes = append(changes, ch)
@@ -1414,11 +1460,11 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 	defer cursor.Close(ctx)
 
 	type CommunityResponse struct {
-		ID               string `json:"_id"`
-		Name             string `json:"name"`
-		HasPromotion     bool   `json:"hasPromotion"`
-		CurrentPlan      string `json:"currentPlan,omitempty"`
-		IsPromotionApplied bool `json:"isPromotionApplied"`
+		ID                 string `json:"_id"`
+		Name               string `json:"name"`
+		HasPromotion       bool   `json:"hasPromotion"`
+		CurrentPlan        string `json:"currentPlan,omitempty"`
+		IsPromotionApplied bool   `json:"isPromotionApplied"`
 	}
 
 	communities := make([]CommunityResponse, 0)
@@ -1443,10 +1489,10 @@ func (cc ContentCreator) GetOwnedCommunitiesHandler(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":              true,
-		"communities":          communities,
-		"hasAppliedPromotion":  appliedCommunityID != "",
-		"appliedCommunityId":   appliedCommunityID,
+		"success":             true,
+		"communities":         communities,
+		"hasAppliedPromotion": appliedCommunityID != "",
+		"appliedCommunityId":  appliedCommunityID,
 	})
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/linesmerrill/police-cad-api/models"
 )
@@ -75,7 +76,7 @@ func TestBackfillSubscriptionDisposition(t *testing.T) {
 		case isProgramGrant(sub):
 			return "upgraded"
 		default:
-			return "not-a-program-grant"
+			return "granted"
 		}
 	}
 
@@ -95,14 +96,18 @@ func TestBackfillSubscriptionDisposition(t *testing.T) {
 			want: "upgraded",
 		},
 		{
-			name: "community never claimed its benefit",
+			// An active entitlement with nothing behind it is exactly the broken
+			// state the backfill exists to repair, so it gets a fresh grant.
+			name: "active entitlement with an empty subscription gets a grant",
 			sub:  models.Subscription{},
-			want: "not-a-program-grant",
+			want: "granted",
 		},
 		{
-			name: "lapsed paid subscription is not resurrected",
+			// Safe because it is INACTIVE: no live billing to detach. The dead id
+			// is reported as replacingSubscriptionId so the dry run shows it.
+			name: "lapsed paid subscription is replaced by a grant",
 			sub:  models.Subscription{ID: "sub_1Pxyz", Plan: "premium", Active: false, Source: "stripe"},
-			want: "not-a-program-grant",
+			want: "granted",
 		},
 		{
 			// The plan is raised but `active` is never written, so a dormant
@@ -118,6 +123,53 @@ func TestBackfillSubscriptionDisposition(t *testing.T) {
 			assert.Equal(t, tc.want, disposition(tc.sub))
 		})
 	}
+}
+
+// Issuing a fresh grant is the one write that does NOT go through the
+// cc_program_ prefix guard, so its filter carries the safety instead: it must
+// refuse any target holding a live self-funded subscription.
+func TestCCProgramIssueGrantFilterRefusesLiveSelfFundedSubs(t *testing.T) {
+	id := primitive.NewObjectID()
+	filter := ccProgramIssueGrantFilter(id, "user.subscription.id")
+
+	assert.Equal(t, id, filter["_id"], "must be scoped to the one target")
+
+	alts, ok := filter["$or"].([]bson.M)
+	assert.True(t, ok, "must carry an $or guard")
+
+	// The only way to match is: not active, or no id, or already one of ours.
+	// Crucially there is no branch that matches an ACTIVE non-program id.
+	var sawNotActive, sawProgramPrefix bool
+	for _, alt := range alts {
+		if v, present := alt["user.subscription.active"]; present {
+			assert.Equal(t, bson.M{"$ne": true}, v, "the active branch must require NOT active")
+			sawNotActive = true
+		}
+		if v, present := alt["user.subscription.id"]; present {
+			if m, isM := v.(bson.M); isM {
+				if rx, hasRx := m["$regex"]; hasRx {
+					assert.Equal(t, "^"+ccProgramSubscriptionPrefix, rx)
+					sawProgramPrefix = true
+				}
+			}
+		}
+	}
+	assert.True(t, sawNotActive, "must allow writing when the subscription is inactive")
+	assert.True(t, sawProgramPrefix, "must allow writing over one of our own grants")
+}
+
+func TestCCProgramIssueGrantFilterDerivesTheActiveFieldFromTheIDPath(t *testing.T) {
+	// Community records use a different prefix; the active field must follow it
+	// rather than being hardcoded to the user path.
+	filter := ccProgramIssueGrantFilter(primitive.NewObjectID(), "community.subscription.id")
+	alts := filter["$or"].([]bson.M)
+	found := false
+	for _, alt := range alts {
+		if _, present := alt["community.subscription.active"]; present {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected community.subscription.active in the guard")
 }
 
 func TestCCProgramPlanForTargetType(t *testing.T) {
