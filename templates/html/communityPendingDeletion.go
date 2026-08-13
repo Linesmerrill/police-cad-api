@@ -50,7 +50,7 @@ func RenderCommunityPendingDeletionReminderEmail(displayName, communityName stri
       </div>
 
       <p>If you scheduled this deletion intentionally, no action is needed.</p>
-      <p>If this was a mistake or you've changed your mind, please reply to this email or contact support before the deadline so we can restore the community.</p>
+      <p>If this was a mistake or you've changed your mind, contact us through our <a href="https://www.linespolice-cad.com/contact-us">contact page</a> before the deadline so we can restore the community.</p>
     </div>
     <div class="footer">
       <p>Lines Police CAD &middot; <a href="https://linespolice-cad.com">linespolice-cad.com</a></p>

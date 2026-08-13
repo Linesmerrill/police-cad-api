@@ -746,7 +746,7 @@ func RenderChecksFailedEmail(displayName string, reasons []string, ownershipProv
 
       <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Open my application</a>
 
-      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think this is wrong, reply to this email or contact support and a person will look at it.</p>
+      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think this is wrong, tell us through our <a href="https://www.linespolice-cad.com/contact-us" style="color:#fbbf24;">contact page</a> and a person will look at it.</p>
     </div>
     <div class="footer">
       <p>&copy; Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
@@ -822,7 +822,7 @@ func RenderRequirementNotMetEmail(displayName, requirement, measured string, ste
 
       <a href="https://www.linespolice-cad.com/content-creators/apply" class="cta-button">Apply again</a>
 
-      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think we measured the wrong channel, reply to this email and a person will take a look.</p>
+      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think we measured the wrong channel, tell us through our <a href="https://www.linespolice-cad.com/contact-us" style="color:#fbbf24;">contact page</a> and a person will take a look.</p>
     </div>
     <div class="footer">
       <p>&copy; Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
