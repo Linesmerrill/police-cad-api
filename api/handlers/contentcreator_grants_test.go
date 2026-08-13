@@ -64,6 +64,71 @@ func TestIsSelfFundedSubscription(t *testing.T) {
 	}
 }
 
+// The backfill classifies each existing grant before touching anything. Getting
+// this wrong either detaches live billing or silently skips a creator.
+func TestBackfillSubscriptionDisposition(t *testing.T) {
+	// Mirrors the switch in AdminBackfillCreatorTiersHandler.
+	disposition := func(sub models.Subscription) string {
+		switch {
+		case isSelfFundedSubscription(sub):
+			return "left-alone-self-funded"
+		case isProgramGrant(sub):
+			return "upgraded"
+		default:
+			return "not-a-program-grant"
+		}
+	}
+
+	cases := []struct {
+		name string
+		sub  models.Subscription
+		want string
+	}{
+		{
+			name: "creator paying for their own premium plus keeps it",
+			sub:  models.Subscription{ID: "sub_1Pxyz", Plan: "premium_plus", Active: true, Source: "stripe"},
+			want: "left-alone-self-funded",
+		},
+		{
+			name: "existing program grant on the old base plan gets raised",
+			sub:  models.Subscription{ID: ccProgramSubscriptionPrefix + "665f1a2b3c4d5e6f7a8b9c0d", Plan: "base", Active: true},
+			want: "upgraded",
+		},
+		{
+			name: "community never claimed its benefit",
+			sub:  models.Subscription{},
+			want: "not-a-program-grant",
+		},
+		{
+			name: "lapsed paid subscription is not resurrected",
+			sub:  models.Subscription{ID: "sub_1Pxyz", Plan: "premium", Active: false, Source: "stripe"},
+			want: "not-a-program-grant",
+		},
+		{
+			// The plan is raised but `active` is never written, so a dormant
+			// grant stays dormant — it is corrected, not resurrected.
+			name: "inactive program grant has its plan corrected, staying inactive",
+			sub:  models.Subscription{ID: ccProgramSubscriptionPrefix + "abc", Plan: "base", Active: false},
+			want: "upgraded",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, disposition(tc.sub))
+		})
+	}
+}
+
+func TestCCProgramPlanForTargetType(t *testing.T) {
+	assert.Equal(t, ccProgramUserPlan, ccProgramPlanFor("user"))
+	assert.Equal(t, ccProgramCommunityPlan, ccProgramPlanFor("community"))
+	// Fail closed: an unknown target must not receive a plan at all, so the
+	// backfill reports it instead of writing a nonsense value.
+	assert.Equal(t, "", ccProgramPlanFor("department"))
+	assert.Equal(t, "", ccProgramPlanFor(""))
+}
+
 func TestIsProgramGrant(t *testing.T) {
 	assert.True(t, isProgramGrant(models.Subscription{ID: ccProgramSubscriptionPrefix + "abc"}))
 	assert.False(t, isProgramGrant(models.Subscription{ID: "sub_stripe"}))

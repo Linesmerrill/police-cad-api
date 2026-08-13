@@ -52,6 +52,20 @@ func ccProgramGrantFilter(field string) bson.M {
 	return bson.M{field: bson.M{"$regex": "^" + ccProgramSubscriptionPrefix}}
 }
 
+// ccProgramPlanFor returns what the program should grant for a given
+// entitlement target. Returns "" for an unrecognised target type so callers
+// fail closed rather than writing a nonsense plan.
+func ccProgramPlanFor(targetType string) string {
+	switch targetType {
+	case "user":
+		return ccProgramUserPlan
+	case "community":
+		return ccProgramCommunityPlan
+	default:
+		return ""
+	}
+}
+
 // isProgramGrant reports whether a subscription was created by this program
 // rather than bought by its holder.
 func isProgramGrant(sub models.Subscription) bool {
@@ -151,6 +165,148 @@ func (cc ContentCreator) sendApplicationSubmittedEmail(ctx context.Context, user
 // Premium Plus at $99/yr plus a Premium community boost at $8/mo. Both are the
 // prices actually charged, not the struck-through "full" prices.
 const ccProgramAnnualValue = "$195"
+
+// AdminBackfillCreatorTiersHandler raises grants that were made before the
+// program moved to top-tier benefits. Without it, existing creators keep the
+// Base plan they were given while the site advertises Premium Plus.
+//
+// Defaults to a DRY RUN; writing requires ?apply=true. Idempotent — entitlements
+// already on the target plan are reported as unchanged, so it is safe to re-run.
+//
+// Only ACTIVE entitlements are touched. Revoked ones are historical records of
+// what someone used to have, and rewriting them would falsify that history.
+//
+// A creator paying for their own subscription keeps it: their entitlement is
+// still raised (it is the fallback that activates if they cancel) but the
+// subscription record is left alone, for the same reason the grant path leaves
+// it alone — our marker would detach live billing.
+func (cc ContentCreator) AdminBackfillCreatorTiersHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	apply := r.URL.Query().Get("apply") == "true"
+
+	cursor, err := cc.EntDB.Find(ctx, bson.M{
+		"source": "content_creator_program",
+		"active": true,
+	})
+	if err != nil {
+		config.ErrorStatus("failed to list entitlements", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var entitlements []models.ContentCreatorEntitlement
+	if err := cursor.All(ctx, &entitlements); err != nil {
+		config.ErrorStatus("failed to decode entitlements", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	type change struct {
+		EntitlementID  string `json:"entitlementId"`
+		TargetType     string `json:"targetType"`
+		TargetID       string `json:"targetId"`
+		FromPlan       string `json:"fromPlan"`
+		ToPlan         string `json:"toPlan"`
+		SubscriptionOp string `json:"subscriptionOp"` // upgraded | left-alone-self-funded | not-a-program-grant
+		Applied        bool   `json:"applied"`
+		Error          string `json:"error,omitempty"`
+	}
+	changes := make([]change, 0, len(entitlements))
+	alreadyCurrent := 0
+
+	for _, ent := range entitlements {
+		target := ccProgramPlanFor(ent.TargetType)
+		if target == "" {
+			changes = append(changes, change{
+				EntitlementID: ent.ID.Hex(), TargetType: ent.TargetType, TargetID: ent.TargetID.Hex(),
+				FromPlan: ent.Plan, Error: "unrecognised target type",
+			})
+			continue
+		}
+		if ent.Plan == target {
+			alreadyCurrent++
+			continue
+		}
+
+		ch := change{
+			EntitlementID: ent.ID.Hex(), TargetType: ent.TargetType, TargetID: ent.TargetID.Hex(),
+			FromPlan: ent.Plan, ToPlan: target,
+		}
+
+		// Decide what happens to the subscription record by reading it first,
+		// so the dry run reports the truth rather than a guess.
+		var subField, planField string
+		var currentSub models.Subscription
+		switch ent.TargetType {
+		case "user":
+			subField, planField = "user.subscription.id", "user.subscription.plan"
+			var u models.User
+			if err := cc.UDB.FindOne(ctx, bson.M{"_id": ent.TargetID}).Decode(&u); err == nil {
+				currentSub = u.Details.Subscription
+			}
+		case "community":
+			subField, planField = "community.subscription.id", "community.subscription.plan"
+			if comm, err := cc.CDB.FindOne(ctx, bson.M{"_id": ent.TargetID}); err == nil && comm != nil {
+				currentSub = comm.Details.Subscription
+			}
+		}
+
+		switch {
+		case isSelfFundedSubscription(currentSub):
+			ch.SubscriptionOp = "left-alone-self-funded"
+		case isProgramGrant(currentSub):
+			ch.SubscriptionOp = "upgraded"
+		default:
+			// No live grant on the record (lapsed, empty, or never applied).
+			// Raise the entitlement but do not resurrect a subscription.
+			ch.SubscriptionOp = "not-a-program-grant"
+		}
+
+		if apply {
+			now := primitive.NewDateTimeFromTime(time.Now())
+			if err := cc.EntDB.UpdateOne(ctx, bson.M{"_id": ent.ID},
+				bson.M{"$set": bson.M{"plan": target, "updatedAt": now}}); err != nil {
+				ch.Error = err.Error()
+			} else {
+				ch.Applied = true
+			}
+
+			if ch.Error == "" && ch.SubscriptionOp == "upgraded" {
+				// Re-assert the cc_program_ prefix in the filter so a record that
+				// changed hands between the read above and this write is still safe.
+				filter := ccProgramGrantFilter(subField)
+				filter["_id"] = ent.TargetID
+				update := bson.M{"$set": bson.M{planField: target}}
+				var uErr error
+				if ent.TargetType == "user" {
+					_, uErr = cc.UDB.UpdateOne(ctx, filter, update)
+				} else {
+					uErr = cc.CDB.UpdateOne(ctx, filter, update)
+				}
+				if uErr != nil {
+					ch.Error = uErr.Error()
+				}
+			}
+			zap.S().Infow("creator tier backfill",
+				"entitlementId", ent.ID.Hex(), "targetType", ent.TargetType,
+				"from", ent.Plan, "to", target, "subscriptionOp", ch.SubscriptionOp)
+		}
+
+		changes = append(changes, ch)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"dryRun":         !apply,
+		"userPlan":       ccProgramUserPlan,
+		"communityPlan":  ccProgramCommunityPlan,
+		"needingChange":  len(changes),
+		"alreadyCurrent": alreadyCurrent,
+		"changes":        changes,
+	})
+}
 
 // AdminNotifyTierUpgradeHandler emails active creators that their program
 // benefits have been raised to the top tier. This is a deliberate one-off
