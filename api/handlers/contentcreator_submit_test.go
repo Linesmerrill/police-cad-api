@@ -43,3 +43,13 @@ func TestFollowerBarSatisfiable(t *testing.T) {
 		assert.False(t, followerBarSatisfiable(nil))
 	})
 }
+
+func TestSplitCSV(t *testing.T) {
+	assert.Equal(t, []string{"submitted", "under_review"}, splitCSV("submitted,under_review"))
+	assert.Equal(t, []string{"submitted", "under_review"}, splitCSV(" submitted , under_review "))
+	assert.Equal(t, []string{"submitted"}, splitCSV("submitted"))
+	// A trailing comma must not put an empty status into the filter — that
+	// would match nothing and quietly empty the admin queue.
+	assert.Equal(t, []string{"submitted"}, splitCSV("submitted,"))
+	assert.Empty(t, splitCSV(",  ,"))
+}

@@ -898,6 +898,18 @@ func (cc ContentCreator) GetContentCreatorStatsHandler(w http.ResponseWriter, r 
 
 // --- Authenticated User Endpoints ---
 
+// splitCSV turns "a,b , c" into ["a","b","c"], dropping blanks so a trailing
+// comma cannot smuggle an empty status into a query filter.
+func splitCSV(v string) []string {
+	out := make([]string, 0, 2)
+	for _, part := range strings.Split(v, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // followerBarSatisfiable reports whether an application could still clear the
 // follower minimum, judged only on what we can know at submission time.
 //
@@ -1848,7 +1860,15 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 
 	filter := bson.M{}
 	if status != "" {
-		filter["status"] = status
+		// Comma-separated so a caller can ask for everything still needing
+		// attention in one request. "submitted" alone hid applications that had
+		// moved to under_review — they are the ones a reviewer has already
+		// started, which makes them more urgent, not less.
+		if wanted := splitCSV(status); len(wanted) > 1 {
+			filter["status"] = bson.M{"$in": wanted}
+		} else {
+			filter["status"] = status
+		}
 	} else if excludeStatus != "" {
 		filter["status"] = bson.M{"$ne": excludeStatus}
 	}
