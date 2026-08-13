@@ -52,9 +52,11 @@ func RenderApplicationSubmittedEmail(displayName string) string {
       <p>Thank you for applying to the <strong>Lines Police CAD Content Creator Program</strong>! We're excited to review your application.</p>
 
       <div class="highlight-box">
-        <h3>📋 What happens next?</h3>
-        <p style="margin-bottom: 0;">Our team will carefully review your application. This process typically takes <strong>5-7 business days</strong>. Applications require approval from at least two team members to ensure fair evaluation.</p>
+        <h3>⚡ One thing we need from you</h3>
+        <p style="margin-bottom: 0;">Before your application goes to our team, we confirm you own the channels you listed. Grab your <strong>verification code</strong> and add it to your channel description &mdash; it takes about a minute, and your application will not move forward until it is done.</p>
       </div>
+
+      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Get my verification code</a>
 
       <div class="timeline">
         <div class="timeline-item">
@@ -62,23 +64,26 @@ func RenderApplicationSubmittedEmail(displayName string) string {
           <div class="timeline-text"><strong>Step 1:</strong> Application submitted ✓</div>
         </div>
         <div class="timeline-item">
-          <div class="timeline-icon" style="background: #6b7280;"></div>
-          <div class="timeline-text"><strong>Step 2:</strong> First review by our team</div>
+          <div class="timeline-icon" style="background: #fbbf24;"></div>
+          <div class="timeline-text"><strong>Step 2:</strong> <strong style="color:#fbbf24;">Your turn</strong> &mdash; add your verification code to each channel&rsquo;s description, then press Check</div>
         </div>
         <div class="timeline-item">
           <div class="timeline-icon" style="background: #6b7280;"></div>
-          <div class="timeline-text"><strong>Step 3:</strong> Second review & final decision</div>
+          <div class="timeline-text"><strong>Step 3:</strong> Automatic checks &mdash; we confirm the channel exists, that the code is there, and read your follower count</div>
         </div>
         <div class="timeline-item">
           <div class="timeline-icon" style="background: #6b7280;"></div>
-          <div class="timeline-text"><strong>Step 4:</strong> You'll receive an email with our decision</div>
+          <div class="timeline-text"><strong>Step 4:</strong> Team review &mdash; two of our team look at applications that passed the checks</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-icon" style="background: #6b7280;"></div>
+          <div class="timeline-text"><strong>Step 5:</strong> You&rsquo;ll receive an email with our decision</div>
         </div>
       </div>
 
-      <p>In the meantime, you can check your application status anytime:</p>
-      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">View Application Status</a>
+      <p style="color: #9ca3af; font-size: 14px;">A few things worth knowing: you can remove the code once a channel is verified, we re-check automatically every few hours so you do not have to sit on the page, and your follower count is read from the channel itself &mdash; so do not worry if the number you entered was not exact. TikTok has no public API, so our team confirms those by eye.</p>
 
-      <p style="margin-top: 30px; color: #9ca3af; font-size: 14px;">If you have any questions about the program or your application, please don't hesitate to reach out to our support team.</p>
+      <p style="margin-top: 24px; color: #9ca3af; font-size: 14px;">Any questions about the program or your application, just reach out to our support team.</p>
     </div>
     <div class="footer">
       <p>© Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>

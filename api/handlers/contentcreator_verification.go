@@ -178,6 +178,29 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 		return
 	}
 
+	// Budget check BEFORE any outbound call. Every Check press spends a unit of
+	// a shared daily platform quota, so this is what stops one applicant
+	// hammering the button and exhausting verification for everyone. It is keyed
+	// to the application rather than the caller's IP, so rotating IPs does not
+	// buy more budget and people behind one NAT do not share it.
+	if ok, retryAfter, reason := platform.VerifyCheckBudget(time.Now()); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+		config.InfoStatus(reason, http.StatusTooManyRequests, w, nil)
+		return
+	}
+
+	// Spend one unit of the budget whether or not the fetch below succeeds:
+	// a failed lookup still costs us a platform API call.
+	countAfter, windowFrom := platform.NextVerifyCheckCounters(time.Now())
+	nowDT := primitive.NewDateTimeFromTime(time.Now())
+	windowDT := primitive.NewDateTimeFromTime(windowFrom)
+	budgetPrefix := fmt.Sprintf("platforms.%d.", idx)
+	_ = cc.AppDB.UpdateOne(ctx, bson.M{"_id": app.ID}, bson.M{"$set": bson.M{
+		budgetPrefix + "verificationLastCheckedAt":   nowDT,
+		budgetPrefix + "verificationCheckCount":      countAfter,
+		budgetPrefix + "verificationCheckWindowFrom": windowDT,
+	}})
+
 	fetcher, err := platforms.For(platform.Type)
 	if err == platforms.ErrManualOnly {
 		// Not a failure: the code stays pending until a human confirms it.

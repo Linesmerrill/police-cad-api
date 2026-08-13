@@ -1,6 +1,11 @@
 package models
 
-import "go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 // ContentCreatorApplication represents an application to the Content Creator Program
 type ContentCreatorApplication struct {
@@ -118,6 +123,62 @@ type ContentCreatorPlatform struct {
 	// ReportedFollowerCount preserves what the applicant claimed, so a large gap
 	// between claim and reality is visible to reviewers instead of overwritten.
 	ReportedFollowerCount int `json:"reportedFollowerCount,omitempty" bson:"reportedFollowerCount,omitempty"`
+
+	// Manual check budget. Every Check press spends a unit of a SHARED daily
+	// platform API quota, so one impatient or malicious applicant must not be
+	// able to exhaust it for everyone. Tracked per platform entry and keyed to
+	// the application, which an IP-based limiter at the proxy cannot be — that
+	// one is bypassed by rotating IPs and punishes users behind a shared NAT.
+	VerificationLastCheckedAt   *primitive.DateTime `json:"verificationLastCheckedAt,omitempty" bson:"verificationLastCheckedAt,omitempty"`
+	VerificationCheckCount      int                 `json:"verificationCheckCount,omitempty" bson:"verificationCheckCount,omitempty"`
+	VerificationCheckWindowFrom *primitive.DateTime `json:"verificationCheckWindowFrom,omitempty" bson:"verificationCheckWindowFrom,omitempty"`
+}
+
+// Manual verification check budget, per platform entry.
+//
+// A real applicant saves their channel then checks: a short cooldown is
+// invisible to them. The daily cap bounds the worst case so a single
+// application cannot spend a meaningful share of the platform quota.
+const (
+	VerifyCheckCooldown  = 30 * time.Second
+	VerifyCheckDailyCap  = 25
+	VerifyCheckCapWindow = 24 * time.Hour
+)
+
+// VerifyCheckBudget reports whether a manual check may run now.
+//
+// Returns ok=false with a retryAfter and a reason written for the applicant.
+// Callers must not spend a platform API call when this says no.
+func (p ContentCreatorPlatform) VerifyCheckBudget(now time.Time) (ok bool, retryAfter time.Duration, reason string) {
+	if p.VerificationLastCheckedAt != nil {
+		since := now.Sub(p.VerificationLastCheckedAt.Time())
+		if since < VerifyCheckCooldown {
+			wait := VerifyCheckCooldown - since
+			return false, wait, fmt.Sprintf(
+				"Please wait %d seconds before checking again.", int(wait.Seconds())+1)
+		}
+	}
+
+	// The cap is a rolling window: an expired window resets the count, so a
+	// legitimate applicant coming back the next day is never stuck.
+	if p.VerificationCheckWindowFrom != nil &&
+		now.Sub(p.VerificationCheckWindowFrom.Time()) < VerifyCheckCapWindow &&
+		p.VerificationCheckCount >= VerifyCheckDailyCap {
+		wait := VerifyCheckCapWindow - now.Sub(p.VerificationCheckWindowFrom.Time())
+		return false, wait, "You have checked this channel a lot today. We keep checking automatically every few hours, so you can leave the code in place and we will pick it up."
+	}
+
+	return true, 0, ""
+}
+
+// NextVerifyCheckCounters returns the counters to persist after a check runs,
+// rolling the window when the previous one has expired.
+func (p ContentCreatorPlatform) NextVerifyCheckCounters(now time.Time) (count int, windowFrom time.Time) {
+	if p.VerificationCheckWindowFrom == nil ||
+		now.Sub(p.VerificationCheckWindowFrom.Time()) >= VerifyCheckCapWindow {
+		return 1, now
+	}
+	return p.VerificationCheckCount + 1, p.VerificationCheckWindowFrom.Time()
 }
 
 // Platform verification statuses.

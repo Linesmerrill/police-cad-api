@@ -173,7 +173,12 @@ func (cc ContentCreator) sendApplicationSubmittedEmail(ctx context.Context, user
 
 	subject := "Application Received - Lines Police CAD Creator Program"
 	htmlContent := templates.RenderApplicationSubmittedEmail(displayName)
-	plainText := fmt.Sprintf("Hi %s, Thank you for applying to the Lines Police CAD Content Creator Program! Our team will review your application within 5-7 business days. You can check your status at https://www.linespolice-cad.com/content-creators/me", displayName)
+	plainText := fmt.Sprintf("Hi %s, thank you for applying to the Lines Police CAD Content Creator Program. "+
+		"Before your application goes to our team we confirm you own the channels you listed. "+
+		"Get your verification code at https://www.linespolice-cad.com/content-creators/me and add it to each channel's description, then press Check. "+
+		"Your application will not move forward until that is done. "+
+		"After that we automatically confirm the channel exists, that the code is there, and read your follower count, then two of our team review it and you get an email with the decision. "+
+		"You can remove the code once a channel is verified.", displayName)
 
 	go func() {
 		if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
