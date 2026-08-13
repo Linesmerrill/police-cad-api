@@ -142,7 +142,7 @@ func (cc ContentCreator) StartChannelVerificationHandler(w http.ResponseWriter, 
 func channelInstruction(platformType string) string {
 	switch strings.ToLower(platformType) {
 	case "youtube":
-		return "Add this code anywhere in your YouTube channel description (YouTube Studio, Customization, Basic info, Description), save, then click Check. You can remove it once verified."
+		return "Add this code anywhere in your YouTube channel description (YouTube Studio, Customization, Profile tab, Description), save, then click Check. You can remove it once verified."
 	case "twitch":
 		return "Add this code anywhere in your Twitch About panel / bio (Settings, Channel, About), save, then click Check. You can remove it once verified."
 	case "tiktok":
