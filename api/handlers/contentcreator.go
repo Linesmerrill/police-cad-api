@@ -308,6 +308,19 @@ func (cc ContentCreator) AdminBackfillCreatorTiersHandler(w http.ResponseWriter,
 	})
 }
 
+// ccTierUpgradePlainText is the text/plain alternative for the tier upgrade
+// email. Shared by the real send and the ?testEmail= path so what gets checked
+// in a test inbox is exactly what creators receive.
+func ccTierUpgradePlainText(displayName string) string {
+	return fmt.Sprintf(
+		"Great news %s! Your Content Creator Program benefits are being raised to Premium Plus, our highest tier, free of charge. "+
+			"That is a value of %s saved every year. Premium Plus on your account (unlimited communities, no ads, verified badge) "+
+			"plus a Premium boost for one community you manage. Your account is already upgraded. "+
+			"Keep up the awesome work, we appreciate you. View your benefits at https://www.linespolice-cad.com/content-creators/me",
+		displayName, ccProgramAnnualValue,
+	)
+}
+
 // AdminNotifyTierUpgradeHandler emails active creators that their program
 // benefits have been raised to the top tier. This is a deliberate one-off
 // announcement, not part of any automated flow, so it is admin-triggered.
@@ -325,6 +338,33 @@ func (cc ContentCreator) AdminNotifyTierUpgradeHandler(w http.ResponseWriter, r 
 	defer cancel()
 
 	send := r.URL.Query().Get("send") == "true"
+
+	// ?testEmail=you@example.com sends the real thing to one address and stops.
+	// Lets the exact message be checked in a real inbox before any creator is
+	// contacted, without a dry run's guesswork about how it renders.
+	if testEmail := strings.TrimSpace(r.URL.Query().Get("testEmail")); testEmail != "" {
+		name := strings.TrimSpace(r.URL.Query().Get("testName"))
+		if name == "" {
+			name = "Test Creator"
+		}
+		subject := "[TEST] Your Creator benefits just got bigger - Lines Police CAD"
+		htmlContent := templates.RenderCreatorTierUpgradeEmail(name, ccProgramAnnualValue)
+		plainText := ccTierUpgradePlainText(name)
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := sendContentCreatorEmail(testEmail, name, subject, htmlContent, plainText); err != nil {
+			zap.S().Errorw("failed to send creator tier upgrade test email", "error", err, "to", testEmail)
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"test": true, "sent": false, "to": testEmail, "error": err.Error()})
+			return
+		}
+		zap.S().Infow("sent creator tier upgrade TEST email", "to", testEmail)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"test": true, "sent": true, "to": testEmail, "displayName": name, "annualValue": ccProgramAnnualValue,
+		})
+		return
+	}
 
 	cursor, err := cc.CCDB.Find(ctx, bson.M{"status": bson.M{"$in": []string{"active", "warned"}}})
 	if err != nil {
@@ -367,10 +407,7 @@ func (cc ContentCreator) AdminNotifyTierUpgradeHandler(w http.ResponseWriter, r 
 		if send {
 			subject := "Your Creator benefits just got bigger - Lines Police CAD"
 			htmlContent := templates.RenderCreatorTierUpgradeEmail(creator.DisplayName, ccProgramAnnualValue)
-			plainText := fmt.Sprintf(
-				"Great news %s! Your Content Creator Program benefits are being raised to Premium Plus, our highest tier, free of charge. That is a value of %s saved every year. Premium Plus on your account (unlimited communities, no ads, verified badge) plus a Premium boost for one community you manage. Your account is already upgraded. Keep up the awesome work, we appreciate you. View your benefits at https://www.linespolice-cad.com/content-creators/me",
-				creator.DisplayName, ccProgramAnnualValue,
-			)
+			plainText := ccTierUpgradePlainText(creator.DisplayName)
 			if err := sendContentCreatorEmail(user.Details.Email, creator.DisplayName, subject, htmlContent, plainText); err != nil {
 				rec.Error = err.Error()
 				zap.S().Errorw("failed to send creator tier upgrade email", "error", err, "creatorId", creator.ID.Hex())
