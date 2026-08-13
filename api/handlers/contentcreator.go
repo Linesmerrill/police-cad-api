@@ -1060,6 +1060,27 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 	})
 }
 
+// applicationResponse shapes an application for its own owner. One place, so a
+// field added for the dashboard cannot reach one code path and miss another —
+// the checks were already read by the frontend before they were ever sent.
+func applicationResponse(app *models.ContentCreatorApplication) models.ContentCreatorApplicationResponse {
+	return models.ContentCreatorApplicationResponse{
+		ID:              app.ID,
+		DisplayName:     app.DisplayName,
+		PrimaryPlatform: app.PrimaryPlatform,
+		Platforms:       app.Platforms,
+		Description:     app.Description,
+		Bio:             app.Bio,
+		Status:          app.Status,
+		Feedback:        app.Feedback,
+		CreatedAt:       app.CreatedAt,
+		ReviewedAt:      app.ReviewedAt,
+		Checks:          app.Checks,
+		ChecksPassed:    app.ChecksPassed,
+		RejectionReason: app.RejectionReason,
+	}
+}
+
 // GetMyApplicationHandler returns the current user's application status
 // GET /api/v1/content-creator-applications/me
 func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.Request) {
@@ -1099,16 +1120,12 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 		pendingApp, _ := cc.AppDB.FindOne(ctx, pendingAppFilter)
 		if pendingApp != nil {
 			// Return the pending application instead of the removed creator
-			appResponse := models.ContentCreatorApplicationResponse{
-				ID:              pendingApp.ID,
-				DisplayName:     pendingApp.DisplayName,
-				PrimaryPlatform: pendingApp.PrimaryPlatform,
-				Platforms:       pendingApp.Platforms,
-				Description:     pendingApp.Description,
-				Bio:             pendingApp.Bio,
-				Status:          pendingApp.Status,
-				CreatedAt:       pendingApp.CreatedAt,
+			if cc.ScreenOnDemand(ctx, pendingApp) {
+				if fresh, err := cc.AppDB.FindOne(ctx, bson.M{"_id": pendingApp.ID}); err == nil && fresh != nil {
+					pendingApp = fresh
+				}
 			}
+			appResponse := applicationResponse(pendingApp)
 			response := models.ContentCreatorMeResponse{
 				Success:     true,
 				Application: &appResponse,
@@ -1183,18 +1200,18 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 	}
 
 	app := applications[0]
-	appResponse := models.ContentCreatorApplicationResponse{
-		ID:              app.ID,
-		DisplayName:     app.DisplayName,
-		PrimaryPlatform: app.PrimaryPlatform,
-		Platforms:       app.Platforms,
-		Description:     app.Description,
-		Bio:             app.Bio,
-		Status:          app.Status,
-		Feedback:        app.Feedback,
-		CreatedAt:       app.CreatedAt,
-		ReviewedAt:      app.ReviewedAt,
+
+	// Screen on the way in. Somebody opening this page is the best moment to
+	// have a current answer for them — the alternative is a page that says "we
+	// will email you shortly" while the application sits Submitted until the
+	// next sweep, hours later. Cheap and heavily guarded; see ScreenOnDemand.
+	if cc.ScreenOnDemand(ctx, &app) {
+		if fresh, err := cc.AppDB.FindOne(ctx, bson.M{"_id": app.ID}); err == nil && fresh != nil {
+			app = *fresh
+		}
 	}
+
+	appResponse := applicationResponse(&app)
 
 	response := models.ContentCreatorMeResponse{
 		Success:     true,

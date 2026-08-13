@@ -403,6 +403,13 @@ type ContentCreatorApplicationResponse struct {
 	Feedback        string                   `json:"feedback,omitempty"`
 	CreatedAt       primitive.DateTime       `json:"createdAt"`
 	ReviewedAt      *primitive.DateTime      `json:"reviewedAt,omitempty"`
+	// What the automated checks found. Every check Reason is written for the
+	// applicant to read, so these go back to them: the dashboard shows each
+	// check with its reason, and without them the page has to guess at the
+	// state from the platform records alone.
+	Checks          []ApplicationCheck `json:"checks,omitempty"`
+	ChecksPassed    bool               `json:"checksPassed"`
+	RejectionReason string             `json:"rejectionReason,omitempty"`
 }
 
 // ContentCreatorMeResponse is the response for the current user's creator status

@@ -119,6 +119,28 @@ func TestScreenApplication(t *testing.T) {
 		assert.False(t, res.FollowerShortfall, "a missing channel is a handle problem, not a size one")
 	})
 
+	t.Run("the shortfall carries the channel it was measured from", func(t *testing.T) {
+		// The rejection email names this, so an applicant with three channels
+		// does not have to guess which one we read.
+		res := screenApplication(ctx, appWith(yt, 0), fetcherReturning(
+			platforms.ChannelInfo{Description: "LPC-VERIFY-ABC123", FollowerCount: 252}, nil))
+		assert.Equal(t, 252, res.FollowerBest)
+		assert.Contains(t, res.FollowerBestLabel, "YouTube")
+		assert.Contains(t, res.FollowerBestLabel, "cryptic")
+	})
+
+	t.Run("a shortfall on an unproven channel is not ours to reject", func(t *testing.T) {
+		// The count is real but nobody has shown the channel is theirs — it may
+		// be a mistyped handle pointing at a stranger. The ownership check
+		// handles this, slowly; screening must not slam the door on the first
+		// page load.
+		unproven := models.ContentCreatorPlatform{Type: "youtube", Handle: "cryptic", VerificationCode: "LPC-VERIFY-ABC123"}
+		res := screenApplication(ctx, appWith(unproven, 0), fetcherReturning(
+			platforms.ChannelInfo{Description: "no code yet", FollowerCount: 40}, nil))
+		assert.True(t, res.FollowerShortfall, "the check still fails")
+		assert.False(t, res.OwnershipProven, "but the auto-reject is gated on this")
+	})
+
 	t.Run("clearing the bar never sets a shortfall", func(t *testing.T) {
 		res := screenApplication(ctx, appWith(yt, 0), fetcherReturning(
 			platforms.ChannelInfo{Description: "LPC-VERIFY-ABC123", FollowerCount: 500}, nil))

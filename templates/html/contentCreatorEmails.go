@@ -756,3 +756,79 @@ func RenderChecksFailedEmail(displayName string, reasons []string, ownershipProv
 </body>
 </html>`, displayName, items, closing)
 }
+
+// RenderRequirementNotMetEmail tells an applicant their application did not meet
+// a published program requirement.
+//
+// Separate from RenderApplicationRejectedEmail on purpose: that one opens with
+// "after careful review by our team", which would be a lie here. Nobody
+// reviewed this — a number was measured against a published minimum. Saying so
+// plainly is kinder than implying a person weighed them up and said no, and it
+// makes the way back obvious: change the number, apply again.
+//
+// requirement is the rule in the applicant's words ("At least 500 followers on
+// one channel"). measured is what we actually read. steps are the numbered
+// instructions for reapplying.
+func RenderRequirementNotMetEmail(displayName, requirement, measured string, steps []string) string {
+	stepItems := ""
+	for _, s := range steps {
+		stepItems += `<li style="margin-bottom:8px;">` + s + `</li>`
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>About your Creator Program application - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #6b7280 0%%, #4b5563 100%%); padding: 36px 30px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 36px 30px; color: #e5e7eb; line-height: 1.6; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .req-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin: 22px 0; }
+    .req-label { color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 6px; }
+    .req-value { color: #fff; font-weight: 700; margin: 0 0 16px; }
+    .req-value-last { color: #fff; font-weight: 700; margin: 0; }
+    .steps { background: rgba(34,197,94,0.07); border: 1px solid rgba(34,197,94,0.28); border-radius: 12px; padding: 20px 20px 20px 38px; margin: 22px 0; }
+    .steps li { color: #bbf7d0; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 8px; }
+    .footer { padding: 28px 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>About your application</h1>
+    </div>
+    <div class="content">
+      <h2>Hi %s,</h2>
+      <p>Thank you for applying to the <strong>Lines Police CAD Content Creator Program</strong>. We are not able to accept this application, because it does not meet one of the program requirements.</p>
+
+      <div class="req-box">
+        <p class="req-label">The requirement</p>
+        <p class="req-value">%s</p>
+        <p class="req-label">What we found</p>
+        <p class="req-value-last">%s</p>
+      </div>
+
+      <p>This one is measured automatically from your channel, so there is nothing you need to appeal &mdash; and nothing stopping you from applying again the moment it changes.</p>
+
+      <p style="margin-bottom:0;"><strong style="color:#fff;">When you are ready to reapply:</strong></p>
+      <ol class="steps">%s</ol>
+
+      <a href="https://www.linespolice-cad.com/content-creators/apply" class="cta-button">Apply again</a>
+
+      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think we measured the wrong channel, reply to this email and a person will take a look.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, requirement, measured, stepItems)
+}

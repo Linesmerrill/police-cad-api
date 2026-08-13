@@ -53,15 +53,122 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 
 	screened := 0
 	for i := range apps {
-		app := &apps[i]
+		if err := cc.screenAndPersist(ctx, &apps[i], countsAsAttempt); err != nil {
+			continue
+		}
+		screened++
+	}
+	return screened, nil
+}
+
+// ScreenOnDemand re-runs the checks for one application when its owner opens
+// their status page, so the answer they are looking at is current rather than
+// up to four hours old. The sweep still catches everyone who does not visit.
+//
+// Best-effort by design: this sits in front of a page load, so a platform
+// outage or a slow lookup must never stop the page rendering. Errors are logged
+// and swallowed, and the caller re-reads the application afterwards.
+func (cc ContentCreator) ScreenOnDemand(ctx context.Context, app *models.ContentCreatorApplication) bool {
+	if app == nil {
+		return false
+	}
+	if app.Status != "submitted" && app.Status != "under_review" {
+		return false // decided; nothing left for screening to say
+	}
+	if app.ChecksSettled {
+		return false // the outcome will not change on its own
+	}
+	if app.ChecksLastRunAt != nil &&
+		time.Since(app.ChecksLastRunAt.Time()) < onDemandScreenCooldown {
+		return false
+	}
+
+	// Screening gets its own budget, well under the request's. Platform lookups
+	// carry a 10s client timeout each, which is the whole request on its own —
+	// a slow YouTube must not hold someone's dashboard hostage. Whatever does
+	// not finish here, the sweep picks up.
+	sctx, cancel := context.WithTimeout(ctx, onDemandScreenBudget)
+	defer cancel()
+
+	if err := cc.screenAndPersist(sctx, app, onDemandScreening); err != nil {
+		zap.S().Warnw("on-demand screening did not finish; the sweep will retry",
+			"applicationId", app.ID.Hex(), "error", err)
+		return false
+	}
+	return true
+}
+
+// countsAsAttempt distinguishes the scheduled sweep from a screening the
+// applicant triggered by opening their page. CheckAttempts is how we decide to
+// stop waiting for a verification code that is never coming — twelve sweeps is
+// about two days. Counting page loads against that budget would let someone
+// refresh their way to a hard ownership failure in under a minute.
+const (
+	countsAsAttempt   = true
+	onDemandScreening = false
+
+	// A refresh loop must not become a quota bill. Verified channels are never
+	// re-fetched, so the cost is bounded to unverified ones, but this keeps even
+	// that to once a minute per applicant.
+	onDemandScreenCooldown = time.Minute
+
+	// How long screening may hold up a page load before we give up on it and
+	// let the scheduled sweep deal with it.
+	onDemandScreenBudget = 5 * time.Second
+)
+
+// screenAndPersist runs the automated checks over one application, writes what
+// they found, and sends whatever the outcome calls for.
+//
+// Shared by the scheduled sweep and the applicant's own Check button. A
+// decision this consequential must not depend on which of the two got there
+// first: before this was shared, verifying a 252-follower channel left the page
+// saying "we will email you shortly" while the application sat as Submitted for
+// up to four hours, still withdrawable, with nothing sent.
+// channelLabel names a platform entry the way its owner would recognise it.
+func channelLabel(p models.ContentCreatorPlatform) string {
+	name := p.Handle
+	if name == "" {
+		name = p.URL
+	}
+	if name == "" {
+		return platformDisplayName(p.Type)
+	}
+	return fmt.Sprintf("%s (%s)", platformDisplayName(p.Type), name)
+}
+
+// platformDisplayName is the platform's own capitalisation. "Youtube" in an
+// email to a YouTuber reads like it was written by something that has never
+// seen the site.
+func platformDisplayName(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "youtube":
+		return "YouTube"
+	case "twitch":
+		return "Twitch"
+	case "tiktok":
+		return "TikTok"
+	case "", "other":
+		return "your channel"
+	default:
+		return strings.ToUpper(t[:1]) + t[1:]
+	}
+}
+
+func (cc ContentCreator) screenAndPersist(ctx context.Context, app *models.ContentCreatorApplication, attempt bool) error {
+	{
 		res := screenApplication(ctx, app, platforms.For)
 		now := primitive.NewDateTimeFromTime(time.Now())
 
+		attempts := app.CheckAttempts
+		if attempt {
+			attempts++
+		}
 		set := bson.M{
 			"checks":          res.Checks,
 			"checksPassed":    res.Passed,
 			"checksLastRunAt": now,
-			"checkAttempts":   app.CheckAttempts + 1,
+			"checkAttempts":   attempts,
 			"updatedAt":       now,
 		}
 		// Fold in anything the pass learned about the channels themselves, so a
@@ -96,11 +203,18 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 		case res.Passed && app.AdminNotifiedAt == nil:
 			notifyAdmin = true
 
-		case res.Blocked && res.FollowerShortfall:
+		case res.Blocked && res.FollowerShortfall && res.OwnershipProven:
 			// A hard program requirement, measured from the channel itself. There
 			// is nothing for a reviewer to weigh, so it is decided here rather
 			// than sitting in a queue waiting for someone to reach the same
 			// conclusion. The applicant is told why and can reapply if they grow.
+			//
+			// Only once they have proved a channel is theirs. A count read off a
+			// channel nobody has claimed yet might be a mistyped handle pointing
+			// at a stranger's channel, and screening now runs the moment they
+			// open the page — rejecting on that would close the door before they
+			// had done anything wrong. Unproven channels are handled by the
+			// ownership check instead, which retries first and gives up slowly.
 			autoReject = true
 
 		case res.Blocked && app.ApplicantNotifiedAt == nil:
@@ -136,9 +250,8 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 
 		if err := cc.AppDB.UpdateOne(ctx, bson.M{"_id": app.ID}, bson.M{"$set": set}); err != nil {
 			zap.S().Errorw("failed to persist application screening", "applicationId", app.ID.Hex(), "error", err)
-			continue
+			return err
 		}
-		screened++
 
 		total := 0
 		for _, p := range app.Platforms {
@@ -151,8 +264,9 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 
 		if autoReject {
 			zap.S().Infow("creator application auto-rejected: below the follower minimum",
-				"applicationId", app.ID.Hex(), "reason", res.FollowerReason)
-			cc.sendApplicationDecisionEmail(ctx, app.UserID, app.DisplayName, "rejected", res.FollowerReason, "")
+				"applicationId", app.ID.Hex(), "followers", res.FollowerBest,
+				"minimum", models.MinFollowers, "channel", res.FollowerBestLabel)
+			cc.sendFollowerMinimumEmail(ctx, app, res)
 		}
 		if notifyApplicant {
 			zap.S().Infow("creator application failed automated checks, telling the applicant",
@@ -164,7 +278,62 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 			cc.notifyAdminsApplicationReady(ctx, app, total)
 		}
 	}
-	return screened, nil
+	return nil
+}
+
+// sendFollowerMinimumEmail is the auto-response for the one rejection no human
+// makes: a channel measured under the published follower minimum.
+//
+// It names the requirement, the channel we measured and the number we read, and
+// gives the steps back in. Nobody should have to reply to an email to find out
+// which of their channels we looked at or what would change the answer.
+func (cc ContentCreator) sendFollowerMinimumEmail(ctx context.Context, app *models.ContentCreatorApplication, res screenResult) {
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	if err := cc.UDB.FindOne(ctx, bson.M{"_id": app.UserID}).Decode(&user); err != nil || user.Details.Email == "" {
+		zap.S().Errorw("cannot send the follower-minimum decision: no email on file",
+			"applicationId", app.ID.Hex(), "error", err)
+		return
+	}
+
+	min := formatCount(models.MinFollowers)
+	requirement := fmt.Sprintf("At least %s followers or subscribers on one of your channels.", min)
+
+	measured := fmt.Sprintf("%s followers, read from %s on %s.",
+		formatCount(res.FollowerBest),
+		res.FollowerBestLabel,
+		time.Now().Format("2 January 2006"))
+	if res.FollowerBestLabel == "" {
+		measured = fmt.Sprintf("%s followers on your largest channel.", formatCount(res.FollowerBest))
+	}
+
+	steps := []string{
+		fmt.Sprintf("Grow the channel past %s followers. There is no waiting period and no limit on how many times you can apply.", min),
+		"Start a new application at linespolice-cad.com/content-creators/apply.",
+		"Add the verification code we give you to your channel description, exactly as before.",
+		"We re-read the channel automatically, so the count on the day you apply is the one that counts.",
+	}
+
+	subject := "About your Creator Program application - Lines Police CAD"
+	htmlContent := templates.RenderRequirementNotMetEmail(app.DisplayName, requirement, measured, steps)
+	plainText := fmt.Sprintf(
+		"Hi %s, thank you for applying to the Lines Police CAD Content Creator Program. "+
+			"We cannot accept this application because it does not meet one of the program requirements. "+
+			"The requirement: %s What we found: %s "+
+			"This is measured automatically, so you are welcome to apply again as soon as it changes — "+
+			"start a new application at https://www.linespolice-cad.com/content-creators/apply.",
+		app.DisplayName, requirement, measured)
+
+	go func() {
+		if err := sendContentCreatorEmail(user.Details.Email, app.DisplayName, subject, htmlContent, plainText); err != nil {
+			zap.S().Errorw("failed to send the follower-minimum decision email",
+				"applicationId", app.ID.Hex(), "error", err)
+		}
+	}()
 }
 
 // sendChecksFailedEmail tells an applicant which automated check failed and what
@@ -614,6 +783,10 @@ type screenResult struct {
 	// FailureReasons are the applicant-facing reasons the application is
 	// blocked, for the email that tells them.
 	FailureReasons []string
+	// FollowerBest is the largest count we read and FollowerBestLabel names the
+	// channel it came from, for the email that has to explain the decision.
+	FollowerBest      int
+	FollowerBestLabel string
 	// FollowerShortfall means we successfully read a real follower count and it
 	// is under the minimum. That is a program requirement, not a judgement call,
 	// so it is auto-rejected rather than queued for a human. Never set when the
@@ -639,6 +812,9 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	// existing creators are assessed, so a small second channel is not a reason
 	// to reject someone.
 	bestFollowers := 0
+	// Which channel produced that number, so the rejection email can name it
+	// rather than making someone guess which of their channels we measured.
+	bestLabel := ""
 	anyFollowerData := false
 
 	for i, p := range app.Platforms {
@@ -661,6 +837,7 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 			add(models.CheckOwnership, models.CheckPassed, "")
 			if p.FollowerCount > bestFollowers {
 				bestFollowers = p.FollowerCount
+				bestLabel = channelLabel(p)
 			}
 			anyFollowerData = true
 			continue
@@ -692,6 +869,7 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 		res.FollowerCounts[i] = info.FollowerCount
 		if info.FollowerCount > bestFollowers {
 			bestFollowers = info.FollowerCount
+			bestLabel = channelLabel(p)
 		}
 		anyFollowerData = true
 
@@ -736,6 +914,8 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 		})
 		res.Blocked = true
 		res.FollowerShortfall = true
+		res.FollowerBest = bestFollowers
+		res.FollowerBestLabel = bestLabel
 		// The rejection reason is read on its own in an email, away from the
 		// checks list, so it carries the way back in. The check reason above
 		// stays terse — it sits in a table.
