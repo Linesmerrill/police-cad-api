@@ -873,6 +873,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/content-creator-applications/{id}/rescreen", http.HandlerFunc(contentCreator.AdminRescreenApplicationHandler)).Methods("POST")
 	// The human half of review: judgement calls the automated checks cannot make.
 	apiCreate.Handle("/admin/content-creator-applications/{id}/review-checklist", http.HandlerFunc(contentCreator.AdminSetReviewChecklistHandler)).Methods("POST")
+	// Approvals are reversible while the application is still open.
+	apiCreate.Handle("/admin/content-creator-applications/{id}/withdraw-approval", http.HandlerFunc(contentCreator.AdminWithdrawApprovalHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")

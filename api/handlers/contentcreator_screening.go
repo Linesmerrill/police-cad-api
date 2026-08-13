@@ -727,3 +727,95 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	}
 	return res
 }
+
+// AdminWithdrawApprovalHandler lets an admin take back the first approval they
+// gave.
+//
+// Approvals were one-way: give one by mistake, or change your mind after seeing
+// something on the channel, and the only escape was for a second admin to
+// approve anyway or for the whole application to be rejected. Neither is
+// honest. Withdrawing returns the application to awaiting-review.
+//
+// Only the admin who gave the approval can take it back, or an owner. An admin
+// quietly removing somebody else's approval would defeat the point of recording
+// who gave it.
+func (cc ContentCreator) AdminWithdrawApprovalHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	adminIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+	adminObjID, err := primitive.ObjectIDFromHex(adminIDStr)
+	if err != nil {
+		config.ErrorStatus("invalid admin id", http.StatusBadRequest, w, err)
+		return
+	}
+
+	appObjID, err := primitive.ObjectIDFromHex(mux.Vars(r)["id"])
+	if err != nil {
+		config.ErrorStatus("invalid application ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	app, err := cc.AppDB.FindOne(ctx, bson.M{"_id": appObjID})
+	if err != nil || app == nil {
+		config.ErrorStatus("application not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	// Nothing to withdraw, and a decided application is not reopened this way.
+	if app.FirstApprovalBy == nil {
+		config.InfoStatus("there is no approval to withdraw", http.StatusConflict, w, nil)
+		return
+	}
+	if app.Status != "submitted" && app.Status != "under_review" {
+		config.InfoStatus("this application has already been decided", http.StatusConflict, w, nil)
+		return
+	}
+
+	isOwner := false
+	if admin, aErr := cc.AdminDB.FindOne(ctx, bson.M{"_id": adminObjID}); aErr == nil && admin != nil {
+		isOwner = admin.Role == "owner"
+		for _, role := range admin.Roles {
+			if role == "owner" {
+				isOwner = true
+				break
+			}
+		}
+	}
+	if app.FirstApprovalBy.Hex() != adminObjID.Hex() && !isOwner {
+		config.ErrorStatus("only the admin who approved this, or an owner, can withdraw that approval",
+			http.StatusForbidden, w, nil)
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	if err := cc.AppDB.UpdateOne(ctx, bson.M{"_id": appObjID}, bson.M{
+		"$set":   bson.M{"status": "submitted", "updatedAt": now},
+		"$unset": bson.M{"firstApprovalBy": "", "firstApprovalAt": ""},
+	}); err != nil {
+		config.ErrorStatus("failed to withdraw approval", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	onBehalf := ""
+	if app.FirstApprovalBy.Hex() != adminObjID.Hex() {
+		onBehalf = fmt.Sprintf(" (given by %s)", app.FirstApprovalBy.Hex())
+	}
+	cc.auditScreening(r, app, "creator_application_approval_withdrawn", map[string]interface{}{
+		"withdrawnBy":      adminIDStr,
+		"originalApprover": app.FirstApprovalBy.Hex(),
+		"ownerAction":      isOwner && app.FirstApprovalBy.Hex() != adminObjID.Hex(),
+	}, fmt.Sprintf("Withdrew the first approval on %s%s", app.DisplayName, onBehalf))
+
+	zap.S().Infow("creator application approval withdrawn",
+		"applicationId", appObjID.Hex(), "withdrawnBy", adminIDStr,
+		"originalApprover", app.FirstApprovalBy.Hex())
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}

@@ -1951,6 +1951,9 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 		CreatorStatus       string `json:"creatorStatus,omitempty"`
 		FirstApprovalByName string `json:"firstApprovalByName,omitempty"`
 		ReviewedByName      string `json:"reviewedByName,omitempty"`
+		// Who ticked each checklist item, keyed by admin id. The checklist is an
+		// accountability record; a timestamp with no name against it is not one.
+		CheckedByNames map[string]string `json:"checkedByNames,omitempty"`
 	}{
 		ContentCreatorApplication: application,
 	}
@@ -1983,6 +1986,46 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 	}
 	if application.ReviewedBy != nil {
 		response.ReviewedByName = getAdminName(application.ReviewedBy)
+	}
+
+	// Who ticked each checklist item. The checklist is an accountability
+	// record; a timestamp with no name against it is not one.
+	if len(application.ReviewChecklist) > 0 {
+		names := map[string]string{}
+		for _, item := range application.ReviewChecklist {
+			if item.CheckedBy == nil {
+				continue
+			}
+			id := item.CheckedBy.Hex()
+			if _, seen := names[id]; seen {
+				continue // one lookup per admin, not per item
+			}
+			if n := getAdminName(item.CheckedBy); n != "" {
+				names[id] = n
+			}
+		}
+		if len(names) > 0 {
+			response.CheckedByNames = names
+		}
+	}
+
+	if len(application.ReviewChecklist) > 0 {
+		names := map[string]string{}
+		for _, item := range application.ReviewChecklist {
+			if item.CheckedBy == nil {
+				continue
+			}
+			id := item.CheckedBy.Hex()
+			if _, seen := names[id]; seen {
+				continue // one lookup per admin, not per item
+			}
+			if n := getAdminName(item.CheckedBy); n != "" {
+				names[id] = n
+			}
+		}
+		if len(names) > 0 {
+			response.CheckedByNames = names
+		}
 	}
 
 	// If approved and has a creatorId, look up the creator status
