@@ -349,11 +349,11 @@ func RenderCreatorRemovedEmail(displayName, reason string) string {
         <h4>Benefits Revoked:</h4>
         <div class="revoked-item">
           <span class="revoked-icon">✕</span>
-          <span>Personal Base Plan - No longer active on your account</span>
+          <span>Premium Plus - No longer active on your account</span>
         </div>
         <div class="revoked-item">
           <span class="revoked-icon">✕</span>
-          <span>Community Base Plan - Removed from your community (if applied)</span>
+          <span>Premium community boost - Removed from your community (if applied)</span>
         </div>
         <div class="revoked-item">
           <span class="revoked-icon">✕</span>
@@ -581,11 +581,11 @@ func RenderGracePeriodRecoveryEmail(displayName string, currentFollowers int) st
       <div class="benefits">
         <div class="benefit-item">
           <div class="benefit-icon">👤</div>
-          <div class="benefit-text"><strong>Personal Base Plan</strong> - Still active on your account</div>
+          <div class="benefit-text"><strong>Premium Plus</strong> - Still active on your account</div>
         </div>
         <div class="benefit-item">
           <div class="benefit-icon">🏢</div>
-          <div class="benefit-text"><strong>Community Base Plan</strong> - Still available for your community</div>
+          <div class="benefit-text"><strong>Premium community boost</strong> - Still available for your community</div>
         </div>
         <div class="benefit-item">
           <div class="benefit-icon">⭐</div>
