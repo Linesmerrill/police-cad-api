@@ -441,6 +441,107 @@ func (cc ContentCreator) auditScreening(r *http.Request, app *models.ContentCrea
 	}
 }
 
+// AdminSetReviewChecklistHandler records a reviewer confirming (or un-confirming)
+// one of the human judgement calls.
+//
+// The automated checks answer "is this channel real and theirs". They cannot
+// answer "is this content we want associated with us", which is the actual
+// decision. Keeping those confirmations on the application means a second
+// reviewer sees what the first already looked at, and each toggle lands in the
+// audit log so an approval can be traced to what was actually confirmed.
+func (cc ContentCreator) AdminSetReviewChecklistHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	adminIDStr, ok := getUserIDFromRequest(r)
+	if !ok {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, nil)
+		return
+	}
+	adminObjID, _ := primitive.ObjectIDFromHex(adminIDStr)
+
+	appObjID, err := primitive.ObjectIDFromHex(mux.Vars(r)["id"])
+	if err != nil {
+		config.ErrorStatus("invalid application ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	var req struct {
+		Key     string `json:"key"`
+		Checked bool   `json:"checked"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		config.ErrorStatus("invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+	// Guard the key so arbitrary fields cannot be written into the document.
+	if !models.IsReviewChecklistKey(req.Key) {
+		config.ErrorStatus("unknown checklist item", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	app, err := cc.AppDB.FindOne(ctx, bson.M{"_id": appObjID})
+	if err != nil || app == nil {
+		config.ErrorStatus("application not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	now := primitive.NewDateTimeFromTime(time.Now())
+	items := make([]models.ReviewChecklistItem, 0, len(models.ReviewChecklistKeys))
+	seen := map[string]bool{}
+	for _, it := range app.ReviewChecklist {
+		if it.Key == req.Key {
+			it.Checked = req.Checked
+			if req.Checked {
+				it.CheckedBy = &adminObjID
+				it.CheckedAt = &now
+			} else {
+				// Un-ticking clears the attribution; leaving the old name on an
+				// unchecked item would misrepresent who stands behind it.
+				it.CheckedBy = nil
+				it.CheckedAt = nil
+			}
+		}
+		items = append(items, it)
+		seen[it.Key] = true
+	}
+	if !seen[req.Key] {
+		item := models.ReviewChecklistItem{Key: req.Key, Checked: req.Checked}
+		if req.Checked {
+			item.CheckedBy = &adminObjID
+			item.CheckedAt = &now
+		}
+		items = append(items, item)
+	}
+
+	if err := cc.AppDB.UpdateOne(ctx, bson.M{"_id": appObjID},
+		bson.M{"$set": bson.M{"reviewChecklist": items, "updatedAt": now}}); err != nil {
+		config.ErrorStatus("failed to record checklist", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	verb := "confirmed"
+	if !req.Checked {
+		verb = "un-confirmed"
+	}
+	cc.auditScreening(r, app, "creator_application_review_checklist", map[string]interface{}{
+		"key":      req.Key,
+		"checked":  req.Checked,
+		"complete": models.ReviewChecklistComplete(items),
+	}, fmt.Sprintf("Reviewer %s \"%s\" for %s", verb, req.Key, app.DisplayName))
+
+	zap.S().Infow("reviewer checklist updated",
+		"applicationId", appObjID.Hex(), "key", req.Key, "checked", req.Checked, "adminId", adminIDStr)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"checklist": items,
+		"complete":  models.ReviewChecklistComplete(items),
+	})
+}
+
 // indexOfPlatform finds a platform's position for follower lookup.
 func indexOfPlatform(app *models.ContentCreatorApplication, target models.ContentCreatorPlatform) int {
 	for i, p := range app.Platforms {

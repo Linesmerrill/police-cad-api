@@ -47,6 +47,63 @@ type ContentCreatorApplication struct {
 	// ChecksSettled marks screening as finished either way, so "nobody has been
 	// told about this" is a state that cannot persist.
 	ChecksSettled bool `json:"checksSettled" bson:"checksSettled"`
+
+	// ReviewChecklist is the human half of review: the judgement calls no
+	// automated check can make. Stored on the application so a second reviewer
+	// sees what the first already confirmed, and every toggle is written to the
+	// admin audit log.
+	ReviewChecklist []ReviewChecklistItem `json:"reviewChecklist,omitempty" bson:"reviewChecklist,omitempty"`
+}
+
+// ReviewChecklistItem is one thing a human has to confirm before approving.
+type ReviewChecklistItem struct {
+	Key       string              `json:"key" bson:"key"`
+	Checked   bool                `json:"checked" bson:"checked"`
+	CheckedBy *primitive.ObjectID `json:"checkedBy,omitempty" bson:"checkedBy,omitempty"`
+	CheckedAt *primitive.DateTime `json:"checkedAt,omitempty" bson:"checkedAt,omitempty"`
+}
+
+// The reviewer checklist. Keys are stable; the wording lives with the UI so it
+// can be reworded without migrating stored data.
+const (
+	ReviewCheckAutomated = "automated_passed"
+	ReviewCheckRPContent = "rp_content"
+	ReviewCheckGenuine   = "genuine_content"
+)
+
+// ReviewChecklistKeys is the canonical set, in the order a reviewer works
+// through them.
+var ReviewChecklistKeys = []string{
+	ReviewCheckAutomated,
+	ReviewCheckRPContent,
+	ReviewCheckGenuine,
+}
+
+// IsReviewChecklistKey guards the override endpoint against arbitrary keys
+// being written into the document.
+func IsReviewChecklistKey(key string) bool {
+	for _, k := range ReviewChecklistKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// ReviewChecklistComplete reports whether every item has been confirmed.
+func ReviewChecklistComplete(items []ReviewChecklistItem) bool {
+	done := map[string]bool{}
+	for _, it := range items {
+		if it.Checked {
+			done[it.Key] = true
+		}
+	}
+	for _, k := range ReviewChecklistKeys {
+		if !done[k] {
+			return false
+		}
+	}
+	return true
 }
 
 // Automated check keys and statuses.
