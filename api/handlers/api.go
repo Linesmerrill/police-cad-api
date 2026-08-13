@@ -883,6 +883,27 @@ func (a *App) New() *mux.Router {
 		economy.CivDB,
 	)
 
+	// Re-screen creator applications every 4 hours: resolve each channel, look
+	// for the ownership code, read the real follower count, and email admins only
+	// once an application has passed. Registered from here rather than inside the
+	// scheduler because the work needs the application store and the creator
+	// email helpers, which live in this package.
+	//
+	// 4 hours rather than hourly: the slow step is a human editing their channel
+	// description, and each pass costs platform API quota per application.
+	const applicationScreeningSchedule = "0 */4 * * *"
+	a.Scheduler.AddJob("screenCreatorApplications", applicationScreeningSchedule, func() {
+		a.Scheduler.RunLocked("screenCreatorApplications", "creator_application_screening_job",
+			10*time.Minute, func(ctx context.Context) error {
+				n, err := contentCreator.ScreenPendingApplications(ctx)
+				if err != nil {
+					return err
+				}
+				zap.S().Infow("screened creator applications", "count", n)
+				return nil
+			})
+	})
+
 	// Metrics dashboard
 	r.HandleFunc("/metrics-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./docs/metrics-dashboard.html")

@@ -22,6 +22,46 @@ type ContentCreatorApplication struct {
 	CreatorID       *primitive.ObjectID      `json:"creatorId,omitempty" bson:"creatorId,omitempty"` // set when approved
 	CreatedAt       primitive.DateTime       `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       primitive.DateTime       `json:"updatedAt" bson:"updatedAt"`
+
+	// Automated screening. A scheduled job re-runs the machine-checkable parts
+	// of review (does the channel exist, is it owned by the applicant, does it
+	// clear the follower minimum) so human attention is only spent on
+	// applications that already passed. Admins are notified when Checks flip to
+	// passed, NOT on submit — a bogus application should never reach an inbox.
+	Checks          []ApplicationCheck  `json:"checks,omitempty" bson:"checks,omitempty"`
+	ChecksPassed    bool                `json:"checksPassed" bson:"checksPassed"`
+	ChecksLastRunAt *primitive.DateTime `json:"checksLastRunAt,omitempty" bson:"checksLastRunAt,omitempty"`
+	CheckAttempts   int                 `json:"checkAttempts,omitempty" bson:"checkAttempts,omitempty"`
+	// AdminNotifiedAt makes the review email fire exactly once.
+	AdminNotifiedAt *primitive.DateTime `json:"adminNotifiedAt,omitempty" bson:"adminNotifiedAt,omitempty"`
+}
+
+// Automated check keys and statuses.
+const (
+	CheckChannelResolves = "channel_resolves"
+	CheckOwnership       = "ownership"
+	CheckFollowers       = "followers"
+
+	CheckPending = "pending" // still working, will retry
+	CheckPassed  = "passed"
+	CheckFailed  = "failed" // applicant must act; reason explains what
+	CheckManual  = "manual" // no public API, a human confirms
+
+	// MinFollowers is the program's follower requirement. Previously a bare 500
+	// repeated across the scheduler.
+	MinFollowers = 500
+)
+
+// ApplicationCheck is one automated check against one platform entry. The
+// applicant sees these on their dashboard, so Reason is written for them, not
+// for a log.
+type ApplicationCheck struct {
+	Key       string              `json:"key" bson:"key"`
+	Platform  string              `json:"platform" bson:"platform"`
+	Handle    string              `json:"handle" bson:"handle"`
+	Status    string              `json:"status" bson:"status"`
+	Reason    string              `json:"reason,omitempty" bson:"reason,omitempty"`
+	CheckedAt *primitive.DateTime `json:"checkedAt,omitempty" bson:"checkedAt,omitempty"`
 }
 
 // ContentCreator represents an approved content creator in the program

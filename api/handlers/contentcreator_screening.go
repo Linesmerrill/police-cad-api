@@ -1,0 +1,274 @@
+package handlers
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.uber.org/zap"
+
+	"github.com/linesmerrill/police-cad-api/models"
+	"github.com/linesmerrill/police-cad-api/platforms"
+)
+
+// Automated screening of creator applications.
+//
+// Review used to be: application submitted -> admins emailed -> a human works
+// out whether the channel is real, belongs to the applicant, and is big enough.
+// The first two were unanswerable by eye, which is how someone got an
+// application through listing a channel they did not own.
+//
+// The machine-checkable parts now run on a schedule and admins are only emailed
+// once an application has passed them. A bogus submission never reaches an
+// inbox; the applicant sees exactly which check failed and why.
+
+// ScreenPendingApplications re-runs the automated checks over every application
+// awaiting review, persists the outcome, and emails admins the moment one turns
+// reviewable. Idempotent: an application already notified is not notified again.
+//
+// Returns how many were screened, for the caller's log.
+func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, error) {
+	cursor, err := cc.AppDB.Find(ctx, bson.M{
+		"status": bson.M{"$in": []string{"submitted", "under_review"}},
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close(ctx)
+
+	var apps []models.ContentCreatorApplication
+	if err := cursor.All(ctx, &apps); err != nil {
+		return 0, err
+	}
+
+	screened := 0
+	for i := range apps {
+		app := &apps[i]
+		res := screenApplication(ctx, app, platforms.For)
+		now := primitive.NewDateTimeFromTime(time.Now())
+
+		set := bson.M{
+			"checks":          res.Checks,
+			"checksPassed":    res.Passed,
+			"checksLastRunAt": now,
+			"checkAttempts":   app.CheckAttempts + 1,
+			"updatedAt":       now,
+		}
+		// Fold in anything the pass learned about the channels themselves, so a
+		// creator who verified via the scheduler is as verified as one who used
+		// the button.
+		for idx := range res.OwnershipVerified {
+			p := fmt.Sprintf("platforms.%d.", idx)
+			set[p+"verificationStatus"] = models.PlatformVerified
+			set[p+"verificationMethod"] = "api"
+			set[p+"verifiedAt"] = now
+			set[p+"verificationCode"] = ""
+		}
+		for idx, count := range res.FollowerCounts {
+			p := fmt.Sprintf("platforms.%d.", idx)
+			if app.Platforms[idx].ReportedFollowerCount == 0 {
+				set[p+"reportedFollowerCount"] = app.Platforms[idx].FollowerCount
+			}
+			set[p+"followerCount"] = count
+		}
+
+		notifyNow := res.Passed && app.AdminNotifiedAt == nil
+		if notifyNow {
+			set["adminNotifiedAt"] = now
+		}
+
+		if err := cc.AppDB.UpdateOne(ctx, bson.M{"_id": app.ID}, bson.M{"$set": set}); err != nil {
+			zap.S().Errorw("failed to persist application screening", "applicationId", app.ID.Hex(), "error", err)
+			continue
+		}
+		screened++
+
+		if notifyNow {
+			// The only point at which a human is asked to look. Everything that
+			// failed a machine check is handled without an email.
+			total := 0
+			for _, p := range app.Platforms {
+				if c, ok := res.FollowerCounts[indexOfPlatform(app, p)]; ok {
+					total += c
+				} else {
+					total += p.FollowerCount
+				}
+			}
+			cc.notifyAdminsApplicationReady(ctx, app, total)
+		}
+	}
+	return screened, nil
+}
+
+// indexOfPlatform finds a platform's position for follower lookup.
+func indexOfPlatform(app *models.ContentCreatorApplication, target models.ContentCreatorPlatform) int {
+	for i, p := range app.Platforms {
+		if p.Type == target.Type && p.Handle == target.Handle {
+			return i
+		}
+	}
+	return -1
+}
+
+// notifyAdminsApplicationReady sends the review email, now that the application
+// has cleared the automated checks.
+func (cc ContentCreator) notifyAdminsApplicationReady(ctx context.Context, app *models.ContentCreatorApplication, totalFollowers int) {
+	var applicant struct {
+		Details struct {
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	username := "Unknown"
+	if err := cc.UDB.FindOne(ctx, bson.M{"_id": app.UserID}).Decode(&applicant); err == nil {
+		username = applicant.Details.Username
+	}
+	zap.S().Infow("creator application cleared automated checks, notifying admins",
+		"applicationId", app.ID.Hex(), "displayName", app.DisplayName)
+	cc.sendAdminNewApplicationEmail(ctx, username, app.DisplayName, app.PrimaryPlatform, totalFollowers)
+}
+
+// maxOwnershipAttempts bounds how long we keep re-checking for a code that
+// never appears. Generous on purpose: people apply, then get to editing their
+// channel hours later.
+const maxOwnershipAttempts = 12
+
+// screenResult is the outcome of one screening pass over one application.
+type screenResult struct {
+	Checks []models.ApplicationCheck
+	// Passed means every check is passed or manual, so a human should look.
+	Passed bool
+	// Blocked means at least one check failed outright and the applicant has to
+	// act. Distinct from "still pending", which just means try again later.
+	Blocked bool
+	// FollowerCounts holds the real counts read from each platform, indexed by
+	// platform position, so the caller can write them back.
+	FollowerCounts map[int]int
+	// OwnershipVerified marks platform indexes whose code was found this pass.
+	OwnershipVerified map[int]bool
+}
+
+// channelFetcher lets tests substitute platform responses. Production passes
+// platforms.For.
+type channelFetcher func(platformType string) (platforms.Fetcher, error)
+
+// screenApplication runs every check for an application and reports what the
+// applicant should be told. It performs no writes — the caller persists.
+func screenApplication(ctx context.Context, app *models.ContentCreatorApplication, fetcherFor channelFetcher) screenResult {
+	now := primitive.NewDateTimeFromTime(time.Now())
+	res := screenResult{
+		FollowerCounts:    map[int]int{},
+		OwnershipVerified: map[int]bool{},
+	}
+
+	// The follower requirement is met by the BIGGEST channel, matching how
+	// existing creators are assessed, so a small second channel is not a reason
+	// to reject someone.
+	bestFollowers := 0
+	anyFollowerData := false
+
+	for i, p := range app.Platforms {
+		label := p.Handle
+		if label == "" {
+			label = p.URL
+		}
+		add := func(key, status, reason string) {
+			res.Checks = append(res.Checks, models.ApplicationCheck{
+				Key: key, Platform: p.Type, Handle: label,
+				Status: status, Reason: reason, CheckedAt: &now,
+			})
+		}
+
+		// Already-verified platforms are not re-fetched. Their stored follower
+		// count is trusted because verification wrote it.
+		if p.IsVerified() {
+			add(models.CheckChannelResolves, models.CheckPassed, "")
+			add(models.CheckOwnership, models.CheckPassed, "")
+			if p.FollowerCount > bestFollowers {
+				bestFollowers = p.FollowerCount
+			}
+			anyFollowerData = true
+			continue
+		}
+
+		fetcher, err := fetcherFor(p.Type)
+		if err == platforms.ErrManualOnly {
+			// No public API. Not the applicant's problem and not a failure.
+			add(models.CheckChannelResolves, models.CheckManual, "This platform is reviewed by our team.")
+			add(models.CheckOwnership, models.CheckManual, "Leave the code in your bio; our team confirms it.")
+			continue
+		}
+
+		info, ferr := fetcher.Fetch(ctx, p.Handle)
+		switch {
+		case ferr == platforms.ErrChannelNotFound:
+			add(models.CheckChannelResolves, models.CheckFailed,
+				fmt.Sprintf("We could not find a %s channel at \"%s\". Check the link is correct.", p.Type, label))
+			res.Blocked = true
+			continue
+		case ferr != nil:
+			// Our side is unwell (no key, quota, network). Never blame the
+			// applicant for it — stay pending and try again next run.
+			add(models.CheckChannelResolves, models.CheckPending, "Checking your channel, this can take a little while.")
+			continue
+		}
+
+		add(models.CheckChannelResolves, models.CheckPassed, "")
+		res.FollowerCounts[i] = info.FollowerCount
+		if info.FollowerCount > bestFollowers {
+			bestFollowers = info.FollowerCount
+		}
+		anyFollowerData = true
+
+		if platforms.ContainsCode(info.Description, p.VerificationCode) && p.VerificationCode != "" {
+			add(models.CheckOwnership, models.CheckPassed, "")
+			res.OwnershipVerified[i] = true
+			continue
+		}
+
+		if app.CheckAttempts >= maxOwnershipAttempts {
+			add(models.CheckOwnership, models.CheckFailed,
+				"We could not find your verification code in this channel's description. Add it and request a new check.")
+			res.Blocked = true
+			continue
+		}
+		add(models.CheckOwnership, models.CheckPending,
+			"Waiting for your verification code to appear in this channel's description.")
+	}
+
+	// Follower check is judged against the minimum, not against what the
+	// applicant claimed. Someone who guessed their own count wrong should still
+	// get in if the real number clears the bar.
+	switch {
+	case !anyFollowerData:
+		res.Checks = append(res.Checks, models.ApplicationCheck{
+			Key: models.CheckFollowers, Status: models.CheckPending,
+			Reason: "We will check your follower count once your channel is reachable.", CheckedAt: &now,
+		})
+	case bestFollowers >= models.MinFollowers:
+		res.Checks = append(res.Checks, models.ApplicationCheck{
+			Key: models.CheckFollowers, Status: models.CheckPassed,
+			Reason:    fmt.Sprintf("%d followers on your largest channel.", bestFollowers),
+			CheckedAt: &now,
+		})
+	default:
+		res.Checks = append(res.Checks, models.ApplicationCheck{
+			Key: models.CheckFollowers, Status: models.CheckFailed,
+			Reason: fmt.Sprintf("Your largest channel has %d followers. The programme needs at least %d.",
+				bestFollowers, models.MinFollowers),
+			CheckedAt: &now,
+		})
+		res.Blocked = true
+	}
+
+	// Passed means a human should now look: nothing failed, nothing outstanding.
+	res.Passed = !res.Blocked
+	for _, c := range res.Checks {
+		if c.Status == models.CheckPending {
+			res.Passed = false
+			break
+		}
+	}
+	return res
+}

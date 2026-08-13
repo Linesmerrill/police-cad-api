@@ -995,17 +995,14 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 	}
 	cc.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user)
 
-	// Calculate total followers for admin notification
-	totalFollowers := 0
-	for _, p := range req.Platforms {
-		totalFollowers += p.FollowerCount
-	}
-
 	// Send confirmation email to applicant
 	cc.sendApplicationSubmittedEmail(ctx, userObjID, req.DisplayName)
 
-	// Send notification to all admins
-	cc.sendAdminNewApplicationEmail(ctx, user.Details.Username, req.DisplayName, req.PrimaryPlatform, totalFollowers)
+	// Admins are deliberately NOT emailed here. Every platform field on a fresh
+	// application is self-asserted, so notifying on submit meant a human read
+	// every fabricated channel and invented follower count by hand. The
+	// screening job emails them once an application has actually cleared the
+	// automated checks — see ScreenPendingApplications.
 
 	zap.S().Infow("content creator application submitted",
 		"applicationId", application.ID.Hex(),
