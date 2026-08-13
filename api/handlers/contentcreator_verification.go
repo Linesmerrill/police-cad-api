@@ -137,6 +137,19 @@ func (cc ContentCreator) StartChannelVerificationHandler(w http.ResponseWriter, 
 	})
 }
 
+// formatCount renders a follower count the way a person would say it, since
+// these strings are read by applicants rather than parsed.
+func formatCount(n int) string {
+	switch {
+	case n >= 1000000:
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fK", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
 // channelInstruction tells the applicant exactly where the code goes. Wrong
 // field means a failed check and a confused applicant.
 func channelInstruction(platformType string) string {
@@ -216,30 +229,39 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 	prefix := fmt.Sprintf("platforms.%d.", idx)
 	now := primitive.NewDateTimeFromTime(time.Now())
 
+	// The response reports the two questions separately -- did we find the
+	// channel, and did we find the code on it -- rather than collapsing both
+	// into one "could not verify". A single message left the applicant unable to
+	// tell a wrong handle from an unsaved description, and that ambiguity is
+	// what turns into a support ping.
 	if fetchErr != nil {
-		// Distinguish our problem from theirs. A missing API key is not a failed
-		// verification and must not be recorded as one.
-		status := http.StatusBadGateway
-		msg := "could not read that channel, please try again shortly"
-		record := ""
-		switch {
-		case fetchErr == platforms.ErrChannelNotFound:
-			status = http.StatusNotFound
-			msg = "we could not find that channel, check the handle is correct"
-			record = "channel not found"
-		case strings.Contains(fetchErr.Error(), platforms.ErrNotConfigured.Error()):
-			zap.S().Errorw("channel verification unavailable: platform not configured",
-				"platform", platform.Type, "error", fetchErr)
-			msg = "verification is temporarily unavailable, our team has been notified"
-		}
-		if record != "" {
+		if fetchErr == platforms.ErrChannelNotFound {
 			_ = cc.AppDB.UpdateOne(ctx, bson.M{"_id": app.ID}, bson.M{"$set": bson.M{
 				prefix + "verificationStatus": models.PlatformFailed,
-				prefix + "verificationError":  record,
+				prefix + "verificationError":  "channel not found",
 				"updatedAt":                   now,
 			}})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"verified":       false,
+				"channelFound":   false,
+				"codeFound":      false,
+				"channelMessage": fmt.Sprintf("We could not find a %s channel at \"%s\". Open the link above — if it does not go to your channel, the handle on your application is wrong.", platform.Type, platform.Handle),
+				"codeMessage":    "We could not check for your code, because we could not reach the channel.",
+			})
+			return
 		}
-		config.InfoStatus(msg, status, w, nil)
+
+		// Anything else is our side: no API key, exhausted quota, network. Never
+		// recorded against the applicant, and phrased so they do not go hunting
+		// for a mistake they did not make.
+		if strings.Contains(fetchErr.Error(), platforms.ErrNotConfigured.Error()) {
+			zap.S().Errorw("channel verification unavailable: platform not configured",
+				"platform", platform.Type, "error", fetchErr)
+		}
+		config.InfoStatus("Verification is temporarily unavailable on our side. Nothing is wrong with your channel — we keep checking automatically, so you can leave the code in place.",
+			http.StatusBadGateway, w, nil)
 		return
 	}
 
@@ -252,8 +274,11 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"verified": false,
-			"message":  "We could not find the code in that channel's description yet. Save the change and try again — it can take a moment to show up.",
+			"verified":       false,
+			"channelFound":   true,
+			"codeFound":      false,
+			"channelMessage": fmt.Sprintf("Found your channel — %s followers.", formatCount(info.FollowerCount)),
+			"codeMessage":    "The code is not in that channel's description yet. Make sure you saved the change, then try again — it can take a moment to show up.",
 		})
 		return
 	}
@@ -287,10 +312,14 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"verified":      true,
-		"followerCount": info.FollowerCount,
-		"claimedCount":  platform.FollowerCount,
-		"profileUrl":    info.ProfileURL,
+		"verified":       true,
+		"channelFound":   true,
+		"codeFound":      true,
+		"channelMessage": fmt.Sprintf("Found your channel — %s followers.", formatCount(info.FollowerCount)),
+		"codeMessage":    "Code found. This channel is verified — you can remove the code now.",
+		"followerCount":  info.FollowerCount,
+		"claimedCount":   platform.FollowerCount,
+		"profileUrl":     info.ProfileURL,
 	})
 }
 
