@@ -17,6 +17,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
+	"github.com/linesmerrill/police-cad-api/platforms"
 	templates "github.com/linesmerrill/police-cad-api/templates/html"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
@@ -508,7 +509,7 @@ func (cc ContentCreator) sendAdminNewApplicationEmail(ctx context.Context, appli
 	}
 
 	htmlContent := templates.RenderAdminNewApplicationEmail(applicantUsername, displayName, primaryPlatform, followersStr)
-	plainText := fmt.Sprintf("New Creator Application: %s (%s) - Platform: %s, Followers: %s. Please review within 5-7 business days at https://www.linespolice-cad.com/lpc-admin", applicantUsername, displayName, primaryPlatform, followersStr)
+	plainText := fmt.Sprintf("New Creator Application: %s (%s) - Platform: %s, Followers: %s. Please review within 3-5 business days at https://www.linespolice-cad.com/lpc-admin", applicantUsername, displayName, primaryPlatform, followersStr)
 
 	go func() {
 		for _, admin := range admins {
@@ -897,6 +898,31 @@ func (cc ContentCreator) GetContentCreatorStatsHandler(w http.ResponseWriter, r 
 
 // --- Authenticated User Endpoints ---
 
+// followerBarSatisfiable reports whether an application could still clear the
+// follower minimum, judged only on what we can know at submission time.
+//
+// The applicant is not asked for a follower count on any platform we read
+// ourselves — the number would be a guess we are about to overwrite. So a zero
+// from YouTube or Twitch means "not asked", not "no audience", and gating on it
+// would reject every applicant on our two biggest platforms. Those are held to
+// the same bar a moment later on the real number: screening auto-rejects a
+// channel that comes back under models.MinFollowers.
+//
+// Where we cannot measure — TikTok, "other" — the applicant's own number is the
+// only one we will ever have, so it has to clear the bar here.
+func followerBarSatisfiable(ps []models.ContentCreatorPlatform) bool {
+	maxClaimed := 0
+	for _, p := range ps {
+		if platforms.Measurable(p.Type) {
+			return true
+		}
+		if p.FollowerCount > maxClaimed {
+			maxClaimed = p.FollowerCount
+		}
+	}
+	return maxClaimed >= models.MinFollowers
+}
+
 // CreateApplicationHandler submits a new creator application
 // POST /api/v1/content-creator-applications
 func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http.Request) {
@@ -946,15 +972,10 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Validate minimum follower requirement
-	maxFollowers := 0
-	for _, p := range req.Platforms {
-		if p.FollowerCount > maxFollowers {
-			maxFollowers = p.FollowerCount
-		}
-	}
-	if maxFollowers < 500 {
-		config.ErrorStatus("minimum 500 followers required on at least one platform", http.StatusBadRequest, w, nil)
+	if !followerBarSatisfiable(req.Platforms) {
+		config.ErrorStatus(
+			fmt.Sprintf("minimum %d followers required on at least one platform", models.MinFollowers),
+			http.StatusBadRequest, w, nil)
 		return
 	}
 

@@ -146,7 +146,7 @@ func RenderAdminNewApplicationEmail(applicantName, displayName, primaryPlatform,
       </div>
 
       <div class="alert-box">
-        <p>⏱️ <strong>Reminder:</strong> Applications should be reviewed within 5-7 business days. This application requires at least 2 admin approvals.</p>
+        <p>⏱️ <strong>Reminder:</strong> Applications should be reviewed within 3-5 business days. This application requires at least 2 admin approvals.</p>
       </div>
 
       <a href="https://www.linespolice-cad.com/admin/console" class="cta-button">Review in Admin Console</a>

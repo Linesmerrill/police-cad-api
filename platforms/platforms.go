@@ -63,6 +63,18 @@ func For(platformType string) (Fetcher, error) {
 	}
 }
 
+// Measurable reports whether we read this platform's follower count ourselves.
+// Where we do, the applicant is not asked for a number at all — so a zero from
+// one of these is the absence of a question, not a claim of zero, and must
+// never be validated as though the applicant typed it.
+//
+// Independent of credentials on purpose: a missing API key is an outage, and an
+// outage must not change what an applicant is allowed to submit.
+func Measurable(platformType string) bool {
+	_, err := For(platformType)
+	return err == nil
+}
+
 // NormalizeHandle strips the decoration people paste in: full URLs, leading @,
 // query strings and trailing slashes. Applicants supply a handle, a URL, or a
 // URL in the handle field, and all three should work.

@@ -90,10 +90,18 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 
 		notifyAdmin := false
 		notifyApplicant := false
+		autoReject := false
 
 		switch {
 		case res.Passed && app.AdminNotifiedAt == nil:
 			notifyAdmin = true
+
+		case res.Blocked && res.FollowerShortfall:
+			// A hard program requirement, measured from the channel itself. There
+			// is nothing for a reviewer to weigh, so it is decided here rather
+			// than sitting in a queue waiting for someone to reach the same
+			// conclusion. The applicant is told why and can reapply if they grow.
+			autoReject = true
 
 		case res.Blocked && app.ApplicantNotifiedAt == nil:
 			// This is the state that used to notify nobody. Admins are only told
@@ -113,6 +121,12 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 			}
 		}
 
+		if autoReject {
+			set["status"] = "rejected"
+			set["rejectionReason"] = res.FollowerReason
+			set["reviewedAt"] = now
+			set["applicantNotifiedAt"] = now
+		}
 		if notifyAdmin {
 			set["adminNotifiedAt"] = now
 		}
@@ -135,6 +149,11 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 			}
 		}
 
+		if autoReject {
+			zap.S().Infow("creator application auto-rejected: below the follower minimum",
+				"applicationId", app.ID.Hex(), "reason", res.FollowerReason)
+			cc.sendApplicationDecisionEmail(ctx, app.UserID, app.DisplayName, "rejected", res.FollowerReason, "")
+		}
 		if notifyApplicant {
 			zap.S().Infow("creator application failed automated checks, telling the applicant",
 				"applicationId", app.ID.Hex(), "reasons", res.FailureReasons,
@@ -595,6 +614,12 @@ type screenResult struct {
 	// FailureReasons are the applicant-facing reasons the application is
 	// blocked, for the email that tells them.
 	FailureReasons []string
+	// FollowerShortfall means we successfully read a real follower count and it
+	// is under the minimum. That is a program requirement, not a judgement call,
+	// so it is auto-rejected rather than queued for a human. Never set when the
+	// count could not be read — an unreadable channel is our problem.
+	FollowerShortfall bool
+	FollowerReason    string
 }
 
 // channelFetcher lets tests substitute platform responses. Production passes
@@ -699,17 +724,23 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	case bestFollowers >= models.MinFollowers:
 		res.Checks = append(res.Checks, models.ApplicationCheck{
 			Key: models.CheckFollowers, Status: models.CheckPassed,
-			Reason:    fmt.Sprintf("%d followers on your largest channel.", bestFollowers),
+			Reason:    fmt.Sprintf("%s followers on your largest channel.", formatCount(bestFollowers)),
 			CheckedAt: &now,
 		})
 	default:
+		reason := fmt.Sprintf("Your largest channel has %s followers. The program needs at least %s.",
+			formatCount(bestFollowers), formatCount(models.MinFollowers))
 		res.Checks = append(res.Checks, models.ApplicationCheck{
 			Key: models.CheckFollowers, Status: models.CheckFailed,
-			Reason: fmt.Sprintf("Your largest channel has %d followers. The program needs at least %d.",
-				bestFollowers, models.MinFollowers),
-			CheckedAt: &now,
+			Reason: reason, CheckedAt: &now,
 		})
 		res.Blocked = true
+		res.FollowerShortfall = true
+		// The rejection reason is read on its own in an email, away from the
+		// checks list, so it carries the way back in. The check reason above
+		// stays terse — it sits in a table.
+		res.FollowerReason = reason + fmt.Sprintf(
+			" You are very welcome to apply again once you are over %s.", formatCount(models.MinFollowers))
 	}
 
 	// Passed means a human should now look: nothing failed, nothing outstanding.

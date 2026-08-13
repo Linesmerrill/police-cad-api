@@ -100,6 +100,29 @@ func TestScreenApplication(t *testing.T) {
 		assert.Contains(t, c.Reason, "120")
 		assert.Contains(t, c.Reason, "500")
 		assert.True(t, res.Blocked)
+		// A hard program requirement measured from the channel: decided here,
+		// not queued for a reviewer to reach the same conclusion.
+		assert.True(t, res.FollowerShortfall)
+		assert.NotEmpty(t, res.FollowerReason)
+	})
+
+	t.Run("an unreadable channel is never an auto-rejection", func(t *testing.T) {
+		// The difference that matters: we did not measure anything, so there is
+		// nothing to reject on. Rejecting here would punish someone for our
+		// missing API key.
+		res := screenApplication(ctx, appWith(yt, 0), fetcherReturning(
+			platforms.ChannelInfo{}, platforms.ErrNotConfigured))
+		assert.False(t, res.FollowerShortfall)
+
+		res = screenApplication(ctx, appWith(yt, 0), fetcherReturning(
+			platforms.ChannelInfo{}, platforms.ErrChannelNotFound))
+		assert.False(t, res.FollowerShortfall, "a missing channel is a handle problem, not a size one")
+	})
+
+	t.Run("clearing the bar never sets a shortfall", func(t *testing.T) {
+		res := screenApplication(ctx, appWith(yt, 0), fetcherReturning(
+			platforms.ChannelInfo{Description: "LPC-VERIFY-ABC123", FollowerCount: 500}, nil))
+		assert.False(t, res.FollowerShortfall, "exactly the minimum qualifies")
 	})
 
 	t.Run("a wrong claim still passes when the real count clears the bar", func(t *testing.T) {
