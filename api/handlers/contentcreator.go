@@ -2108,6 +2108,19 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		return
 	}
 
+	// Channel ownership is enforced here rather than at submit, so a platform
+	// API outage cannot strand an applicant mid-form. Everything below this
+	// point grants real benefits, so it must not run on a channel nobody has
+	// proved they own — an applicant once listed a channel belonging to someone
+	// else. Platforms with no public API are cleared by an admin instead.
+	if pending := unverifiedPlatforms(application); len(pending) > 0 {
+		config.ErrorStatus(
+			"cannot approve: channel ownership is unverified for "+strings.Join(pending, ", ")+
+				". The applicant verifies from their dashboard, or an admin can confirm manually.",
+			http.StatusPreconditionFailed, w, nil)
+		return
+	}
+
 	// Update application status to approved
 	appUpdate := bson.M{
 		"$set": bson.M{

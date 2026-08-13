@@ -4,46 +4,46 @@ import "go.mongodb.org/mongo-driver/bson/primitive"
 
 // ContentCreatorApplication represents an application to the Content Creator Program
 type ContentCreatorApplication struct {
-	ID              primitive.ObjectID              `json:"_id" bson:"_id"`
-	UserID          primitive.ObjectID              `json:"userId" bson:"userId"`
-	DisplayName     string                          `json:"displayName" bson:"displayName"`
-	PrimaryPlatform string                          `json:"primaryPlatform" bson:"primaryPlatform"` // twitch, youtube, tiktok, other
-	Platforms       []ContentCreatorPlatform        `json:"platforms" bson:"platforms"`
-	Description     string                          `json:"description" bson:"description"` // for admin evaluation
-	Bio             string                          `json:"bio" bson:"bio"`                 // for public profile (max 500 chars)
-	Status          string                          `json:"status" bson:"status"`           // submitted, under_review, approved, rejected, withdrawn
-	RejectionReason string                          `json:"rejectionReason,omitempty" bson:"rejectionReason,omitempty"`
-	AdminNotes      string                          `json:"adminNotes,omitempty" bson:"adminNotes,omitempty"`
-	Feedback        string                          `json:"feedback,omitempty" bson:"feedback,omitempty"`
-	FirstApprovalBy *primitive.ObjectID             `json:"firstApprovalBy,omitempty" bson:"firstApprovalBy,omitempty"`
-	FirstApprovalAt *primitive.DateTime             `json:"firstApprovalAt,omitempty" bson:"firstApprovalAt,omitempty"`
-	ReviewedBy      *primitive.ObjectID             `json:"reviewedBy,omitempty" bson:"reviewedBy,omitempty"`
-	ReviewedAt      *primitive.DateTime             `json:"reviewedAt,omitempty" bson:"reviewedAt,omitempty"`
-	CreatorID       *primitive.ObjectID             `json:"creatorId,omitempty" bson:"creatorId,omitempty"` // set when approved
-	CreatedAt       primitive.DateTime              `json:"createdAt" bson:"createdAt"`
-	UpdatedAt       primitive.DateTime              `json:"updatedAt" bson:"updatedAt"`
+	ID              primitive.ObjectID       `json:"_id" bson:"_id"`
+	UserID          primitive.ObjectID       `json:"userId" bson:"userId"`
+	DisplayName     string                   `json:"displayName" bson:"displayName"`
+	PrimaryPlatform string                   `json:"primaryPlatform" bson:"primaryPlatform"` // twitch, youtube, tiktok, other
+	Platforms       []ContentCreatorPlatform `json:"platforms" bson:"platforms"`
+	Description     string                   `json:"description" bson:"description"` // for admin evaluation
+	Bio             string                   `json:"bio" bson:"bio"`                 // for public profile (max 500 chars)
+	Status          string                   `json:"status" bson:"status"`           // submitted, under_review, approved, rejected, withdrawn
+	RejectionReason string                   `json:"rejectionReason,omitempty" bson:"rejectionReason,omitempty"`
+	AdminNotes      string                   `json:"adminNotes,omitempty" bson:"adminNotes,omitempty"`
+	Feedback        string                   `json:"feedback,omitempty" bson:"feedback,omitempty"`
+	FirstApprovalBy *primitive.ObjectID      `json:"firstApprovalBy,omitempty" bson:"firstApprovalBy,omitempty"`
+	FirstApprovalAt *primitive.DateTime      `json:"firstApprovalAt,omitempty" bson:"firstApprovalAt,omitempty"`
+	ReviewedBy      *primitive.ObjectID      `json:"reviewedBy,omitempty" bson:"reviewedBy,omitempty"`
+	ReviewedAt      *primitive.DateTime      `json:"reviewedAt,omitempty" bson:"reviewedAt,omitempty"`
+	CreatorID       *primitive.ObjectID      `json:"creatorId,omitempty" bson:"creatorId,omitempty"` // set when approved
+	CreatedAt       primitive.DateTime       `json:"createdAt" bson:"createdAt"`
+	UpdatedAt       primitive.DateTime       `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ContentCreator represents an approved content creator in the program
 type ContentCreator struct {
-	ID              primitive.ObjectID              `json:"_id" bson:"_id"`
-	UserID          *primitive.ObjectID             `json:"userId,omitempty" bson:"userId,omitempty"` // nullable if creator left platform
-	ApplicationID   primitive.ObjectID              `json:"applicationId" bson:"applicationId"`
-	DisplayName     string                          `json:"displayName" bson:"displayName"`
-	Slug            string                          `json:"slug" bson:"slug"` // unique URL-friendly identifier
-	ProfileImage    string                          `json:"profileImage,omitempty" bson:"profileImage,omitempty"`
-	Bio             string                          `json:"bio" bson:"bio"`
-	ThemeColor      string                          `json:"themeColor" bson:"themeColor"` // hex color for profile (e.g. #fbbf24)
-	PrimaryPlatform string                          `json:"primaryPlatform" bson:"primaryPlatform"`
-	Platforms       []ContentCreatorPlatform        `json:"platforms" bson:"platforms"`
-	Status          string                          `json:"status" bson:"status"` // active, warned, pending_removal, removed
-	Featured        bool                            `json:"featured" bson:"featured"`
-	WarnedAt        *primitive.DateTime             `json:"warnedAt,omitempty" bson:"warnedAt,omitempty"`
-	WarningMessage  string                          `json:"warningMessage,omitempty" bson:"warningMessage,omitempty"`
-	WarningReason   string                          `json:"warningReason,omitempty" bson:"warningReason,omitempty"`
-	RemovalReason   string                          `json:"removalReason,omitempty" bson:"removalReason,omitempty"`
-	JoinedAt        primitive.DateTime              `json:"joinedAt" bson:"joinedAt"`
-	RemovedAt       *primitive.DateTime             `json:"removedAt,omitempty" bson:"removedAt,omitempty"`
+	ID              primitive.ObjectID       `json:"_id" bson:"_id"`
+	UserID          *primitive.ObjectID      `json:"userId,omitempty" bson:"userId,omitempty"` // nullable if creator left platform
+	ApplicationID   primitive.ObjectID       `json:"applicationId" bson:"applicationId"`
+	DisplayName     string                   `json:"displayName" bson:"displayName"`
+	Slug            string                   `json:"slug" bson:"slug"` // unique URL-friendly identifier
+	ProfileImage    string                   `json:"profileImage,omitempty" bson:"profileImage,omitempty"`
+	Bio             string                   `json:"bio" bson:"bio"`
+	ThemeColor      string                   `json:"themeColor" bson:"themeColor"` // hex color for profile (e.g. #fbbf24)
+	PrimaryPlatform string                   `json:"primaryPlatform" bson:"primaryPlatform"`
+	Platforms       []ContentCreatorPlatform `json:"platforms" bson:"platforms"`
+	Status          string                   `json:"status" bson:"status"` // active, warned, pending_removal, removed
+	Featured        bool                     `json:"featured" bson:"featured"`
+	WarnedAt        *primitive.DateTime      `json:"warnedAt,omitempty" bson:"warnedAt,omitempty"`
+	WarningMessage  string                   `json:"warningMessage,omitempty" bson:"warningMessage,omitempty"`
+	WarningReason   string                   `json:"warningReason,omitempty" bson:"warningReason,omitempty"`
+	RemovalReason   string                   `json:"removalReason,omitempty" bson:"removalReason,omitempty"`
+	JoinedAt        primitive.DateTime       `json:"joinedAt" bson:"joinedAt"`
+	RemovedAt       *primitive.DateTime      `json:"removedAt,omitempty" bson:"removedAt,omitempty"`
 	// Grace period fields for low follower tracking
 	GracePeriodStartedAt  *primitive.DateTime `json:"gracePeriodStartedAt,omitempty" bson:"gracePeriodStartedAt,omitempty"`
 	GracePeriodEndsAt     *primitive.DateTime `json:"gracePeriodEndsAt,omitempty" bson:"gracePeriodEndsAt,omitempty"`
@@ -55,11 +55,44 @@ type ContentCreator struct {
 
 // ContentCreatorPlatform represents a social media platform connection
 type ContentCreatorPlatform struct {
-	Type            string `json:"type" bson:"type"` // twitch, youtube, tiktok, other
-	URL             string `json:"url" bson:"url"`
-	Handle          string `json:"handle" bson:"handle"`
-	FollowerCount   int    `json:"followerCount" bson:"followerCount"`
-	VerifiedByAdmin bool   `json:"verifiedByAdmin" bson:"verifiedByAdmin"`
+	Type   string `json:"type" bson:"type"` // twitch, youtube, tiktok, other
+	URL    string `json:"url" bson:"url"`
+	Handle string `json:"handle" bson:"handle"`
+	// FollowerCount is the trusted count. Until the channel is verified it holds
+	// whatever the applicant typed; verification overwrites it with the real
+	// figure read from the platform.
+	FollowerCount   int  `json:"followerCount" bson:"followerCount"`
+	VerifiedByAdmin bool `json:"verifiedByAdmin" bson:"verifiedByAdmin"`
+
+	// Channel ownership verification. The applicant puts VerificationCode in
+	// their channel description, we read the public channel and look for it.
+	// Without this every field above is self-asserted — someone applied with a
+	// channel they did not own, and the follower count was equally unchecked.
+	VerificationCode          string              `json:"verificationCode,omitempty" bson:"verificationCode,omitempty"`
+	VerificationCodeExpiresAt *primitive.DateTime `json:"verificationCodeExpiresAt,omitempty" bson:"verificationCodeExpiresAt,omitempty"`
+	VerificationStatus        string              `json:"verificationStatus,omitempty" bson:"verificationStatus,omitempty"` // unverified | pending | verified | failed
+	VerificationError         string              `json:"verificationError,omitempty" bson:"verificationError,omitempty"`
+	VerifiedAt                *primitive.DateTime `json:"verifiedAt,omitempty" bson:"verifiedAt,omitempty"`
+	VerificationMethod        string              `json:"verificationMethod,omitempty" bson:"verificationMethod,omitempty"` // api | admin
+	VerifiedBy                *primitive.ObjectID `json:"verifiedBy,omitempty" bson:"verifiedBy,omitempty"`                 // admin who vouched, when method is admin
+	// ReportedFollowerCount preserves what the applicant claimed, so a large gap
+	// between claim and reality is visible to reviewers instead of overwritten.
+	ReportedFollowerCount int `json:"reportedFollowerCount,omitempty" bson:"reportedFollowerCount,omitempty"`
+}
+
+// Platform verification statuses.
+const (
+	PlatformUnverified = "unverified"
+	PlatformPending    = "pending"
+	PlatformVerified   = "verified"
+	PlatformFailed     = "failed"
+)
+
+// IsVerified reports whether a platform entry has cleared ownership checks by
+// either route. Treats a legacy VerifiedByAdmin tick as verified so records
+// predating this system are not retroactively blocked.
+func (p ContentCreatorPlatform) IsVerified() bool {
+	return p.VerificationStatus == PlatformVerified || p.VerifiedByAdmin
 }
 
 // ContentCreatorEntitlement represents a plan entitlement granted to a creator
@@ -68,7 +101,7 @@ type ContentCreatorEntitlement struct {
 	ContentCreatorID primitive.ObjectID  `json:"contentCreatorId" bson:"contentCreatorId"`
 	TargetType       string              `json:"targetType" bson:"targetType"` // "user" or "community"
 	TargetID         primitive.ObjectID  `json:"targetId" bson:"targetId"`
-	Plan             string              `json:"plan" bson:"plan"` // "base"
+	Plan             string              `json:"plan" bson:"plan"`     // "base"
 	Source           string              `json:"source" bson:"source"` // "content_creator_program"
 	Active           bool                `json:"active" bson:"active"`
 	GrantedAt        primitive.DateTime  `json:"grantedAt" bson:"grantedAt"`
@@ -87,7 +120,7 @@ type ContentCreatorFollowerSnapshot struct {
 	Platforms        []ContentCreatorPlatform `json:"platforms" bson:"platforms"`
 	TotalFollowers   int                      `json:"totalFollowers" bson:"totalFollowers"`
 	MaxFollowers     int                      `json:"maxFollowers" bson:"maxFollowers"` // highest single platform count
-	Source           string                   `json:"source" bson:"source"`            // "manual", "api", "admin"
+	Source           string                   `json:"source" bson:"source"`             // "manual", "api", "admin"
 	RecordedAt       primitive.DateTime       `json:"recordedAt" bson:"recordedAt"`
 	RecordedBy       *primitive.ObjectID      `json:"recordedBy,omitempty" bson:"recordedBy,omitempty"`
 }
@@ -123,12 +156,12 @@ type ReviewApplicationRequest struct {
 
 // UpdateContentCreatorRequest is the request body for updating a creator profile
 type UpdateContentCreatorRequest struct {
-	DisplayName   string                   `json:"displayName,omitempty"`
-	Bio           string                   `json:"bio,omitempty"`
-	ThemeColor    string                   `json:"themeColor,omitempty"`
-	ProfileImage  string                   `json:"profileImage,omitempty"`
-	Platforms     []ContentCreatorPlatform `json:"platforms,omitempty"`
-	Featured      *bool                    `json:"featured,omitempty"`
+	DisplayName  string                   `json:"displayName,omitempty"`
+	Bio          string                   `json:"bio,omitempty"`
+	ThemeColor   string                   `json:"themeColor,omitempty"`
+	ProfileImage string                   `json:"profileImage,omitempty"`
+	Platforms    []ContentCreatorPlatform `json:"platforms,omitempty"`
+	Featured     *bool                    `json:"featured,omitempty"`
 }
 
 // WarnCreatorRequest is the request body for issuing a warning
@@ -215,29 +248,29 @@ type ContentCreatorMeResponse struct {
 
 // ContentCreatorPrivateResponse is the private response for a content creator (includes entitlements)
 type ContentCreatorPrivateResponse struct {
-	ID                    primitive.ObjectID       `json:"_id"`
-	DisplayName           string                   `json:"displayName"`
-	Slug                  string                   `json:"slug"`
-	ProfileImage          string                   `json:"profileImage,omitempty"`
-	Bio                   string                   `json:"bio"`
-	ThemeColor            string                   `json:"themeColor"`
-	PrimaryPlatform       string                   `json:"primaryPlatform"`
-	Platforms             []ContentCreatorPlatform `json:"platforms"`
-	Status                string                   `json:"status"`
-	Featured              bool                     `json:"featured"`
-	WarnedAt              *primitive.DateTime      `json:"warnedAt,omitempty"`
-	WarningMessage        string                   `json:"warningMessage,omitempty"`
-	JoinedAt              primitive.DateTime       `json:"joinedAt"`
-	Entitlements          EntitlementsSummary      `json:"entitlements"`
-	GracePeriodStartedAt  *primitive.DateTime      `json:"gracePeriodStartedAt,omitempty"`
-	GracePeriodEndsAt     *primitive.DateTime      `json:"gracePeriodEndsAt,omitempty"`
-	LastSyncedAt          *primitive.DateTime      `json:"lastSyncedAt,omitempty"`
+	ID                   primitive.ObjectID       `json:"_id"`
+	DisplayName          string                   `json:"displayName"`
+	Slug                 string                   `json:"slug"`
+	ProfileImage         string                   `json:"profileImage,omitempty"`
+	Bio                  string                   `json:"bio"`
+	ThemeColor           string                   `json:"themeColor"`
+	PrimaryPlatform      string                   `json:"primaryPlatform"`
+	Platforms            []ContentCreatorPlatform `json:"platforms"`
+	Status               string                   `json:"status"`
+	Featured             bool                     `json:"featured"`
+	WarnedAt             *primitive.DateTime      `json:"warnedAt,omitempty"`
+	WarningMessage       string                   `json:"warningMessage,omitempty"`
+	JoinedAt             primitive.DateTime       `json:"joinedAt"`
+	Entitlements         EntitlementsSummary      `json:"entitlements"`
+	GracePeriodStartedAt *primitive.DateTime      `json:"gracePeriodStartedAt,omitempty"`
+	GracePeriodEndsAt    *primitive.DateTime      `json:"gracePeriodEndsAt,omitempty"`
+	LastSyncedAt         *primitive.DateTime      `json:"lastSyncedAt,omitempty"`
 }
 
 // EntitlementsSummary summarizes a creator's entitlements
 type EntitlementsSummary struct {
 	PersonalPlan         bool                 `json:"personalPlan"`
-	PersonalPlanFallback bool                 `json:"personalPlanFallback"` // true if user has higher plan, entitlement acts as fallback
+	PersonalPlanFallback bool                 `json:"personalPlanFallback"`      // true if user has higher plan, entitlement acts as fallback
 	CurrentUserPlan      string               `json:"currentUserPlan,omitempty"` // user's current subscription plan
 	CommunityPlan        CommunityPlanSummary `json:"communityPlan"`
 }
@@ -251,16 +284,16 @@ type CommunityPlanSummary struct {
 
 // ContentCreatorAnalytics is the analytics response for admin
 type ContentCreatorAnalytics struct {
-	TotalCreators      int `json:"totalCreators"`
-	ActiveCreators     int `json:"activeCreators"`
-	WarnedCreators     int `json:"warnedCreators"`
-	PendingRemoval     int `json:"pendingRemoval"`
-	TotalApplications  int `json:"totalApplications"`
-	PendingApplications int `json:"pendingApplications"`
-	ApprovedApplications int `json:"approvedApplications"`
-	RejectedApplications int `json:"rejectedApplications"`
-	TotalMonthlyValue  float64 `json:"totalMonthlyValue"`
-	TotalYearlyValue   float64 `json:"totalYearlyValue"`
+	TotalCreators        int     `json:"totalCreators"`
+	ActiveCreators       int     `json:"activeCreators"`
+	WarnedCreators       int     `json:"warnedCreators"`
+	PendingRemoval       int     `json:"pendingRemoval"`
+	TotalApplications    int     `json:"totalApplications"`
+	PendingApplications  int     `json:"pendingApplications"`
+	ApprovedApplications int     `json:"approvedApplications"`
+	RejectedApplications int     `json:"rejectedApplications"`
+	TotalMonthlyValue    float64 `json:"totalMonthlyValue"`
+	TotalYearlyValue     float64 `json:"totalYearlyValue"`
 }
 
 // PaginationInfo is defined in announcement.go - reusing that definition

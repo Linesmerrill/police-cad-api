@@ -859,6 +859,11 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/content-creators/notify-tier-upgrade", http.HandlerFunc(contentCreator.AdminNotifyTierUpgradeHandler)).Methods("POST")
 	// Dry run by default; pass ?apply=true to write. Idempotent.
 	apiCreate.Handle("/admin/content-creators/backfill-tiers", http.HandlerFunc(contentCreator.AdminBackfillCreatorTiersHandler)).Methods("POST")
+	// Channel ownership verification. The applicant drives the first two from
+	// their own dashboard; the admin route covers platforms with no public API.
+	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-start", http.HandlerFunc(contentCreator.StartChannelVerificationHandler)).Methods("POST")
+	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-check", http.HandlerFunc(contentCreator.CheckChannelVerificationHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creator-applications/{id}/platforms/{index}/verify", http.HandlerFunc(contentCreator.AdminVerifyPlatformHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")
