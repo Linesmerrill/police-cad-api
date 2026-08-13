@@ -39,6 +39,14 @@ type ContentCreatorApplication struct {
 	CheckAttempts   int                 `json:"checkAttempts,omitempty" bson:"checkAttempts,omitempty"`
 	// AdminNotifiedAt makes the review email fire exactly once.
 	AdminNotifiedAt *primitive.DateTime `json:"adminNotifiedAt,omitempty" bson:"adminNotifiedAt,omitempty"`
+	// ApplicantNotifiedAt marks that the applicant has been told their checks
+	// failed. Without it an application that fails screening notifies nobody:
+	// admins are only emailed on pass, and the applicant is only emailed on
+	// rejection, so a failed-but-not-rejected application sat silently forever.
+	ApplicantNotifiedAt *primitive.DateTime `json:"applicantNotifiedAt,omitempty" bson:"applicantNotifiedAt,omitempty"`
+	// ChecksSettled marks screening as finished either way, so "nobody has been
+	// told about this" is a state that cannot persist.
+	ChecksSettled bool `json:"checksSettled" bson:"checksSettled"`
 }
 
 // Automated check keys and statuses.

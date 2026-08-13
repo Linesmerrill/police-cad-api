@@ -686,3 +686,73 @@ func RenderGracePeriodReminderEmail(displayName string, currentFollowers, thresh
 </body>
 </html>`, displayName, currentFollowers, threshold, threshold)
 }
+
+// RenderChecksFailedEmail tells an applicant that the automatic checks found a
+// problem, and exactly which one.
+//
+// Before this existed, a failed application notified nobody: admins are only
+// emailed when checks pass and applicants only when rejected, so an application
+// that failed screening and was never rejected simply sat there.
+//
+// ownershipProven changes the ending: someone who has proved a channel is
+// theirs is a real applicant who fell short of a requirement, and a human is
+// also looking. Someone who has not is told only how to fix it.
+func RenderChecksFailedEmail(displayName string, reasons []string, ownershipProven bool) string {
+	items := ""
+	for _, r := range reasons {
+		items += `<li style="margin-bottom:10px;">` + r + `</li>`
+	}
+	if items == "" {
+		items = `<li>One of our automatic checks did not pass.</li>`
+	}
+
+	closing := `Your application stays open. Fix the above and we will pick it up automatically &mdash; there is no need to reapply.`
+	if ownershipProven {
+		closing = `Your application stays open, and because you have already verified your channel a member of our team will take a look too. Fix the above and we will pick it up automatically &mdash; there is no need to reapply.`
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>Your application needs a change - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #f59e0b 0%%, #d97706 100%%); padding: 36px 30px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 36px 30px; color: #e5e7eb; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .reasons { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 12px; padding: 20px 20px 20px 38px; margin: 22px 0; }
+    .reasons li { color: #fde68a; line-height: 1.6; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 18px; }
+    .footer { padding: 28px 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Your application needs a change</h1>
+    </div>
+    <div class="content">
+      <h2>Hi %s,</h2>
+      <p>We ran the automatic checks on your Content Creator Program application, and something needs your attention:</p>
+
+      <ul class="reasons">%s</ul>
+
+      <p>%s</p>
+
+      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Open my application</a>
+
+      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think this is wrong, reply to this email or contact support and a person will look at it.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, items, closing)
+}

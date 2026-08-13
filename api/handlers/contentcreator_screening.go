@@ -18,6 +18,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/linesmerrill/police-cad-api/platforms"
+	templates "github.com/linesmerrill/police-cad-api/templates/html"
 )
 
 // Automated screening of creator applications.
@@ -81,9 +82,42 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 			set[p+"followerCount"] = count
 		}
 
-		notifyNow := res.Passed && app.AdminNotifiedAt == nil
-		if notifyNow {
+		// Screening is settled once it is not going to change on its own: either
+		// everything passed, or something failed outright. Only a pending check
+		// is worth another sweep.
+		settled := res.Passed || res.Blocked
+		set["checksSettled"] = settled
+
+		notifyAdmin := false
+		notifyApplicant := false
+
+		switch {
+		case res.Passed && app.AdminNotifiedAt == nil:
+			notifyAdmin = true
+
+		case res.Blocked && app.ApplicantNotifiedAt == nil:
+			// This is the state that used to notify nobody. Admins are only told
+			// on pass, the applicant is only told on rejection, so an application
+			// that failed screening but was never rejected sat silently forever.
+			// The applicant is always told what failed and how to fix it.
+			notifyApplicant = true
+
+			// Whether it also deserves an admin's attention depends on what
+			// failed. A channel nobody has proved they own is exactly the noise
+			// this system exists to absorb. But a real person, on a channel they
+			// have proved is theirs, who fell short of a requirement is a
+			// judgement call — 252 followers against a 500 minimum might still be
+			// someone worth having. That reaches a human.
+			if res.OwnershipProven && app.AdminNotifiedAt == nil {
+				notifyAdmin = true
+			}
+		}
+
+		if notifyAdmin {
 			set["adminNotifiedAt"] = now
+		}
+		if notifyApplicant {
+			set["applicantNotifiedAt"] = now
 		}
 
 		if err := cc.AppDB.UpdateOne(ctx, bson.M{"_id": app.ID}, bson.M{"$set": set}); err != nil {
@@ -92,21 +126,60 @@ func (cc ContentCreator) ScreenPendingApplications(ctx context.Context) (int, er
 		}
 		screened++
 
-		if notifyNow {
-			// The only point at which a human is asked to look. Everything that
-			// failed a machine check is handled without an email.
-			total := 0
-			for _, p := range app.Platforms {
-				if c, ok := res.FollowerCounts[indexOfPlatform(app, p)]; ok {
-					total += c
-				} else {
-					total += p.FollowerCount
-				}
+		total := 0
+		for _, p := range app.Platforms {
+			if c, ok := res.FollowerCounts[indexOfPlatform(app, p)]; ok {
+				total += c
+			} else {
+				total += p.FollowerCount
 			}
+		}
+
+		if notifyApplicant {
+			zap.S().Infow("creator application failed automated checks, telling the applicant",
+				"applicationId", app.ID.Hex(), "reasons", res.FailureReasons,
+				"ownershipProven", res.OwnershipProven)
+			cc.sendChecksFailedEmail(ctx, app, res.FailureReasons, res.OwnershipProven)
+		}
+		if notifyAdmin {
 			cc.notifyAdminsApplicationReady(ctx, app, total)
 		}
 	}
 	return screened, nil
+}
+
+// sendChecksFailedEmail tells an applicant which automated check failed and what
+// to do about it, so a failed application is never a silence.
+func (cc ContentCreator) sendChecksFailedEmail(ctx context.Context, app *models.ContentCreatorApplication, reasons []string, ownershipProven bool) {
+	var user struct {
+		Details struct {
+			Email    string `bson:"email"`
+			Username string `bson:"username"`
+		} `bson:"user"`
+	}
+	if err := cc.UDB.FindOne(ctx, bson.M{"_id": app.UserID}).Decode(&user); err != nil || user.Details.Email == "" {
+		zap.S().Errorw("cannot tell applicant their checks failed: no email on file",
+			"applicationId", app.ID.Hex(), "error", err)
+		return
+	}
+
+	subject := "Your Creator Program application needs a change - Lines Police CAD"
+	htmlContent := templates.RenderChecksFailedEmail(app.DisplayName, reasons, ownershipProven)
+	plainText := fmt.Sprintf(
+		"Hi %s, we ran the automatic checks on your Creator Program application and something needs your attention: %s. "+
+			"Fix it at https://www.linespolice-cad.com/content-creators/me and we will re-check automatically. %s",
+		app.DisplayName, strings.Join(reasons, " "),
+		map[bool]string{
+			true:  "Your application stays open and a member of our team will also take a look.",
+			false: "Your application stays open until this is resolved.",
+		}[ownershipProven],
+	)
+
+	go func() {
+		if err := sendContentCreatorEmail(user.Details.Email, app.DisplayName, subject, htmlContent, plainText); err != nil {
+			zap.S().Errorw("failed to send checks-failed email", "error", err, "applicationId", app.ID.Hex())
+		}
+	}()
 }
 
 // AdminOverrideCheckHandler lets an admin pass or fail an individual check by
@@ -413,6 +486,14 @@ type screenResult struct {
 	FollowerCounts map[int]int
 	// OwnershipVerified marks platform indexes whose code was found this pass.
 	OwnershipVerified map[int]bool
+	// OwnershipProven is true once ANY channel has been proved to belong to the
+	// applicant. It separates "a real person who fell short of a requirement"
+	// from "a channel nobody has shown they own", which decides whether a failed
+	// application is worth an admin's attention.
+	OwnershipProven bool
+	// FailureReasons are the applicant-facing reasons the application is
+	// blocked, for the email that tells them.
+	FailureReasons []string
 }
 
 // channelFetcher lets tests substitute platform responses. Production passes
@@ -449,6 +530,7 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 		// Already-verified platforms are not re-fetched. Their stored follower
 		// count is trusted because verification wrote it.
 		if p.IsVerified() {
+			res.OwnershipProven = true
 			add(models.CheckChannelResolves, models.CheckPassed, "")
 			add(models.CheckOwnership, models.CheckPassed, "")
 			if p.FollowerCount > bestFollowers {
@@ -490,6 +572,7 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 		if platforms.ContainsCode(info.Description, p.VerificationCode) && p.VerificationCode != "" {
 			add(models.CheckOwnership, models.CheckPassed, "")
 			res.OwnershipVerified[i] = true
+			res.OwnershipProven = true
 			continue
 		}
 
@@ -534,6 +617,11 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 		if c.Status == models.CheckPending {
 			res.Passed = false
 			break
+		}
+	}
+	for _, c := range res.Checks {
+		if c.Status == models.CheckFailed && c.Reason != "" {
+			res.FailureReasons = append(res.FailureReasons, c.Reason)
 		}
 	}
 	return res

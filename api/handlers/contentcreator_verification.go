@@ -150,6 +150,17 @@ func formatCount(n int) string {
 	}
 }
 
+// followerMessage states the follower result against the minimum. Ownership and
+// eligibility are different things, and collapsing them let a channel under the
+// bar look like a clean pass.
+func followerMessage(count int) string {
+	if count >= models.MinFollowers {
+		return fmt.Sprintf("%s followers, above the %d minimum.", formatCount(count), models.MinFollowers)
+	}
+	return fmt.Sprintf("%s followers. The program needs at least %d, so this channel does not qualify on its own yet.",
+		formatCount(count), models.MinFollowers)
+}
+
 // channelInstruction tells the applicant exactly where the code goes. Wrong
 // field means a failed check and a confused applicant.
 func channelInstruction(platformType string) string {
@@ -244,11 +255,13 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"verified":       false,
-				"channelFound":   false,
-				"codeFound":      false,
-				"channelMessage": fmt.Sprintf("We could not find a %s channel at \"%s\". Open the link above — if it does not go to your channel, the handle on your application is wrong.", platform.Type, platform.Handle),
-				"codeMessage":    "We could not check for your code, because we could not reach the channel.",
+				"verified":        false,
+				"channelFound":    false,
+				"codeFound":       false,
+				"channelMessage":  fmt.Sprintf("We could not find a %s channel at \"%s\". Open the link above — if it does not go to your channel, the handle on your application is wrong.", platform.Type, platform.Handle),
+				"followersOk":     false,
+				"followerMessage": "We could not read your follower count, because we could not reach the channel.",
+				"codeMessage":     "We could not check for your code, because we could not reach the channel.",
 			})
 			return
 		}
@@ -273,12 +286,17 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 		}})
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		followersOk := info.FollowerCount >= models.MinFollowers
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"verified":       false,
-			"channelFound":   true,
-			"codeFound":      false,
-			"channelMessage": fmt.Sprintf("Found your channel — %s followers.", formatCount(info.FollowerCount)),
-			"codeMessage":    "The code is not in that channel's description yet. Make sure you saved the change, then try again — it can take a moment to show up.",
+			"verified":        false,
+			"channelFound":    true,
+			"codeFound":       false,
+			"followersOk":     followersOk,
+			"followerCount":   info.FollowerCount,
+			"minFollowers":    models.MinFollowers,
+			"channelMessage":  "We reached your channel.",
+			"followerMessage": followerMessage(info.FollowerCount),
+			"codeMessage":     "The code is not in that channel's description yet. Make sure you saved the change, then try again — it can take a moment to show up.",
 		})
 		return
 	}
@@ -311,15 +329,22 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	// "verified" means ownership is proved, which is NOT the same as eligible.
+	// Reporting the follower check separately stops a channel under the minimum
+	// from reading as a clean pass.
+	followersOk := info.FollowerCount >= models.MinFollowers
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"verified":       true,
-		"channelFound":   true,
-		"codeFound":      true,
-		"channelMessage": fmt.Sprintf("Found your channel — %s followers.", formatCount(info.FollowerCount)),
-		"codeMessage":    "Code found. This channel is verified — you can remove the code now.",
-		"followerCount":  info.FollowerCount,
-		"claimedCount":   platform.FollowerCount,
-		"profileUrl":     info.ProfileURL,
+		"verified":        true,
+		"channelFound":    true,
+		"codeFound":       true,
+		"followersOk":     followersOk,
+		"followerCount":   info.FollowerCount,
+		"minFollowers":    models.MinFollowers,
+		"channelMessage":  "We reached your channel.",
+		"followerMessage": followerMessage(info.FollowerCount),
+		"codeMessage":     "Code found. You have proved this channel is yours — you can remove the code now.",
+		"claimedCount":    platform.FollowerCount,
+		"profileUrl":      info.ProfileURL,
 	})
 }
 
