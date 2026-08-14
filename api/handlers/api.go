@@ -826,6 +826,7 @@ func (a *App) New() *mux.Router {
 		UDB:     databases.NewUserDatabase(a.dbHelper),
 		CDB:     databases.NewCommunityDatabase(a.dbHelper),
 		AdminDB: databases.NewAdminDatabase(a.dbHelper),
+		AuditDB: databases.NewAdminAuditDatabase(a.dbHelper),
 	}
 
 	// Public content creator routes (no auth required)
@@ -859,6 +860,21 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/content-creators/notify-tier-upgrade", http.HandlerFunc(contentCreator.AdminNotifyTierUpgradeHandler)).Methods("POST")
 	// Dry run by default; pass ?apply=true to write. Idempotent.
 	apiCreate.Handle("/admin/content-creators/backfill-tiers", http.HandlerFunc(contentCreator.AdminBackfillCreatorTiersHandler)).Methods("POST")
+	// Channel ownership verification. The applicant drives the first two from
+	// their own dashboard; the admin route covers platforms with no public API.
+	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-start", http.HandlerFunc(contentCreator.StartChannelVerificationHandler)).Methods("POST")
+	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-check", http.HandlerFunc(contentCreator.CheckChannelVerificationHandler)).Methods("POST")
+	apiCreate.Handle("/admin/content-creator-applications/{id}/platforms/{index}/verify", http.HandlerFunc(contentCreator.AdminVerifyPlatformHandler)).Methods("POST")
+	// Manual pass/fail of any individual automated check, for platforms with no
+	// public API or when a reviewer knows something the checks cannot see.
+	apiCreate.Handle("/admin/content-creator-applications/{id}/checks/override", http.HandlerFunc(contentCreator.AdminOverrideCheckHandler)).Methods("POST")
+	// Re-run checks on demand rather than waiting for the 4-hourly sweep.
+	// Optional ?key= narrows it to one check.
+	apiCreate.Handle("/admin/content-creator-applications/{id}/rescreen", http.HandlerFunc(contentCreator.AdminRescreenApplicationHandler)).Methods("POST")
+	// The human half of review: judgement calls the automated checks cannot make.
+	apiCreate.Handle("/admin/content-creator-applications/{id}/review-checklist", http.HandlerFunc(contentCreator.AdminSetReviewChecklistHandler)).Methods("POST")
+	// Approvals are reversible while the application is still open.
+	apiCreate.Handle("/admin/content-creator-applications/{id}/withdraw-approval", http.HandlerFunc(contentCreator.AdminWithdrawApprovalHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}", http.HandlerFunc(contentCreator.AdminUpdateCreatorHandler)).Methods("PATCH")
 	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")
@@ -877,6 +893,27 @@ func (a *App) New() *mux.Router {
 		economy.IDB,
 		economy.CivDB,
 	)
+
+	// Re-screen creator applications every 4 hours: resolve each channel, look
+	// for the ownership code, read the real follower count, and email admins only
+	// once an application has passed. Registered from here rather than inside the
+	// scheduler because the work needs the application store and the creator
+	// email helpers, which live in this package.
+	//
+	// 4 hours rather than hourly: the slow step is a human editing their channel
+	// description, and each pass costs platform API quota per application.
+	const applicationScreeningSchedule = "0 */4 * * *"
+	a.Scheduler.AddJob("screenCreatorApplications", applicationScreeningSchedule, func() {
+		a.Scheduler.RunLocked("screenCreatorApplications", "creator_application_screening_job",
+			10*time.Minute, func(ctx context.Context) error {
+				n, err := contentCreator.ScreenPendingApplications(ctx)
+				if err != nil {
+					return err
+				}
+				zap.S().Infow("screened creator applications", "count", n)
+				return nil
+			})
+	})
 
 	// Metrics dashboard
 	r.HandleFunc("/metrics-dashboard", func(w http.ResponseWriter, r *http.Request) {

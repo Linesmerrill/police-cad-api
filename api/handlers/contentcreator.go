@@ -17,6 +17,7 @@ import (
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
+	"github.com/linesmerrill/police-cad-api/platforms"
 	templates "github.com/linesmerrill/police-cad-api/templates/html"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
@@ -110,6 +111,9 @@ type ContentCreator struct {
 	UDB     databases.UserDatabase
 	CDB     databases.CommunityDatabase
 	AdminDB databases.AdminDatabase
+	// AuditDB records manual admin intervention in application screening, so an
+	// override always has a trail showing who made it and why.
+	AuditDB databases.AdminAuditDatabase
 }
 
 // getUserIDFromRequest extracts the user ID from the X-User-ID header (set by Express proxy)
@@ -170,7 +174,12 @@ func (cc ContentCreator) sendApplicationSubmittedEmail(ctx context.Context, user
 
 	subject := "Application Received - Lines Police CAD Creator Program"
 	htmlContent := templates.RenderApplicationSubmittedEmail(displayName)
-	plainText := fmt.Sprintf("Hi %s, Thank you for applying to the Lines Police CAD Content Creator Program! Our team will review your application within 5-7 business days. You can check your status at https://www.linespolice-cad.com/content-creators/me", displayName)
+	plainText := fmt.Sprintf("Hi %s, thank you for applying to the Lines Police CAD Content Creator Program. "+
+		"Before your application goes to our team we confirm you own the channels you listed. "+
+		"Get your verification code at https://www.linespolice-cad.com/content-creators/me and add it to each channel's description, then press Check. "+
+		"Your application will not move forward until that is done. "+
+		"After that we automatically confirm the channel exists, that the code is there, and read your follower count, then two of our team review it and you get an email with the decision. "+
+		"You can remove the code once a channel is verified.", displayName)
 
 	go func() {
 		if err := sendContentCreatorEmail(user.Details.Email, displayName, subject, htmlContent, plainText); err != nil {
@@ -500,7 +509,7 @@ func (cc ContentCreator) sendAdminNewApplicationEmail(ctx context.Context, appli
 	}
 
 	htmlContent := templates.RenderAdminNewApplicationEmail(applicantUsername, displayName, primaryPlatform, followersStr)
-	plainText := fmt.Sprintf("New Creator Application: %s (%s) - Platform: %s, Followers: %s. Please review within 5-7 business days at https://www.linespolice-cad.com/lpc-admin", applicantUsername, displayName, primaryPlatform, followersStr)
+	plainText := fmt.Sprintf("New Creator Application: %s (%s) - Platform: %s, Followers: %s. Please review within 3-5 business days at https://www.linespolice-cad.com/lpc-admin", applicantUsername, displayName, primaryPlatform, followersStr)
 
 	go func() {
 		for _, admin := range admins {
@@ -889,6 +898,43 @@ func (cc ContentCreator) GetContentCreatorStatsHandler(w http.ResponseWriter, r 
 
 // --- Authenticated User Endpoints ---
 
+// splitCSV turns "a,b , c" into ["a","b","c"], dropping blanks so a trailing
+// comma cannot smuggle an empty status into a query filter.
+func splitCSV(v string) []string {
+	out := make([]string, 0, 2)
+	for _, part := range strings.Split(v, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// followerBarSatisfiable reports whether an application could still clear the
+// follower minimum, judged only on what we can know at submission time.
+//
+// The applicant is not asked for a follower count on any platform we read
+// ourselves — the number would be a guess we are about to overwrite. So a zero
+// from YouTube or Twitch means "not asked", not "no audience", and gating on it
+// would reject every applicant on our two biggest platforms. Those are held to
+// the same bar a moment later on the real number: screening auto-rejects a
+// channel that comes back under models.MinFollowers.
+//
+// Where we cannot measure — TikTok, "other" — the applicant's own number is the
+// only one we will ever have, so it has to clear the bar here.
+func followerBarSatisfiable(ps []models.ContentCreatorPlatform) bool {
+	maxClaimed := 0
+	for _, p := range ps {
+		if platforms.Measurable(p.Type) {
+			return true
+		}
+		if p.FollowerCount > maxClaimed {
+			maxClaimed = p.FollowerCount
+		}
+	}
+	return maxClaimed >= models.MinFollowers
+}
+
 // CreateApplicationHandler submits a new creator application
 // POST /api/v1/content-creator-applications
 func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http.Request) {
@@ -938,15 +984,10 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Validate minimum follower requirement
-	maxFollowers := 0
-	for _, p := range req.Platforms {
-		if p.FollowerCount > maxFollowers {
-			maxFollowers = p.FollowerCount
-		}
-	}
-	if maxFollowers < 500 {
-		config.ErrorStatus("minimum 500 followers required on at least one platform", http.StatusBadRequest, w, nil)
+	if !followerBarSatisfiable(req.Platforms) {
+		config.ErrorStatus(
+			fmt.Sprintf("minimum %d followers required on at least one platform", models.MinFollowers),
+			http.StatusBadRequest, w, nil)
 		return
 	}
 
@@ -956,11 +997,10 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Validate bio length
-	if len(req.Bio) < 20 {
-		config.ErrorStatus("bio must be at least 20 characters", http.StatusBadRequest, w, nil)
-		return
-	}
+	// Bio is optional at submission. It is public-profile copy, and asking
+	// someone to write it before we have accepted them is asking most people to
+	// write it for nothing. They are prompted for it on their creator profile
+	// once approved, where they can also edit it whenever they like.
 	if len(req.Bio) > 500 {
 		config.ErrorStatus("bio must be at most 500 characters", http.StatusBadRequest, w, nil)
 		return
@@ -995,17 +1035,14 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 	}
 	cc.UDB.FindOne(ctx, bson.M{"_id": userObjID}).Decode(&user)
 
-	// Calculate total followers for admin notification
-	totalFollowers := 0
-	for _, p := range req.Platforms {
-		totalFollowers += p.FollowerCount
-	}
-
 	// Send confirmation email to applicant
 	cc.sendApplicationSubmittedEmail(ctx, userObjID, req.DisplayName)
 
-	// Send notification to all admins
-	cc.sendAdminNewApplicationEmail(ctx, user.Details.Username, req.DisplayName, req.PrimaryPlatform, totalFollowers)
+	// Admins are deliberately NOT emailed here. Every platform field on a fresh
+	// application is self-asserted, so notifying on submit meant a human read
+	// every fabricated channel and invented follower count by hand. The
+	// screening job emails them once an application has actually cleared the
+	// automated checks — see ScreenPendingApplications.
 
 	zap.S().Infow("content creator application submitted",
 		"applicationId", application.ID.Hex(),
@@ -1020,6 +1057,27 @@ func (cc ContentCreator) CreateApplicationHandler(w http.ResponseWriter, r *http
 		"message":     "Application submitted successfully",
 		"application": application,
 	})
+}
+
+// applicationResponse shapes an application for its own owner. One place, so a
+// field added for the dashboard cannot reach one code path and miss another —
+// the checks were already read by the frontend before they were ever sent.
+func applicationResponse(app *models.ContentCreatorApplication) models.ContentCreatorApplicationResponse {
+	return models.ContentCreatorApplicationResponse{
+		ID:              app.ID,
+		DisplayName:     app.DisplayName,
+		PrimaryPlatform: app.PrimaryPlatform,
+		Platforms:       app.Platforms,
+		Description:     app.Description,
+		Bio:             app.Bio,
+		Status:          app.Status,
+		Feedback:        app.Feedback,
+		CreatedAt:       app.CreatedAt,
+		ReviewedAt:      app.ReviewedAt,
+		Checks:          app.Checks,
+		ChecksPassed:    app.ChecksPassed,
+		RejectionReason: app.RejectionReason,
+	}
 }
 
 // GetMyApplicationHandler returns the current user's application status
@@ -1061,16 +1119,12 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 		pendingApp, _ := cc.AppDB.FindOne(ctx, pendingAppFilter)
 		if pendingApp != nil {
 			// Return the pending application instead of the removed creator
-			appResponse := models.ContentCreatorApplicationResponse{
-				ID:              pendingApp.ID,
-				DisplayName:     pendingApp.DisplayName,
-				PrimaryPlatform: pendingApp.PrimaryPlatform,
-				Platforms:       pendingApp.Platforms,
-				Description:     pendingApp.Description,
-				Bio:             pendingApp.Bio,
-				Status:          pendingApp.Status,
-				CreatedAt:       pendingApp.CreatedAt,
+			if cc.ScreenOnDemand(ctx, pendingApp) {
+				if fresh, err := cc.AppDB.FindOne(ctx, bson.M{"_id": pendingApp.ID}); err == nil && fresh != nil {
+					pendingApp = fresh
+				}
 			}
+			appResponse := applicationResponse(pendingApp)
 			response := models.ContentCreatorMeResponse{
 				Success:     true,
 				Application: &appResponse,
@@ -1145,18 +1199,18 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 	}
 
 	app := applications[0]
-	appResponse := models.ContentCreatorApplicationResponse{
-		ID:              app.ID,
-		DisplayName:     app.DisplayName,
-		PrimaryPlatform: app.PrimaryPlatform,
-		Platforms:       app.Platforms,
-		Description:     app.Description,
-		Bio:             app.Bio,
-		Status:          app.Status,
-		Feedback:        app.Feedback,
-		CreatedAt:       app.CreatedAt,
-		ReviewedAt:      app.ReviewedAt,
+
+	// Screen on the way in. Somebody opening this page is the best moment to
+	// have a current answer for them — the alternative is a page that says "we
+	// will email you shortly" while the application sits Submitted until the
+	// next sweep, hours later. Cheap and heavily guarded; see ScreenOnDemand.
+	if cc.ScreenOnDemand(ctx, &app) {
+		if fresh, err := cc.AppDB.FindOne(ctx, bson.M{"_id": app.ID}); err == nil && fresh != nil {
+			app = *fresh
+		}
 	}
+
+	appResponse := applicationResponse(&app)
 
 	response := models.ContentCreatorMeResponse{
 		Success:     true,
@@ -1822,7 +1876,15 @@ func (cc ContentCreator) AdminGetApplicationsHandler(w http.ResponseWriter, r *h
 
 	filter := bson.M{}
 	if status != "" {
-		filter["status"] = status
+		// Comma-separated so a caller can ask for everything still needing
+		// attention in one request. "submitted" alone hid applications that had
+		// moved to under_review — they are the ones a reviewer has already
+		// started, which makes them more urgent, not less.
+		if wanted := splitCSV(status); len(wanted) > 1 {
+			filter["status"] = bson.M{"$in": wanted}
+		} else {
+			filter["status"] = status
+		}
 	} else if excludeStatus != "" {
 		filter["status"] = bson.M{"$ne": excludeStatus}
 	}
@@ -1946,6 +2008,9 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 		CreatorStatus       string `json:"creatorStatus,omitempty"`
 		FirstApprovalByName string `json:"firstApprovalByName,omitempty"`
 		ReviewedByName      string `json:"reviewedByName,omitempty"`
+		// Who ticked each checklist item, keyed by admin id. The checklist is an
+		// accountability record; a timestamp with no name against it is not one.
+		CheckedByNames map[string]string `json:"checkedByNames,omitempty"`
 	}{
 		ContentCreatorApplication: application,
 	}
@@ -1978,6 +2043,46 @@ func (cc ContentCreator) AdminGetApplicationHandler(w http.ResponseWriter, r *ht
 	}
 	if application.ReviewedBy != nil {
 		response.ReviewedByName = getAdminName(application.ReviewedBy)
+	}
+
+	// Who ticked each checklist item. The checklist is an accountability
+	// record; a timestamp with no name against it is not one.
+	if len(application.ReviewChecklist) > 0 {
+		names := map[string]string{}
+		for _, item := range application.ReviewChecklist {
+			if item.CheckedBy == nil {
+				continue
+			}
+			id := item.CheckedBy.Hex()
+			if _, seen := names[id]; seen {
+				continue // one lookup per admin, not per item
+			}
+			if n := getAdminName(item.CheckedBy); n != "" {
+				names[id] = n
+			}
+		}
+		if len(names) > 0 {
+			response.CheckedByNames = names
+		}
+	}
+
+	if len(application.ReviewChecklist) > 0 {
+		names := map[string]string{}
+		for _, item := range application.ReviewChecklist {
+			if item.CheckedBy == nil {
+				continue
+			}
+			id := item.CheckedBy.Hex()
+			if _, seen := names[id]; seen {
+				continue // one lookup per admin, not per item
+			}
+			if n := getAdminName(item.CheckedBy); n != "" {
+				names[id] = n
+			}
+		}
+		if len(names) > 0 {
+			response.CheckedByNames = names
+		}
 	}
 
 	// If approved and has a creatorId, look up the creator status
@@ -2105,6 +2210,19 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	// Second approval - check it's a different admin (unless owner override)
 	if !isOwnerOverride && application.FirstApprovalBy != nil && application.FirstApprovalBy.Hex() == adminObjID.Hex() {
 		config.ErrorStatus("you already approved this application - a different admin must provide the second approval", http.StatusConflict, w, nil)
+		return
+	}
+
+	// Channel ownership is enforced here rather than at submit, so a platform
+	// API outage cannot strand an applicant mid-form. Everything below this
+	// point grants real benefits, so it must not run on a channel nobody has
+	// proved they own — an applicant once listed a channel belonging to someone
+	// else. Platforms with no public API are cleared by an admin instead.
+	if pending := unverifiedPlatforms(application); len(pending) > 0 {
+		config.ErrorStatus(
+			"cannot approve: channel ownership is unverified for "+strings.Join(pending, ", ")+
+				". The applicant verifies from their dashboard, or an admin can confirm manually.",
+			http.StatusPreconditionFailed, w, nil)
 		return
 	}
 

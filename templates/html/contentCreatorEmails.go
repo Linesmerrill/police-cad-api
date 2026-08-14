@@ -52,9 +52,11 @@ func RenderApplicationSubmittedEmail(displayName string) string {
       <p>Thank you for applying to the <strong>Lines Police CAD Content Creator Program</strong>! We're excited to review your application.</p>
 
       <div class="highlight-box">
-        <h3>📋 What happens next?</h3>
-        <p style="margin-bottom: 0;">Our team will carefully review your application. This process typically takes <strong>5-7 business days</strong>. Applications require approval from at least two team members to ensure fair evaluation.</p>
+        <h3>⚡ One thing we need from you</h3>
+        <p style="margin-bottom: 0;">Before your application goes to our team, we confirm you own the channels you listed. Grab your <strong>verification code</strong> and add it to your channel description &mdash; it takes about a minute, and your application will not move forward until it is done.</p>
       </div>
+
+      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Get my verification code</a>
 
       <div class="timeline">
         <div class="timeline-item">
@@ -62,23 +64,26 @@ func RenderApplicationSubmittedEmail(displayName string) string {
           <div class="timeline-text"><strong>Step 1:</strong> Application submitted ✓</div>
         </div>
         <div class="timeline-item">
-          <div class="timeline-icon" style="background: #6b7280;"></div>
-          <div class="timeline-text"><strong>Step 2:</strong> First review by our team</div>
+          <div class="timeline-icon" style="background: #fbbf24;"></div>
+          <div class="timeline-text"><strong>Step 2:</strong> <strong style="color:#fbbf24;">Your turn</strong> &mdash; add your verification code to each channel&rsquo;s description, then press Check</div>
         </div>
         <div class="timeline-item">
           <div class="timeline-icon" style="background: #6b7280;"></div>
-          <div class="timeline-text"><strong>Step 3:</strong> Second review & final decision</div>
+          <div class="timeline-text"><strong>Step 3:</strong> Automatic checks &mdash; we confirm the channel exists, that the code is there, and read your follower count</div>
         </div>
         <div class="timeline-item">
           <div class="timeline-icon" style="background: #6b7280;"></div>
-          <div class="timeline-text"><strong>Step 4:</strong> You'll receive an email with our decision</div>
+          <div class="timeline-text"><strong>Step 4:</strong> Team review &mdash; two of our team look at applications that passed the checks</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-icon" style="background: #6b7280;"></div>
+          <div class="timeline-text"><strong>Step 5:</strong> You&rsquo;ll receive an email with our decision</div>
         </div>
       </div>
 
-      <p>In the meantime, you can check your application status anytime:</p>
-      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">View Application Status</a>
+      <p style="color: #9ca3af; font-size: 14px;">A few things worth knowing: you can remove the code once a channel is verified, we re-check automatically every few hours so you do not have to sit on the page, and your follower count is read from the channel itself &mdash; so do not worry if the number you entered was not exact. TikTok has no public API, so our team confirms those by eye.</p>
 
-      <p style="margin-top: 30px; color: #9ca3af; font-size: 14px;">If you have any questions about the program or your application, please don't hesitate to reach out to our support team.</p>
+      <p style="margin-top: 24px; color: #9ca3af; font-size: 14px;">Any questions about the program or your application, just reach out to our support team.</p>
     </div>
     <div class="footer">
       <p>© Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
@@ -141,7 +146,7 @@ func RenderAdminNewApplicationEmail(applicantName, displayName, primaryPlatform,
       </div>
 
       <div class="alert-box">
-        <p>⏱️ <strong>Reminder:</strong> Applications should be reviewed within 5-7 business days. This application requires at least 2 admin approvals.</p>
+        <p>⏱️ <strong>Reminder:</strong> Applications should be reviewed within 3-5 business days. This application requires at least 2 admin approvals.</p>
       </div>
 
       <a href="https://www.linespolice-cad.com/admin/console" class="cta-button">Review in Admin Console</a>
@@ -214,7 +219,7 @@ func RenderApplicationApprovedEmail(displayName string) string {
       </div>
 
       <div class="note-box">
-        <p>💡 <strong>Next Step:</strong> Visit your Creator Dashboard to claim your free Premium boost for one of your communities!</p>
+        <p>💡 <strong>Next:</strong> your Creator Dashboard has a short setup list waiting - write your profile bio, add a picture, and point your free Premium boost at one of your communities. Your public profile is live from now, so it is worth a few minutes.</p>
       </div>
 
       <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Go to Creator Dashboard</a>
@@ -680,4 +685,150 @@ func RenderGracePeriodReminderEmail(displayName string, currentFollowers, thresh
   </div>
 </body>
 </html>`, displayName, currentFollowers, threshold, threshold)
+}
+
+// RenderChecksFailedEmail tells an applicant that the automatic checks found a
+// problem, and exactly which one.
+//
+// Before this existed, a failed application notified nobody: admins are only
+// emailed when checks pass and applicants only when rejected, so an application
+// that failed screening and was never rejected simply sat there.
+//
+// ownershipProven changes the ending: someone who has proved a channel is
+// theirs is a real applicant who fell short of a requirement, and a human is
+// also looking. Someone who has not is told only how to fix it.
+func RenderChecksFailedEmail(displayName string, reasons []string, ownershipProven bool) string {
+	items := ""
+	for _, r := range reasons {
+		items += `<li style="margin-bottom:10px;">` + r + `</li>`
+	}
+	if items == "" {
+		items = `<li>One of our automatic checks did not pass.</li>`
+	}
+
+	closing := `Your application stays open. Fix the above and we will pick it up automatically &mdash; there is no need to reapply.`
+	if ownershipProven {
+		closing = `Your application stays open, and because you have already verified your channel a member of our team will take a look too. Fix the above and we will pick it up automatically &mdash; there is no need to reapply.`
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>Your application needs a change - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #f59e0b 0%%, #d97706 100%%); padding: 36px 30px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 36px 30px; color: #e5e7eb; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .reasons { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 12px; padding: 20px 20px 20px 38px; margin: 22px 0; }
+    .reasons li { color: #fde68a; line-height: 1.6; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 18px; }
+    .footer { padding: 28px 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Your application needs a change</h1>
+    </div>
+    <div class="content">
+      <h2>Hi %s,</h2>
+      <p>We ran the automatic checks on your Content Creator Program application, and something needs your attention:</p>
+
+      <ul class="reasons">%s</ul>
+
+      <p>%s</p>
+
+      <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Open my application</a>
+
+      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think this is wrong, tell us through our <a href="https://www.linespolice-cad.com/contact-us" style="color:#fbbf24;">contact page</a> and a person will look at it.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, items, closing)
+}
+
+// RenderRequirementNotMetEmail tells an applicant their application did not meet
+// a published program requirement.
+//
+// Separate from RenderApplicationRejectedEmail on purpose: that one opens with
+// "after careful review by our team", which would be a lie here. Nobody
+// reviewed this — a number was measured against a published minimum. Saying so
+// plainly is kinder than implying a person weighed them up and said no, and it
+// makes the way back obvious: change the number, apply again.
+//
+// requirement is the rule in the applicant's words ("At least 500 followers on
+// one channel"). measured is what we actually read. steps are the numbered
+// instructions for reapplying.
+func RenderRequirementNotMetEmail(displayName, requirement, measured string, steps []string) string {
+	stepItems := ""
+	for _, s := range steps {
+		stepItems += `<li style="margin-bottom:8px;">` + s + `</li>`
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>About your Creator Program application - Lines Police CAD</title>
+  <style type="text/css">
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #0a0a0f; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #12121f; }
+    .header { background: linear-gradient(135deg, #6b7280 0%%, #4b5563 100%%); padding: 36px 30px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 36px 30px; color: #e5e7eb; line-height: 1.6; }
+    .content h2 { color: #fff; margin-top: 0; }
+    .req-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin: 22px 0; }
+    .req-label { color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 6px; }
+    .req-value { color: #fff; font-weight: 700; margin: 0 0 16px; }
+    .req-value-last { color: #fff; font-weight: 700; margin: 0; }
+    .steps { background: rgba(34,197,94,0.07); border: 1px solid rgba(34,197,94,0.28); border-radius: 12px; padding: 20px 20px 20px 38px; margin: 22px 0; }
+    .steps li { color: #bbf7d0; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #fbbf24 0%%, #f59e0b 100%%); color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 8px; }
+    .footer { padding: 28px 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .footer a { color: #fbbf24; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>About your application</h1>
+    </div>
+    <div class="content">
+      <h2>Hi %s,</h2>
+      <p>Thank you for applying to the <strong>Lines Police CAD Content Creator Program</strong>. We are not able to accept this application, because it does not meet one of the program requirements.</p>
+
+      <div class="req-box">
+        <p class="req-label">The requirement</p>
+        <p class="req-value">%s</p>
+        <p class="req-label">What we found</p>
+        <p class="req-value-last">%s</p>
+      </div>
+
+      <p>This one is measured automatically from your channel, so there is nothing you need to appeal &mdash; and nothing stopping you from applying again the moment it changes.</p>
+
+      <p style="margin-bottom:0;"><strong style="color:#fff;">When you are ready to reapply:</strong></p>
+      <ol class="steps">%s</ol>
+
+      <a href="https://www.linespolice-cad.com/content-creators/apply" class="cta-button">Apply again</a>
+
+      <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think we measured the wrong channel, tell us through our <a href="https://www.linespolice-cad.com/contact-us" style="color:#fbbf24;">contact page</a> and a person will take a look.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; Lines Police CAD | <a href="https://www.linespolice-cad.com">linespolice-cad.com</a></p>
+      <p><a href="https://www.linespolice-cad.com/contact-us">Contact Support</a></p>
+    </div>
+  </div>
+</body>
+</html>`, displayName, requirement, measured, stepItems)
 }

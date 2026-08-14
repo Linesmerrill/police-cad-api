@@ -20,14 +20,14 @@ import (
 
 // Scheduler handles periodic background jobs for the content creator program
 type Scheduler struct {
-	cron    *cron.Cron
-	CCDB    databases.ContentCreatorDatabase
-	SnapDB  databases.ContentCreatorSnapshotDatabase
-	EntDB   databases.ContentCreatorEntitlementDatabase
-	UDB     databases.UserDatabase
-	CDB        databases.CommunityDatabase
-	LockDB     databases.SchedulerLockDatabase
-	DBHelper   databases.DatabaseHelper
+	cron     *cron.Cron
+	CCDB     databases.ContentCreatorDatabase
+	SnapDB   databases.ContentCreatorSnapshotDatabase
+	EntDB    databases.ContentCreatorEntitlementDatabase
+	UDB      databases.UserDatabase
+	CDB      databases.CommunityDatabase
+	LockDB   databases.SchedulerLockDatabase
+	DBHelper databases.DatabaseHelper
 	// Economy
 	SessionDB  databases.ClockSessionDatabase
 	InboxDB    databases.InboxItemDatabase
@@ -128,6 +128,57 @@ func (s *Scheduler) Start() {
 	zap.S().Info("Content creator scheduler started")
 }
 
+// AddJob registers an extra periodic job.
+//
+// The scheduler is constructed from the handlers package, so a job whose work
+// lives in handlers (creator application screening, which needs the application
+// store and the admin email helpers) cannot be a method here without an import
+// cycle. Handlers registers it through this instead.
+//
+// Safe before or after Start: robfig/cron accepts entries on a running cron.
+func (s *Scheduler) AddJob(name, spec string, fn func()) {
+	if _, err := s.cron.AddFunc(spec, fn); err != nil {
+		zap.S().Errorw("failed to register job", "job", name, "schedule", spec, "error", err)
+		return
+	}
+	s.registerJob(name, spec)
+}
+
+// InstanceID exposes the dyno identity so externally registered jobs can report
+// it in cron alerts the same way built-in ones do.
+func (s *Scheduler) InstanceID() string { return s.instanceID }
+
+// RunLocked runs fn under the same distributed lock, stats and Discord alerting
+// the built-in jobs use. Externally registered jobs go through this so they
+// cannot double-run across dynos or fail silently.
+func (s *Scheduler) RunLocked(jobName, lockKey string, ttl time.Duration, fn func(context.Context) error) {
+	s.recordStart(jobName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), ttl)
+	defer cancel()
+
+	acquired, err := s.LockDB.TryAcquireLock(ctx, lockKey, s.instanceID, ttl)
+	if err != nil {
+		zap.S().Errorw("failed to acquire lock", "job", jobName, "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "lock_acquire"})
+		return
+	}
+	if !acquired {
+		zap.S().Debugw("another instance holds the lock, skipping", "job", jobName)
+		return
+	}
+	defer s.LockDB.ReleaseLock(ctx, lockKey, s.instanceID)
+
+	if err := fn(ctx); err != nil {
+		zap.S().Errorw("job failed", "job", jobName, "error", err)
+		s.recordError(jobName, err)
+		SendCronAlert(s.instanceID, jobName, err, map[string]string{"phase": "run"})
+		return
+	}
+	s.recordSuccess(jobName)
+}
+
 // Stop gracefully stops the scheduler
 func (s *Scheduler) Stop() {
 	ctx := s.cron.Stop()
@@ -165,7 +216,7 @@ func (s *Scheduler) processGracePeriods() {
 
 	// Find creators whose grace period has expired
 	expiredFilter := bson.M{
-		"status":           "warned",
+		"status":            "warned",
 		"gracePeriodEndsAt": bson.M{"$lt": primitive.NewDateTimeFromTime(now)},
 	}
 
@@ -330,7 +381,7 @@ func (s *Scheduler) removeCreator(ctx context.Context, creator models.ContentCre
 		}
 		// Only update if the subscription was from content creator program
 		_, err = s.UDB.UpdateOne(ctx, bson.M{
-			"_id": *creator.UserID,
+			"_id":                  *creator.UserID,
 			"user.subscription.id": "cc_program_" + creator.ID.Hex(),
 		}, userUpdate)
 		if err != nil {
@@ -353,7 +404,7 @@ func (s *Scheduler) removeCreator(ctx context.Context, creator models.ContentCre
 			},
 		}
 		err = s.CDB.UpdateOne(ctx, bson.M{
-			"_id": communityEnt.TargetID,
+			"_id":                       communityEnt.TargetID,
 			"community.subscription.id": "cc_program_" + creator.ID.Hex(),
 		}, communityUpdate)
 		if err != nil {
@@ -402,7 +453,7 @@ func (s *Scheduler) checkAllCreators() {
 	// and aren't already in a grace period
 	threeDaysAgo := time.Now().Add(-3 * 24 * time.Hour)
 	filter := bson.M{
-		"status": "active",
+		"status":               "active",
 		"gracePeriodStartedAt": nil,
 		"$or": []bson.M{
 			{"lastSyncedAt": nil},
