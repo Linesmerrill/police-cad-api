@@ -203,18 +203,20 @@ func (cc ContentCreator) screenAndPersist(ctx context.Context, app *models.Conte
 		case res.Passed && app.AdminNotifiedAt == nil:
 			notifyAdmin = true
 
-		case res.Blocked && res.FollowerShortfall && res.OwnershipProven:
+		case res.Blocked && res.FollowerShortfall:
 			// A hard program requirement, measured from the channel itself. There
 			// is nothing for a reviewer to weigh, so it is decided here rather
 			// than sitting in a queue waiting for someone to reach the same
 			// conclusion. The applicant is told why and can reapply if they grow.
 			//
-			// Only once they have proved a channel is theirs. A count read off a
-			// channel nobody has claimed yet might be a mistyped handle pointing
-			// at a stranger's channel, and screening now runs the moment they
-			// open the page — rejecting on that would close the door before they
-			// had done anything wrong. Unproven channels are handled by the
-			// ownership check instead, which retries first and gives up slowly.
+			// This deliberately does not wait for them to prove ownership first.
+			// Making someone place a verification code on a channel we have
+			// already measured as too small only wastes their evening before we
+			// tell them no. FollowerShortfall is the guard that matters: it is
+			// set only when we really read the numbers and nothing outstanding
+			// could still qualify. If the handle was a typo pointing at someone
+			// else's channel, the email names the channel we measured and they
+			// can reapply immediately.
 			autoReject = true
 
 		case res.Blocked && app.ApplicantNotifiedAt == nil:
@@ -816,6 +818,10 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	// rather than making someone guess which of their channels we measured.
 	bestLabel := ""
 	anyFollowerData := false
+	// The largest count we could NOT check ourselves — a TikTok bio, a channel
+	// our lookup could not reach. If one of those claims enough to qualify, the
+	// application is not ours to decide: a human has to look at the number.
+	bestUnmeasuredClaim := 0
 
 	for i, p := range app.Platforms {
 		label := p.Handle
@@ -848,6 +854,9 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 			// No public API. Not the applicant's problem and not a failure.
 			add(models.CheckChannelResolves, models.CheckManual, "This platform is reviewed by our team.")
 			add(models.CheckOwnership, models.CheckManual, "Leave the code in your bio; our team confirms it.")
+			if p.FollowerCount > bestUnmeasuredClaim {
+				bestUnmeasuredClaim = p.FollowerCount
+			}
 			continue
 		}
 
@@ -862,6 +871,9 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 			// Our side is unwell (no key, quota, network). Never blame the
 			// applicant for it — stay pending and try again next run.
 			add(models.CheckChannelResolves, models.CheckPending, "Checking your channel, this can take a little while.")
+			if p.FollowerCount > bestUnmeasuredClaim {
+				bestUnmeasuredClaim = p.FollowerCount
+			}
 			continue
 		}
 
@@ -913,7 +925,10 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 			Reason: reason, CheckedAt: &now,
 		})
 		res.Blocked = true
-		res.FollowerShortfall = true
+		// Only ours to decide when nothing outstanding could still qualify. A
+		// TikTok claiming 5,000 that we cannot read is a number for a human to
+		// weigh, not one to reject around.
+		res.FollowerShortfall = bestUnmeasuredClaim < models.MinFollowers
 		res.FollowerBest = bestFollowers
 		res.FollowerBestLabel = bestLabel
 		// The rejection reason is read on its own in an email, away from the

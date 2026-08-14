@@ -129,16 +129,55 @@ func TestScreenApplication(t *testing.T) {
 		assert.Contains(t, res.FollowerBestLabel, "cryptic")
 	})
 
-	t.Run("a shortfall on an unproven channel is not ours to reject", func(t *testing.T) {
-		// The count is real but nobody has shown the channel is theirs — it may
-		// be a mistyped handle pointing at a stranger. The ownership check
-		// handles this, slowly; screening must not slam the door on the first
-		// page load.
+	t.Run("a measured shortfall does not wait for ownership", func(t *testing.T) {
+		// We read the channel and it is too small. Making them place a code on
+		// it first only wastes their evening before we say no.
 		unproven := models.ContentCreatorPlatform{Type: "youtube", Handle: "cryptic", VerificationCode: "LPC-VERIFY-ABC123"}
 		res := screenApplication(ctx, appWith(unproven, 0), fetcherReturning(
 			platforms.ChannelInfo{Description: "no code yet", FollowerCount: 40}, nil))
-		assert.True(t, res.FollowerShortfall, "the check still fails")
-		assert.False(t, res.OwnershipProven, "but the auto-reject is gated on this")
+		assert.True(t, res.FollowerShortfall)
+		assert.False(t, res.OwnershipProven, "and it is not a precondition")
+	})
+
+	t.Run("a claim we cannot check keeps the decision human", func(t *testing.T) {
+		// YouTube is real and small; the TikTok claim would qualify and we have
+		// no way to read it. That is a number for a person to weigh, not one to
+		// auto-reject around.
+		app := &models.ContentCreatorApplication{Platforms: []models.ContentCreatorPlatform{
+			{Type: "youtube", Handle: "small", VerificationCode: "LPC-VERIFY-ABC123"},
+			{Type: "tiktok", Handle: "big", FollowerCount: 5000},
+		}}
+		res := screenApplication(ctx, app, func(kind string) (platforms.Fetcher, error) {
+			if kind == "tiktok" {
+				return nil, platforms.ErrManualOnly
+			}
+			return fakeFetcher{platforms.ChannelInfo{Description: "LPC-VERIFY-ABC123", FollowerCount: 40}, nil}, nil
+		})
+		assert.True(t, res.Blocked, "the measured channels are still short")
+		assert.False(t, res.FollowerShortfall, "but this one is not ours to decide")
+	})
+
+	t.Run("a small claim we cannot check does not save it", func(t *testing.T) {
+		app := &models.ContentCreatorApplication{Platforms: []models.ContentCreatorPlatform{
+			{Type: "youtube", Handle: "small", VerificationCode: "LPC-VERIFY-ABC123"},
+			{Type: "tiktok", Handle: "alsosmall", FollowerCount: 30},
+		}}
+		res := screenApplication(ctx, app, func(kind string) (platforms.Fetcher, error) {
+			if kind == "tiktok" {
+				return nil, platforms.ErrManualOnly
+			}
+			return fakeFetcher{platforms.ChannelInfo{Description: "LPC-VERIFY-ABC123", FollowerCount: 40}, nil}, nil
+		})
+		assert.True(t, res.FollowerShortfall)
+	})
+
+	t.Run("our own lookup failure never auto-rejects", func(t *testing.T) {
+		// The count on the record is a claim we could not confirm. Treating it
+		// as measured would reject someone over our outage.
+		p := models.ContentCreatorPlatform{Type: "youtube", Handle: "cryptic", FollowerCount: 9000}
+		res := screenApplication(ctx, appWith(p, 0), fetcherReturning(
+			platforms.ChannelInfo{}, platforms.ErrNotConfigured))
+		assert.False(t, res.FollowerShortfall)
 	})
 
 	t.Run("clearing the bar never sets a shortfall", func(t *testing.T) {
