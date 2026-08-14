@@ -139,6 +139,16 @@ func (cc ContentCreator) StartChannelVerificationHandler(w http.ResponseWriter, 
 
 // formatCount renders a follower count the way a person would say it, since
 // these strings are read by applicants rather than parsed.
+// followersLabel writes a count with the noun that matches it. "1 followers"
+// is small, but it is the kind of small that makes software look unfinished,
+// and this string is read by the applicant at the moment they are told no.
+func followersLabel(n int) string {
+	if n == 1 {
+		return "1 follower"
+	}
+	return formatCount(n) + " followers"
+}
+
 func formatCount(n int) string {
 	switch {
 	case n >= 1000000:
@@ -155,9 +165,9 @@ func formatCount(n int) string {
 // bar look like a clean pass.
 func followerMessage(count int) string {
 	if count >= models.MinFollowers {
-		return fmt.Sprintf("%s followers, above the %d minimum.", formatCount(count), models.MinFollowers)
+		return fmt.Sprintf("%s, above the %d minimum.", followersLabel(count), models.MinFollowers)
 	}
-	return fmt.Sprintf("%s followers. The program needs at least %d, so this channel does not qualify on its own yet.",
+	return fmt.Sprintf("%s. The program needs at least %d, so this channel does not qualify on its own yet.",
 		formatCount(count), models.MinFollowers)
 }
 

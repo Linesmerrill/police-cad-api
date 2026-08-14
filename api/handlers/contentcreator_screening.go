@@ -117,14 +117,6 @@ const (
 	onDemandScreenBudget = 5 * time.Second
 )
 
-// screenAndPersist runs the automated checks over one application, writes what
-// they found, and sends whatever the outcome calls for.
-//
-// Shared by the scheduled sweep and the applicant's own Check button. A
-// decision this consequential must not depend on which of the two got there
-// first: before this was shared, verifying a 252-follower channel left the page
-// saying "we will email you shortly" while the application sat as Submitted for
-// up to four hours, still withdrawable, with nothing sent.
 // channelLabel names a platform entry the way its owner would recognise it.
 func channelLabel(p models.ContentCreatorPlatform) string {
 	name := p.Handle
@@ -155,6 +147,14 @@ func platformDisplayName(t string) string {
 	}
 }
 
+// screenAndPersist runs the automated checks over one application, writes what
+// they found, and sends whatever the outcome calls for.
+//
+// Shared by the scheduled sweep and the applicant's own Check button. A
+// decision this consequential must not depend on which of the two got there
+// first: before this was shared, verifying a 252-follower channel left the page
+// saying "we will email you shortly" while the application sat as Submitted for
+// up to four hours, still withdrawable, with nothing sent.
 func (cc ContentCreator) screenAndPersist(ctx context.Context, app *models.ContentCreatorApplication, attempt bool) error {
 	{
 		res := screenApplication(ctx, app, platforms.For)
@@ -303,12 +303,12 @@ func (cc ContentCreator) sendFollowerMinimumEmail(ctx context.Context, app *mode
 	min := formatCount(models.MinFollowers)
 	requirement := fmt.Sprintf("At least %s followers or subscribers on one of your channels.", min)
 
-	measured := fmt.Sprintf("%s followers, read from %s on %s.",
-		formatCount(res.FollowerBest),
+	measured := fmt.Sprintf("%s, read from %s on %s.",
+		followersLabel(res.FollowerBest),
 		res.FollowerBestLabel,
 		time.Now().Format("2 January 2006"))
 	if res.FollowerBestLabel == "" {
-		measured = fmt.Sprintf("%s followers on your largest channel.", formatCount(res.FollowerBest))
+		measured = fmt.Sprintf("%s on your largest channel.", followersLabel(res.FollowerBest))
 	}
 
 	steps := []string{
@@ -902,12 +902,12 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	case bestFollowers >= models.MinFollowers:
 		res.Checks = append(res.Checks, models.ApplicationCheck{
 			Key: models.CheckFollowers, Status: models.CheckPassed,
-			Reason:    fmt.Sprintf("%s followers on your largest channel.", formatCount(bestFollowers)),
+			Reason:    fmt.Sprintf("%s on your largest channel.", followersLabel(bestFollowers)),
 			CheckedAt: &now,
 		})
 	default:
-		reason := fmt.Sprintf("Your largest channel has %s followers. The program needs at least %s.",
-			formatCount(bestFollowers), formatCount(models.MinFollowers))
+		reason := fmt.Sprintf("Your largest channel has %s. The program needs at least %s.",
+			followersLabel(bestFollowers), formatCount(models.MinFollowers))
 		res.Checks = append(res.Checks, models.ApplicationCheck{
 			Key: models.CheckFollowers, Status: models.CheckFailed,
 			Reason: reason, CheckedAt: &now,
