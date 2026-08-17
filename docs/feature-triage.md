@@ -1,8 +1,8 @@
 # Feature Request Triage — Living Doc
 
-_Auto-generated 2026-08-10 16:54 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
+_Auto-generated 2026-08-17 16:27 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
 
-**54** active requests · **282** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
+**54** active requests · **283** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
 
 **Legend** — Scope: 🌐 website · ⚙️ API · 📱 mobile · 🤖 bot. Effort: S (<1d) · M (few days) · L (1–2wk) · XL (multi-wk). Priority = upvotes + 2×comments.
 
@@ -24,7 +24,7 @@ Highest-value low-effort items (quick wins & easy), by priority:
 |---|---:|---:|
 | ⚡ Quick Wins | 2 | 11 |
 | 🟢 Easy / Low-Hanging | 3 | 9 |
-| 🏗️ Full Features | 30 | 201 |
+| 🏗️ Full Features | 30 | 202 |
 | 🚫 Probably Shouldn't Add | 4 | 31 |
 | ⚠️ Untriaged | 15 | 30 |
 
@@ -57,7 +57,7 @@ _Substantial builds — plan and phase these._
 |:--:|---|---:|---:|:--:|---|---|---|
 |   | [Items, custom looting and crafting](https://www.linespolice-cad.com/feature-requests/6a13d4bf07d208ef76c64182) | 47 | 11 | XL | ⚙️ 🌐 📱 🤖 api/website/mobile/bot | Cryptic | Highest-voted request (46). The custom-items + shop + inventory core aligns with the economy/inventory system staff already said is planned. But the full FiveM scope (looting, crafting, hunger/thirst) is a big lane change for a CAD — a commenter even said 'this is a cad system not a fivem addon'. Recommend carving an MVP: custom items + shops + inventory tied to the existing economy, and defer hunger/crafting/looting. _Risks/deps: Scope creep; pay-to-win concerns raised in comments; depends on economy system (already shipped)._ _Possible dup: Custom Civilian Jobs + Buyable Items; Job system; Department Overhaul_ |
 |   | [Parity with Emergency Response Liberty County (Roblox)](https://www.linespolice-cad.com/feature-requests/69a90489f5524b2c4aa0834b) | 19 | 7 | XL | ⚙️ 🌐 📱 api/website/mobile | Josevf479 | ER:LC PRC API can supply live player lists, callsigns, locations, join/leave logs and some in-game commands — enabling live unit tracking, duty logging and CAD-to-game announcements. No RP data (civilians/warrants) is exposed, so it's about bringing live game state in, not syncing records. Staff already publicly deferred pending stronger demand; requester notes plates + emergency calls were recently added to the API. _Risks/deps: Poll-based external API needs background services/infra; gauge demand before committing. Phase as MVP (status/players/commands) → live map._ _Possible dup: A FiveM Addon for the cad/ticket system_ |
-|   | [Ticket Format for the PD](https://www.linespolice-cad.com/feature-requests/6a3d4781bd5933e6c9b8badf) | 17 | 2 | M | ⚙️ 🌐 📱 api/website/mobile | Real_Halx | Adds a richer, realistic ticket/citation format with extra fields (e.g. phone number for follow-ups) that carry into court. Citations already exist; this extends the citation model + issue forms across surfaces. Solid votes (9) for a moderate change. _Risks/deps: Coordinate field changes with the court/case view so judges see the added info._ |
+|   | [Ticket Format for the PD](https://www.linespolice-cad.com/feature-requests/6a3d4781bd5933e6c9b8badf) | 18 | 2 | M | ⚙️ 🌐 📱 api/website/mobile | Real_Halx | Adds a richer, realistic ticket/citation format with extra fields (e.g. phone number for follow-ups) that carry into court. Citations already exist; this extends the citation model + issue forms across surfaces. Solid votes (9) for a moderate change. _Risks/deps: Coordinate field changes with the court/case view so judges see the added info._ |
 |   | [Link characters](https://www.linespolice-cad.com/feature-requests/69aca7d24794df4f176b596d) | 10 | 5 | M | ⚙️ 🌐 📱 api/website/mobile | Braids | Link civilian profiles for relationships (spouse, family). Contained: a relationship reference on the civilian model plus UI to set/display it. Positive reception incl. staff ('cool concept'); 9 votes, 4 comments of agreement. _Risks/deps: Decide directionality/consent (mutual link vs one-way)._ |
 |   | [‼️Role Syncing‼️](https://www.linespolice-cad.com/feature-requests/69d32a709c76e1ecb185684a) | 10 | 2 | L | 🌐 ⚙️ 🤖 website/api/bot | Cryptic | Sync Discord roles → CAD community roles on join. Discord OAuth linking exists but only with 'identify' scope; needs expanded scope (guilds/roles), a community↔guild mapping, a Discord-role→CAD-role mapping table, and auto-enroll logic. Staff flagged a caveat: syncing roles still requires re-adding members + setting permissions. _Risks/deps: OAuth scope expansion; new mapping config UI; permission edge cases._ |
 |   | [Give Police a option to see someone's medical history](https://www.linespolice-cad.com/feature-requests/69a8879367bba4188404c58f) | 6 | 2 | M | ⚙️ 🌐 📱 api/website/mobile | Dukk | Toggle to let police view medical history on servers without EMS/Fire. Staff framed it as a configurable, per-department component under the planned Custom Departments work. Medical history already exists (EMS); this is a permission/visibility toggle + surfacing it to police. _Risks/deps: Ties into Custom Departments plan; privacy toggle default off._ |
