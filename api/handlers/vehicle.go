@@ -433,6 +433,10 @@ func (v Vehicle) CreateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 	vehicle.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	vehicle.Details.UpdatedAt = vehicle.Details.CreatedAt
 
+	// Persist the canonical flag encoding regardless of what the client sent,
+	// so no new record adds to the legacy pile. See models/vehicle_flags.go.
+	vehicle.Details.NormalizeFlags()
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -520,6 +524,11 @@ func (v Vehicle) UpdateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 	updatedDetails := models.VehicleDetails{}
 	data, _ = json.Marshal(existingDetailsMap)
 	json.Unmarshal(data, &updatedDetails)
+
+	// Heal the record: whatever encoding it was stored in, and whatever the
+	// client sent, it goes back in the canonical form. Touching any field
+	// migrates the flags. See models/vehicle_flags.go.
+	updatedDetails.NormalizeFlags()
 
 	// Update the vehicle in the database
 	err = v.DB.UpdateOne(ctx, bson.M{"_id": vID}, bson.M{"$set": bson.M{"vehicle": updatedDetails}})
