@@ -73,8 +73,16 @@ func (l License) LicensesByCivilianIDHandler(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Build filter once (reused for both queries)
-	filter := bson.M{"license.civilianID": civID}
+	// Build filter once (reused for both queries).
+	//
+	// Legacy records key the civilian as license.ownerID rather than
+	// license.civilianID (see models/license_normalize.go). Matching only the
+	// modern key hid roughly three quarters of the collection from every API
+	// consumer. Both keys are indexed.
+	filter := bson.M{"$or": []bson.M{
+		{"license.civilianID": civID},
+		{"license.ownerID": civID},
+	}}
 
 	// Execute queries in parallel for better performance
 	type findResult struct {
@@ -153,6 +161,9 @@ func (l License) CreateLicenseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Store the canonical shape so new records never join the legacy split.
+	newLicense.Details.NormalizeFields()
+
 	// Insert the new license into the database
 	_, err := l.DB.InsertOne(context.Background(), newLicense)
 	if err != nil {
@@ -166,6 +177,20 @@ func (l License) CreateLicenseHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "License created successfully",
 		"id":      licenseID.Hex(),
 	})
+}
+
+// legacyLicenseKeys maps a legacy request key onto its canonical home, so a
+// caller may send either spelling. canonicalLicenseKeys is the inverse.
+var legacyLicenseKeys = map[string]string{
+	"licenseType":     "type",
+	"additionalNotes": "notes",
+	"ownerID":         "civilianID",
+}
+
+var canonicalLicenseKeys = map[string]string{
+	"type":       "licenseType",
+	"notes":      "additionalNotes",
+	"civilianID": "ownerID",
 }
 
 // UpdateLicenseByIDHandler updates a license by ID
@@ -186,14 +211,50 @@ func (l License) UpdateLicenseByIDHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	update := bson.M{"$set": bson.M{}}
-	for key, value := range updatedFields {
-		update["$set"].(bson.M)["license."+key] = value
+	// Use request context with timeout for proper trace tracking and timeout handling
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	// Read the stored record first so we can tell which key set it uses.
+	existing, err := l.DB.FindOne(ctx, bson.M{"_id": lID})
+	if err != nil {
+		config.InfoStatus("no license found by that ID", http.StatusNotFound, w, err)
+		return
 	}
+	storedAsLegacy := existing.Details.LicenseType != "" ||
+		existing.Details.AdditionalNotes != "" ||
+		existing.Details.OwnerID != ""
 
-	filter := bson.M{"_id": lID}
+	set := bson.M{}
+	for key, value := range updatedFields {
+		// Accept either key set from the caller, but always write canonical.
+		canonical := key
+		if alias, ok := legacyLicenseKeys[key]; ok {
+			canonical = alias
+		}
 
-	err = l.DB.UpdateOne(context.Background(), filter, update)
+		if str, ok := value.(string); ok {
+			switch canonical {
+			case "status":
+				value = models.LicenseDetails{Status: str}.NormalizedStatus()
+			case "expirationDate":
+				value = models.LicenseDetails{ExpirationDate: str}.NormalizedExpiration()
+			}
+		}
+
+		set["license."+canonical] = value
+
+		// A legacy record is still rendered straight from the Mongoose model by
+		// the website's police and dispatch dashboards, which read the legacy
+		// key. Keep it in step so an edit made here does not leave those
+		// screens showing the old value.
+		if legacy, ok := canonicalLicenseKeys[canonical]; ok && storedAsLegacy {
+			set["license."+legacy] = value
+		}
+	}
+	set["license.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+
+	err = l.DB.UpdateOne(ctx, bson.M{"_id": lID}, bson.M{"$set": set})
 	if err != nil {
 		config.ErrorStatus("failed to update license by ID", http.StatusInternalServerError, w, err)
 		return
