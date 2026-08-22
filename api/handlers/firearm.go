@@ -373,6 +373,10 @@ func (f Firearm) UpdateFirearmHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Captured before the merge: the reconciler needs to know whether
+	// ownership actually moved to a different civilian.
+	existingFirearmOwnerID := existingFirearm.Details.RegisteredOwnerID
+
 	// Merge the update data with the existing firearm data
 	for key, value := range updateData {
 		existingDetailsMap[key] = value
@@ -383,6 +387,25 @@ func (f Firearm) UpdateFirearmHandler(w http.ResponseWriter, r *http.Request) {
 	updatedDetails := models.FirearmDetails{}
 	data, _ = json.Marshal(existingDetailsMap)
 	json.Unmarshal(data, &updatedDetails)
+
+	// Bring the deprecated registeredOwnerID/registeredOwner pair in step with
+	// the canonical linkedCivilianID, so unlink actually unlinks. See
+	// models/asset_link.go.
+	_, linkSent := updateData["linkedCivilianID"]
+	_, nameSent := updateData["registeredOwner"]
+	reconciled := models.ReconcileOwnerLink(
+		models.OwnerLink{
+			LinkedCivilianID:  updatedDetails.LinkedCivilianID,
+			RegisteredOwnerID: updatedDetails.RegisteredOwnerID,
+			RegisteredOwner:   updatedDetails.RegisteredOwner,
+		},
+		existingFirearmOwnerID,
+		linkSent,
+		nameSent,
+	)
+	updatedDetails.LinkedCivilianID = reconciled.LinkedCivilianID
+	updatedDetails.RegisteredOwnerID = reconciled.RegisteredOwnerID
+	updatedDetails.RegisteredOwner = reconciled.RegisteredOwner
 
 	// Update the firearm in the database
 	err = f.DB.UpdateOne(context.Background(), bson.M{"_id": fID}, bson.M{"$set": bson.M{"firearm": updatedDetails}})
