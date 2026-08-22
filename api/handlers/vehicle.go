@@ -502,6 +502,10 @@ func (v Vehicle) UpdateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Captured before the merge: the reconciler needs to know whether
+	// ownership actually moved to a different civilian.
+	existingVehicleOwnerID := existingVehicle.Details.RegisteredOwnerID
+
 	// Convert existing vehicle details to a map
 	existingDetailsMap := make(map[string]interface{})
 	data, _ := json.Marshal(existingVehicle.Details)
@@ -529,6 +533,25 @@ func (v Vehicle) UpdateVehicleHandler(w http.ResponseWriter, r *http.Request) {
 	// client sent, it goes back in the canonical form. Touching any field
 	// migrates the flags. See models/vehicle_flags.go.
 	updatedDetails.NormalizeFlags()
+
+	// Bring the deprecated registeredOwnerID/registeredOwner pair in step with
+	// the canonical linkedCivilianID, so unlink actually unlinks. See
+	// models/asset_link.go.
+	_, linkSent := updateData["linkedCivilianID"]
+	_, nameSent := updateData["registeredOwner"]
+	reconciled := models.ReconcileOwnerLink(
+		models.OwnerLink{
+			LinkedCivilianID:  updatedDetails.LinkedCivilianID,
+			RegisteredOwnerID: updatedDetails.RegisteredOwnerID,
+			RegisteredOwner:   updatedDetails.RegisteredOwner,
+		},
+		existingVehicleOwnerID,
+		linkSent,
+		nameSent,
+	)
+	updatedDetails.LinkedCivilianID = reconciled.LinkedCivilianID
+	updatedDetails.RegisteredOwnerID = reconciled.RegisteredOwnerID
+	updatedDetails.RegisteredOwner = reconciled.RegisteredOwner
 
 	// Update the vehicle in the database
 	err = v.DB.UpdateOne(ctx, bson.M{"_id": vID}, bson.M{"$set": bson.M{"vehicle": updatedDetails}})
