@@ -381,6 +381,15 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.PenalCodes = models.DefaultCommunityPenalCodes()
 	newCommunity.Details.MembersCount = 1
 
+	// Normalize onboarding content at creation too. Fill rates say this is where
+	// it will actually be set: across live public communities, fields on the
+	// create form are filled 78-89% of the time while fields that live only in
+	// settings sit at 0.4-4.7%. An invite typed without a scheme is stored
+	// canonically rather than refused, since a rejected create loses the whole
+	// community over a missing "https://".
+	newCommunity.Details.DiscordInviteURL = models.NormalizeDiscordInviteURL(newCommunity.Details.DiscordInviteURL)
+	newCommunity.Details.OnboardingSteps = models.NormalizeOnboardingSteps(newCommunity.Details.OnboardingSteps)
+
 	// Initialize the events slice if it is null
 	if newCommunity.Details.Events == nil {
 		newCommunity.Details.Events = []models.Event{}
@@ -985,6 +994,27 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 		req["economy"] = cleaned
+	}
+
+	// Owner-authored onboarding content gets the same treatment. A member who has
+	// just requested to join is sent to the community's own Discord, so an invite
+	// stored in a shape Discord will not resolve is a dead end for every new
+	// member rather than a cosmetic problem.
+	if inviteRaw, exists := req["discordInviteUrl"]; exists {
+		invite, vErr := normalizeDiscordInvitePatch(inviteRaw)
+		if vErr != nil {
+			config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+			return
+		}
+		req["discordInviteUrl"] = invite
+	}
+	if stepsRaw, exists := req["onboardingSteps"]; exists {
+		steps, vErr := normalizeOnboardingStepsPatch(stepsRaw)
+		if vErr != nil {
+			config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+			return
+		}
+		req["onboardingSteps"] = steps
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling

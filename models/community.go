@@ -81,6 +81,12 @@ type CommunityDetails struct {
 	Roles                         []Role                  `json:"roles" bson:"roles"`
 	BanList                       []string                `json:"banList" bson:"banList"`
 	Description                   string                  `json:"description" bson:"description"`
+	// Owner-authored onboarding. A community's own Discord is where the member
+	// actually gets trained and let in; see ResolveDiscordInvite in
+	// community_onboarding.go for how this is filled when the owner has not set
+	// it explicitly.
+	DiscordInviteURL string   `json:"discordInviteUrl,omitempty" bson:"discordInviteUrl,omitempty"`
+	OnboardingSteps  []string `json:"onboardingSteps,omitempty" bson:"onboardingSteps,omitempty"`
 	Members                       map[string]MemberDetail `json:"members" bson:"members"`
 	MembersCount                  int                     `json:"membersCount" bson:"membersCount"`
 	Events                        []Event                 `json:"events" bson:"events"`
