@@ -834,19 +834,31 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send push notification in the background (non-blocking)
-	go u.sendNotificationPush(notification.SentToID, newNotification, senderUsername)
+	go sendNotificationPush(u.PTDB, u.UPDB, notification.SentToID, newNotification, senderUsername)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "notification created successfully"}`))
 }
 
-// sendNotificationPush sends an Expo push notification for a regular in-app notification.
-// It checks the user's notification preferences before sending.
-func (u User) sendNotificationPush(recipientID string, notif models.Notification, senderUsername string) {
+// sendNotificationPush sends an Expo push notification for a regular in-app
+// notification, honouring the recipient's notification preferences.
+//
+// It takes its collections as arguments rather than hanging off User because
+// join requests are resolved from two different handlers: community-level ones
+// on User, department ones on Community. Both need to push to the requester,
+// and duplicating the preference and title logic per receiver is how the two
+// drift apart.
+func sendNotificationPush(
+	ptdb databases.PushTokenDatabase,
+	updb databases.UserPreferencesDatabase,
+	recipientID string,
+	notif models.Notification,
+	senderUsername string,
+) {
 	ctx := context.Background()
 
 	// Look up push tokens for the recipient
-	tokens, err := u.PTDB.Find(ctx, bson.M{"userId": recipientID})
+	tokens, err := ptdb.Find(ctx, bson.M{"userId": recipientID})
 	if err != nil {
 		zap.S().Errorf("sendNotificationPush: failed to fetch push tokens for user %s: %v", recipientID, err)
 		return
@@ -857,9 +869,9 @@ func (u User) sendNotificationPush(recipientID string, notif models.Notification
 
 	// Check notification preferences (default to all-enabled if not set)
 	prefs := models.DefaultNotificationPreferences()
-	if u.UPDB != nil {
+	if updb != nil {
 		var userPrefs models.UserPreferences
-		if err := u.UPDB.FindOne(ctx, bson.M{"userId": recipientID}).Decode(&userPrefs); err == nil {
+		if err := updb.FindOne(ctx, bson.M{"userId": recipientID}).Decode(&userPrefs); err == nil {
 			p := userPrefs.NotificationPreferences
 			// Only use stored prefs if at least one field has been explicitly set
 			if p.AllNotifications || p.Friends || p.CommunityJoins || p.DepartmentJoins || p.PanicAlerts || p.General {
@@ -891,6 +903,17 @@ func (u User) sendNotificationPush(recipientID string, notif models.Notification
 				return
 			}
 		}
+	case NotificationCommunityApproved, NotificationCommunityDeclined:
+		// The outcome of a community join request belongs to the same category as
+		// the request itself, not to General. Someone who turned off everything
+		// except community joins still wants to hear that they got in.
+		if !prefs.CommunityJoins {
+			return
+		}
+	case NotificationDepartmentApproved, NotificationDepartmentDeclined:
+		if !prefs.DepartmentJoins {
+			return
+		}
 	default:
 		if !prefs.General {
 			return
@@ -911,6 +934,18 @@ func (u User) sendNotificationPush(recipientID string, notif models.Notification
 			title = "Community Join Request"
 			body = senderUsername + " wants to join " + notif.Data2
 		}
+	case NotificationCommunityApproved:
+		title = "You're in"
+		body = notif.Message
+	case NotificationCommunityDeclined:
+		title = "Join Request Declined"
+		body = notif.Message
+	case NotificationDepartmentApproved:
+		title = "Department Approved"
+		body = notif.Message
+	case NotificationDepartmentDeclined:
+		title = "Department Request Declined"
+		body = notif.Message
 	default:
 		title = "LPC Notification"
 		body = notif.Message
@@ -1912,7 +1947,7 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	if len(communityObjectIDs) > 50 {
 		// Use aggregation pipeline: sample large pool, then filter out user communities
 		pipeline := mongo.Pipeline{
-			{{"$match", bson.M{"community.visibility": "public"}}},
+			{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
 			{{"$sample", bson.M{"size": limit * 5}}}, // Sample 5x the limit to account for filtering
 		}
 		
@@ -2020,9 +2055,11 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Check if the community exists
+	// Check if the community exists. The document is kept rather than discarded so
+	// the resolution notification below can name the community; a member told only
+	// that "a request was approved" still has to go hunting for which one.
 	communityFilter := bson.M{"_id": cID}
-	_, err = u.CDB.FindOne(ctx, communityFilter)
+	communityDoc, err := u.CDB.FindOne(ctx, communityFilter)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			config.ErrorStatus("community does not exist", http.StatusBadRequest, w, fmt.Errorf("community does not exist: %s", requestBody.CommunityID))
@@ -2155,6 +2192,23 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 			notifUpdate := bson.M{"$pull": bson.M{"user.notifications": notifMatch}}
 			// Best-effort cleanup — never fail the resolution if this errors.
 			_, _ = u.DB.UpdateMany(ctx, notifFilter, notifUpdate)
+
+			// Then tell the person who actually asked. Clearing the admins' copy
+			// above is only half of resolving a request: without this the requester
+			// is never informed either way and has to keep revisiting the community
+			// page to find out whether they were let in.
+			var communityName string
+			if communityDoc != nil {
+				communityName = communityDoc.Details.Name
+			}
+			notifyJoinResolved(ctx, u.DB, u.PTDB, u.UPDB, JoinResolution{
+				Status:         requestBody.Status,
+				PreviousStatus: existingCommunity.Status,
+				RequesterID:    userID,
+				ActorID:        resolveActorFromRequest(r),
+				CommunityID:    requestBody.CommunityID,
+				CommunityName:  communityName,
+			})
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -2858,7 +2912,9 @@ func (u User) UnfriendUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"message": "User unfriended successfully"}`))
 }
 
-// AddUserToPendingDepartmentHandler adds a user to a department's members list with status "pending"
+// AddUserToPendingDepartmentHandler adds a user to a department's members list.
+// The new member is "pending" when the department requires approval and
+// "approved" when it does not; the response reports which.
 func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["userId"]
@@ -2927,10 +2983,20 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Add the user to the department's members list with status "pending"
+	// A department that does not require approval has nothing to approve, so joining
+	// one is immediate. Writing "pending" here regardless of ApprovalRequired left
+	// self-serve joins parked in a queue nobody was going to work: every other read
+	// path (department.go, community.go's department access checks, economy.go)
+	// already treats any approved community member as a member of a department that
+	// does not require approval, so the member could use the department while their
+	// own entry claimed otherwise and an admin saw a request they could not action.
+	status := "approved"
+	if department.ApprovalRequired {
+		status = "pending"
+	}
 	member := models.MemberStatus{
 		UserID: userID,
-		Status: "pending",
+		Status: status,
 	}
 	department.Members = append(department.Members, member)
 
@@ -2943,7 +3009,11 @@ func (u User) AddUserToPendingDepartmentHandler(w http.ResponseWriter, r *http.R
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "User added to department with pending status successfully"}`))
+	if status == "approved" {
+		w.Write([]byte(`{"message": "User added to department successfully", "status": "approved"}`))
+		return
+	}
+	w.Write([]byte(`{"message": "User added to department with pending status successfully", "status": "pending"}`))
 }
 
 // CancelPendingDepartmentRequestHandler cancels a pending department join request for a user
@@ -4526,7 +4596,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	// Build the aggregation pipeline
 	pipeline := mongo.Pipeline{
 		// Filter for communities with visibility set to public
-		{{"$match", bson.M{"community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
 
 		// Add a numeric rank for subscription tiers
 		{{"$addFields", bson.M{
@@ -4574,7 +4644,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Create the paginated response
-	totalCount, _ := u.CDB.CountDocuments(ctx, bson.M{"community.visibility": "public"})
+	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDemoCommunities(bson.M{"community.visibility": "public"}))
 	paginatedResponse := PaginatedDataResponse{
 		Page:       Page,
 		TotalCount: totalCount,
@@ -4611,7 +4681,7 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 
 	// Aggregation pipeline
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.M{"community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
 		{{"$addFields", bson.M{
 			"subscriptionRank": bson.M{
 				"$switch": bson.M{
@@ -4693,7 +4763,7 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Count total matching documents (use same ctx from aggregation)
-	totalCount, _ := u.CDB.CountDocuments(ctx, bson.M{"community.visibility": "public"})
+	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDemoCommunities(bson.M{"community.visibility": "public"}))
 
 	// Return response
 	response := map[string]interface{}{

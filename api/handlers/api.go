@@ -450,6 +450,9 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/communities/leaderboard", http.HandlerFunc(c.CommunityLeaderboardHandler)).Methods("GET")
 	apiCreate.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.GetEliteCommunitiesHandler))).Methods("GET")
 	apiV2.Handle("/communities/elite", api.Middleware(http.HandlerFunc(c.FetchEliteCommunitiesHandler))).Methods("GET")
+	// Registered before any single-segment wildcard on this router so the literal
+	// path always wins the match.
+	apiV2.Handle("/communities/recommended", api.Middleware(http.HandlerFunc(c.FetchRecommendedCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
 	apiCreate.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandler))).Methods("GET")
 	apiV2.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandlerV2))).Methods("GET")

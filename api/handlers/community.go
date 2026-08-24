@@ -381,6 +381,15 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	newCommunity.Details.PenalCodes = models.DefaultCommunityPenalCodes()
 	newCommunity.Details.MembersCount = 1
 
+	// Normalize onboarding content at creation too. Fill rates say this is where
+	// it will actually be set: across live public communities, fields on the
+	// create form are filled 78-89% of the time while fields that live only in
+	// settings sit at 0.4-4.7%. An invite typed without a scheme is stored
+	// canonically rather than refused, since a rejected create loses the whole
+	// community over a missing "https://".
+	newCommunity.Details.DiscordInviteURL = models.NormalizeDiscordInviteURL(newCommunity.Details.DiscordInviteURL)
+	newCommunity.Details.OnboardingSteps = models.NormalizeOnboardingSteps(newCommunity.Details.OnboardingSteps)
+
 	// Initialize the events slice if it is null
 	if newCommunity.Details.Events == nil {
 		newCommunity.Details.Events = []models.Event{}
@@ -985,6 +994,27 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 		req["economy"] = cleaned
+	}
+
+	// Owner-authored onboarding content gets the same treatment. A member who has
+	// just requested to join is sent to the community's own Discord, so an invite
+	// stored in a shape Discord will not resolve is a dead end for every new
+	// member rather than a cosmetic problem.
+	if inviteRaw, exists := req["discordInviteUrl"]; exists {
+		invite, vErr := normalizeDiscordInvitePatch(inviteRaw)
+		if vErr != nil {
+			config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+			return
+		}
+		req["discordInviteUrl"] = invite
+	}
+	if stepsRaw, exists := req["onboardingSteps"]; exists {
+		steps, vErr := normalizeOnboardingStepsPatch(stepsRaw)
+		if vErr != nil {
+			config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+			return
+		}
+		req["onboardingSteps"] = steps
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
@@ -3628,11 +3658,15 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	// Verify the user exists in the department members
+	// Verify the user exists in the department members. The current status is kept
+	// so the resolution notification below can tell an actual state change from an
+	// admin re-approving someone who was already approved.
 	userFound := false
+	var previousMemberStatus string
 	for _, member := range department.Members {
 		if member.UserID == requestBody.UserID {
 			userFound = true
+			previousMemberStatus = member.Status
 			break
 		}
 	}
@@ -3693,6 +3727,19 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 		notifUpdate := bson.M{"$pull": bson.M{"user.notifications": notifMatch}}
 		// Best-effort cleanup — never fail the resolution if this errors.
 		_, _ = c.UDB.UpdateMany(ctx, notifFilter, notifUpdate)
+
+		// Then tell the requester, who otherwise learns nothing: the admins' copy
+		// is cleared and no message is sent to the person who asked to join.
+		notifyJoinResolved(ctx, c.UDB, c.PTDB, c.UPDB, JoinResolution{
+			Status:         requestBody.Status,
+			PreviousStatus: previousMemberStatus,
+			RequesterID:    requestBody.UserID,
+			ActorID:        actorID,
+			CommunityID:    communityID,
+			CommunityName:  community.Details.Name,
+			DepartmentID:   departmentID,
+			DepartmentName: department.Name,
+		})
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -4014,7 +4061,7 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 	// Build the aggregation pipeline
 	pipeline := mongo.Pipeline{
 		// Match communities with "elite" subscription and "public" visibility
-		{{"$match", bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})}},
 
 		// Add a random field for sorting
 		{{"$addFields", bson.M{"randomSort": bson.M{"$rand": bson.M{}}}}},
@@ -4048,7 +4095,7 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 
 	// Create the paginated response
 	// Use same filter for count - consider making this resilient if it times out
-	countFilter := bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}
+	countFilter := excludeDemoCommunities(bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})
 	totalCount, err := c.DB.CountDocuments(ctx, countFilter)
 	if err != nil {
 		// If count fails, use result count as fallback
@@ -4082,7 +4129,7 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 
 	// Aggregation pipeline for elite + public communities
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})}},
 		{{"$addFields", bson.M{"randomSort": bson.M{"$rand": bson.M{}}}}},
 		{{"$sort", bson.M{"randomSort": 1}}},
 		{{"$skip", skip}},
@@ -4144,10 +4191,10 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Count total matching documents (use same ctx from aggregation)
-	totalCount, _ := c.DB.CountDocuments(ctx, bson.M{
+	totalCount, _ := c.DB.CountDocuments(ctx, excludeDemoCommunities(bson.M{
 		"community.subscription.plan": "elite",
 		"community.visibility":        "public",
-	})
+	}))
 
 	// Return paginated response
 	response := map[string]interface{}{
@@ -4549,10 +4596,10 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 
 	// Step 1: Fetch a large random pool of public communities that match the tag
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.D{
+		{{"$match", excludeDemoCommunitiesD(bson.D{
 			{"community.visibility", "public"},
 			{"community.tags", tag},
-		}}},
+		})}},
 		{{"$sample", bson.D{
 			{"size", 50},
 		}}},
@@ -4691,6 +4738,7 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		// Direct array matching - MongoDB will use array index efficiently
 		matchStage = append(matchStage, bson.E{"community.tags", tag})
 	}
+	matchStage = excludeDemoCommunitiesD(matchStage)
 
 	// OPTIMIZATION: For "all" tag, skip expensive sort on large collection
 	// Use _id sort instead (can use _id index) or skip sort entirely for first page
@@ -4763,6 +4811,7 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		if tag != "all" {
 			countFilter["community.tags"] = tag
 		}
+		countFilter = excludeDemoCommunities(countFilter)
 		totalCount, err := c.DB.CountDocuments(ctx, countFilter)
 		countChan <- countResult{total: totalCount, err: err}
 	}()

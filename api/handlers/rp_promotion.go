@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -506,27 +505,7 @@ func sanitizeRpPromotionData(data *models.RpPromotionData, tier rpTierConfig) er
 // URLs, settings pages, etc. — those superficially contain "discord" and pass
 // the old loose check but render as "Unknown" in the destination channel.
 func isDiscordInviteURL(s string) bool {
-	u, err := url.Parse(strings.TrimSpace(s))
-	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return false
-	}
-	host := strings.ToLower(u.Host)
-	host = strings.TrimPrefix(host, "www.")
-	host = strings.TrimPrefix(host, "ptb.")
-	host = strings.TrimPrefix(host, "canary.")
-	path := strings.Trim(u.Path, "/")
-	switch host {
-	case "discord.gg":
-		return path != "" && !strings.Contains(path, "/")
-	case "discord.com", "discordapp.com":
-		const prefix = "invite/"
-		if !strings.HasPrefix(path, prefix) {
-			return false
-		}
-		code := strings.TrimPrefix(path, prefix)
-		return code != "" && !strings.Contains(code, "/")
-	}
-	return false
+	return models.IsDiscordInviteURL(s)
 }
 
 // cleanURLSlice trims each entry, drops blanks, and limits the slice to max
