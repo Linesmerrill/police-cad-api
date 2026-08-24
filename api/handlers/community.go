@@ -4014,7 +4014,7 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 	// Build the aggregation pipeline
 	pipeline := mongo.Pipeline{
 		// Match communities with "elite" subscription and "public" visibility
-		{{"$match", bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})}},
 
 		// Add a random field for sorting
 		{{"$addFields", bson.M{"randomSort": bson.M{"$rand": bson.M{}}}}},
@@ -4048,7 +4048,7 @@ func (c Community) GetEliteCommunitiesHandler(w http.ResponseWriter, r *http.Req
 
 	// Create the paginated response
 	// Use same filter for count - consider making this resilient if it times out
-	countFilter := bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}
+	countFilter := excludeDemoCommunities(bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})
 	totalCount, err := c.DB.CountDocuments(ctx, countFilter)
 	if err != nil {
 		// If count fails, use result count as fallback
@@ -4082,7 +4082,7 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 
 	// Aggregation pipeline for elite + public communities
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.M{"community.subscription.plan": "elite", "community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.subscription.plan": "elite", "community.visibility": "public"})}},
 		{{"$addFields", bson.M{"randomSort": bson.M{"$rand": bson.M{}}}}},
 		{{"$sort", bson.M{"randomSort": 1}}},
 		{{"$skip", skip}},
@@ -4144,10 +4144,10 @@ func (c Community) FetchEliteCommunitiesHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Count total matching documents (use same ctx from aggregation)
-	totalCount, _ := c.DB.CountDocuments(ctx, bson.M{
+	totalCount, _ := c.DB.CountDocuments(ctx, excludeDemoCommunities(bson.M{
 		"community.subscription.plan": "elite",
 		"community.visibility":        "public",
-	})
+	}))
 
 	// Return paginated response
 	response := map[string]interface{}{
@@ -4549,10 +4549,10 @@ func (c Community) FetchCommunitiesByTagHandler(w http.ResponseWriter, r *http.R
 
 	// Step 1: Fetch a large random pool of public communities that match the tag
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.D{
+		{{"$match", excludeDemoCommunitiesD(bson.D{
 			{"community.visibility", "public"},
 			{"community.tags", tag},
-		}}},
+		})}},
 		{{"$sample", bson.D{
 			{"size", 50},
 		}}},
@@ -4691,6 +4691,7 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		// Direct array matching - MongoDB will use array index efficiently
 		matchStage = append(matchStage, bson.E{"community.tags", tag})
 	}
+	matchStage = excludeDemoCommunitiesD(matchStage)
 
 	// OPTIMIZATION: For "all" tag, skip expensive sort on large collection
 	// Use _id sort instead (can use _id index) or skip sort entirely for first page
@@ -4763,6 +4764,7 @@ func (c Community) FetchCommunitiesByTagHandlerV2(w http.ResponseWriter, r *http
 		if tag != "all" {
 			countFilter["community.tags"] = tag
 		}
+		countFilter = excludeDemoCommunities(countFilter)
 		totalCount, err := c.DB.CountDocuments(ctx, countFilter)
 		countChan <- countResult{total: totalCount, err: err}
 	}()

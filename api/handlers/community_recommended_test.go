@@ -57,22 +57,137 @@ func TestRecommendedMatchTagHandling(t *testing.T) {
 	})
 }
 
+func excludedIDsFrom(t *testing.T, match bson.M) []primitive.ObjectID {
+	t.Helper()
+	filter, ok := match["_id"].(bson.M)
+	if !ok {
+		t.Fatalf("_id filter missing: %#v", match["_id"])
+	}
+	nin, ok := filter["$nin"].([]primitive.ObjectID)
+	if !ok {
+		t.Fatalf("$nin is not an id slice: %#v", filter["$nin"])
+	}
+	return nin
+}
+
 func TestRecommendedMatchExclusions(t *testing.T) {
-	t.Run("no exclusions leaves the id filter off", func(t *testing.T) {
-		if _, ok := recommendedMatch("", nil)["_id"]; ok {
-			t.Error("_id filter should be absent when nothing is excluded")
+	t.Run("caller exclusions are applied", func(t *testing.T) {
+		id := primitive.NewObjectID()
+		nin := excludedIDsFrom(t, recommendedMatch("", []primitive.ObjectID{id}))
+		found := false
+		for _, excluded := range nin {
+			if excluded == id {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("$nin = %#v, want it to contain the caller's excluded id", nin)
 		}
 	})
 
-	t.Run("exclusions become a $nin", func(t *testing.T) {
+	t.Run("caller exclusions do not displace the demo ones", func(t *testing.T) {
 		id := primitive.NewObjectID()
-		filter, ok := recommendedMatch("", []primitive.ObjectID{id})["_id"].(bson.M)
-		if !ok {
-			t.Fatal("_id filter missing")
+		nin := excludedIDsFrom(t, recommendedMatch("", []primitive.ObjectID{id}))
+		if len(nin) != 1+len(demoCommunityObjectIDs) {
+			t.Errorf("got %d exclusions, want the caller's plus %d demo communities",
+				len(nin), len(demoCommunityObjectIDs))
 		}
-		nin, ok := filter["$nin"].([]primitive.ObjectID)
-		if !ok || len(nin) != 1 || nin[0] != id {
-			t.Errorf("$nin = %#v, want the excluded id", filter["$nin"])
+	})
+}
+
+// Our own communities stay public as working examples, but they are not real
+// servers to play in. Both are boosted and sizeable, so before this they led the
+// PC results for every new player.
+func TestRecommendedMatchAlwaysExcludesDemoCommunities(t *testing.T) {
+	if len(demoCommunityObjectIDs) != len(demoCommunityIDs) {
+		t.Fatalf("only %d of %d demo ids parsed; the rest would still be recommended",
+			len(demoCommunityObjectIDs), len(demoCommunityIDs))
+	}
+	if len(demoCommunityObjectIDs) == 0 {
+		t.Fatal("expected at least one demo community to be excluded")
+	}
+
+	// Excluded on every entry point into the match, with or without a caller
+	// exclusion list and with or without a tag filter.
+	for _, tc := range []struct {
+		name     string
+		tag      string
+		excluded []primitive.ObjectID
+	}{
+		{name: "no tag, no caller exclusions"},
+		{name: "platform tag", tag: "PC"},
+		{name: "all tag", tag: "all"},
+		{name: "with caller exclusions", excluded: []primitive.ObjectID{primitive.NewObjectID()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nin := excludedIDsFrom(t, recommendedMatch(tc.tag, tc.excluded))
+			for _, demo := range demoCommunityObjectIDs {
+				found := false
+				for _, excluded := range nin {
+					if excluded == demo {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("demo community %s is not excluded", demo.Hex())
+				}
+			}
+		})
+	}
+}
+
+// A typo here must not take the API down, and must not silently pass either.
+func TestDemoCommunityIDsAreValidObjectIDs(t *testing.T) {
+	for _, hex := range demoCommunityIDs {
+		if _, err := primitive.ObjectIDFromHex(hex); err != nil {
+			t.Errorf("demo community id %q is not a valid object id: %v", hex, err)
+		}
+	}
+}
+
+func TestExcludeDemoCommunities(t *testing.T) {
+	t.Run("adds the exclusion to a filter with no _id condition", func(t *testing.T) {
+		got := excludeDemoCommunities(bson.M{"community.visibility": "public"})
+		if len(excludedIDsFrom(t, got)) != len(demoCommunityObjectIDs) {
+			t.Errorf("got %#v", got["_id"])
+		}
+		if got["community.visibility"] != "public" {
+			t.Error("the original conditions must survive")
+		}
+	})
+
+	t.Run("merges with an existing $nin instead of replacing it", func(t *testing.T) {
+		existing := primitive.NewObjectID()
+		got := excludeDemoCommunities(bson.M{"_id": bson.M{"$nin": []primitive.ObjectID{existing}}})
+		nin := excludedIDsFrom(t, got)
+		if len(nin) != 1+len(demoCommunityObjectIDs) {
+			t.Fatalf("got %d exclusions, want %d", len(nin), 1+len(demoCommunityObjectIDs))
+		}
+		if nin[0] != existing {
+			t.Error("the caller's exclusion was dropped")
+		}
+	})
+}
+
+func TestExcludeDemoCommunitiesD(t *testing.T) {
+	t.Run("appends the exclusion", func(t *testing.T) {
+		got := excludeDemoCommunitiesD(bson.D{{Key: "community.visibility", Value: "public"}})
+		if len(got) != 2 || got[1].Key != "_id" {
+			t.Fatalf("got %#v", got)
+		}
+		if got[0].Key != "community.visibility" {
+			t.Error("the original conditions must survive, in order")
+		}
+	})
+
+	// A bson.D carrying two _id keys silently drops one, so appending blindly
+	// would be worse than not excluding at all.
+	t.Run("leaves an existing _id condition alone", func(t *testing.T) {
+		id := primitive.NewObjectID()
+		input := bson.D{{Key: "_id", Value: id}}
+		got := excludeDemoCommunitiesD(input)
+		if len(got) != 1 {
+			t.Errorf("got %#v, want the input untouched rather than a duplicate _id key", got)
 		}
 	})
 }

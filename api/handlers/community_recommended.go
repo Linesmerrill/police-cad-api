@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.uber.org/zap"
 )
 
 // communitiesAlreadyJoined returns every community the user already holds an
@@ -117,6 +118,79 @@ func subscriptionRankExpr() bson.M {
 	}}
 }
 
+// demoCommunityIDs are our own communities. They stay public on purpose, as
+// working examples people can look at, but they are not real servers to play in
+// and must never be recommended to somebody looking for one.
+//
+// Both are elite/basic boosted and reasonably large, so without this they lead
+// the PC results for every new player. Listed by ID rather than by owner: the
+// same account could later run a genuine community, and excluding by owner would
+// silently swallow it. Adding a future test community means adding its ID here.
+var demoCommunityIDs = []string{
+	"6803ecda576732cfdd465db9", // Lines Police CAD (Developers)
+	"680405dccc4b8e684c686dbe", // Lines Police Server
+}
+
+// demoCommunityObjectIDs is the parsed form, built once at startup. A malformed
+// entry is dropped rather than panicking: a typo here must not take the API down.
+var demoCommunityObjectIDs = func() []primitive.ObjectID {
+	ids := make([]primitive.ObjectID, 0, len(demoCommunityIDs))
+	for _, hex := range demoCommunityIDs {
+		oid, err := primitive.ObjectIDFromHex(hex)
+		if err != nil {
+			zap.S().Errorw("demo community id is not a valid object id; it will still be recommended",
+				"id", hex, "error", err)
+			continue
+		}
+		ids = append(ids, oid)
+	}
+	return ids
+}()
+
+// excludeDemoCommunities adds our own communities to a discovery filter's
+// exclusion list, preserving anything already excluded.
+//
+// Applied to every surface that *suggests* a community to somebody: the elite
+// carousel, discover, browse-by-tag, random and recommended. Deliberately NOT
+// applied to search or to fetching one community by id — they stay public as
+// working examples, so looking them up by name or opening a direct link must
+// still work. The line is "we put it in front of you" versus "you asked for it
+// by name".
+func excludeDemoCommunities(match bson.M) bson.M {
+	if len(demoCommunityObjectIDs) == 0 {
+		return match
+	}
+	existing, _ := match["_id"].(bson.M)
+	if existing == nil {
+		match["_id"] = bson.M{"$nin": demoCommunityObjectIDs}
+		return match
+	}
+	prior, _ := existing["$nin"].([]primitive.ObjectID)
+	combined := make([]primitive.ObjectID, 0, len(prior)+len(demoCommunityObjectIDs))
+	combined = append(combined, prior...)
+	combined = append(combined, demoCommunityObjectIDs...)
+	existing["$nin"] = combined
+	match["_id"] = existing
+	return match
+}
+
+// excludeDemoCommunitiesD is the bson.D form, for the browse-by-tag pipelines
+// which build ordered match documents. If an _id condition is somehow already
+// present it is left alone rather than appended to, since a bson.D with two _id
+// keys silently drops one.
+func excludeDemoCommunitiesD(match bson.D) bson.D {
+	if len(demoCommunityObjectIDs) == 0 {
+		return match
+	}
+	for _, elem := range match {
+		if elem.Key == "_id" {
+			zap.S().Warnw("demo community exclusion skipped: match already constrains _id")
+			return match
+		}
+	}
+	return append(match, bson.E{Key: "_id", Value: bson.M{"$nin": demoCommunityObjectIDs}})
+}
+
 // recommendedMatch builds the match stage. The count and the pipeline share it
 // so a totalCount can never describe a different set than the page it labels.
 func recommendedMatch(tag string, excludedIDs []primitive.ObjectID) bson.M {
@@ -127,10 +201,13 @@ func recommendedMatch(tag string, excludedIDs []primitive.ObjectID) bson.M {
 	if tag != "" && !strings.EqualFold(tag, "all") {
 		match["community.tags"] = tag
 	}
+
 	if len(excludedIDs) > 0 {
 		match["_id"] = bson.M{"$nin": excludedIDs}
 	}
-	return match
+	// Our own demo communities are excluded on top of whatever the caller is
+	// already a member of.
+	return excludeDemoCommunities(match)
 }
 
 // FetchRecommendedCommunitiesHandler returns public communities worth joining,

@@ -1912,7 +1912,7 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	if len(communityObjectIDs) > 50 {
 		// Use aggregation pipeline: sample large pool, then filter out user communities
 		pipeline := mongo.Pipeline{
-			{{"$match", bson.M{"community.visibility": "public"}}},
+			{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
 			{{"$sample", bson.M{"size": limit * 5}}}, // Sample 5x the limit to account for filtering
 		}
 		
@@ -4526,7 +4526,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	// Build the aggregation pipeline
 	pipeline := mongo.Pipeline{
 		// Filter for communities with visibility set to public
-		{{"$match", bson.M{"community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
 
 		// Add a numeric rank for subscription tiers
 		{{"$addFields", bson.M{
@@ -4574,7 +4574,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Create the paginated response
-	totalCount, _ := u.CDB.CountDocuments(ctx, bson.M{"community.visibility": "public"})
+	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDemoCommunities(bson.M{"community.visibility": "public"}))
 	paginatedResponse := PaginatedDataResponse{
 		Page:       Page,
 		TotalCount: totalCount,
@@ -4611,7 +4611,7 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 
 	// Aggregation pipeline
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.M{"community.visibility": "public"}}},
+		{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
 		{{"$addFields", bson.M{
 			"subscriptionRank": bson.M{
 				"$switch": bson.M{
@@ -4693,7 +4693,7 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Count total matching documents (use same ctx from aggregation)
-	totalCount, _ := u.CDB.CountDocuments(ctx, bson.M{"community.visibility": "public"})
+	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDemoCommunities(bson.M{"community.visibility": "public"}))
 
 	// Return response
 	response := map[string]interface{}{
