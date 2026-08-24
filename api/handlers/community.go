@@ -3658,11 +3658,15 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	// Verify the user exists in the department members
+	// Verify the user exists in the department members. The current status is kept
+	// so the resolution notification below can tell an actual state change from an
+	// admin re-approving someone who was already approved.
 	userFound := false
+	var previousMemberStatus string
 	for _, member := range department.Members {
 		if member.UserID == requestBody.UserID {
 			userFound = true
+			previousMemberStatus = member.Status
 			break
 		}
 	}
@@ -3723,6 +3727,19 @@ func (c Community) UpdateDepartmentJoinRequestHandler(w http.ResponseWriter, r *
 		notifUpdate := bson.M{"$pull": bson.M{"user.notifications": notifMatch}}
 		// Best-effort cleanup — never fail the resolution if this errors.
 		_, _ = c.UDB.UpdateMany(ctx, notifFilter, notifUpdate)
+
+		// Then tell the requester, who otherwise learns nothing: the admins' copy
+		// is cleared and no message is sent to the person who asked to join.
+		notifyJoinResolved(ctx, c.UDB, c.PTDB, c.UPDB, JoinResolution{
+			Status:         requestBody.Status,
+			PreviousStatus: previousMemberStatus,
+			RequesterID:    requestBody.UserID,
+			ActorID:        actorID,
+			CommunityID:    communityID,
+			CommunityName:  community.Details.Name,
+			DepartmentID:   departmentID,
+			DepartmentName: department.Name,
+		})
 	}
 
 	w.WriteHeader(http.StatusOK)
