@@ -1,8 +1,8 @@
 # Feature Request Triage — Living Doc
 
-_Auto-generated 2026-08-17 16:27 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
+_Auto-generated 2026-08-24 16:37 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
 
-**54** active requests · **283** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
+**55** active requests · **284** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
 
 **Legend** — Scope: 🌐 website · ⚙️ API · 📱 mobile · 🤖 bot. Effort: S (<1d) · M (few days) · L (1–2wk) · XL (multi-wk). Priority = upvotes + 2×comments.
 
@@ -26,7 +26,7 @@ Highest-value low-effort items (quick wins & easy), by priority:
 | 🟢 Easy / Low-Hanging | 3 | 9 |
 | 🏗️ Full Features | 30 | 202 |
 | 🚫 Probably Shouldn't Add | 4 | 31 |
-| ⚠️ Untriaged | 15 | 30 |
+| ⚠️ Untriaged | 16 | 31 |
 
 **Surface impact** (active triaged items touching each surface): 🌐 website 33 · ⚙️ api 34 · 📱 mobile 31 · 🤖 bot 6
 
@@ -113,6 +113,7 @@ _Add an entry to `triage.json` for each, then re-run._
 | [Forms](https://www.linespolice-cad.com/feature-requests/6a58145a8d51e059fe204e05) | 2 | 0 | Sergant W. O'CONNOR |
 | [internal complaint form](https://www.linespolice-cad.com/feature-requests/6a55555e8ef6ef7b43ae9aef) | 2 | 0 | joeyjohn90 |
 | [Bail Bondsman](https://www.linespolice-cad.com/feature-requests/6a4e4ce1b4e78b4c04891d70) | 2 | 0 | Odin |
+| [Look up Database and Licencse](https://www.linespolice-cad.com/feature-requests/6a8bc01c7070333bf4d70473) | 1 | 0 | wocon45 |
 | [Automatic calculation for jail time UPDATE.](https://www.linespolice-cad.com/feature-requests/6a742d5abbbb6fedaa5b6733) | 1 | 0 | buggs181 |
 | [Cage fights](https://www.linespolice-cad.com/feature-requests/6a6d6f816663a62cd8d2b168) | 1 | 0 | GesusG37 |
 | [API Connect other games](https://www.linespolice-cad.com/feature-requests/6a628eaf16e6761f0c7b637b) | 1 | 0 | jodiells12 |
