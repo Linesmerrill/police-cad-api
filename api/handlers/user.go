@@ -1062,14 +1062,27 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 		return timeI.After(timeJ)
 	})
 
+	// Calculate total unseen notifications. Both totalCount and unseenCount
+	// describe the user's whole notification list rather than the requested
+	// page, so they are computed before the early exit below — clients drive
+	// the app-icon badge off unseenCount and must not see it reset to 0 just
+	// because they paged past the end of the list.
+	totalCount := len(sortedNotifications)
+	unseenCount := 0
+	for _, notification := range sortedNotifications {
+		if !notification.Seen {
+			unseenCount++
+		}
+	}
+
 	// Early exit if skip exceeds total notifications
 	if skip >= len(sortedNotifications) {
 		response := map[string]interface{}{
 			"notifications": []map[string]interface{}{},
 			"page":          page,
 			"limit":         limit,
-			"total":         len(sortedNotifications),
-			"unseenCount":   0,
+			"total":         totalCount,
+			"unseenCount":   unseenCount,
 		}
 		responseBody, err := json.Marshal(response)
 		if err != nil {
@@ -1079,15 +1092,6 @@ func (u User) GetUserNotificationsHandlerV2(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusOK)
 		w.Write(responseBody)
 		return
-	}
-
-	// Calculate total unseen notifications
-	totalCount := len(sortedNotifications)
-	unseenCount := 0
-	for _, notification := range sortedNotifications {
-		if !notification.Seen {
-			unseenCount++
-		}
 	}
 
 	// Apply pagination
