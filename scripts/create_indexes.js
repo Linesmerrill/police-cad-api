@@ -966,5 +966,14 @@ createIndexSafe(
   { name: "arrestreports_community_dept_officer_idx", background: true }
 );
 
+// Platform-wide launch countdowns are looked up by slug when seeding or
+// correcting a date by hand. Unique so a second seed run updates the existing
+// record instead of quietly creating a duplicate that both surfaces would show.
+createIndexSafe(
+  db.countdowns,
+  { slug: 1 },
+  { name: "countdowns_slug_unique_idx", unique: true, background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
