@@ -522,8 +522,78 @@ func (cc ContentCreator) sendAdminNewApplicationEmail(ctx context.Context, appli
 	}()
 }
 
+// codeRemovalTarget describes where an applicant was asked to put our
+// verification code, phrased to drop straight into a sentence: "your YouTube
+// description", "your YouTube and Twitch descriptions", or "your channel
+// description" for a platform with no name of its own.
+//
+// Empty when no code was ever issued, so the reminder is left off entirely
+// rather than telling somebody to undo work they never did.
+//
+// Creators kept leaving the code in place long after it had done its job --
+// one approved channel still opened its description with LPC-VERIFY-XXXXXX --
+// because nothing ever told them the job was done. The dashboard says it, but
+// it collapses once every channel is verified, and an approved creator has no
+// reason to open it again.
+func codeRemovalTarget(ps []models.ContentCreatorPlatform) string {
+	var named []string
+	seen := map[string]bool{}
+	unnamed := 0
+
+	for _, p := range ps {
+		if strings.TrimSpace(p.VerificationCode) == "" {
+			continue
+		}
+		name := platformDisplayName(p.Type)
+		// "other" and blank both come back as "your channel". Counted, not
+		// named, so they can be pluralised without being listed.
+		if name == "your channel" {
+			unnamed++
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		named = append(named, name)
+	}
+
+	total := len(named) + unnamed
+	switch {
+	case total == 0:
+		return ""
+	// Anything unnamed drags the whole phrase generic. Naming only half
+	// produces "your YouTube and your other channels descriptions", which no
+	// person would say out loud.
+	case unnamed > 0:
+		if total == 1 {
+			return "your channel description"
+		}
+		return "your channel descriptions"
+	case len(named) == 1:
+		return "your " + named[0] + " description"
+	default:
+		return "your " + joinWithAnd(named) + " descriptions"
+	}
+}
+
+// joinWithAnd renders a list the way a person would say it: "a and b",
+// "a, b and c".
+func joinWithAnd(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+	}
+}
+
 // sendApplicationDecisionEmail sends approval/rejection email to the applicant
-func (cc ContentCreator) sendApplicationDecisionEmail(ctx context.Context, userID primitive.ObjectID, displayName, status, rejectionReason, feedback string) {
+func (cc ContentCreator) sendApplicationDecisionEmail(ctx context.Context, userID primitive.ObjectID, displayName, status, rejectionReason, feedback string, appPlatforms []models.ContentCreatorPlatform) {
 	// Get user email
 	var user struct {
 		Details struct {
@@ -541,15 +611,23 @@ func (cc ContentCreator) sendApplicationDecisionEmail(ctx context.Context, userI
 		return
 	}
 
+	// The code has done its whole job by the time either of these goes out, and
+	// nothing reads it again. Say so, in both the HTML and the plain text.
+	removalTarget := codeRemovalTarget(appPlatforms)
+	removalLine := ""
+	if removalTarget != "" {
+		removalLine = fmt.Sprintf(" If our verification code is still in %s, you can take it out now. It has done its job.", removalTarget)
+	}
+
 	var subject, htmlContent, plainText string
 	if status == "approved" {
 		subject = "Welcome to the Creator Program! - Lines Police CAD"
-		htmlContent = templates.RenderApplicationApprovedEmail(displayName)
-		plainText = fmt.Sprintf("Congratulations %s! Your application to the Lines Police CAD Content Creator Program has been approved! Visit https://www.linespolice-cad.com/content-creators/me to view your benefits.", displayName)
+		htmlContent = templates.RenderApplicationApprovedEmail(displayName, removalTarget)
+		plainText = fmt.Sprintf("Congratulations %s! Your application to the Lines Police CAD Content Creator Program has been approved! Visit https://www.linespolice-cad.com/content-creators/me to view your benefits.%s", displayName, removalLine)
 	} else {
 		subject = "Application Update - Lines Police CAD Creator Program"
-		htmlContent = templates.RenderApplicationRejectedEmail(displayName, rejectionReason, feedback)
-		plainText = fmt.Sprintf("Hi %s, Your application to the Lines Police CAD Content Creator Program was not approved. Reason: %s. You can apply again in the future. Visit https://www.linespolice-cad.com/content-creators/me for more details.", displayName, rejectionReason)
+		htmlContent = templates.RenderApplicationRejectedEmail(displayName, rejectionReason, feedback, removalTarget)
+		plainText = fmt.Sprintf("Hi %s, Your application to the Lines Police CAD Content Creator Program was not approved. Reason: %s. You can apply again in the future. Visit https://www.linespolice-cad.com/content-creators/me for more details.%s", displayName, rejectionReason, removalLine)
 	}
 
 	go func() {
@@ -2332,7 +2410,7 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 	}
 
 	// Send approval email to the applicant
-	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "approved", "", "")
+	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "approved", "", "", application.Platforms)
 
 	// Log the approval with appropriate context
 	if isOwnerOverride {
@@ -2434,7 +2512,7 @@ func (cc ContentCreator) AdminRejectApplicationHandler(w http.ResponseWriter, r 
 	}
 
 	// Send rejection email to the applicant
-	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "rejected", req.RejectionReason, req.Feedback)
+	cc.sendApplicationDecisionEmail(ctx, application.UserID, application.DisplayName, "rejected", req.RejectionReason, req.Feedback, application.Platforms)
 
 	zap.S().Infow("content creator application rejected",
 		"applicationId", appObjID.Hex(),
