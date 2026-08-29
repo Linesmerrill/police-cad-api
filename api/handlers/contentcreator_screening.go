@@ -320,15 +320,24 @@ func (cc ContentCreator) sendFollowerMinimumEmail(ctx context.Context, app *mode
 		"We re-read the channel automatically, so the count on the day you apply is the one that counts.",
 	}
 
+	// This is a decision, so the code has done its job here too. A reapplication
+	// is issued a fresh one -- step three above says so -- and the old one is
+	// just clutter in their description from here on.
+	removalTarget := codeRemovalTarget(app.Platforms)
+	removalLine := ""
+	if removalTarget != "" {
+		removalLine = fmt.Sprintf(" If our verification code is still in %s, you can take it out now. It has done its job.", removalTarget)
+	}
+
 	subject := "About your Creator Program application - Lines Police CAD"
-	htmlContent := templates.RenderRequirementNotMetEmail(app.DisplayName, requirement, measured, steps)
+	htmlContent := templates.RenderRequirementNotMetEmail(app.DisplayName, requirement, measured, removalTarget, steps)
 	plainText := fmt.Sprintf(
 		"Hi %s, thank you for applying to the Lines Police CAD Content Creator Program. "+
 			"We cannot accept this application because it does not meet one of the program requirements. "+
 			"The requirement: %s What we found: %s "+
 			"This is measured automatically, so you are welcome to apply again as soon as it changes — "+
-			"start a new application at https://www.linespolice-cad.com/content-creators/apply.",
-		app.DisplayName, requirement, measured)
+			"start a new application at https://www.linespolice-cad.com/content-creators/apply.%s",
+		app.DisplayName, requirement, measured, removalLine)
 
 	go func() {
 		if err := sendContentCreatorEmail(user.Details.Email, app.DisplayName, subject, htmlContent, plainText); err != nil {

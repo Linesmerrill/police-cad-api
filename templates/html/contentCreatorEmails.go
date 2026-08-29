@@ -160,7 +160,28 @@ func RenderAdminNewApplicationEmail(applicantName, displayName, primaryPlatform,
 }
 
 // RenderApplicationApprovedEmail generates the HTML for the approval notification email
-func RenderApplicationApprovedEmail(displayName string) string {
+// codeRemovalNote builds the reminder telling a creator they can take our
+// verification code back out of their channel description.
+//
+// Safe to say the moment a decision is made, and not before: screening never
+// re-fetches a platform once it is verified, and the sweep only looks at
+// submitted and under_review applications. Nothing reads the code after this
+// point.
+//
+// target is the phrase naming where they put it ("your YouTube description").
+// An empty target returns an empty string, so somebody who was never issued a
+// code is not told to undo work they never did.
+func codeRemovalNote(target string) string {
+	if target == "" {
+		return ""
+	}
+	return `
+      <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; margin: 22px 0;">
+        <p style="margin: 0; color: #e5e7eb; font-size: 14px;"><strong style="color: #fff;">One small thing:</strong> if our verification code is still in ` + target + `, you can take it out now. It has done its job, and taking it out keeps your channel tidy.</p>
+      </div>`
+}
+
+func RenderApplicationApprovedEmail(displayName, codeRemovalTarget string) string {
 	return fmt.Sprintf(`<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -223,7 +244,7 @@ func RenderApplicationApprovedEmail(displayName string) string {
       </div>
 
       <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">Go to Creator Dashboard</a>
-
+      %s
       <p style="margin-top: 30px; color: #9ca3af; font-size: 14px;">Thank you for being part of the Lines Police CAD community. We can't wait to see your content!</p>
     </div>
     <div class="footer">
@@ -232,7 +253,7 @@ func RenderApplicationApprovedEmail(displayName string) string {
     </div>
   </div>
 </body>
-</html>`, displayName)
+</html>`, displayName, codeRemovalNote(codeRemovalTarget))
 }
 
 // RenderCreatorTierUpgradeEmail generates the one-off announcement telling
@@ -384,7 +405,7 @@ func RenderCreatorRemovedEmail(displayName, reason string) string {
 }
 
 // RenderApplicationRejectedEmail generates the HTML for the rejection notification email
-func RenderApplicationRejectedEmail(displayName, rejectionReason, feedback string) string {
+func RenderApplicationRejectedEmail(displayName, rejectionReason, feedback, codeRemovalTarget string) string {
 	feedbackSection := ""
 	if feedback != "" {
 		feedbackSection = fmt.Sprintf(`
@@ -435,6 +456,7 @@ func RenderApplicationRejectedEmail(displayName, rejectionReason, feedback strin
         <p>🔄 <strong>Don't give up!</strong> You're welcome to apply again in the future once you've addressed the feedback above. We'd love to have you in the program!</p>
       </div>
 
+      %s
       <p>You can view more details about your application status:</p>
       <a href="https://www.linespolice-cad.com/content-creators/me" class="cta-button">View Application Status</a>
 
@@ -446,7 +468,7 @@ func RenderApplicationRejectedEmail(displayName, rejectionReason, feedback strin
     </div>
   </div>
 </body>
-</html>`, displayName, rejectionReason, feedbackSection)
+</html>`, displayName, rejectionReason, feedbackSection, codeRemovalNote(codeRemovalTarget))
 }
 
 // RenderLowFollowerWarningEmail generates the HTML for the low follower warning email
@@ -769,7 +791,7 @@ func RenderChecksFailedEmail(displayName string, reasons []string, ownershipProv
 // requirement is the rule in the applicant's words ("At least 500 followers on
 // one channel"). measured is what we actually read. steps are the numbered
 // instructions for reapplying.
-func RenderRequirementNotMetEmail(displayName, requirement, measured string, steps []string) string {
+func RenderRequirementNotMetEmail(displayName, requirement, measured, codeRemovalTarget string, steps []string) string {
 	stepItems := ""
 	for _, s := range steps {
 		stepItems += `<li style="margin-bottom:8px;">` + s + `</li>`
@@ -821,6 +843,7 @@ func RenderRequirementNotMetEmail(displayName, requirement, measured string, ste
       <ol class="steps">%s</ol>
 
       <a href="https://www.linespolice-cad.com/content-creators/apply" class="cta-button">Apply again</a>
+      %s
 
       <p style="margin-top: 28px; color: #9ca3af; font-size: 14px;">If you think we measured the wrong channel, tell us through our <a href="https://www.linespolice-cad.com/contact-us" style="color:#fbbf24;">contact page</a> and a person will take a look.</p>
     </div>
@@ -830,5 +853,5 @@ func RenderRequirementNotMetEmail(displayName, requirement, measured string, ste
     </div>
   </div>
 </body>
-</html>`, displayName, requirement, measured, stepItems)
+</html>`, displayName, requirement, measured, stepItems, codeRemovalNote(codeRemovalTarget))
 }
