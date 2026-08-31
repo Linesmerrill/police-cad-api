@@ -107,6 +107,7 @@ func (a *App) New() *mux.Router {
 		UDB: databases.NewUserDatabase(a.dbHelper),
 	}
 	countdown := Countdown{DB: databases.NewCountdownDatabase(a.dbHelper)}
+	housePromo := HousePromo{DB: databases.NewHousePromoDatabase(a.dbHelper)}
 	announcement := Announcement{
 		ADB:  databases.NewAnnouncementDatabase(a.dbHelper),
 		UDB:  databases.NewUserDatabase(a.dbHelper),
@@ -494,6 +495,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/user/{userId}/quick-action-usage", api.Middleware(http.HandlerFunc(u.RecordQuickActionUsageHandler))).Methods("POST")
 	// Platform-wide launch countdowns (website, mobile, Discord bot).
 	apiCreate.Handle("/countdowns", api.Middleware(http.HandlerFunc(countdown.ListCountdownsHandler))).Methods("GET")
+
+	// Internal promotions, shown by the clients in an ad slot that did not fill.
+	apiCreate.Handle("/house-promos", api.Middleware(http.HandlerFunc(housePromo.ListHousePromosHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/announcements", api.Middleware(http.HandlerFunc(changelog.GetUserAnnouncementsHandler))).Methods("GET")
 	apiCreate.Handle("/user/{userId}/mark-announcement-seen", api.Middleware(http.HandlerFunc(changelog.MarkAnnouncementSeenHandler))).Methods("PUT")
 	apiCreate.Handle("/user/{userId}/remove-community", api.Middleware(http.HandlerFunc(u.RemoveCommunityFromUserHandler))).Methods("DELETE")
