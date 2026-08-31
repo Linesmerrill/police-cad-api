@@ -975,5 +975,15 @@ createIndexSafe(
   { name: "countdowns_slug_unique_idx", unique: true, background: true }
 );
 
+// Internal promotions, looked up by slug when seeding or switching one off by
+// hand. Unique for the same reason as countdowns: a second seed run must update
+// the existing record rather than quietly create a duplicate that every surface
+// would then show twice.
+createIndexSafe(
+  db.housePromos,
+  { slug: 1 },
+  { name: "housePromos_slug_unique_idx", unique: true, background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
