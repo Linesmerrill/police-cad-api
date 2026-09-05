@@ -456,6 +456,7 @@ func (a *App) New() *mux.Router {
 	// path always wins the match.
 	apiV2.Handle("/communities/recommended", api.Middleware(http.HandlerFunc(c.FetchRecommendedCommunitiesHandler))).Methods("GET")
 	apiCreate.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandler))).Methods("GET")
+	apiV2.Handle("/communities/{owner_id}", api.Middleware(http.HandlerFunc(c.CommunitiesByOwnerIDHandlerV2))).Methods("GET")
 	apiCreate.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandler))).Methods("GET")
 	apiV2.Handle("/communities/tag/{tag}", api.Middleware(http.HandlerFunc(c.FetchCommunitiesByTagHandlerV2))).Methods("GET")
 
