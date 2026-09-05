@@ -328,6 +328,41 @@ func applyCommunityBackfill(ctx context.Context, cdb databases.CommunityDatabase
 	return actions, nil
 }
 
+// writeCreateCommunityError renders a create-community rejection that a client
+// can actually show to a user.
+//
+// The body carries the reason twice on purpose. `error`/`message` sit at the
+// top level, which is the shape the community_limit_reached 403 has always
+// used and the shape both clients now read. The nested `response` object
+// mirrors them so anything still parsing the standard API error envelope
+// (models.ErrorMessageResponse) keeps working. Extra context -- plan, cap,
+// active -- is merged in at the top level for the cap case.
+//
+// These are expected, user-caused rejections, so they log at Info: routing
+// them through config.ErrorStatus would emit a stacktrace per attempt and
+// flood the logs (see the ErrorStatus note in the handler docs). Previously
+// the cap path wrote its response inline with no logging at all, which meant a
+// user hitting their limit left no trace anywhere.
+func writeCreateCommunityError(w http.ResponseWriter, status int, code, message string, extra map[string]interface{}) {
+	zap.S().Infow("create community rejected", "code", code, "status", status)
+
+	body := map[string]interface{}{
+		"error":   code,
+		"message": message,
+		"response": map[string]interface{}{
+			"error":   code,
+			"message": message,
+		},
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 // CreateCommunityHandler creates a new community
 func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	var newCommunity models.Community
@@ -338,33 +373,47 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Resolve the owner BEFORE writing anything. This used to be validated
+	// only after InsertOne, which meant a request carrying no usable ownerID
+	// -- a logged-out web visitor (/communities has no auth gate, so the
+	// template renders an empty user), or a mobile client whose SecureStore
+	// "userId" had been cleared -- still inserted a community, then 400'd. The
+	// caller saw "failed to create community" and every retry orphaned another
+	// ownerless document that no user could see, administer or delete.
+	//
+	// Validating first also means the cap check below can no longer be skipped
+	// by simply omitting ownerID.
+	ownerHex := strings.TrimSpace(newCommunity.Details.OwnerID)
+	if ownerHex == "" {
+		writeCreateCommunityError(w, http.StatusBadRequest, "missing_owner",
+			"We could not tell who is creating this community. Sign out, sign back in and try again.", nil)
+		return
+	}
+	uID, err := primitive.ObjectIDFromHex(ownerHex)
+	if err != nil {
+		writeCreateCommunityError(w, http.StatusBadRequest, "invalid_owner",
+			"We could not tell who is creating this community. Sign out, sign back in and try again.", nil)
+		return
+	}
+	newCommunity.Details.OwnerID = ownerHex
+
 	// Enforce the owned-community cap. CDB.CountDocuments already excludes
 	// pending-deletion communities, so a user who soft-deleted their only
 	// free-tier community can immediately create a fresh one. Hard-deletes
 	// (admin force-delete) likewise free up a slot. We fetch the owner's
 	// plan from the user record rather than trusting anything client-side.
-	if ownerHex := strings.TrimSpace(newCommunity.Details.OwnerID); ownerHex != "" {
-		if ownerObjID, idErr := primitive.ObjectIDFromHex(ownerHex); idErr == nil {
-			capCtx, capCancel := api.WithQueryTimeout(r.Context())
-			defer capCancel()
-			var owner models.User
-			if err := c.UDB.FindOne(capCtx, bson.M{"_id": ownerObjID}).Decode(&owner); err == nil {
-				plan := models.PlanFromUser(&owner)
-				cap := models.CommunityCap(plan)
-				active, _ := c.DB.CountDocuments(capCtx, bson.M{"community.ownerID": ownerHex})
-				if int(active) >= cap {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusForbidden)
-					_ = json.NewEncoder(w).Encode(map[string]interface{}{
-						"error":   "community_limit_reached",
-						"message": fmt.Sprintf("Your %s plan allows up to %d communities. Upgrade your plan or delete an existing community to create another.", plan, cap),
-						"plan":    plan,
-						"cap":     cap,
-						"active":  active,
-					})
-					return
-				}
-			}
+	capCtx, capCancel := api.WithQueryTimeout(r.Context())
+	defer capCancel()
+	var owner models.User
+	if findErr := c.UDB.FindOne(capCtx, bson.M{"_id": uID}).Decode(&owner); findErr == nil {
+		plan := models.PlanFromUser(&owner)
+		cap := models.CommunityCap(plan)
+		active, _ := c.DB.CountDocuments(capCtx, bson.M{"community.ownerID": ownerHex})
+		if int(active) >= cap {
+			writeCreateCommunityError(w, http.StatusForbidden, "community_limit_reached",
+				fmt.Sprintf("Your %s plan allows up to %d communities. Upgrade your plan or delete an existing community to create another.", plan, cap),
+				map[string]interface{}{"plan": plan, "cap": cap, "active": active})
+			return
 		}
 	}
 
@@ -404,18 +453,10 @@ func (c Community) CreateCommunityHandler(w http.ResponseWriter, r *http.Request
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Insert the new community into the database
-	_, err := c.DB.InsertOne(ctx, newCommunity)
-	if err != nil {
+	// Insert the new community into the database. The owner was resolved up
+	// front, so reaching here means we have a real user to attach it to.
+	if _, err := c.DB.InsertOne(ctx, newCommunity); err != nil {
 		config.ErrorStatus("failed to create community", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Add the community to the user's communities array
-	ownerID := newCommunity.Details.OwnerID
-	uID, err := primitive.ObjectIDFromHex(ownerID)
-	if err != nil {
-		config.ErrorStatus("failed to get objectID from Hex", http.StatusBadRequest, w, err)
 		return
 	}
 
