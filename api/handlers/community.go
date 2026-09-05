@@ -544,9 +544,19 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Find communities by owner ID with pagination
+	// Find communities by owner ID with pagination.
+	//
+	// The sort is not optional. Without it Mongo returns natural order, which
+	// makes skip/limit paging undefined: pages can repeat or omit documents
+	// between requests, and a newly created community can land anywhere. Newest
+	// first means a community someone just made is on page 1, where they are
+	// looking for it. _id breaks ties so the order is total, not just stable
+	// within a timestamp.
 	filter := bson.M{"community.ownerID": ownerID}
-	options := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit))
+	options := options.Find().
+		SetSort(bson.D{{Key: "community.createdAt", Value: -1}, {Key: "_id", Value: -1}}).
+		SetSkip(int64(offset)).
+		SetLimit(int64(limit))
 
 	cursor, err := c.DB.Find(ctx, filter, options)
 	if err != nil {
@@ -581,6 +591,92 @@ func (c Community) CommunitiesByOwnerIDHandler(w http.ResponseWriter, r *http.Re
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(b)
+}
+
+// CommunitiesByOwnerIDHandlerV2 returns the communities a user owns, paginated,
+// with the total so a client can page through all of them.
+//
+// The v1 handler above returns a bare array, which carries no total. Callers had
+// no way to know whether more existed, so the website set its "communities you
+// own" total to the length of the page it just received. With a page size of 6
+// that pinned the count at 6 and permanently disabled the next-page control: a
+// user who owned more than six could not reach them, and a community they had
+// just created never appeared. Hence the envelope.
+//
+// Pages are 1-based, matching /api/v2/user/{userId}/communities and the v1
+// handler this replaces, so a caller can switch without changing its paging.
+func (c Community) CommunitiesByOwnerIDHandlerV2(w http.ResponseWriter, r *http.Request) {
+	ownerID := mux.Vars(r)["owner_id"]
+	if strings.TrimSpace(ownerID) == "" {
+		config.ErrorStatus("owner_id is required", http.StatusBadRequest, w, nil)
+		return
+	}
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{"community.ownerID": ownerID}
+
+	// Same total ordering as v1 -- see the note there for why it matters.
+	findOpts := options.Find().
+		SetSort(bson.D{{Key: "community.createdAt", Value: -1}, {Key: "_id", Value: -1}}).
+		SetSkip(int64((page - 1) * limit)).
+		SetLimit(int64(limit))
+
+	cursor, err := c.DB.Find(ctx, filter, findOpts)
+	if err != nil {
+		config.ErrorStatus("failed to get communities by ownerID", http.StatusInternalServerError, w, err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	communities := []models.Community{}
+	if err = cursor.All(ctx, &communities); err != nil {
+		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// CountDocuments excludes pending-deletion communities, and so does Find,
+	// so the total and the page agree about what exists.
+	totalCount, err := c.DB.CountDocuments(ctx, filter)
+	if err != nil {
+		config.ErrorStatus("failed to count communities by ownerID", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	// Self-heal stored membersCount with a live count from the users
+	// collection (see liveMemberCounts for why).
+	ids := make([]string, 0, len(communities))
+	for _, comm := range communities {
+		ids = append(ids, comm.ID.Hex())
+	}
+	liveCounts := liveMemberCounts(ctx, c.UDB, ids)
+	for i := range communities {
+		if live, ok := liveCounts[communities[i].ID.Hex()]; ok {
+			communities[i].Details.MembersCount = live
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":       communities,
+		"totalCount": totalCount,
+		"page":       page,
+		"limit":      limit,
+	})
 }
 
 // CommunityMembersHandler returns all members of a community

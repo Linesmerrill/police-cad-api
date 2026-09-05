@@ -921,6 +921,16 @@ createIndexSafe(
   { name: "community_name_pending_visibility_idx", background: true }
 );
 
+// Communities owned by a user: the owned-communities list, its paging sort and
+// the owned-community cap check on every create all filter on this field and
+// there was no index for it, so each one scanned the collection. The createdAt
+// leg serves the newest-first sort the list pages by.
+createIndexSafe(
+  db.communities,
+  { "community.ownerID": 1, "community.createdAt": -1 },
+  { name: "community_owner_created_idx", background: true }
+);
+
 // RP promo duplicate detection looks up communities by a posted invite URL.
 createIndexSafe(
   db.communities,
