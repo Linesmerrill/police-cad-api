@@ -81,10 +81,22 @@ func TestForReturnsManualOnlyWhereNoAPIExists(t *testing.T) {
 	if _, err := For("twitch"); err != nil {
 		t.Errorf("twitch should be automatable, got %v", err)
 	}
-	for _, p := range []string{"tiktok", "other", "", "myspace"} {
+	for _, p := range []string{"other", "", "myspace"} {
 		if _, err := For(p); err != ErrManualOnly {
 			t.Errorf("For(%q) = %v, want ErrManualOnly", p, err)
 		}
+	}
+
+	// TikTok has a fetcher now: it reads the public profile page, which needs no
+	// key. It is still not Measurable, because that page can be refused at any
+	// time and the applicant's own number has to remain the fallback. If those
+	// two ever agree again, an applicant on a blocked pass ends up with neither
+	// a measurement nor a claim.
+	if f, err := For("tiktok"); err != nil || f == nil {
+		t.Errorf("For(\"tiktok\") = %v, %v; want a fetcher", f, err)
+	}
+	if Measurable("tiktok") {
+		t.Error("Measurable(\"tiktok\") = true; a page that can be blocked is not something we rely on")
 	}
 }
 
