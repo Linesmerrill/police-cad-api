@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/api"
+	"github.com/linesmerrill/police-cad-api/api/scheduler"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/linesmerrill/police-cad-api/platforms"
@@ -194,6 +197,27 @@ func (cc ContentCreator) screenAndPersist(ctx context.Context, app *models.Conte
 		// is worth another sweep.
 		settled := res.Passed || res.Blocked
 		set["checksSettled"] = settled
+
+		// A platform refused us. The application is still reviewable, because a
+		// blocked check falls back to manual rather than pending, so this is a
+		// warning about degraded automation rather than a stuck application.
+		// Raised here and not inside screenApplication, which performs no side
+		// effects by design.
+		if len(res.PlatformsBlocked) > 0 {
+			scheduler.SendWarningAlert(
+				os.Getenv("DYNO"),
+				"creator screening",
+				fmt.Errorf("could not read %s automatically, fell back to manual review",
+					strings.Join(res.PlatformsBlocked, ", ")),
+				map[string]string{
+					"Application": app.ID.Hex(),
+					"Applicant":   app.DisplayName,
+					"Platforms":   strings.Join(res.PlatformsBlocked, ", "),
+					"Impact":      "None for the applicant. Checks moved to manual and the review email still goes out.",
+					"Likely":      "TikTok serving a captcha or blocking the datacenter IP.",
+				},
+			)
+		}
 
 		notifyAdmin := false
 		notifyApplicant := false
@@ -786,6 +810,9 @@ type screenResult struct {
 	FollowerCounts map[int]int
 	// OwnershipVerified marks platform indexes whose code was found this pass.
 	OwnershipVerified map[int]bool
+	// PlatformsBlocked names platforms that refused us this pass, so the caller
+	// can raise a warning. Screening itself performs no side effects.
+	PlatformsBlocked []string
 	// OwnershipProven is true once ANY channel has been proved to belong to the
 	// applicant. It separates "a real person who fell short of a requirement"
 	// from "a channel nobody has shown they own", which decides whether a failed
@@ -804,6 +831,18 @@ type screenResult struct {
 	// count could not be read — an unreadable channel is our problem.
 	FollowerShortfall bool
 	FollowerReason    string
+}
+
+// followerManualReason tells a reviewer what they are being asked to judge.
+// Naming the applicant's own figure matters: it is the only number anybody has,
+// and a reviewer should know it is a claim rather than something we measured.
+func followerManualReason(claimed int) string {
+	if claimed <= 0 {
+		return "We could not read this platform automatically. A member of our team checks the follower count by eye."
+	}
+	return fmt.Sprintf(
+		"We could not read this platform automatically. The applicant reports %s; a member of our team confirms it by eye.",
+		followersLabel(claimed))
 }
 
 // channelFetcher lets tests substitute platform responses. Production passes
@@ -827,6 +866,9 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	// rather than making someone guess which of their channels we measured.
 	bestLabel := ""
 	anyFollowerData := false
+	// Any channel on a platform a human has to check, either because it has no
+	// public data or because we were blocked reading it this pass.
+	anyManualPlatform := false
 	// The largest count we could NOT check ourselves — a TikTok bio, a channel
 	// our lookup could not reach. If one of those claims enough to qualify, the
 	// application is not ours to decide: a human has to look at the number.
@@ -866,6 +908,7 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 			if p.FollowerCount > bestUnmeasuredClaim {
 				bestUnmeasuredClaim = p.FollowerCount
 			}
+			anyManualPlatform = true
 			continue
 		}
 
@@ -875,6 +918,24 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 			add(models.CheckChannelResolves, models.CheckFailed,
 				fmt.Sprintf("We could not find a %s channel at \"%s\". Check the link is correct.", p.Type, label))
 			res.Blocked = true
+			continue
+		case errors.Is(ferr, platforms.ErrPlatformBlocked):
+			// The platform refused us rather than the handle being wrong: a
+			// captcha wall, or our datacenter IP. Manual, NOT pending.
+			//
+			// Pending was the bug. A pending check blocks screenResult.Passed,
+			// Passed is what triggers the admin review email, and nothing was
+			// ever going to clear a check that needs a human who is never told
+			// to look. Every TikTok application sat invisible on that loop.
+			// Manual keeps the application reviewable and puts it in front of
+			// somebody; the Discord warning tells us the automation is degraded.
+			add(models.CheckChannelResolves, models.CheckManual, "This platform is reviewed by our team.")
+			add(models.CheckOwnership, models.CheckManual, "Leave the code in your bio; our team confirms it.")
+			if p.FollowerCount > bestUnmeasuredClaim {
+				bestUnmeasuredClaim = p.FollowerCount
+			}
+			anyManualPlatform = true
+			res.PlatformsBlocked = append(res.PlatformsBlocked, p.Type)
 			continue
 		case ferr != nil:
 			// Our side is unwell (no key, quota, network). Never blame the
@@ -915,6 +976,16 @@ func screenApplication(ctx context.Context, app *models.ContentCreatorApplicatio
 	// applicant claimed. Someone who guessed their own count wrong should still
 	// get in if the real number clears the bar.
 	switch {
+	case !anyFollowerData && anyManualPlatform:
+		// Nothing measurable, and nothing that will become measurable: every
+		// channel is on a platform we review by hand. Pending here was the
+		// other half of the deadlock, since it also blocks Passed and so the
+		// admin email. Manual hands a human the applicant's own number to weigh.
+		res.Checks = append(res.Checks, models.ApplicationCheck{
+			Key: models.CheckFollowers, Status: models.CheckManual,
+			Reason:    followerManualReason(bestUnmeasuredClaim),
+			CheckedAt: &now,
+		})
 	case !anyFollowerData:
 		res.Checks = append(res.Checks, models.ApplicationCheck{
 			Key: models.CheckFollowers, Status: models.CheckPending,

@@ -32,10 +32,14 @@ var (
 	ErrNotConfigured = errors.New("platform credentials not configured")
 
 	// ErrManualOnly means the platform exposes no usable public API, so an admin
-	// has to confirm the code by eye. TikTok is the case: there is no public
-	// endpoint for a bio or follower count, and scraping from a server IP is
-	// blocked and breaks constantly. Better to be honest than to ship something
-	// that silently fails.
+	// has to confirm the code by eye. "other" is the case: an arbitrary link we
+	// know nothing about.
+	//
+	// TikTok used to be here too, on the grounds that scraping from a server IP
+	// gets blocked and breaks. Both halves of that are still true, which is why
+	// the TikTok fetcher reports ErrPlatformBlocked distinctly, the caller keeps
+	// the manual path as its fallback, and a warning goes to Discord when it
+	// fires. Trying and degrading loudly beats not trying.
 	ErrManualOnly = errors.New("platform requires manual verification")
 
 	// ErrChannelNotFound means the handle does not resolve. Usually a typo, but
@@ -56,23 +60,39 @@ func For(platformType string) (Fetcher, error) {
 		return YouTube{}, nil
 	case "twitch":
 		return Twitch{}, nil
-	case "tiktok", "other", "":
+	case "tiktok":
+		// Reads the public profile page. Falls back to manual review when
+		// TikTok blocks us, rather than failing the applicant. See tiktok.go.
+		return TikTok{}, nil
+	case "other", "":
 		return nil, ErrManualOnly
 	default:
 		return nil, ErrManualOnly
 	}
 }
 
-// Measurable reports whether we read this platform's follower count ourselves.
-// Where we do, the applicant is not asked for a number at all — so a zero from
-// one of these is the absence of a question, not a claim of zero, and must
-// never be validated as though the applicant typed it.
+// Measurable reports whether we can RELY on reading this platform's follower
+// count. Where we can, the applicant is not asked for a number at all — so a
+// zero from one of these is the absence of a question, not a claim of zero, and
+// must never be validated as though the applicant typed it.
+//
+// Deliberately NOT derived from For(). TikTok has a fetcher and we use it, but
+// it reads a public web page that can serve a captcha or refuse a datacenter IP
+// at any moment. If having a fetcher made TikTok measurable, we would stop
+// asking those applicants for a number, and on the passes where TikTok blocks
+// us we would have no figure at all: not a measurement and not a claim, leaving
+// a reviewer nothing to judge. Listing the platforms we actually trust keeps the
+// applicant's own number as the fallback that graceful degradation needs.
 //
 // Independent of credentials on purpose: a missing API key is an outage, and an
 // outage must not change what an applicant is allowed to submit.
 func Measurable(platformType string) bool {
-	_, err := For(platformType)
-	return err == nil
+	switch strings.ToLower(strings.TrimSpace(platformType)) {
+	case "youtube", "twitch":
+		return true
+	default:
+		return false
+	}
 }
 
 // NormalizeHandle strips the decoration people paste in: full URLs, leading @,

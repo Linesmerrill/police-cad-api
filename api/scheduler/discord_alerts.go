@@ -23,6 +23,9 @@ import (
 const (
 	cronAlertWebhookEnv   = "DISCORD_CRON_ERROR_WEBHOOK_URL"
 	cronAlertDedupWindow  = 60 * time.Second
+	// Warnings are informational, so they dedup for far longer: a run of
+	// applications during an outage should not become thirty messages.
+	warningAlertDedupWindow = 15 * time.Minute
 	cronAlertHTTPDeadline = 5 * time.Second
 )
 
@@ -62,6 +65,27 @@ func truncForDiscord(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
+// SendWarningAlert posts a warning embed for something that degraded but did
+// not break: we fell back to a slower path and carried on.
+//
+// Deliberately not styled as a failure. It is amber rather than red, titled
+// "Warning" rather than "failure", and carries no mention, so it reads as
+// something to look at on a weekday rather than a 3 AM page. The dedup window
+// is much longer than the error one for the same reason: a burst of creator
+// applications while TikTok is blocking us should leave one message, not thirty.
+func SendWarningAlert(instanceID, source string, detail error, fields map[string]string) {
+	postDiscordAlert(discordAlertOptions{
+		instanceID: instanceID,
+		name:       source,
+		detail:     detail,
+		fields:     fields,
+		title:      "Warning",
+		color:      0xf59e0b,
+		nameLabel:  "Source",
+		dedup:      warningAlertDedupWindow,
+	})
+}
+
 // SendCronAlert posts an error embed to Discord for a failed scheduler job.
 // `jobName` identifies which job (e.g. "processCommunityPendingDeletions"),
 // `err` is the failure, and `fields` are arbitrary key/value pairs included
@@ -73,16 +97,42 @@ func truncForDiscord(s string, n int) string {
 // reference. Callers should pass the running dyno's DYNO env, or empty
 // string if not relevant.
 func SendCronAlert(instanceID, jobName string, err error, fields map[string]string) {
+	postDiscordAlert(discordAlertOptions{
+		instanceID: instanceID,
+		name:       jobName,
+		detail:     err,
+		fields:     fields,
+		title:      "Cron failure",
+		color:      0xef4444,
+		nameLabel:  "Job",
+		dedup:      cronAlertDedupWindow,
+	})
+}
+
+// discordAlertOptions is one alert, whatever its severity.
+type discordAlertOptions struct {
+	instanceID string
+	name       string
+	detail     error
+	fields     map[string]string
+	title      string
+	color      int
+	nameLabel  string
+	dedup      time.Duration
+}
+
+func postDiscordAlert(o discordAlertOptions) {
 	webhook := os.Getenv(cronAlertWebhookEnv)
-	if webhook == "" || err == nil {
+	if webhook == "" || o.detail == nil {
 		return
 	}
+	instanceID, jobName, err, fields := o.instanceID, o.name, o.detail, o.fields
 
-	sig := jobName + "|" + err.Error()
+	sig := o.title + "|" + jobName + "|" + err.Error()
 	now := time.Now()
 
 	cronAlertMu.Lock()
-	if t, ok := cronAlertRecent[sig]; ok && now.Sub(t) < cronAlertDedupWindow {
+	if t, ok := cronAlertRecent[sig]; ok && now.Sub(t) < o.dedup {
 		cronAlertMu.Unlock()
 		return
 	}
@@ -90,7 +140,7 @@ func SendCronAlert(instanceID, jobName string, err error, fields map[string]stri
 	// Prune entries older than the dedup window so the map can't grow
 	// without bound.
 	for k, t := range cronAlertRecent {
-		if now.Sub(t) > cronAlertDedupWindow {
+		if now.Sub(t) > warningAlertDedupWindow {
 			delete(cronAlertRecent, k)
 		}
 	}
@@ -109,7 +159,7 @@ func SendCronAlert(instanceID, jobName string, err error, fields map[string]stri
 		instanceID = dyno
 	}
 	embedFields := []discordField{
-		{Name: "Job", Value: jobName, Inline: true},
+		{Name: o.nameLabel, Value: jobName, Inline: true},
 		{Name: "Instance", Value: instanceID, Inline: true},
 	}
 	for k, v := range fields {
@@ -121,9 +171,9 @@ func SendCronAlert(instanceID, jobName string, err error, fields map[string]stri
 	}
 
 	embed := discordEmbed{
-		Title:       fmt.Sprintf("⚠️ Cron failure · %s", truncForDiscord(err.Error(), 200)),
+		Title:       fmt.Sprintf("⚠️ %s · %s", o.title, truncForDiscord(err.Error(), 200)),
 		Description: fmt.Sprintf("```\n%s\n```", truncForDiscord(err.Error(), 1800)),
-		Color:       0xef4444,
+		Color:       o.color,
 		Timestamp:   now.UTC().Format(time.RFC3339),
 		Footer:      &discordFooter{Text: "police-cad-api · " + env + " · " + dyno},
 		Fields:      embedFields,
