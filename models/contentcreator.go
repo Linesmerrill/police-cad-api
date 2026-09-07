@@ -79,6 +79,30 @@ var ReviewChecklistKeys = []string{
 	ReviewCheckGenuine,
 }
 
+// UncheckedReviewChecklistKeys returns the canonical keys that are not ticked.
+//
+// Approval is gated on this being empty. The checklist is the audit record for
+// a decision no automated check can make, so an approval with nothing ticked
+// behind it is an approval nobody can account for.
+//
+// Missing and explicitly false are the same answer on purpose: an item that was
+// never written is not a confirmation.
+func UncheckedReviewChecklistKeys(items []ReviewChecklistItem) []string {
+	checked := make(map[string]bool, len(items))
+	for _, item := range items {
+		if item.Checked {
+			checked[item.Key] = true
+		}
+	}
+	missing := make([]string, 0, len(ReviewChecklistKeys))
+	for _, key := range ReviewChecklistKeys {
+		if !checked[key] {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
 // IsReviewChecklistKey guards the override endpoint against arbitrary keys
 // being written into the document.
 func IsReviewChecklistKey(key string) bool {

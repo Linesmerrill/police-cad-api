@@ -2241,6 +2241,36 @@ func (cc ContentCreator) AdminApproveApplicationHandler(w http.ResponseWriter, r
 		isOwnerOverride = true
 	}
 
+	// The reviewer checklist has to be complete before anyone can approve.
+	//
+	// This was previously enforced only in the browser -- the admin page
+	// computed `canApprove = checksPassed && allTicked` and disabled the button,
+	// but this handler never looked at ReviewChecklist at all. An approval
+	// posted straight to the API went through with nothing ticked, which left an
+	// approval on the record with no confirmations behind it. For something
+	// whose whole purpose is the audit trail, that is the one state it must not
+	// be able to reach.
+	//
+	// The approval itself is the record: an admin cannot approve without having
+	// ticked these, so an approval implies the judgement calls were made.
+	//
+	// Owner override is deliberately exempt. It already bypasses the two-person
+	// requirement below; it exists for the cases the normal flow cannot handle,
+	// and it is separately recorded as an override.
+	if !isOwnerOverride {
+		if missing := models.UncheckedReviewChecklistKeys(application.ReviewChecklist); len(missing) > 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "review_checklist_incomplete",
+				"message": "Confirm every item on the reviewer checklist before approving. " +
+					"Outstanding: " + strings.Join(missing, ", ") + ".",
+				"missing": missing,
+			})
+			return
+		}
+	}
+
 	// Check if this is first or second approval (or owner override)
 	if application.FirstApprovalBy == nil && !isOwnerOverride {
 		// First approval - set to under_review and record first approver
