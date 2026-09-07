@@ -1,8 +1,8 @@
 # Feature Request Triage — Living Doc
 
-_Auto-generated 2026-08-31 21:20 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
+_Auto-generated 2026-09-07 19:38 UTC from live feature-request data. Do not hand-edit — update `triage.json` and re-run `generate.py` (see [README](../scripts/feature-triage/README.md))._
 
-**58** active requests · **297** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
+**60** active requests · **301** total upvotes · **37** shipped. Statuses sync from the DB: an item marked released/beta on the site moves here automatically.
 
 **Legend** — Scope: 🌐 website · ⚙️ API · 📱 mobile · 🤖 bot. Effort: S (<1d) · M (few days) · L (1–2wk) · XL (multi-wk). Priority = upvotes + 2×comments.
 
@@ -26,7 +26,7 @@ Highest-value low-effort items (quick wins & easy), by priority:
 | 🟢 Easy / Low-Hanging | 3 | 9 |
 | 🏗️ Full Features | 30 | 206 |
 | 🚫 Probably Shouldn't Add | 4 | 32 |
-| ⚠️ Untriaged | 19 | 39 |
+| ⚠️ Untriaged | 21 | 43 |
 
 **Surface impact** (active triaged items touching each surface): 🌐 website 33 · ⚙️ api 34 · 📱 mobile 31 · 🤖 bot 6
 
@@ -70,7 +70,7 @@ _Substantial builds — plan and phase these._
 |   | [Civilian/Police Records Issue/Suggestion](https://www.linespolice-cad.com/feature-requests/69fa8e161ce52768aea34994) 🧪 in beta | 5 | 1 | M | ⚙️ 🌐 📱 api/website/mobile | ShanRocky | Restrict civilians from deleting their own records and give supervisor roles controlled delete/manage (with bulk options). Staff agreed ('should have added from the beginning') and it's already in beta. Permission model + records exist; this gates deletion + adds supervisor tooling. _Risks/deps: Currently in beta_testing — in flight._ _Possible dup: Restrict who can suspend or revoke licenses_ |
 |   | [Self Dispatch Options for LEO](https://www.linespolice-cad.com/feature-requests/6a4c35e0e948c039f9ca11b2) | 6 | 0 | L | ⚙️ 🌐 📱 api/website/mobile | ShanRocky | A fuller restatement of the existing 'Self Dispatch and Call Attachment Suggestion' (same requester): authorized LEO/Fire/EMS create/attach/close/edit their own calls when no dispatcher is online, see assigned units, and get a PER-UNIT tone when attached (not a dept-wide sound). Calls + unit assignment already exist, so it extends them with permissioned self-service + a targeted attach notification. Consolidate with the original into one self-dispatch project rather than tracking twice. _Risks/deps: Per-unit (not dept-wide) attach tone; per-department permission toggle; extend to Fire/EMS dashboards._ _Possible dup: Self Dispatch and Call Attachment Suggestion; Audio Notifications for 911... (attach tone); Update to fire and EMS_ |
 |   | [Update to fire and EMS](https://www.linespolice-cad.com/feature-requests/6a179ef5a5d3130925b94448) | 5 | 0 | M | 🌐 📱 ⚙️ website/mobile/api | topmost_deer7 | Bring Fire/EMS dashboards to parity with the police dashboard, including sending tones/panic. EMS dashboard and LEO/FD/EMS tones already exist on the website, so this is closing parity gaps rather than net-new plumbing. Overlaps the audio cluster. _Risks/deps: Clarify which surface(s) lack parity._ _Possible dup: Mobile Sound; Audio Notifications for 911..._ |
-|   | [Staff Department](https://www.linespolice-cad.com/feature-requests/69b67ab11056a7b7299c92f3) | 5 | 0 | M | ⚙️ 🌐 📱 api/website/mobile | zyren1.exe | Restrict weapon-license create/edit/remove to a special 'staff' department (toggleable), so civilians can't self-issue firearm licenses, plus a police 'gun taken' flag. Permissions model exists; this adds a license-permission gate + a field. Fits the Custom Departments direction. _Risks/deps: Overlaps license-permission and DMV requests; unify the permission model._ _Possible dup: Restrict who can suspend or revoke licenses; Department Overhaul_ |
+|   | [Staff Department](https://www.linespolice-cad.com/feature-requests/69b67ab11056a7b7299c92f3) | 5 | 0 | M | ⚙️ 🌐 📱 api/website/mobile | theo_ste11 | Restrict weapon-license create/edit/remove to a special 'staff' department (toggleable), so civilians can't self-issue firearm licenses, plus a police 'gun taken' flag. Permissions model exists; this adds a license-permission gate + a field. Fits the Custom Departments direction. _Risks/deps: Overlaps license-permission and DMV requests; unify the permission model._ _Possible dup: Restrict who can suspend or revoke licenses; Department Overhaul_ |
 |   | [Clock In / Clock Out System Suggestion](https://www.linespolice-cad.com/feature-requests/6a11249046e73d2248545e0c) | 3 | 1 | L | ⚙️ 🌐 📱 api/website/mobile | ShanRocky | Shift tracking with time-based quotas, shift history, and supervisor oversight/reports. Basic clock-in/clock-out already exists (economy), so the net-new value is quotas + reporting + supervisor permissions. Requester suggests a simple clock in/out button per department. _Risks/deps: Roblox auto-clock integration likely out of scope; manual is the realistic path._ |
 |   | [Character import](https://www.linespolice-cad.com/feature-requests/6a090eb09687cfca58d7fec8) | 3 | 1 | M | ⚙️ 🌐 📱 api/website/mobile | shadow_vex1232 | Import/duplicate a character (with vehicles, firearms, etc.) from one community into another. Contained but non-trivial: deep-copy of civilian + linked assets with fresh IDs and ownership. Requester clarified the flow in a comment. Modest demand (2 votes). _Risks/deps: ID remapping; avoid cross-community data leakage._ |
 |   | [Expired tickets](https://www.linespolice-cad.com/feature-requests/6a4252fc2ad13be0912d943e) | 4 | 0 | M | ⚙️ 🌐 📱 api/website/mobile | Dukk | Give tickets a pay window (server-configurable) that turns into a warrant if unpaid, plus a paid/unpaid flag. The inbox/fines system already has due dates (dueAt), delinquent status, and contest-extension days, and a scheduler already flips fines delinquent (api/scheduler/economy_jobs.go) — so the net-new is auto-consequence generation + config. DNYGUNZ (2026-07-07) asks for this generalized to real-world failure-to-respond actions: failure to answer a ticket → license suspension/revocation, failure to pay → warrant, and for ARRESTS a failure-to-appear → automatic warrant. Widen from citations-only to arrests and add license-suspend as an outcome. Infra is mostly there. _Risks/deps: Needs a scheduler/cron to flip unpaid/no-response → warrant/suspension (project historically lacks expiry crons; reuse the economy_jobs delinquent job). Coordinate license-suspend with the existing license model + wire Discord cron alerts._ _Possible dup: Automatic case progression (failure-to-respond); Requesting the ability to restrict who can suspend or revoke licenses (license-suspend outcome)_ |
@@ -104,9 +104,9 @@ _Add an entry to `triage.json` for each, then re-run._
 | Feature | ▲ | 💬 | Requested by |
 |---|---:|---:|---|
 | [Civs can delete their records and accounts](https://www.linespolice-cad.com/feature-requests/6a5f98b8a74a82a47dbe106b) | 4 | 1 | 𝐓𝐖3𝐑𝐊𝐈𝐓𝐌𝐈𝐋𝐄𝐘 |
+| [Look up Database and Licencse](https://www.linespolice-cad.com/feature-requests/6a8bc01c7070333bf4d70473) | 3 | 1 | wocon45 |
 | [A Arrest, Charge, and Record wipe for all civilians](https://www.linespolice-cad.com/feature-requests/6a6ac424f734a93e3ea6e47f) | 3 | 1 | RcrOO_ |
-| [Look up Database and Licencse](https://www.linespolice-cad.com/feature-requests/6a8bc01c7070333bf4d70473) | 2 | 1 | wocon45 |
-| [A Wipe feature for stuff like criminal history and etc.](https://www.linespolice-cad.com/feature-requests/6a8e4295cc1ed7d42a64ee20) | 3 | 0 | RcrOO_ |
+| [A Wipe feature for stuff like criminal history and etc.](https://www.linespolice-cad.com/feature-requests/6a8e4295cc1ed7d42a64ee20) | 4 | 0 | RcrOO_ |
 | [Wallet Improvement](https://www.linespolice-cad.com/feature-requests/6a6447cc1ca50c260d592996) | 3 | 0 | Normac360 |
 | [Delete Multiple Characters](https://www.linespolice-cad.com/feature-requests/6a626f4016e6761f0c7b5efe) | 3 | 0 | hhiclofi |
 | [Economy Jobs](https://www.linespolice-cad.com/feature-requests/6a557f9c2bc5e283b5375406) | 3 | 0 | BurnedBinkie860 |
@@ -117,6 +117,8 @@ _Add an entry to `triage.json` for each, then re-run._
 | [Forms](https://www.linespolice-cad.com/feature-requests/6a58145a8d51e059fe204e05) | 2 | 0 | Sergant W. O'CONNOR |
 | [internal complaint form](https://www.linespolice-cad.com/feature-requests/6a55555e8ef6ef7b43ae9aef) | 2 | 0 | joeyjohn90 |
 | [Bail Bondsman](https://www.linespolice-cad.com/feature-requests/6a4e4ce1b4e78b4c04891d70) | 2 | 0 | Odin |
+| [Criminal Flagging System](https://www.linespolice-cad.com/feature-requests/6a9cc16cfd28cd90759f3e1e) | 1 | 0 | Sheriff Z.Bradford |
+| [Citation removal toggle](https://www.linespolice-cad.com/feature-requests/6a98bb1c36c96a07ad030e56) | 1 | 0 | Gaxmexon |
 | [Automatic calculation for jail time UPDATE.](https://www.linespolice-cad.com/feature-requests/6a742d5abbbb6fedaa5b6733) | 1 | 0 | buggs181 |
 | [Cage fights](https://www.linespolice-cad.com/feature-requests/6a6d6f816663a62cd8d2b168) | 1 | 0 | GesusG37 |
 | [API Connect other games](https://www.linespolice-cad.com/feature-requests/6a628eaf16e6761f0c7b637b) | 1 | 0 | jodiells12 |
