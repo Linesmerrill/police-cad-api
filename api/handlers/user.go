@@ -2490,6 +2490,32 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// The community is read up front so ownership can be checked before anything
+	// is mutated. It used to be fetched after the membersCount decrement, with
+	// its error assigned and never checked.
+	communityFilter := bson.M{"_id": cID}
+	community, err := u.CDB.FindOne(ctx, communityFilter)
+	if err != nil {
+		config.ErrorStatus("failed to fetch community", http.StatusNotFound, w, err)
+		return
+	}
+
+	// An owner cannot be removed from the community they own, by themselves or
+	// by anyone else.
+	//
+	// This handler strips the user from every role and every department below,
+	// and leaves community.ownerID pointing at someone who is no longer a
+	// member. The community is then unrecoverable from inside the product: the
+	// dangling owner has to request to join their own departments, and the only
+	// people who can approve that are the owner and community administrators,
+	// both of whom just left with them. Ownership has to move first.
+	if community.Details.OwnerID == userID {
+		config.ErrorStatus(
+			"You own this community, so you cannot leave it. Transfer ownership to another member first, then you can leave.",
+			http.StatusConflict, w, nil)
+		return
+	}
+
 	// Update the user's communities array to remove the specified community
 	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
 	_, err = u.DB.UpdateOne(ctx, userFilter, userUpdate)
@@ -2499,14 +2525,12 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Find the community by community ID and decrement the membersCount
-	communityFilter := bson.M{"_id": cID}
 	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": -1}}
 	err = u.CDB.UpdateOne(ctx, communityFilter, communityUpdate)
 	if err != nil {
 		config.ErrorStatus("failed to decrement community membersCount", http.StatusInternalServerError, w, err)
 		return
 	}
-	community, err := u.CDB.FindOne(ctx, communityFilter)
 
 	// Iterate through the roles and remove the user ID from the members array
 	for _, role := range community.Details.Roles {

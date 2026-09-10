@@ -64,8 +64,14 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Check if the user is a member of the community
-	isMember := false
+	// Check if the user is a member of the community.
+	//
+	// The owner always passes, matching userHasCommunityPermission. Without it a
+	// community whose ownerID points at someone with no approved user.communities
+	// entry — the shape the ownership transfer used to leave behind — reads as
+	// isMember:false for its own owner, who is then shown the request-to-join
+	// wall on every department and has no way through it.
+	isMember := community.Details.OwnerID == userID
 	for _, communityDetails := range userData.Details.Communities {
 		if communityDetails.CommunityID == communityID && communityDetails.Status == "approved" {
 			isMember = true
@@ -84,8 +90,9 @@ func (c Community) GetDepartmentsScreenDataHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Check if the user has permission to manage departments
-	canManageDepartments := false
+	// Check if the user has permission to manage departments. The owner always
+	// can, role or no role.
+	canManageDepartments := community.Details.OwnerID == userID
 	for _, role := range community.Details.Roles {
 		isMember := false
 		for _, member := range role.Members {
