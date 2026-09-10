@@ -300,6 +300,12 @@ func TestUser_RemoveCommunityFromUserHandler_UserUpdateFailure(t *testing.T) {
 	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
 	// Mock failed user update
+	// The community is read up front so ownership can be checked before anything
+	// is mutated.
+	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{ID: communityObjectID}, nil)
+
 	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(nil, errors.New("database error"))
 	
 	// Create handler
@@ -379,6 +385,11 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityUpdateFailure(t *testing.T
 	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
 	
 	// Mock failed community update
+	// The community is read up front so ownership can be checked before anything
+	// is mutated.
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{ID: communityObjectID}, nil)
+
 	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(errors.New("database error"))
 	
 	// Create handler
@@ -455,13 +466,8 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) 
 	}).Return(nil)
 	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
 	
-	// Mock successful user update
-	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID}, bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
-	
-	// Mock successful community update
-	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": communityObjectID}, bson.M{"$inc": bson.M{"community.membersCount": -1}}).Return(nil)
-	
-	// Mock failed community find - return a valid community but with an error to avoid nil pointer dereference
+	// The community read fails. It now happens before anything is written, and
+	// its error is checked, so nothing is mutated.
 	mockCommunity := &models.Community{
 		ID: primitive.ObjectID{},
 		Details: models.CommunityDetails{
@@ -489,10 +495,12 @@ func TestUser_RemoveCommunityFromUserHandler_CommunityFindFailure(t *testing.T) 
 	handler.ServeHTTP(rr, req)
 	time.Sleep(50 * time.Millisecond) // let logAudit goroutine complete
 
-	// Assertions - Note: The handler has a bug - it doesn't check the error from FindOne
-	// So it continues processing and returns success instead of failing
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Contains(t, rr.Body.String(), "Community and roles updated successfully")
+	// The community read error used to be assigned and never checked, so the
+	// handler pulled the user's membership, decremented the count and reported
+	// success against a community it had failed to load. It now refuses.
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	mockUserDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+	mockCommunityDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 
 	// Verify mocks were called
 	mockUserDB.AssertExpectations(t)

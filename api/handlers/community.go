@@ -5806,6 +5806,49 @@ func (c Community) FetchBannedUsersHandlerV2(w http.ResponseWriter, r *http.Requ
 }
 
 // TransferCommunityOwnershipHandler handles the transfer of community ownership
+// ensureCommunityMembership makes user an approved member of communityID,
+// promoting an existing non-approved entry rather than adding a second one.
+//
+// Membership is read from user.communities[].status, not from the community's
+// members map (see the note on Community.Details.Members), so this is the write
+// that actually makes someone a member. Returns whether anything changed, which
+// is useful for audit; callers that treat this as best-effort can ignore it.
+func ensureCommunityMembership(ctx context.Context, udb databases.UserDatabase, userID primitive.ObjectID, communityID string, user *models.User) bool {
+	if udb == nil || user == nil {
+		return false
+	}
+	for _, uc := range user.Details.Communities {
+		if uc.CommunityID != communityID {
+			continue
+		}
+		if uc.Status == "approved" {
+			return false
+		}
+		// Present but pending/declined/blocked: promote it in place. Pushing a
+		// second entry would leave two rows for one community, and whichever the
+		// membership scan hits first decides access.
+		_, err := udb.UpdateOne(ctx,
+			bson.M{"_id": userID, "user.communities.communityId": communityID},
+			bson.M{"$set": bson.M{"user.communities.$.status": "approved"}})
+		return err == nil
+	}
+
+	// No entry at all. Initialize the array first when it is missing or null, the
+	// same two-step CreateCommunityHandler uses, because $push onto a null field
+	// errors instead of creating an array.
+	_, _ = udb.UpdateOne(ctx,
+		bson.M{"_id": userID, "user.communities": nil},
+		bson.M{"$set": bson.M{"user.communities": bson.A{}}})
+	_, err := udb.UpdateOne(ctx,
+		bson.M{"_id": userID},
+		bson.M{"$addToSet": bson.M{"user.communities": models.UserCommunity{
+			ID:          primitive.NewObjectID().Hex(),
+			CommunityID: communityID,
+			Status:      "approved",
+		}}})
+	return err == nil
+}
+
 func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *http.Request) {
 	// Get community ID from URL parameters
 	communityID := mux.Vars(r)["communityId"]
@@ -5933,6 +5976,23 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 		config.ErrorStatus("failed to transfer ownership", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// Ensure the incoming owner is actually a member of the community they now
+	// own. Nothing here required them to be one: the endpoint validated only that
+	// the id belonged to a real user, so ownership could be handed to someone
+	// with no user.communities entry at all.
+	//
+	// That entry is what membership is read from — community.Members is not a
+	// reliable membership source — so without it the new owner reads as a
+	// non-member everywhere, most visibly on the departments screen, and their
+	// only way in is to request to join. Approving that request needs the owner
+	// or a community administrator, which after the previous owner leaves is
+	// nobody. The admin-console transfer (AdminTransferOwnershipHandler) has
+	// always done this; the user-facing one never did.
+	//
+	// Best-effort: ownership has already moved and the caller is not left in a
+	// half-transferred state if the membership write fails.
+	ensureCommunityMembership(context.Background(), c.UDB, newOwnerID, communityID, &newOwner)
 
 	// Return success response
 	response := map[string]interface{}{

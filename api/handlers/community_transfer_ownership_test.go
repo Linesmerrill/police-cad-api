@@ -83,6 +83,15 @@ func TestCommunity_TransferCommunityOwnershipHandler_Success(t *testing.T) {
 	// Mock the update operation
 	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": cID}, mock.Anything).Return(nil)
 
+	// The new owner is made an approved member of the community they now own.
+	// Without it they read as a non-member everywhere membership is checked and
+	// have to request to join their own departments.
+	var membershipWrites []bson.M
+	mockUserDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			membershipWrites = append(membershipWrites, args.Get(2).(bson.M))
+		}).Return(nil, nil)
+
 	// Create request
 	requestBody := map[string]string{
 		"currentUserId": currentUserID,
@@ -111,6 +120,12 @@ func TestCommunity_TransferCommunityOwnershipHandler_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "Community ownership transferred successfully", response["message"])
 	assert.Equal(t, newOwnerID, response["newOwnerId"])
+
+	// The new owner had no communities entry at all, so one is pushed as approved.
+	assert.Len(t, membershipWrites, 2, "init-if-null, then the push")
+	added := membershipWrites[1]["$addToSet"].(bson.M)["user.communities"].(models.UserCommunity)
+	assert.Equal(t, communityID, added.CommunityID)
+	assert.Equal(t, "approved", added.Status)
 
 	// Verify mocks were called
 	mockCommunityDB.AssertExpectations(t)
@@ -199,6 +214,7 @@ func transferOwnershipRoles(t *testing.T, roles []models.Role, currentUserID, ne
 		*userPtr = models.User{ID: newOwnerID, Details: models.UserDetails{Username: "newowner"}}
 	}).Return(nil)
 	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": newOwnerObjID}).Return(mockNewOwnerResult)
+	mockUserDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	var writtenRoles []models.Role
 	mockCommunityDB.On("UpdateOne", mock.Anything, bson.M{"_id": cID}, mock.MatchedBy(func(update bson.M) bool {
