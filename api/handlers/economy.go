@@ -34,11 +34,11 @@ type Economy struct {
 
 // ---- helpers ----
 
-// resolveDepartmentEconomy returns the department + rank config snapshot used at clock-in.
-// Falls back to department.BasePayPerHour when rank.PayRatePerHour is zero.
-func resolveDepartmentEconomy(community *models.Community, deptID, rankID string) (dept *models.Department, payRate int64, payoutMode string, maxSessionMin, afkGrace int, ok bool) {
+// resolveDepartmentEconomy returns the department + its session config.
+// Pay is resolved separately by departmentPayRate, which needs the member's rank.
+func resolveDepartmentEconomy(community *models.Community, deptID string) (dept *models.Department, payoutMode string, maxSessionMin, afkGrace int, ok bool) {
 	if community == nil {
-		return nil, 0, "", 0, 0, false
+		return nil, "", 0, 0, false
 	}
 	for i := range community.Details.Departments {
 		d := &community.Details.Departments[i]
@@ -48,18 +48,7 @@ func resolveDepartmentEconomy(community *models.Community, deptID, rankID string
 		}
 	}
 	if dept == nil {
-		return nil, 0, "", 0, 0, false
-	}
-	payRate = int64(dept.BasePayPerHour)
-	if rankID != "" {
-		for i := range dept.Ranks {
-			if dept.Ranks[i].ID.Hex() == rankID {
-				if dept.Ranks[i].PayRatePerHour > 0 {
-					payRate = int64(dept.Ranks[i].PayRatePerHour)
-				}
-				break
-			}
-		}
+		return nil, "", 0, 0, false
 	}
 	payoutMode = dept.PayoutMode
 	if payoutMode == "" {
@@ -73,7 +62,58 @@ func resolveDepartmentEconomy(community *models.Community, deptID, rankID string
 	if afkGrace <= 0 {
 		afkGrace = 60
 	}
-	return dept, payRate, payoutMode, maxSessionMin, afkGrace, true
+	return dept, payoutMode, maxSessionMin, afkGrace, true
+}
+
+// resolveMemberRank returns the rank a member counts as holding: the one they
+// were assigned, or the department's default rank when they have no usable
+// assignment.
+//
+// "No rank assigned means the default rank" is the rule rank.go already applies
+// everywhere it reads a member's rank — promotion eligibility (rank.go:1499),
+// progress (rank.go:1758) and the auto-assign that persists it (rank.go:1118).
+// Pay resolution was the one place that skipped it, and the members it skipped
+// are not an edge case: a member only gets a rankId once something has walked
+// them through the promotion flow, and members of a public department have no
+// members[] entry to carry one at all.
+//
+// A rankId pointing at a deleted rank falls through to the default too, matching
+// rank.go:1499, which keys off "no rank found" rather than "no rank recorded".
+func resolveMemberRank(dept *models.Department, rankID string) *models.Rank {
+	if dept == nil {
+		return nil
+	}
+	if rankID != "" {
+		for i := range dept.Ranks {
+			if dept.Ranks[i].ID.Hex() == rankID {
+				return &dept.Ranks[i]
+			}
+		}
+	}
+	for i := range dept.Ranks {
+		if dept.Ranks[i].IsDefault {
+			return &dept.Ranks[i]
+		}
+	}
+	return nil
+}
+
+// departmentPayRate returns the hourly rate in cents a member is paid in dept,
+// plus the rank id that rate was resolved from (empty when the department has no
+// rank that applies). A rank pays its own rate only when one is configured;
+// a rank with no rate set is paid the department base, not zero.
+func departmentPayRate(dept *models.Department, rankID string) (payRate int64, resolvedRankID string) {
+	if dept == nil {
+		return 0, ""
+	}
+	rank := resolveMemberRank(dept, rankID)
+	if rank == nil {
+		return int64(dept.BasePayPerHour), ""
+	}
+	if rank.PayRatePerHour > 0 {
+		return int64(rank.PayRatePerHour), rank.ID.Hex()
+	}
+	return int64(dept.BasePayPerHour), rank.ID.Hex()
 }
 
 // findUserMembership returns the rankId for a user in a department (LEO/EMS-style depts).
@@ -263,8 +303,9 @@ type clockInRequest struct {
 }
 
 // ClockInHandler starts a clock session for a user against a department.
-// Pay rate comes from rank.payRatePerHour if the user has a rank assigned,
-// otherwise from department.basePayPerHour.
+// Pay rate comes from the member's rank, falling back to the department's
+// default rank when they hold no assignment, and to department.basePayPerHour
+// when neither rank sets a rate.
 func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 	var req clockInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -302,7 +343,7 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dept, payRate, payoutMode, maxSession, afkGrace, ok := resolveDepartmentEconomy(community, req.DepartmentID, "")
+	dept, payoutMode, maxSession, afkGrace, ok := resolveDepartmentEconomy(community, req.DepartmentID)
 	if !ok {
 		config.ErrorStatus("department not found", http.StatusNotFound, w, nil)
 		return
@@ -327,10 +368,12 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("user is not a member of this department", http.StatusForbidden, w, nil)
 		return
 	}
-	// Re-resolve with rankID for accurate pay rate.
-	if rankID != "" {
-		_, payRate, _, _, _, _ = resolveDepartmentEconomy(community, req.DepartmentID, rankID)
-	}
+	// Resolve pay from the member's rank, falling back to the department's
+	// default rank when they hold no assignment — which is the normal state for
+	// a public department, where nobody has a members[] entry to carry one.
+	// Without that fallback every such member is paid department base pay and
+	// the configured rank rates never apply to anyone.
+	payRate, rankID := departmentPayRate(dept, rankID)
 
 	// Enforce one active session per USER. The previous check scoped by
 	// civilianId, which let a single user clock in N civilians at once and
