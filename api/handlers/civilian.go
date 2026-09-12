@@ -359,9 +359,29 @@ func (c Civilian) CreateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	civilian.Details.UpdatedAt = civilian.Details.CreatedAt
 	civilian.Details.SearchName = helpers.NormalizeForSearch(civilian.Details.Name)
 
+	// Balance is server-owned. Both fields decode straight off the request body,
+	// so whatever the client sent is discarded here before the community's
+	// configured starting balance is applied below.
+	civilian.Details.Balance = 0
+	civilian.Details.BalanceInitialized = false
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Grant the community's starting balance at creation.
+	//
+	// This used to be purely lazy: ensureBalanceInitialized ran only when a
+	// wallet was opened, a fine was paid, or a transfer happened. A civilian who
+	// was simply created and looked at in the list read $0.00 no matter what
+	// "Default starting balance" was set to, which is what the report was about.
+	//
+	// Granting eagerly also closes a worse hole. The clock-out payout paths
+	// $inc the earned credit and $set balanceInitialized: true in one write
+	// without ever adding the starting balance, so for an uninitialized
+	// civilian a single shift permanently forfeited it. Those paths are fixed
+	// too, but a civilian that is never uninitialized cannot hit that at all.
+	c.applyStartingBalance(ctx, &civilian)
 
 	_, err := c.DB.InsertOne(ctx, civilian)
 	if err != nil {
@@ -374,6 +394,43 @@ func (c Civilian) CreateCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		"message": "Civilian created successfully",
 		"id":      civilian.ID.Hex(),
 	})
+}
+
+// applyStartingBalance sets a new civilian's opening balance from their
+// community's economy settings. No-op when the civilian has no community, the
+// community cannot be read, economy is off for it, or the configured amount is
+// not positive — in every one of those cases the civilian stays uninitialized
+// and the existing lazy backfill still applies later if economy is turned on.
+func (c Civilian) applyStartingBalance(ctx context.Context, civilian *models.Civilian) {
+	if civilian == nil || c.CommDB == nil {
+		return
+	}
+	communityHex := strings.TrimSpace(civilian.Details.ActiveCommunityID)
+	if communityHex == "" {
+		return
+	}
+	commID, err := primitive.ObjectIDFromHex(communityHex)
+	if err != nil {
+		return
+	}
+	community, err := c.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil {
+		return
+	}
+	if !community.Details.Economy.Enabled {
+		return
+	}
+	start := community.Details.Economy.DefaultStartingBalance
+	if start <= 0 {
+		// A configured zero is still a decision, so record it as initialized —
+		// otherwise the lazy backfill would keep rewriting the balance to zero
+		// and wipe anything the civilian later earned.
+		civilian.Details.Balance = 0
+		civilian.Details.BalanceInitialized = true
+		return
+	}
+	civilian.Details.Balance = start
+	civilian.Details.BalanceInitialized = true
 }
 
 // UpdateCivilianHandler updates a civilian's details
