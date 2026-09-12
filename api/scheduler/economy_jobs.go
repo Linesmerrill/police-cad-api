@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -115,6 +116,11 @@ func (s *Scheduler) payAndCloseSession(ctx context.Context, sess *models.ClockSe
 	}
 	if credit > 0 && sess.CivilianID != "" {
 		if civID, err := primitive.ObjectIDFromHex(sess.CivilianID); err == nil {
+			// Same ordering as the handler payout path: grant the starting
+			// balance first if this civilian never got one, because the $inc
+			// below marks them initialized and nothing would grant it after.
+			s.grantStartingBalanceIfUnset(ctx, civID, sess.CommunityID)
+
 			_ = s.CivDB.UpdateOne(ctx, bson.M{"_id": civID}, bson.M{
 				"$inc": bson.M{"civilian.balance": credit},
 				"$set": bson.M{
@@ -124,6 +130,33 @@ func (s *Scheduler) payAndCloseSession(ctx context.Context, sess *models.ClockSe
 			})
 		}
 	}
+}
+
+// grantStartingBalanceIfUnset mirrors the handler-side helper of the same name:
+// it credits the community's starting balance only to a civilian who has never
+// been initialized. The condition lives in the filter, so this is a no-op for
+// anyone already initialized and safe to call on every sweep.
+func (s *Scheduler) grantStartingBalanceIfUnset(ctx context.Context, civID primitive.ObjectID, communityHex string) {
+	if s.CDB == nil || s.CivDB == nil || strings.TrimSpace(communityHex) == "" {
+		return
+	}
+	commID, err := primitive.ObjectIDFromHex(communityHex)
+	if err != nil {
+		return
+	}
+	community, err := s.CDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil || !community.Details.Economy.Enabled {
+		return
+	}
+	start := community.Details.Economy.DefaultStartingBalance
+	if start <= 0 {
+		return
+	}
+	_ = s.CivDB.UpdateOne(ctx,
+		bson.M{"_id": civID, "civilian.balanceInitialized": bson.M{"$ne": true}},
+		bson.M{"$inc": bson.M{"civilian.balance": start},
+			"$set": bson.M{"civilian.balanceInitialized": true}},
+	)
 }
 
 // inboxDelinquencyTick flips any pending inbox item whose dueAt has passed to "delinquent".

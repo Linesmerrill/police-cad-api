@@ -188,6 +188,15 @@ func (e Economy) paySession(ctx context.Context, sess *models.ClockSession, now 
 	balanceAfterSet := false
 	if credit > 0 && sess.CivilianID != "" {
 		if civID, perr := primitive.ObjectIDFromHex(sess.CivilianID); perr == nil {
+			// Grant the community's starting balance before crediting, if this
+			// civilian never received it. The $inc below stamps
+			// balanceInitialized: true, so without this a civilian whose first
+			// ever economy event is a payout loses the starting balance for
+			// good: the flag is set, and ensureBalanceInitialized never runs
+			// again. New civilians get it at creation now, so this only covers
+			// ones that predate that.
+			e.grantStartingBalanceIfUnset(ctx, civID, sess.CommunityID)
+
 			res := e.CivDB.FindOneAndUpdate(ctx,
 				bson.M{"_id": civID},
 				bson.M{
@@ -291,6 +300,38 @@ func (e Economy) ensureBalanceInitialized(ctx context.Context, civ *models.Civil
 	})
 	civ.Details.Balance = start
 	civ.Details.BalanceInitialized = true
+}
+
+// grantStartingBalanceIfUnset gives a civilian their community's starting
+// balance if and only if they have never been initialized, then marks them
+// initialized. The filter carries that condition so the write is a no-op for
+// anyone already initialized, which makes it safe to call on every payout and
+// safe against two payouts racing.
+//
+// Distinct from ensureBalanceInitialized, which $sets the balance outright:
+// that is correct on a read path but would overwrite a credit being applied in
+// the same breath, so this one $incs instead.
+func (e Economy) grantStartingBalanceIfUnset(ctx context.Context, civID primitive.ObjectID, communityHex string) {
+	if e.CommDB == nil || strings.TrimSpace(communityHex) == "" {
+		return
+	}
+	commID, err := primitive.ObjectIDFromHex(communityHex)
+	if err != nil {
+		return
+	}
+	community, err := e.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil || !community.Details.Economy.Enabled {
+		return
+	}
+	start := community.Details.Economy.DefaultStartingBalance
+	if start <= 0 {
+		return
+	}
+	_ = e.CivDB.UpdateOne(ctx,
+		bson.M{"_id": civID, "civilian.balanceInitialized": bson.M{"$ne": true}},
+		bson.M{"$inc": bson.M{"civilian.balance": start},
+			"$set": bson.M{"civilian.balanceInitialized": true}},
+	)
 }
 
 // ---- handlers ----
