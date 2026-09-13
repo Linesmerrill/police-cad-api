@@ -159,12 +159,9 @@ func (s Search) SearchUsersHandlerV2(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		defer cursor.Close(ctx)
-		var users []models.User
-		if err = cursor.All(ctx, &users); err != nil {
-			findChan <- findResult{err: err}
-			return
-		}
-		findChan <- findResult{users: users}
+		// One malformed user document used to fail this whole page, taking
+		// search down for everyone whose results happened to include it.
+		findChan <- findResult{users: decodeTolerantly[models.User](ctx, cursor, "v2 user search")}
 	}()
 
 	go func() {
@@ -335,15 +332,7 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer cursor.Close(ctx)
 
-	var users []models.User
-	if err = cursor.All(ctx, &users); err != nil {
-		config.ErrorStatus("failed to decode users", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	if users == nil {
-		users = []models.User{}
-	}
+	users := decodeTolerantly[models.User](ctx, cursor, "v1 user search")
 
 	// TODO: Remove after frontend release v1.0.5
 	// Search for communities with visibility set to "public"
@@ -361,11 +350,7 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer communityCursor.Close(ctx)
 
-	var communities []models.Community
-	if err = communityCursor.All(ctx, &communities); err != nil {
-		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
-		return
-	}
+	communities := decodeTolerantly[models.Community](ctx, communityCursor, "v1 community search")
 
 	results["users"] = users
 	results["communities"] = communities
@@ -471,11 +456,7 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer communityCursor.Close(ctx)
 
-	var communities []models.Community
-	if err = communityCursor.All(ctx, &communities); err != nil {
-		config.ErrorStatus("failed to decode communities", http.StatusInternalServerError, w, err)
-		return
-	}
+	communities := decodeTolerantly[models.Community](ctx, communityCursor, "v1 community search")
 
 	// Self-heal stored membersCount with a live count from the users
 	// collection (see liveMemberCounts for why).
