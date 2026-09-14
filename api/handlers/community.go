@@ -1133,6 +1133,19 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		req["economy"] = cleaned
 	}
 
+	// Court processing gets the same strict treatment as economy. It is a small
+	// object, but respondDays is read by a cron job and autoFileUnanswered
+	// decides whether that job touches this community at all — a value stored
+	// in a shape the decoder cannot read would break both.
+	if courtRaw, exists := req["courtProcessing"]; exists {
+		cleaned, vErr := validateCommunityCourtProcessingPatch(courtRaw)
+		if vErr != nil {
+			config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+			return
+		}
+		req["courtProcessing"] = cleaned
+	}
+
 	// Owner-authored onboarding content gets the same treatment. A member who has
 	// just requested to join is sent to the community's own Discord, so an invite
 	// stored in a shape Discord will not resolve is a dead end for every new
@@ -3590,6 +3603,36 @@ var communityEconomyPatchBounds = map[string]struct {
 	"defaultStartingBalance": {0, 1_000_000_000_000}, // cents ($10B cap)
 	"defaultDueDays":         {0, 3650},              // up to 10 years
 	"contestExtensionDays":   {0, 3650},
+}
+
+// validateCommunityCourtProcessingPatch validates the `courtProcessing`
+// sub-object of a community PATCH. Same allowlist approach as the economy
+// validator: unknown fields are rejected rather than silently stored.
+func validateCommunityCourtProcessingPatch(raw interface{}) (bson.M, error) {
+	obj, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid courtProcessing: expected an object")
+	}
+	clean := bson.M{}
+	for key, value := range obj {
+		switch key {
+		case "autoFileUnanswered":
+			b, ok := value.(bool)
+			if !ok {
+				return nil, fmt.Errorf("invalid courtProcessing.%s: expected boolean", key)
+			}
+			clean[key] = b
+		case "respondDays":
+			n, ierr := coerceJSONInt(value, 0, int64(models.MaxRespondDays))
+			if ierr != nil {
+				return nil, fmt.Errorf("invalid courtProcessing.respondDays: %s", ierr.Error())
+			}
+			clean[key] = n
+		default:
+			return nil, fmt.Errorf("field courtProcessing.%q is not updatable via this endpoint", key)
+		}
+	}
+	return clean, nil
 }
 
 // validateCommunityEconomyPatch takes the raw `economy` sub-object from a
