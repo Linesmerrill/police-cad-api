@@ -1420,8 +1420,52 @@ func (e Economy) isApprovedCommunityMember(ctx context.Context, userID, communit
 const (
 	transferMaxMessageChars = 140
 	transferMinCents        = 1
-	transferMaxCents        = 100_000_00 // $100,000 per transfer
+	// DefaultTransferMaxCents applies when a community has not set its own
+	// limit. Unchanged from when this was the only value.
+	DefaultTransferMaxCents = 100_000_00 // $100,000 per transfer
+	// TransferCeilingCents is the hard limit no community can raise past. The
+	// point of a cap is to bound the damage of a fat finger or a stolen
+	// account, so the setting moves the rail rather than removing it.
+	TransferCeilingCents = 100_000_000_00 // $100,000,000 per transfer
 )
+
+// formatCents renders a cents amount as dollars for a user-facing message.
+func formatCents(cents int64) string {
+	return fmt.Sprintf("$%s.%02d", addThousands(cents/100), cents%100)
+}
+
+// addThousands groups a whole-dollar amount with commas.
+func addThousands(n int64) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var out []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, c)
+	}
+	return string(out)
+}
+
+// ResolveTransferMax returns the per-transfer cap for a community: its own
+// setting when it has one, otherwise the default, clamped to the ceiling so a
+// bad stored value cannot lift the rail entirely.
+func ResolveTransferMax(community *models.Community) int64 {
+	if community == nil {
+		return DefaultTransferMaxCents
+	}
+	configured := community.Details.Economy.MaxTransferCents
+	if configured <= 0 {
+		return DefaultTransferMaxCents
+	}
+	if configured > TransferCeilingCents {
+		return TransferCeilingCents
+	}
+	return configured
+}
 
 // TransferHandler moves money from one civilian to another in the same
 // community. Hard-blocks negative balances regardless of community policy —
@@ -1455,10 +1499,6 @@ func (e Economy) TransferHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AmountCents < transferMinCents {
 		config.ErrorStatus("amount must be at least 1 cent", http.StatusBadRequest, w, nil)
-		return
-	}
-	if req.AmountCents > transferMaxCents {
-		config.ErrorStatus("amount exceeds per-transfer maximum", http.StatusBadRequest, w, nil)
 		return
 	}
 	if len(req.Message) > transferMaxMessageChars {
@@ -1516,6 +1556,15 @@ func (e Economy) TransferHandler(w http.ResponseWriter, r *http.Request) {
 	community, err := e.CommDB.FindOne(ctx, bson.M{"_id": commID})
 	if err != nil {
 		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	// Per-transfer cap, now that we know whose rules apply. Communities running
+	// property or business roleplay legitimately move sums far above the
+	// default, so the limit is theirs to raise within the hard ceiling.
+	if maxCents := ResolveTransferMax(community); req.AmountCents > maxCents {
+		config.ErrorStatus(
+			fmt.Sprintf("amount exceeds this community's per-transfer maximum of %s", formatCents(maxCents)),
+			http.StatusBadRequest, w, nil)
 		return
 	}
 	if !community.Details.Economy.Enabled {

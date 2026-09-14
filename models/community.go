@@ -378,6 +378,12 @@ type EconomySettings struct {
 	AllowNegativeBalance   bool   `json:"allowNegativeBalance" bson:"allowNegativeBalance"`
 	DefaultDueDays         int    `json:"defaultDueDays" bson:"defaultDueDays"`             // days before inbox item flips delinquent
 	ContestExtensionDays   int    `json:"contestExtensionDays" bson:"contestExtensionDays"` // days the due date is pushed when a civilian contests a fine
+	// MaxTransferCents caps a single peer-to-peer transfer. 0 means "unset",
+	// which falls back to DefaultTransferMaxCents. Communities running
+	// property or business roleplay legitimately move sums far larger than the
+	// default, so this is theirs to raise; TransferCeilingCents is the hard
+	// limit they cannot exceed, which keeps the fat-finger rail in place.
+	MaxTransferCents int64 `json:"maxTransferCents" bson:"maxTransferCents"`
 }
 
 // CourtProcessingSettings governs what happens to citations and arrests that

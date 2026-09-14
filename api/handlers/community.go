@@ -3603,6 +3603,9 @@ var communityEconomyPatchBounds = map[string]struct {
 	"defaultStartingBalance": {0, 1_000_000_000_000}, // cents ($10B cap)
 	"defaultDueDays":         {0, 3650},              // up to 10 years
 	"contestExtensionDays":   {0, 3650},
+	// 0 means "unset" and falls back to the default; the upper bound is the
+	// hard transfer ceiling.
+	"maxTransferCents": {0, 100_000_000_00},
 }
 
 // validateCommunityCourtProcessingPatch validates the `courtProcessing`
@@ -3663,7 +3666,7 @@ func validateCommunityEconomyPatch(raw interface{}) (bson.M, error) {
 				return nil, fmt.Errorf("invalid economy.fineMode: expected \"inbox\" or \"auto_debit\"")
 			}
 			clean[key] = s
-		case "defaultStartingBalance", "defaultDueDays", "contestExtensionDays":
+		case "defaultStartingBalance", "defaultDueDays", "contestExtensionDays", "maxTransferCents":
 			bounds := communityEconomyPatchBounds[key]
 			n, ierr := coerceJSONInt(value, bounds.min, bounds.max)
 			if ierr != nil {
