@@ -30,6 +30,7 @@ type Economy struct {
 	CommDB databases.CommunityDatabase
 	ACDB   databases.UserActiveCivilianDatabase // active-civilian pick; nil-safe — auto-pin on first clock-in is skipped when nil.
 	UDB    databases.UserDatabase               // user profile reads — authoritative source for community membership (community.Members map is not).
+	ALDB   databases.AuditLogDatabase           // audit trail for admin balance adjustments; nil-safe.
 }
 
 // ---- helpers ----
