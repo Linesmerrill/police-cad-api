@@ -9,6 +9,13 @@ type CourtCase struct {
 	Version int32              `json:"__v" bson:"__v"`
 }
 
+// Court case origins. Empty is equivalent to CourtCaseOriginContested — every
+// case predating auto-filing was created by a civilian contesting.
+const (
+	CourtCaseOriginContested          = "civilian_contest"
+	CourtCaseOriginFailureToRespond   = "failure_to_respond"
+)
+
 // CourtCaseDetails holds the structure for the inner court case details
 type CourtCaseDetails struct {
 	// Human-readable case number, format CC-YYYY-NNNNNN, unique per community
@@ -40,6 +47,11 @@ type CourtCaseDetails struct {
 
 	// Status: "submitted", "in_review", "scheduled", "in_progress", "completed"
 	Status string `json:"status" bson:"status"`
+
+	// Origin says how the case got here. Empty means the civilian contested it,
+	// which is how every case was created before auto-filing existed, so old
+	// documents read correctly without a migration.
+	Origin string `json:"origin,omitempty" bson:"origin,omitempty"`
 
 	// Resolution per contested item
 	Resolutions []CaseResolution `json:"resolutions" bson:"resolutions"`

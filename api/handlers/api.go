@@ -903,6 +903,8 @@ func (a *App) New() *mux.Router {
 		economy.SDB,
 		economy.IDB,
 		economy.CivDB,
+		databases.NewCourtCaseDatabase(a.dbHelper),
+		databases.NewArrestReportDatabase(a.dbHelper),
 	)
 
 	// Re-screen creator applications every 4 hours: resolve each channel, look

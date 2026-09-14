@@ -32,6 +32,9 @@ type Scheduler struct {
 	SessionDB  databases.ClockSessionDatabase
 	InboxDB    databases.InboxItemDatabase
 	CivDB      databases.CivilianDatabase
+	// Courts: filing citations and arrests nobody answered.
+	CourtDB databases.CourtCaseDatabase
+	ARDB    databases.ArrestReportDatabase
 	instanceID string
 
 	// Per-job run stats for /health/scheduler. Multiple jobs may run in
@@ -52,6 +55,8 @@ func NewScheduler(
 	sessionDB databases.ClockSessionDatabase,
 	inboxDB databases.InboxItemDatabase,
 	civDB databases.CivilianDatabase,
+	courtDB databases.CourtCaseDatabase,
+	arDB databases.ArrestReportDatabase,
 ) *Scheduler {
 	// Generate a unique instance ID for this pod
 	instanceID := os.Getenv("DYNO") // Heroku sets this to "web.1", "web.2", etc.
@@ -71,6 +76,8 @@ func NewScheduler(
 		SessionDB:  sessionDB,
 		InboxDB:    inboxDB,
 		CivDB:      civDB,
+		CourtDB:    courtDB,
+		ARDB:       arDB,
 		instanceID: instanceID,
 		jobStats:   map[string]*JobStat{},
 	}
@@ -111,6 +118,17 @@ func (s *Scheduler) Start() {
 			zap.S().Errorw("failed to register inbox delinquency tick", "error", err)
 		} else {
 			s.registerJob("inboxDelinquencyTick", inboxDelinquencySchedule)
+		}
+	}
+
+	// Courts: file unanswered citations and arrests so a judge can see them.
+	// Hourly is plenty — the window is measured in days.
+	if s.CourtDB != nil && s.CivDB != nil && s.CDB != nil {
+		const courtFTRSchedule = "0 * * * *"
+		if _, err := s.cron.AddFunc(courtFTRSchedule, s.courtFailureToRespondSweep); err != nil {
+			zap.S().Errorw("failed to register court failure-to-respond sweep", "error", err)
+		} else {
+			s.registerJob("courtFailureToRespondSweep", courtFTRSchedule)
 		}
 	}
 

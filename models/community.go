@@ -124,6 +124,7 @@ type CommunityDetails struct {
 	MostWantedVisibleFields       []string                `json:"mostWantedVisibleFields" bson:"mostWantedVisibleFields"`
 	MostWantedCustomFields        []MostWantedCustomField `json:"mostWantedCustomFields" bson:"mostWantedCustomFields"`
 	Economy                       EconomySettings         `json:"economy" bson:"economy"`
+	CourtProcessing        CourtProcessingSettings `json:"courtProcessing" bson:"courtProcessing"`
 	RankSettings                  RankSettings            `json:"rankSettings" bson:"rankSettings"`
 	// RpPromotion holds the community's last "RP server promotion" Discord post
 	// and the timestamp used to enforce the once-per-cooldown posting gate.
@@ -383,6 +384,23 @@ type EconomySettings struct {
 	// default, so this is theirs to raise; TransferCeilingCents is the hard
 	// limit they cannot exceed, which keeps the fat-finger rail in place.
 	MaxTransferCents int64 `json:"maxTransferCents" bson:"maxTransferCents"`
+}
+
+// CourtProcessingSettings governs what happens to citations and arrests that
+// the civilian never responds to.
+//
+// A case reaches a judge today only if the civilian CONTESTS it. Anyone who
+// ignores a ticket never appears on the judicial side at all, so those cases
+// are simply lost — which is what communities have been reporting.
+type CourtProcessingSettings struct {
+	// AutoFileUnanswered files an unanswered citation or arrest as a court case
+	// once the response window has passed, so a judge can see it. Opt-in: it
+	// changes what lands in a community's judicial queue, and a community that
+	// does not run courts should not suddenly acquire a backlog.
+	AutoFileUnanswered bool `json:"autoFileUnanswered" bson:"autoFileUnanswered"`
+	// RespondDays is how long a civilian has to contest before the case is
+	// filed for them. 0 means DefaultRespondDays.
+	RespondDays int `json:"respondDays" bson:"respondDays"`
 }
 
 // TenCodes holds the structure for ten-codes used in departments
