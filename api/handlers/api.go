@@ -177,6 +177,7 @@ func (a *App) New() *mux.Router {
 		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 		ACDB:   acDB,
 		UDB:    databases.NewUserDatabase(a.dbHelper),
+		ALDB:   alDB,
 	}
 
 	// healthchex
@@ -220,6 +221,7 @@ func (a *App) New() *mux.Router {
 	apiV2.Handle("/economy/inbox/{id}/contest", api.Middleware(http.HandlerFunc(economy.ContestInboxItemHandler))).Methods("POST")
 	apiV2.Handle("/economy/inbox/{id}/uphold", api.Middleware(http.HandlerFunc(economy.UpholdInboxItemHandler))).Methods("POST")
 	apiV2.Handle("/economy/transfer", api.Middleware(http.HandlerFunc(economy.TransferHandler))).Methods("POST")
+	apiV2.Handle("/economy/civilian/{civilianId}/adjust", api.Middleware(http.HandlerFunc(economy.AdjustCivilianBalanceHandler))).Methods("POST")
 
 	ws := r.PathPrefix("/ws").Subrouter()
 
