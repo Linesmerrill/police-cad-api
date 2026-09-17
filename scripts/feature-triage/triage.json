@@ -3,7 +3,11 @@
   "triage": {
     "6a4da63764527e6069820926": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "high",
       "rationale": "A court-scoped 'DOJ Portal' / Attorney Access role so District/Defense Attorneys can view and participate in court cases WITHOUT full Judicial edit rights (which today risk accidental or intentional changes to court records). Leans on the existing community permission model (userHasCommunityPermission / roles); the net-new is a distinct role + a read/participate court surface. Split from the shipped 'Automatic Sentencing Calculation'; part of the DOJ-permissions cluster.",
@@ -12,7 +16,11 @@
     },
     "6a4da63764527e6069820927": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "Plea-deal + prosecutor workflow building on the shipped per-charge disposition + Final Judgment system: a prosecutor proposes a plea (reduced/amended charges + agreed fine/jail), the defendant/defense accepts or rejects, and the judge finalizes, with totals auto-updating from the agreed charges. The sentencing math already exists; the net-new is the negotiation state machine + roles. Split from the shipped 'Sentencing Calculator and Plea Deal System'.",
@@ -21,7 +29,11 @@
     },
     "6a4c3ab0e948c039f9ca138a": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "high",
       "rationale": "Two asks. (1) Auto-sentencing calculator with per-charge Upheld/Dismissed/Reduced/Amended and live-updating totals — SHIPPED (arrest fine+time calc + court sentencing with per-charge dispositions & Final Judgment totals across api/web/mobile). (2) Net-new: a separate 'DOJ Portal' / 'Attorney Access' role so District/Defense Attorneys can work court cases WITHOUT full Judicial edit permissions, which today risk accidental or intentional changes to court records. Scoped role + portal leaning on the existing permission model. Mark the site request released once satisfied; the DOJ-portal remainder is the real open work.",
@@ -30,7 +42,11 @@
     },
     "6a4c35e0e948c039f9ca11b2": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "high",
       "rationale": "A fuller restatement of the existing 'Self Dispatch and Call Attachment Suggestion' (same requester): authorized LEO/Fire/EMS create/attach/close/edit their own calls when no dispatcher is online, see assigned units, and get a PER-UNIT tone when attached (not a dept-wide sound). Calls + unit assignment already exist, so it extends them with permissioned self-service + a targeted attach notification. Consolidate with the original into one self-dispatch project rather than tracking twice.",
@@ -39,7 +55,10 @@
     },
     "6a4a242d40e035ad466bffdf": {
       "category": "quick_win",
-      "scope": ["website", "mobile"],
+      "scope": [
+        "website",
+        "mobile"
+      ],
       "effort": "S",
       "confidence": "high",
       "rationale": "A read-only penal-code reference for officers (and optionally civilians) — a place to read the FULL code without the current truncation. penalCodes already live on the community and are fetched for citations/forms, so this is a display surface (a scrollable/searchable list near the police dashboard quick actions), not new data or plumbing. The requester explicitly wants read-only access WITHOUT granting Judicial (edit) access, so it's purely additive with no permission risk.",
@@ -48,7 +67,12 @@
     },
     "6a13d4bf07d208ef76c64182": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile", "bot"],
+      "scope": [
+        "api",
+        "website",
+        "mobile",
+        "bot"
+      ],
       "effort": "XL",
       "confidence": "high",
       "rationale": "Highest-voted request (46). The custom-items + shop + inventory core aligns with the economy/inventory system staff already said is planned. But the full FiveM scope (looting, crafting, hunger/thirst) is a big lane change for a CAD — a commenter even said 'this is a cad system not a fivem addon'. Recommend carving an MVP: custom items + shops + inventory tied to the existing economy, and defer hunger/crafting/looting.",
@@ -57,7 +81,11 @@
     },
     "69a90489f5524b2c4aa0834b": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "XL",
       "confidence": "high",
       "rationale": "ER:LC PRC API can supply live player lists, callsigns, locations, join/leave logs and some in-game commands — enabling live unit tracking, duty logging and CAD-to-game announcements. No RP data (civilians/warrants) is exposed, so it's about bringing live game state in, not syncing records. Staff already publicly deferred pending stronger demand; requester notes plates + emergency calls were recently added to the API.",
@@ -66,7 +94,11 @@
     },
     "6a3d4781bd5933e6c9b8badf": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Adds a richer, realistic ticket/citation format with extra fields (e.g. phone number for follow-ups) that carry into court. Citations already exist; this extends the citation model + issue forms across surfaces. Solid votes (9) for a moderate change.",
@@ -75,7 +107,11 @@
     },
     "69d32a709c76e1ecb185684a": {
       "category": "full_feature",
-      "scope": ["website", "api", "bot"],
+      "scope": [
+        "website",
+        "api",
+        "bot"
+      ],
       "effort": "L",
       "confidence": "high",
       "rationale": "Sync Discord roles → CAD community roles on join. Discord OAuth linking exists but only with 'identify' scope; needs expanded scope (guilds/roles), a community↔guild mapping, a Discord-role→CAD-role mapping table, and auto-enroll logic. Staff flagged a caveat: syncing roles still requires re-adding members + setting permissions.",
@@ -84,7 +120,11 @@
     },
     "69aca7d24794df4f176b596d": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Link civilian profiles for relationships (spouse, family). Contained: a relationship reference on the civilian model plus UI to set/display it. Positive reception incl. staff ('cool concept'); 9 votes, 4 comments of agreement.",
@@ -102,7 +142,11 @@
     },
     "69c43fbf12dc46d46229c7b4": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "high",
       "rationale": "DMV/firearm approval workflow: approve/deny vehicle registrations, emissions tests, and firearm applications, with a chat to arrange appointments. Confirmed no approval state exists today for vehicles or firearms (only civilians have approvalStatus) — so this adds a new approval lifecycle + a coordination chat. 7 votes.",
@@ -129,7 +173,10 @@
     },
     "69be758f47807d968f18c9c8": {
       "category": "full_feature",
-      "scope": ["bot", "api"],
+      "scope": [
+        "bot",
+        "api"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Pay fines via UnbelievaBoat. Staff were positive originally, but LPC now has its own economy + inbox/fines + /pay-fine, which reduces the need. Still useful only for communities standardized on UnbelievaBoat's Discord economy; would be an external API integration hung off fine payment.",
@@ -138,7 +185,10 @@
     },
     "69ca8b7ba4263bca6d1ebd72": {
       "category": "quick_win",
-      "scope": ["website", "api"],
+      "scope": [
+        "website",
+        "api"
+      ],
       "effort": "M",
       "confidence": "high",
       "rationale": "Multi-select units on the dispatch dashboard to set one status for all (e.g. bulk offline). No batch endpoint exists today (each status change is a single PUT); adds roster checkboxes + a batch tenCode endpoint (~half a day). Requested by staff; the new dispatch dashboard already has the roster/filter scaffolding.",
@@ -147,7 +197,11 @@
     },
     "69a8879367bba4188404c58f": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Toggle to let police view medical history on servers without EMS/Fire. Staff framed it as a configurable, per-department component under the planned Custom Departments work. Medical history already exists (EMS); this is a permission/visibility toggle + surfacing it to police.",
@@ -156,7 +210,11 @@
     },
     "6a29d46a69d1034101c666a0": {
       "category": "quick_win",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "high",
       "rationale": "Owner ability to add/remove money from player accounts. The economy + wallet + transaction ledger already exist, so this is an admin balance-adjust action + a small UI, with a ledger entry for auditability. Clear owner demand (appears twice).",
@@ -165,7 +223,11 @@
     },
     "6a27ff9ef89712e483ac3cb3": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "high",
       "rationale": "Sentencing calculator + plea-deal system for court. The calculator (auto-sum jail time/fines from charges, concurrent/consecutive, summary) is a strong, mostly self-contained MVP since penalCode amounts already exist. The plea-deal/prosecutor workflow is the larger second phase.",
@@ -174,7 +236,12 @@
     },
     "6a25cd1632be3f84fb9faed1": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile", "bot"],
+      "scope": [
+        "api",
+        "website",
+        "mobile",
+        "bot"
+      ],
       "effort": "L",
       "confidence": "high",
       "rationale": "Custom civilian jobs/companies separate from departments, with their own pay and shops — a natural extension now that the economy exists. Overlaps heavily with two other requests; worth consolidating into one 'civilian economy/jobs' project.",
@@ -183,7 +250,12 @@
     },
     "6a1f576205070584e6da746e": {
       "category": "full_feature",
-      "scope": ["api", "bot", "website", "mobile"],
+      "scope": [
+        "api",
+        "bot",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "high",
       "rationale": "Custom civilian jobs with pay rates + buyable custom items with an inventory and Discord /buy. Directly extends the shipped economy and the bot's economy commands. Near-duplicate of 'Job system' and overlaps the top items request.",
@@ -201,7 +273,9 @@
     },
     "69dfdb973077f4083243d50f": {
       "category": "quick_win",
-      "scope": ["mobile"],
+      "scope": [
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "high",
       "rationale": "Alert sounds on the mobile dashboards. expo-av is already integrated and mobile already plays panic + signal-100 sounds; the gap is sounds for new calls/BOLOs/dispatch tones. Reuses the established pattern, so relatively cheap. Anchors the broader audio cluster.",
@@ -210,7 +284,11 @@
     },
     "69b67ab11056a7b7299c92f3": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Restrict weapon-license create/edit/remove to a special 'staff' department (toggleable), so civilians can't self-issue firearm licenses, plus a police 'gun taken' flag. Permissions model exists; this adds a license-permission gate + a field. Fits the Custom Departments direction.",
@@ -219,7 +297,11 @@
     },
     "69b433b6e0ccd21fa051d877": {
       "category": "easy",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Auto-assign a default image to registered vehicles/firearms by keyword match (e.g. 'Karin Sultan'). Nice quality touch but requires building + hosting a curated keyword→image library (licensing/quality caveats). Modest demand.",
@@ -228,7 +310,11 @@
     },
     "69ae33420f55723212486bde": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "Courts add-on: civilian-vs-civilian lawsuits, a records-request workflow, and DMV license approve/deny/revoke (toggleable). Staff acknowledged it as an add-on to the existing court system. Overlaps the DMV and other court requests — consolidate.",
@@ -237,7 +323,9 @@
     },
     "69a888ee4725bb15abdc132d": {
       "category": "full_feature",
-      "scope": ["api"],
+      "scope": [
+        "api"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "A FiveM resource that pushes tickets/CAD data into the game. Feasible via the existing API, but it's a new client surface (Lua resource) to build and maintain. Similar spirit to the ER:LC parity ask; gauge demand across FiveM communities first.",
@@ -246,7 +334,11 @@
     },
     "6a3d7bab5f546057cdcb5e0b": {
       "category": "easy",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Admin-customizable insurance-company list, selectable when registering a vehicle — modeled on the existing penal-code config pattern, so tractable. Contained (config list + a vehicle field). Low demand (3 votes), hence cheap-but-not-urgent.",
@@ -255,7 +347,11 @@
     },
     "6a2f29cc1f6a7404d19e146a": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "Sub-divisions within departments (Detective Bureau, SWAT, etc.) with divisional ranks. This is a structural change to the department/rank model and all the surfaces that render ranks. Real value for larger servers but not small.",
@@ -264,7 +360,11 @@
     },
     "6a26a6569bde5da5f0e17848": {
       "category": "quick_win",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "high",
       "rationale": "Auto-calculate total fine + jail time when charges are added to an arrest, and store the totals on the record. penalCode amounts already exist, so this is summation + display + persistence — removes a real, repeated manual pain point. Effectively the MVP of the sentencing-calculator request.",
@@ -273,7 +373,11 @@
     },
     "6a179ef5a5d3130925b94448": {
       "category": "full_feature",
-      "scope": ["website", "mobile", "api"],
+      "scope": [
+        "website",
+        "mobile",
+        "api"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Bring Fire/EMS dashboards to parity with the police dashboard, including sending tones/panic. EMS dashboard and LEO/FD/EMS tones already exist on the website, so this is closing parity gaps rather than net-new plumbing. Overlaps the audio cluster.",
@@ -282,7 +386,11 @@
     },
     "6a11249046e73d2248545e0c": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "high",
       "rationale": "Shift tracking with time-based quotas, shift history, and supervisor oversight/reports. Basic clock-in/clock-out already exists (economy), so the net-new value is quotas + reporting + supervisor permissions. Requester suggests a simple clock in/out button per department.",
@@ -291,7 +399,10 @@
     },
     "69f97d85e5da87ac3ad736f2": {
       "category": "quick_win",
-      "scope": ["website", "mobile"],
+      "scope": [
+        "website",
+        "mobile"
+      ],
       "effort": "S",
       "confidence": "high",
       "rationale": "Play a sound/alert when a looked-up person has an active warrant. Sound infra already exists; this is a small wiring job on the search/lookup result. Cheap, adds a safety/immersion cue. Part of the audio cluster.",
@@ -300,7 +411,11 @@
     },
     "69f04fb3581225bb45cc8f29": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Restrict who can suspend/revoke driver/firearm licenses (e.g. judges/DOJ), with audit log + notification, to stop RP abuse. The permission model and audit-log infra already exist, so this is adding a specific permission gate + wiring notifications. Overlaps other permission/license requests.",
@@ -309,7 +424,11 @@
     },
     "69ed0b3d242caad0f7b47223": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "XL",
       "confidence": "high",
       "rationale": "Full training academy + career progression: courses/checklists, certifications, promotion pathways, evaluations, transfers, and a career-timeline dashboard. Large multi-entity system. Ranks + promotion metrics partially exist, but this is a major build best suited to large servers.",
@@ -318,7 +437,11 @@
     },
     "69d450ff198e246ac867f728": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "A cross-department chat with images and a live feed. Real-time socket infra and a court-chat model already exist as a pattern, but a general chat needs rooms, moderation, history, and images across surfaces. Overlaps the DMV/appointment chat and the (declined) voice requests — text chat is the viable slice.",
@@ -327,7 +450,11 @@
     },
     "6a4252fc2ad13be0912d943e": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Give tickets a pay window (server-configurable) that turns into a warrant if unpaid, plus a paid/unpaid flag. The inbox/fines system already has due dates (dueAt), delinquent status, and contest-extension days, and a scheduler already flips fines delinquent (api/scheduler/economy_jobs.go) — so the net-new is auto-consequence generation + config. DNYGUNZ (2026-07-07) asks for this generalized to real-world failure-to-respond actions: failure to answer a ticket → license suspension/revocation, failure to pay → warrant, and for ARRESTS a failure-to-appear → automatic warrant. Widen from citations-only to arrests and add license-suspend as an outcome. Infra is mostly there.",
@@ -336,7 +463,10 @@
     },
     "6a408470a8212db5c3869f9a": {
       "category": "quick_win",
-      "scope": ["api", "website"],
+      "scope": [
+        "api",
+        "website"
+      ],
       "effort": "S",
       "confidence": "high",
       "rationale": "Set a player's account balance from server settings. Duplicate of 'Send more money to players'; economy + ledger exist, so it's a small admin balance-set action. Fold into that one.",
@@ -345,7 +475,11 @@
     },
     "6a090eb09687cfca58d7fec8": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Import/duplicate a character (with vehicles, firearms, etc.) from one community into another. Contained but non-trivial: deep-copy of civilian + linked assets with fresh IDs and ownership. Requester clarified the flow in a comment. Modest demand (2 votes).",
@@ -354,7 +488,11 @@
     },
     "69f65e091a6d8daf7d4b058f": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "XL",
       "confidence": "high",
       "rationale": "Broad court overhaul: arrest plea flow (like citations), lawyer/attorney integration, civilian-vs-civilian lawsuits, and form-based legal documents (motions, subpoenas, evidence). A large legal-ecosystem build. Strong overlap with the other court requests — anchor a consolidated court roadmap.",
@@ -372,7 +510,10 @@
     },
     "6a2843110360fd95354ea630": {
       "category": "full_feature",
-      "scope": ["bot", "api"],
+      "scope": [
+        "bot",
+        "api"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "Expand the Discord bot with RP action commands (/arrest, /fine, /inventory, /pay, /buy, /sell, /give, /use, etc.) so actions are logged in chat. Some already exist (/search, /send-money, /pay-fine, /contest-fine); the RP/inventory ones depend on the items/economy system. Fits the 'bot as a first-class surface' direction.",
@@ -381,7 +522,11 @@
     },
     "6a24dfeb32be3f84fb9f9101": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "Self-dispatch: authorized responders create their own calls, attach/detach units, update statuses, and get a per-unit tone when attached. The calls system + unit assignment already exist, so this extends them with permissioned self-service + a targeted attach notification. Realistic value for communities without dedicated dispatchers.",
@@ -390,7 +535,12 @@
     },
     "6a245af773dee9cc7d183cc2": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile", "bot"],
+      "scope": [
+        "api",
+        "website",
+        "mobile",
+        "bot"
+      ],
       "effort": "XL",
       "confidence": "med",
       "rationale": "A sprawling department grab-bag: per-rank wages, manager-role join approvals, paid licensing/applications, political/banking departments, an in-CAD shop, department cloning, and application questionnaires. Most sub-ideas duplicate other requests. Two nuggets are cheap and worth extracting now: 'clone a department' and 'manager role can approve joins without full admin'.",
@@ -399,7 +549,11 @@
     },
     "6a22ceb8e3d6d8b3c13e77b0": {
       "category": "full_feature",
-      "scope": ["website", "mobile", "api"],
+      "scope": [
+        "website",
+        "mobile",
+        "api"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Audio for new 911 calls, per-officer attach alerts, and a TTS panic that repeats the officer's callsign. The 911-tone and attach-alert parts are quick wins on existing sound + socket infra; the TTS callsign is the net-new piece. Central to the audio cluster — build these together.",
@@ -408,7 +562,11 @@
     },
     "6a1d6a454168560115580943": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "A booking/jail process: mugshot photo, intake info, jail duration, injury/status notes, and showing the last mugshot on lookup. Arrest records exist; this adds a booking sub-record + image upload + lookup surfacing. Low demand (1 vote) but a coherent RP feature.",
@@ -417,7 +575,11 @@
     },
     "6a1b3160cb406b8d4da391f1": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Let owners/admins upload uniform and vehicle-paint images + descriptions per department (a code-of-conduct/reference gallery). Contained new sub-entity (department media) reusing existing image-upload infra. Low demand (1 vote).",
@@ -426,7 +588,11 @@
     },
     "6a0c2fce9d40ba714626c0cd": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "L",
       "confidence": "med",
       "rationale": "Allow DOJ/prosecutors to initiate/track criminal cases without waiting for the defendant to contest. Confirmed in code: a citation/arrest only reaches the court if the civilian CONTESTS — there is no response-window/deadline field (CourtCaseDetails/ContestedItem have no respondBy/dueBy) and nothing fires on non-response. DNYGUNZ reiterated (2026-07-07): unaddressed tickets/arrests never reach a judge, so the judicial side has to go through the police dept just to see an arrest. Real ask = proactive, prosecutor-initiated cases PLUS a forced-response path so cases surface without a contest. Needs a product decision on the case-lifecycle model before building.",
@@ -435,7 +601,11 @@
     },
     "6a0000358135cc19915dce00": {
       "category": "easy",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "med",
       "rationale": "Add 'media' (image/video) and 'link' field types to the custom report/form builder. The form builder and image-upload infra already exist, so it's adding field types + rendering. Improves report quality; modest demand (1 vote).",
@@ -453,7 +623,10 @@
     },
     "69c21fa43e63368d91d72f35": {
       "category": "quick_win",
-      "scope": ["website", "mobile"],
+      "scope": [
+        "website",
+        "mobile"
+      ],
       "effort": "S",
       "confidence": "high",
       "rationale": "Play a tone/page for dispatch when a new 911 call arrives so a busy dispatcher doesn't miss it. Sound + socket infra already exist (calls already broadcast), so it's a small wiring job. Part of the audio cluster; build alongside Mobile Sound / Audio Notifications.",
@@ -462,7 +635,11 @@
     },
     "69ab3c1c12817610a976dc97": {
       "category": "full_feature",
-      "scope": ["website", "mobile", "bot"],
+      "scope": [
+        "website",
+        "mobile",
+        "bot"
+      ],
       "effort": "XL",
       "confidence": "med",
       "rationale": "Internationalization + a community-translation program. There's no i18n framework today, so retrofitting one across web + mobile (+ bot) and standing up a translation contribution flow is a large, cross-cutting undertaking. Very low current demand (1 vote).",
@@ -471,19 +648,303 @@
     },
     "69fa8e161ce52768aea34994": {
       "category": "full_feature",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "confidence": "high",
       "rationale": "Restrict civilians from deleting their own records and give supervisor roles controlled delete/manage (with bulk options). Staff agreed ('should have added from the beginning') and it's already in beta. Permission model + records exist; this gates deletion + adds supervisor tooling.",
       "risks_or_deps": "Currently in beta_testing — in flight.",
       "possible_duplicate": "Restrict who can suspend or revoke licenses"
+    },
+    "6a6447cc1ca50c260d592996": {
+      "category": "quick_win",
+      "scope": [
+        "website"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "Raise or remove the per-transfer send cap. Grounded and it is a one-liner: the website caps sends at $10,000 (wallet.ejs SEND_MAX_CENTS = 10_000_00) while the API's own transferMaxCents is $100,000 (economy.go), so the website is ten times stricter than the server it talks to. The comment next to the website constant claims it matches the server, which is why nobody noticed. Aligning it to the API unblocks the reported case (a $600,000 property sale) at a stroke; making it a community setting is the fuller answer.",
+      "risks_or_deps": "Fix the misleading 'also enforced server-side' comment at the same time. If the cap becomes configurable it belongs in economy settings next to fineMode, and the server cap stays as the hard ceiling."
+    },
+    "6a742d5abbbb6fedaa5b6733": {
+      "category": "quick_win",
+      "scope": [
+        "website",
+        "api"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "Split penal-code jail time into separate minutes and seconds inputs instead of one field. Jail time is stored as free text today (community_defaults.go ships values like '3 minutes 30 seconds'), so this is a form change plus a parse/format helper, not a schema migration. Small, self-contained, and removes a recurring source of malformed entries.",
+      "risks_or_deps": "Existing values are free text in every community, so parse tolerantly and keep writing a canonical string. Normalize on write and let old values heal over time rather than bulk-rewriting.",
+      "possible_duplicate": "Automatic calculation for jail time (parent)"
+    },
+    "6a626f4016e6761f0c7b5efe": {
+      "category": "easy",
+      "scope": [
+        "website",
+        "api"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Multi-select delete for civilian characters. Two asks in one: bulk selection, and the fact that the list resets to page one after each delete so admins lose their place. The second is arguably a bug and is the cheaper half. Needs a batch delete endpoint; today each delete is a single call.",
+      "risks_or_deps": "Destructive and bulk: require a typed confirmation, cap the batch size, and write an audit entry per deletion rather than one per batch.",
+      "possible_duplicate": "A Arrest, Charge, and Record wipe for all civilians (bulk admin destructive actions)"
+    },
+    "6a55555e8ef6ef7b43ae9aef": {
+      "category": "easy",
+      "scope": [
+        "website",
+        "api",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "med",
+      "rationale": "Internal affairs complaint form for law enforcement. The configurable form builder and per-department rank gates already exist, so the cheapest honest answer is a shipped IA template plus routing to a supervisor role rather than net-new machinery. Only worth doing properly once the custom-forms cluster lands, otherwise it is a one-off.",
+      "risks_or_deps": "Decide who can read submissions: an IA complaint that the accused officer's department can read is worse than no form.",
+      "possible_duplicate": "Customizable Reports, Citations, Department Specific Forms, and Report Workflows"
+    },
+    "6a728bcf2b6333b65e7c5c44": {
+      "category": "probably_not",
+      "scope": [
+        "api"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "Already shipped. The economy (clock-in pay, wallet, balances, fines, transfers) exists and is live; this request predates it and is still marked open on the site. It should be closed or moved to released so it stops counting against the open total and stops attracting votes for something people already have. The 'items to spend money on' half is real and lives in the items/jobs cluster.",
+      "risks_or_deps": "Close or mark released on the site rather than building anything.",
+      "possible_duplicate": "Items, custom looting and crafting; Job system; Economy Jobs"
+    },
+    "6a61ac227ef3fdad0e06d660": {
+      "category": "probably_not",
+      "scope": [
+        "website",
+        "mobile",
+        "api"
+      ],
+      "effort": "XL",
+      "confidence": "high",
+      "rationale": "Voice channels inside the CAD. Every community here already runs on Discord and the CAD is supplemental to it, so this rebuilds the one thing Discord does best and that all these servers already have open on a second monitor. Voice is also a genuinely heavy lift: WebRTC or a hosted SFU, TURN servers, per-minute cost that scales with usage, moderation duties, and mobile background-audio permissions on both stores.",
+      "risks_or_deps": "Ongoing per-minute infrastructure cost and a moderation burden for user-generated audio, against a need Discord already meets for free."
+    },
+    "6a6d6f816663a62cd8d2b168": {
+      "category": "probably_not",
+      "scope": [
+        "api"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Cage fighting minigame for money. Out of scope for a CAD: this is game content, not police or court records, and it has no path to the existing surfaces. One vote, one line of description, no detail to build against."
+    },
+    "6a8dd434cc1ed7d42a64dd90": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "L",
+      "confidence": "high",
+      "rationale": "Automatic court processing for uncontested citations and arrests, with Failure to Appear and Failure to Respond consequences. Confirmed end to end in code: a citation or arrest only reaches a judge if the civilian CONTESTS it, so anyone who ignores a ticket never surfaces on the judicial side at all. A fine does drop into the civilian's inbox with a due date, and inboxDelinquencyTick already flips it to 'delinquent' on a schedule, but nothing anywhere consumes that status beyond displaying it. So the scheduling half of this is already built and wired to nothing. Arrest fines never reach the inbox at all: the hook only fires for citation and ticket types. A paying customer raised exactly this in support, asking for auto license suspension and automatic bench warrants after a 72-hour window.",
+      "risks_or_deps": "Needs a product decision on the case lifecycle before building. Auto-suspending a license and auto-issuing a warrant are both destructive and hard to unwind, so gate them behind per-community toggles with a configurable window (defaultDueDays already exists) and make the consequences reversible. Fix the arrest-fine inbox gap as part of it.",
+      "possible_duplicate": "Automatic case progression; Expired tickets (failure-to-respond); Courts Department Update"
+    },
+    "6a951b666e0325c555c27a4f": {
+      "category": "full_feature",
+      "scope": [
+        "website",
+        "api",
+        "mobile"
+      ],
+      "effort": "XL",
+      "confidence": "high",
+      "rationale": "A real form builder: communities design their own reports and citations, choose field types, and configure what happens after submission (review, routing, storage, distribution). This is the parent of the whole forms cluster and the most fully argued request in it. A configurable form system and per-department rank gates already exist, so the net-new is the design surface, the field-type library, and the submission workflow engine. The workflow half is the expensive part and can be deferred.",
+      "risks_or_deps": "Phase it: field-type library and form designer first, routing and approval workflows second. Versioning matters, since editing a form must not retroactively break records already filed against the old shape.",
+      "possible_duplicate": "Look up Database and Licencse; Forms; internal complaint form; Another Police Report Beta Suggestion"
+    },
+    "6a8bc01c7070333bf4d70473": {
+      "category": "full_feature",
+      "scope": [
+        "website",
+        "api",
+        "mobile"
+      ],
+      "effort": "L",
+      "confidence": "med",
+      "rationale": "More realistic, editable lookup and licence forms, explicitly modelled on a competitor. The concrete part is editable fields, which is the forms cluster; the rest is visual polish on the existing lookup screens. Worth folding into the form-builder work rather than chasing a competitor's layout separately.",
+      "risks_or_deps": "Do not copy a competitor's forms directly. Take the requirement (editable fields, denser realistic layout) and design it against our own token system.",
+      "possible_duplicate": "Customizable Reports, Citations, Department Specific Forms, and Report Workflows; Forms"
+    },
+    "6a58145a8d51e059fe204e05": {
+      "category": "full_feature",
+      "scope": [
+        "website",
+        "api"
+      ],
+      "effort": "L",
+      "confidence": "low",
+      "rationale": "Make police forms look more realistic, again citing a competitor. No specifics beyond that, so there is nothing distinct to build here that the form-builder request does not already cover in far more detail. Track it as a vote for that cluster rather than its own line of work.",
+      "possible_duplicate": "Customizable Reports, Citations, Department Specific Forms, and Report Workflows; Look up Database and Licencse"
+    },
+    "6a557f9c2bc5e283b5375406": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "L",
+      "confidence": "high",
+      "rationale": "Custom civilian jobs outside departments, each with its own pay and salary. A natural extension now that clock-in pay, wallets and the transaction ledger all exist: the pay machinery is built and this is mostly a jobs model plus assignment and a pay source that is not a department. Overlaps two other requests closely enough that they should be one project.",
+      "risks_or_deps": "Consolidate with the civilian jobs and items cluster before building; three separate requests describing one system is the main risk here.",
+      "possible_duplicate": "Job system; Custom Civilian Jobs + Buyable Items; Items, custom looting and crafting"
+    },
+    "6a8e4295cc1ed7d42a64ee20": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Community-wide wipe of criminal records, with per-type toggles (citations, felonies, warnings), plus a way to spot characters carrying unusually large records. Criminal history is embedded in the civilian document, so the wipe itself is one scoped update; the care is all in the guardrails. The reporting half (who has four felonies and a dozen traffic stops) is a separate and arguably more useful feature than the wipe.",
+      "risks_or_deps": "Irreversible and community-wide. Needs an owner-only gate, a typed confirmation naming the community, an audit record of what was cleared, and ideally a soft-delete window rather than a hard purge. Scope strictly to one community.",
+      "possible_duplicate": "A Arrest, Charge, and Record wipe for all civilians (identical request, same author)"
+    },
+    "6a6ac424f734a93e3ea6e47f": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Duplicate of 'A Wipe feature for stuff like criminal history and etc.' by the same author, word for word. Merge the two and keep the votes on whichever is kept, so the demand reads accurately instead of being split across two rows.",
+      "risks_or_deps": "Close as duplicate rather than triaging separately.",
+      "possible_duplicate": "A Wipe feature for stuff like criminal history and etc. (identical text, same author)"
+    },
+    "6a5f98b8a74a82a47dbe106b": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Stop civilians deleting their own records, and optionally their accounts. Already substantially covered: the record-deletion half is in beta as 'Civilian/Police Records Issue/Suggestion', and departments already carry restrictCivilianRecordDeletion, which new departments get set to true. The uncovered part is account deletion and making the existing restriction obvious to owners who do not know the toggle exists.",
+      "risks_or_deps": "Check what the beta already ships before building. The likely real gap is discoverability of the existing per-department toggle, not new enforcement.",
+      "possible_duplicate": "Civilian/Police Records Issue/Suggestion (in beta); Citation removal toggle; Restrict Access to Criminal History deletion & Judicial Actions"
+    },
+    "6a98bb1c36c96a07ad030e56": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "Per-community toggle for whether civilians may remove their own crimes, so that on strict servers a record follows a character permanently. This is the same switch as the records beta and the department-level restrictCivilianRecordDeletion flag; the distinct idea is making it a community-wide default rather than per department.",
+      "risks_or_deps": "Fold into the records beta rather than shipping a second, competing toggle.",
+      "possible_duplicate": "Civilian/Police Records Issue/Suggestion (in beta); Civs can delete their records and accounts"
+    },
+    "6a5fcb291dd61d3e4447b8ec": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Separate police powers from judicial ones: officers should not be able to delete criminal history, suspend or revoke licences, or set parole and probation. Well argued and the pieces exist — the community permission model already has the shape for it, licences have a canonical status set with a single write path (UpdateLicenseByIDHandler), and parole and probation are flags on the civilian. The net-new is a judicial permission and enforcement at those write points.",
+      "risks_or_deps": "Enforce server-side, not just by hiding buttons. Existing communities have officers relying on these actions today, so default the restriction off and let owners opt in, or it becomes a support wave on deploy.",
+      "possible_duplicate": "Restrict who can suspend or revoke licenses; Civilian/Police Records Issue/Suggestion (in beta)"
+    },
+    "6a9cc16cfd28cd90759f3e1e": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "med",
+      "rationale": "Officer-visible flags on a character (gang affiliation, armed, hostile to law enforcement) so patrol knows who they are dealing with. There is precedent to copy: vehicles already carry a flag system, and civilians already have single-purpose booleans for parole, probation and deceased. This generalises that into a configurable, community-defined flag list surfaced on lookup.",
+      "risks_or_deps": "Do not hand-roll the truth test; vehicle flags already have two encodings with per-field polarity and a shared helper, and a second ad-hoc scheme would repeat that mess. Decide who may set and see flags, and whether the civilian can see their own.",
+      "possible_duplicate": "Vehicle flag encodings (existing precedent to follow)"
+    },
+    "6a4e4ce1b4e78b4c04891d70": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "med",
+      "rationale": "A bail bondsman role: a restricted view showing only active warrants and their bond amounts, with a payout proportional to the bond. Both halves exist already — warrants with a status lifecycle, and an economy with balances and a ledger — so this is largely a scoped role plus a filtered view plus a payout action. Niche but self-contained, and it gives civilians something to do with the economy.",
+      "risks_or_deps": "Warrants carry real names and charges, so the restricted view must be genuinely restricted rather than the full warrant screen with fields hidden. Bond amounts do not exist on the warrant model yet."
+    },
+    "6aa4ffb11b8d06a8669fdce7": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "XL",
+      "confidence": "low",
+      "rationale": "Civil litigation: civilian-versus-civilian suits, Section 1983 rights complaints, and formal intent-to-sue notices against departments or individual officers. The most specialised court request yet, and it presumes a US federal civil-rights framework that most communities will not recognise. The generic half, civilian-initiated civil cases, is already part of the Courts Department Update ask and should be built there if at all.",
+      "risks_or_deps": "Very narrow audience. Build the general civil-case lifecycle first and let this be a template on top, rather than a bespoke Section 1983 workflow.",
+      "possible_duplicate": "Courts Department Update (civilian-vs-civilian lawsuits); Automatic case progression"
+    },
+    "6aa84bccb7dbc00fba97c6d3": {
+      "category": "full_feature",
+      "scope": [
+        "bot",
+        "api"
+      ],
+      "effort": "M",
+      "confidence": "med",
+      "rationale": "Issue citations, warnings and warrants from Discord slash commands. This lands squarely in a known gap: the bot has no warrant, BOLO, call or arrest commands today, while licence checks and revocation already work there, so the asymmetry the requester noticed is real. Writing records from Discord is a bigger step than reading them, though.",
+      "risks_or_deps": "Write actions from Discord need the same permission checks as the CAD, and the bot's role gate is its own allowlist rather than Discord permissions. Build it against the API rather than direct Mongo, and regenerate the command docs or CI fails.",
+      "possible_duplicate": "Bot feature parity gaps"
+    },
+    "6a628eaf16e6761f0c7b637b": {
+      "category": "full_feature",
+      "scope": [
+        "api"
+      ],
+      "effort": "XL",
+      "confidence": "high",
+      "rationale": "Support Roblox ER:LC rather than only GTA-style servers. Substantially the same ask as the 19-vote ER:LC parity request, which already has the detail: the public API can supply player lists, callsigns and join/leave logs. Worth merging so the demand shows in one place instead of two.",
+      "risks_or_deps": "Merge into the parity request; on its own this adds a vote, not a requirement.",
+      "possible_duplicate": "Parity with Emergency Response Liberty County (Roblox); A FiveM Addon for the cad/ticket system"
+    },
+    "6a5924230bf718aca20fce2a": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website"
+      ],
+      "effort": "XL",
+      "confidence": "med",
+      "rationale": "An official, opt-in, permission-scoped API so community owners can let their own websites read balances, fines, vehicles and departments, and write things like deposits and invoices. Thoughtfully written and explicitly respects why the API is locked down today. The blocker is underneath it: authorisation is still partly by a forgeable userId query parameter, so issuing third-party keys against the current model would hand out more trust than the model can actually enforce.",
+      "risks_or_deps": "Depends on fixing the forgeable-userId debt first; scoped API keys on top of weak auth is worse than no keys. Then per-community key issuance, granular scopes, rate limits, revocation and an audit trail. Write scopes such as depositing money need particular care."
     }
   },
   "unfiled": [
     {
       "title": "Charge quantity / multiple counts (with drug unit weights)",
       "source": "DNYGUNZ (Discord); refines an earlier customer ask",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "M",
       "rationale": "When creating a penal code/violation, prompt whether it has a quantity and what unit: a plain COUNT (scam cards, 'two counts of murder') or a WEIGHT unit (oz/lb/kilo for drugs). When charging, the officer enters the quantity and the CAD multiplies fine and jail time per unit (penalty defined per-unit). Add the count to the report. Data path already exists (ArrestCharge + server-side ComputeArrestTotals); net-new is quantity+unit on the applied charge plus hasQuantity/unit on the penal-code definition.",
       "risks_or_deps": "Multiply in ComputeArrestTotals (server = source of truth); quantity optional + backward-compatible; a 'Life' sentence stays Life regardless of count.",
@@ -492,7 +953,11 @@
     {
       "title": "Increase report narrative character limit (500 -> 1000)",
       "source": "DNYGUNZ (Discord)",
-      "scope": ["api", "website", "mobile"],
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
       "effort": "S",
       "rationale": "The report narrative caps at 500 chars and most reports exceed it. Double to ~1000. Scope to the arrest/police report narrative field specifically (maxlength=500 is reused on ~15 textareas across calls/BOLOs/notes/911 - do NOT blanket-raise) and check for a server-side cap.",
       "risks_or_deps": "Confirm the exact narrative field(s) and verify no server-side validation truncates at 500.",
