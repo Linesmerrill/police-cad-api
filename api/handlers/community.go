@@ -3600,12 +3600,13 @@ var communityEconomyPatchBounds = map[string]struct {
 	min int64
 	max int64
 }{
-	"defaultStartingBalance": {0, 1_000_000_000_000}, // cents ($10B cap)
-	"defaultDueDays":         {0, 3650},              // up to 10 years
-	"contestExtensionDays":   {0, 3650},
-	// 0 means "unset" and falls back to the default; the upper bound is the
-	// hard transfer ceiling.
-	"maxTransferCents": {0, 100_000_000_00},
+	// Reasonable ranges, kept identical to the website form
+	// (public/js/settings-validation.js) and the mobile form
+	// (utils/settingsValidation.js), so an owner sees a clear message there
+	// instead of a rejected save here. Change all three together.
+	"defaultStartingBalance": {0, 1_000_000_000}, // cents: $0 .. $10,000,000
+	"defaultDueDays":         {1, 365},           // a day .. a year
+	"contestExtensionDays":   {1, 365},
 }
 
 // validateCommunityCourtProcessingPatch validates the `courtProcessing`
@@ -3626,7 +3627,7 @@ func validateCommunityCourtProcessingPatch(raw interface{}) (bson.M, error) {
 			}
 			clean[key] = b
 		case "respondDays":
-			n, ierr := coerceJSONInt(value, 0, int64(models.MaxRespondDays))
+			n, ierr := coerceJSONInt(value, 1, int64(models.MaxRespondDays))
 			if ierr != nil {
 				return nil, fmt.Errorf("invalid courtProcessing.respondDays: %s", ierr.Error())
 			}
@@ -3666,7 +3667,18 @@ func validateCommunityEconomyPatch(raw interface{}) (bson.M, error) {
 				return nil, fmt.Errorf("invalid economy.fineMode: expected \"inbox\" or \"auto_debit\"")
 			}
 			clean[key] = s
-		case "defaultStartingBalance", "defaultDueDays", "contestExtensionDays", "maxTransferCents":
+		case "maxTransferCents":
+			// 0 means "use the default". Otherwise a cap under $1 makes no sense,
+			// and the top is the hard transfer ceiling.
+			n, ierr := coerceJSONInt(value, 0, TransferCeilingCents)
+			if ierr != nil {
+				return nil, fmt.Errorf("invalid economy.maxTransferCents: %s", ierr.Error())
+			}
+			if n != 0 && n < 100 {
+				return nil, fmt.Errorf("invalid economy.maxTransferCents: must be 0 to use the default, or at least 100 cents")
+			}
+			clean[key] = n
+		case "defaultStartingBalance", "defaultDueDays", "contestExtensionDays":
 			bounds := communityEconomyPatchBounds[key]
 			n, ierr := coerceJSONInt(value, bounds.min, bounds.max)
 			if ierr != nil {
