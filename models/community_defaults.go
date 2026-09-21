@@ -6,28 +6,32 @@ import "go.mongodb.org/mongo-driver/bson/primitive"
 // community. The CreateCommunityHandler and the legacy-community backfill
 // script share this so a remediated community is indistinguishable from a
 // freshly-created one.
+//
+// Category is what dispatch reads to colour a unit and to answer "who is
+// available". The codes without one are neither: dispatch leaves those units
+// alone rather than guessing.
 func DefaultTenCodes() []TenCodes {
 	return []TenCodes{
-		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY"},
+		{ID: primitive.NewObjectID(), Code: "Signal 100", Description: "HOLD ALL BUT EMERGENCY", Category: TenCodeCategoryEmergency},
 		{ID: primitive.NewObjectID(), Code: "Signal 60", Description: "Drugs"},
-		{ID: primitive.NewObjectID(), Code: "Signal 41", Description: "Logged on to MDT"},
-		{ID: primitive.NewObjectID(), Code: "Signal 42", Description: "Logged off from MDT"},
+		{ID: primitive.NewObjectID(), Code: "Signal 41", Description: "Logged on to MDT", Category: TenCodeCategoryAvailable},
+		{ID: primitive.NewObjectID(), Code: "Signal 42", Description: "Logged off from MDT", Category: TenCodeCategoryOffDuty},
 		{ID: primitive.NewObjectID(), Code: "Signal 37", Description: "Meet @ ..."},
-		{ID: primitive.NewObjectID(), Code: "Code 4", Description: "Under Control"},
+		{ID: primitive.NewObjectID(), Code: "Code 4", Description: "Under Control", Category: TenCodeCategoryAvailable},
 		{ID: primitive.NewObjectID(), Code: "Code 5", Description: "Felony Stop/High Risk Stop"},
 		{ID: primitive.NewObjectID(), Code: "10-0", Description: "Disappeared"},
 		{ID: primitive.NewObjectID(), Code: "10-1", Description: "Frequency Change"},
 		{ID: primitive.NewObjectID(), Code: "10-2", Description: "Radio Check Loud and Clear"},
 		{ID: primitive.NewObjectID(), Code: "10-3", Description: "Stop Transmitting"},
 		{ID: primitive.NewObjectID(), Code: "10-4", Description: "Affirmative"},
-		{ID: primitive.NewObjectID(), Code: "10-6", Description: "Busy"},
-		{ID: primitive.NewObjectID(), Code: "10-7", Description: "Out of Service"},
-		{ID: primitive.NewObjectID(), Code: "10-8", Description: "In Service"},
+		{ID: primitive.NewObjectID(), Code: "10-6", Description: "Busy", Category: TenCodeCategoryBusy},
+		{ID: primitive.NewObjectID(), Code: "10-7", Description: "Out of Service", Category: TenCodeCategoryBusy},
+		{ID: primitive.NewObjectID(), Code: "10-8", Description: "In Service", Category: TenCodeCategoryAvailable},
 		{ID: primitive.NewObjectID(), Code: "10-9", Description: "Repeat Last Transmission"},
 		{ID: primitive.NewObjectID(), Code: "10-10", Description: "Fight in Progress"},
 		{ID: primitive.NewObjectID(), Code: "10-11", Description: "Traffic Stop"},
 		{ID: primitive.NewObjectID(), Code: "10-12", Description: "Active Ride Along"},
-		{ID: primitive.NewObjectID(), Code: "10-13", Description: "Shots Fired"},
+		{ID: primitive.NewObjectID(), Code: "10-13", Description: "Shots Fired", Category: TenCodeCategoryEmergency},
 		{ID: primitive.NewObjectID(), Code: "10-15", Description: "Subject in Custody"},
 		{ID: primitive.NewObjectID(), Code: "10-16", Description: "Stolen Vehicle"},
 		{ID: primitive.NewObjectID(), Code: "10-17", Description: "Suspicious Person"},
@@ -44,8 +48,8 @@ func DefaultTenCodes() []TenCodes {
 		{ID: primitive.NewObjectID(), Code: "10-30", Description: "Wanted Person"},
 		{ID: primitive.NewObjectID(), Code: "10-31", Description: "Not Wanted, No Warrants"},
 		{ID: primitive.NewObjectID(), Code: "10-32", Description: "Request Backup (Code 1-2-3)"},
-		{ID: primitive.NewObjectID(), Code: "10-41", Description: "Beginning Tour of Duty"},
-		{ID: primitive.NewObjectID(), Code: "10-42", Description: "Ending Tour of Duty"},
+		{ID: primitive.NewObjectID(), Code: "10-41", Description: "Beginning Tour of Duty", Category: TenCodeCategoryAvailable},
+		{ID: primitive.NewObjectID(), Code: "10-42", Description: "Ending Tour of Duty", Category: TenCodeCategoryOffDuty},
 		{ID: primitive.NewObjectID(), Code: "10-43", Description: "Information"},
 		{ID: primitive.NewObjectID(), Code: "10-49", Description: "Homicide"},
 		{ID: primitive.NewObjectID(), Code: "10-50", Description: "Vehicle Accident"},

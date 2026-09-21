@@ -4020,9 +4020,26 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		"community.tenCodes._id": tID,
 	}
 
+	// Only the fields a ten-code actually has. The loop used to write whatever
+	// key the body carried straight into the document.
 	update := bson.M{}
 	for key, value := range requestBody {
-		update["community.tenCodes.$[tenCode]."+key] = value
+		switch key {
+		case "code", "description":
+			update["community.tenCodes.$[tenCode]."+key] = value
+		case "category":
+			category, _ := value.(string)
+			category = strings.TrimSpace(strings.ToLower(category))
+			if !models.IsValidTenCodeCategory(category) {
+				config.ErrorStatus("category must be available, busy, emergency or off-duty", http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.tenCodes.$[tenCode].category"] = category
+		}
+	}
+	if len(update) == 0 {
+		config.ErrorStatus("nothing to update", http.StatusBadRequest, w, nil)
+		return
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
@@ -4054,10 +4071,16 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		Code        string `json:"code"`
 		Description string `json:"description"`
-		Category    string `json:"category"` // Example of a new field in the updated model
+		Category    string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	category := strings.TrimSpace(strings.ToLower(requestBody.Category))
+	if !models.IsValidTenCodeCategory(category) {
+		config.ErrorStatus("category must be available, busy, emergency or off-duty", http.StatusBadRequest, w, nil)
 		return
 	}
 
@@ -4072,6 +4095,7 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 		ID:          primitive.NewObjectID(),
 		Code:        requestBody.Code,
 		Description: requestBody.Description,
+		Category:    category,
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
@@ -4110,6 +4134,7 @@ func (c Community) BulkReplaceTenCodesHandler(w http.ResponseWriter, r *http.Req
 	var requestBody []struct {
 		Code        string `json:"code"`
 		Description string `json:"description"`
+		Category    string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -4130,10 +4155,16 @@ func (c Community) BulkReplaceTenCodesHandler(w http.ResponseWriter, r *http.Req
 			config.ErrorStatus(fmt.Sprintf("ten code at index %d has empty code or description", i), http.StatusBadRequest, w, nil)
 			return
 		}
+		category := strings.TrimSpace(strings.ToLower(item.Category))
+		if !models.IsValidTenCodeCategory(category) {
+			config.ErrorStatus(fmt.Sprintf("ten code at index %d has an unknown category; use available, busy, emergency or off-duty", i), http.StatusBadRequest, w, nil)
+			return
+		}
 		tenCodes = append(tenCodes, models.TenCodes{
 			ID:          primitive.NewObjectID(),
 			Code:        code,
 			Description: description,
+			Category:    category,
 		})
 	}
 
