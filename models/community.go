@@ -408,6 +408,35 @@ type TenCodes struct {
 	ID          primitive.ObjectID `json:"_id" bson:"_id"`
 	Code        string             `json:"code" bson:"code"`
 	Description string             `json:"description" bson:"description"`
+	// Category is what this code means to dispatch: TenCodeCategoryAvailable,
+	// TenCodeCategoryBusy, TenCodeCategoryEmergency or TenCodeCategoryOffDuty.
+	// Empty means the community has not said, and dispatch falls back to reading
+	// the code and description text. Communities that renamed their codes to
+	// plain words, or to another language, have nothing readable in that text,
+	// so this is how they tell dispatch which code means available.
+	Category string `json:"category,omitempty" bson:"category,omitempty"`
+}
+
+// PermissionManageForms is the community permission that allows administering
+// this community's forms and reports.
+const PermissionManageForms = "manage forms"
+
+// The categories a ten-code can carry. Anything else is rejected on write.
+const (
+	TenCodeCategoryAvailable = "available"
+	TenCodeCategoryBusy      = "busy"
+	TenCodeCategoryEmergency = "emergency"
+	TenCodeCategoryOffDuty   = "off-duty"
+)
+
+// IsValidTenCodeCategory reports whether a category is one the clients know how
+// to render. The empty string is valid and means "not set".
+func IsValidTenCodeCategory(category string) bool {
+	switch category {
+	case "", TenCodeCategoryAvailable, TenCodeCategoryBusy, TenCodeCategoryEmergency, TenCodeCategoryOffDuty:
+		return true
+	}
+	return false
 }
 
 // Template holds the structure for a department template

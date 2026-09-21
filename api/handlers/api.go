@@ -82,7 +82,7 @@ func (a *App) New() *mux.Router {
 		TDB:    departmentFormToggleDB,
 		CommDB: databases.NewCommunityDatabase(a.dbHelper),
 	}
-	departmentFormToggle := DepartmentFormToggle{DB: departmentFormToggleDB}
+	departmentFormToggle := DepartmentFormToggle{DB: departmentFormToggleDB, CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	formSubmission := FormSubmission{
 		DB:     formSubmissionDB,
 		TDB:    formTemplateDB,

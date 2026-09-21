@@ -31,6 +31,30 @@ type FormTemplate struct {
 	CommDB databases.CommunityDatabase
 }
 
+// canAdministerForms answers whether this request may change the community's
+// forms, and writes the refusal itself when it may not. Owner, a role with
+// "administrator", or a role with "manage forms" — the same set the forms
+// builder shows the admin UI to.
+//
+// These endpoints had no server-side check at all: the gate was the website
+// hiding the page.
+func (h FormTemplate) canAdministerForms(w http.ResponseWriter, r *http.Request, ctx context.Context, communityID string) bool {
+	if h.CommDB == nil {
+		return true // no community database wired in; nothing to check against
+	}
+	commID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		config.ErrorStatus("invalid community id", http.StatusBadRequest, w, err)
+		return false
+	}
+	community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+	if err != nil || community == nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return false
+	}
+	return authorizeCommunityAction(w, r, community, models.PermissionManageForms)
+}
+
 // CreateFormTemplateHandler creates a new community-scoped form template
 // plus its initial version row.
 //
@@ -57,6 +81,10 @@ func (h FormTemplate) CreateFormTemplateHandler(w http.ResponseWriter, r *http.R
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	if !h.canAdministerForms(w, r, ctx, body.CommunityID) {
+		return
+	}
 
 	// Normalize legacy single-department gate fields (sent by older clients)
 	// into the per-department RankGates shape, then validate against the
@@ -214,6 +242,10 @@ func (h FormTemplate) UpdateFormTemplateHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if !h.canAdministerForms(w, r, ctx, existing.Details.CommunityID) {
+		return
+	}
+
 	if body.RankGates != nil {
 		if err := h.validateRankGates(ctx, existing.Details.CommunityID, *body.RankGates); err != nil {
 			config.ErrorStatus("invalid rank gate", http.StatusBadRequest, w, err)
@@ -363,6 +395,10 @@ func (h FormTemplate) HideDefaultFormTemplateHandler(w http.ResponseWriter, r *h
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	if !h.canAdministerForms(w, r, ctx, communityID) {
+		return
+	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
 	filter := bson.M{

@@ -72,6 +72,7 @@ var defaultPermissionDefs = []struct {
 	{"manage most wanted", "Allows managing the most wanted list (add, edit, delete, reorder entries)"},
 	{"manage records", "Allows deleting civilian records (citations, written warnings, arrest reports) on departments where civilian record deletion is restricted"},
 	{"manage ranks", "Allows managing LEO ranks and assigning ranks to members"},
+	{"manage forms", "Allows creating, editing and archiving this community's forms and reports"},
 	{"view audit logs", "Allows viewing the community audit log"},
 	{"administrator", "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant."},
 }
@@ -1249,61 +1250,18 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 	// Initialize the Members field as an empty array
 	role.Members = []string{}
 
-	var DefaultPermissions = []models.Permission{
-		{
+	// Every role starts with the full permission list, disabled. Built from
+	// defaultPermissionDefs so a new permission cannot be added there and
+	// silently miss new roles: this list had already drifted, and was missing
+	// manage ranks, view audit logs and manage community events.
+	DefaultPermissions := make([]models.Permission, 0, len(defaultPermissionDefs))
+	for _, def := range defaultPermissionDefs {
+		DefaultPermissions = append(DefaultPermissions, models.Permission{
 			ID:          primitive.NewObjectID(),
-			Name:        "manage community settings",
-			Description: "Allows managing community settings",
+			Name:        def.Name,
+			Description: def.Description,
 			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage community events",
-			Description: "Allows managing community events",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage departments",
-			Description: "Allows managing departments",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage roles",
-			Description: "Allows managing roles",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage members",
-			Description: "Allows managing members",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage bans",
-			Description: "Allows managing bans",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage most wanted",
-			Description: "Allows managing the most wanted list (add, edit, delete, reorder entries)",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage records",
-			Description: "Allows deleting civilian records (citations, written warnings, arrest reports) on departments where civilian record deletion is restricted",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "administrator",
-			Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.",
-			Enabled:     false,
-		},
+		})
 	}
 
 	// Add default permissions to the role
@@ -3094,66 +3052,75 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	communityDoc, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	deptIndex := -1
+	for i, dep := range communityDoc.Details.Departments {
+		if dep.ID == dID {
+			deptIndex = i
+			break
+		}
+	}
+	if deptIndex == -1 {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
+		return
+	}
+
+	existing := make(map[string]bool)
+	for _, m := range communityDoc.Details.Departments[deptIndex].Members {
+		existing[m.UserID] = true
+	}
+
+	// Someone already in the department is skipped, not an error. The pickers that
+	// feed this endpoint work off a paginated roster that can be stale or partial,
+	// and two admins can click at the same time, so a 409 here was a routine
+	// "Failed to add user" for a request that had nothing wrong with it. Rejecting
+	// the whole call also half-applied a bulk add: members before the duplicate were
+	// already written when the error went back.
+	newMembers := []interface{}{}
+	added := []string{}
+	skipped := []string{}
 	for _, memberID := range requestBody.Members {
-		// Step 1: Load the community document
-		communityDoc, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
-		if err != nil {
-			config.ErrorStatus("community not found", http.StatusNotFound, w, err)
-			return
+		if memberID == "" {
+			continue
 		}
-
-		// Step 2: Loop through departments to find the right one
-		departments := communityDoc.Details.Departments
-		var deptIndex = -1
-		var userAlreadyExists = false
-
-		for i, dep := range departments {
-
-			if dep.ID == dID {
-				deptIndex = i
-				members := dep.Members
-				for _, m := range members {
-
-					if m.UserID == memberID {
-						userAlreadyExists = true
-						break
-					}
-				}
-				break
-			}
+		if existing[memberID] {
+			skipped = append(skipped, memberID)
+			continue
 		}
+		existing[memberID] = true // also dedupes repeats within one request
+		newMembers = append(newMembers, bson.M{
+			"_id":       primitive.NewObjectID(),
+			"userID":    memberID,
+			"status":    "approved",
+			"tenCodeID": "",
+		})
+		added = append(added, memberID)
+	}
 
-		if deptIndex == -1 {
-			config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
-			return
-		}
-
-		if userAlreadyExists {
-			config.ErrorStatus("member already exists in the department", http.StatusConflict, w, fmt.Errorf("member already exists in the department"))
-			return
-		}
-
-		// Step 3: Add the member if not already there
+	if len(newMembers) > 0 {
 		update := bson.M{
-			"$addToSet": bson.M{
-				fmt.Sprintf("community.departments.%d.members", deptIndex): bson.M{
-					"_id":       primitive.NewObjectID(),
-					"userID":    memberID,
-					"status":    "approved",
-					"tenCodeID": "",
-				},
+			"$push": bson.M{
+				fmt.Sprintf("community.departments.%d.members", deptIndex): bson.M{"$each": newMembers},
 			},
 		}
-
-		err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
-		if err != nil {
+		if err := c.DB.UpdateOne(ctx, bson.M{"_id": cID}, update); err != nil {
 			config.ErrorStatus("failed to update department members", http.StatusInternalServerError, w, err)
 			return
 		}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Department members updated successfully"}`))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Department members updated successfully",
+		"added":   added,
+		"skipped": skipped,
+	})
 }
 
 // SetMemberTenCodeHandler sets the Ten-Code for a member in a department
@@ -4011,9 +3978,26 @@ func (c Community) UpdateTenCodeHandler(w http.ResponseWriter, r *http.Request) 
 		"community.tenCodes._id": tID,
 	}
 
+	// Only the fields a ten-code actually has. The loop used to write whatever
+	// key the body carried straight into the document.
 	update := bson.M{}
 	for key, value := range requestBody {
-		update["community.tenCodes.$[tenCode]."+key] = value
+		switch key {
+		case "code", "description":
+			update["community.tenCodes.$[tenCode]."+key] = value
+		case "category":
+			category, _ := value.(string)
+			category = strings.TrimSpace(strings.ToLower(category))
+			if !models.IsValidTenCodeCategory(category) {
+				config.ErrorStatus("category must be available, busy, emergency or off-duty", http.StatusBadRequest, w, nil)
+				return
+			}
+			update["community.tenCodes.$[tenCode].category"] = category
+		}
+	}
+	if len(update) == 0 {
+		config.ErrorStatus("nothing to update", http.StatusBadRequest, w, nil)
+		return
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
@@ -4045,10 +4029,16 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		Code        string `json:"code"`
 		Description string `json:"description"`
-		Category    string `json:"category"` // Example of a new field in the updated model
+		Category    string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	category := strings.TrimSpace(strings.ToLower(requestBody.Category))
+	if !models.IsValidTenCodeCategory(category) {
+		config.ErrorStatus("category must be available, busy, emergency or off-duty", http.StatusBadRequest, w, nil)
 		return
 	}
 
@@ -4063,6 +4053,7 @@ func (c Community) AddTenCodeHandler(w http.ResponseWriter, r *http.Request) {
 		ID:          primitive.NewObjectID(),
 		Code:        requestBody.Code,
 		Description: requestBody.Description,
+		Category:    category,
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
@@ -4101,6 +4092,7 @@ func (c Community) BulkReplaceTenCodesHandler(w http.ResponseWriter, r *http.Req
 	var requestBody []struct {
 		Code        string `json:"code"`
 		Description string `json:"description"`
+		Category    string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
@@ -4121,10 +4113,16 @@ func (c Community) BulkReplaceTenCodesHandler(w http.ResponseWriter, r *http.Req
 			config.ErrorStatus(fmt.Sprintf("ten code at index %d has empty code or description", i), http.StatusBadRequest, w, nil)
 			return
 		}
+		category := strings.TrimSpace(strings.ToLower(item.Category))
+		if !models.IsValidTenCodeCategory(category) {
+			config.ErrorStatus(fmt.Sprintf("ten code at index %d has an unknown category; use available, busy, emergency or off-duty", i), http.StatusBadRequest, w, nil)
+			return
+		}
 		tenCodes = append(tenCodes, models.TenCodes{
 			ID:          primitive.NewObjectID(),
 			Code:        code,
 			Description: description,
+			Category:    category,
 		})
 	}
 
@@ -6090,22 +6088,33 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 	offset := (page - 1) * limit
 
 	// Find all users that belong to the community with pagination
-	filter := bson.M{
-		"$and": []bson.M{
-			{"user.communities": bson.M{"$exists": true}},
-			{"user.communities": bson.M{"$ne": nil}},
-			{"user.communities": bson.M{
-				"$elemMatch": bson.M{
-					"communityId": communityID,
-					"status":      "approved",
-				},
-			}},
-		},
+	andClauses := []bson.M{
+		{"user.communities": bson.M{"$exists": true}},
+		{"user.communities": bson.M{"$ne": nil}},
+		{"user.communities": bson.M{
+			"$elemMatch": bson.M{
+				"communityId": communityID,
+				"status":      "approved",
+			},
+		}},
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Optional: exclude users already in a given department, matching the v1
+	// members and members/search endpoints, so an "Add Members" picker never
+	// offers someone the department already has.
+	if excludeDeptID := r.URL.Query().Get("exclude_dept_id"); excludeDeptID != "" {
+		if excluded := getDepartmentMemberObjectIDs(ctx, c.DB, communityID, excludeDeptID); len(excluded) > 0 {
+			andClauses = append(andClauses, bson.M{
+				"_id": bson.M{"$nin": excluded},
+			})
+		}
+	}
+
+	filter := bson.M{"$and": andClauses}
 
 	// Execute CountDocuments and Find in parallel for better performance
 	type findResult struct {

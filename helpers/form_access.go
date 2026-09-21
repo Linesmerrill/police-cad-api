@@ -2,10 +2,11 @@ package helpers
 
 import "github.com/linesmerrill/police-cad-api/models"
 
-// IsCommunityAdmin reports whether the user is the community owner or holds a
-// role carrying the enabled "administrator" permission. Admins bypass form
-// rank gating entirely. Mirrors the ownership/administrator check used across
-// the community handlers.
+// IsCommunityAdmin reports whether the user may administer this community's
+// forms: the owner, a role carrying the enabled "administrator" permission, or
+// a role carrying "manage forms". Admins bypass form rank gating entirely.
+// Mirrors the ownership/administrator check used across the community
+// handlers.
 func IsCommunityAdmin(community *models.Community, userID string) bool {
 	if community == nil || userID == "" {
 		return false
@@ -25,7 +26,10 @@ func IsCommunityAdmin(community *models.Community, userID string) bool {
 			continue
 		}
 		for _, perm := range role.Permissions {
-			if perm.Enabled && perm.Name == "administrator" {
+			if !perm.Enabled {
+				continue
+			}
+			if perm.Name == "administrator" || perm.Name == models.PermissionManageForms {
 				return true
 			}
 		}
