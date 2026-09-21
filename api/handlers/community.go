@@ -3094,66 +3094,75 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	communityDoc, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+
+	deptIndex := -1
+	for i, dep := range communityDoc.Details.Departments {
+		if dep.ID == dID {
+			deptIndex = i
+			break
+		}
+	}
+	if deptIndex == -1 {
+		config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
+		return
+	}
+
+	existing := make(map[string]bool)
+	for _, m := range communityDoc.Details.Departments[deptIndex].Members {
+		existing[m.UserID] = true
+	}
+
+	// Someone already in the department is skipped, not an error. The pickers that
+	// feed this endpoint work off a paginated roster that can be stale or partial,
+	// and two admins can click at the same time, so a 409 here was a routine
+	// "Failed to add user" for a request that had nothing wrong with it. Rejecting
+	// the whole call also half-applied a bulk add: members before the duplicate were
+	// already written when the error went back.
+	newMembers := []interface{}{}
+	added := []string{}
+	skipped := []string{}
 	for _, memberID := range requestBody.Members {
-		// Step 1: Load the community document
-		communityDoc, err := c.DB.FindOne(ctx, bson.M{"_id": cID})
-		if err != nil {
-			config.ErrorStatus("community not found", http.StatusNotFound, w, err)
-			return
+		if memberID == "" {
+			continue
 		}
-
-		// Step 2: Loop through departments to find the right one
-		departments := communityDoc.Details.Departments
-		var deptIndex = -1
-		var userAlreadyExists = false
-
-		for i, dep := range departments {
-
-			if dep.ID == dID {
-				deptIndex = i
-				members := dep.Members
-				for _, m := range members {
-
-					if m.UserID == memberID {
-						userAlreadyExists = true
-						break
-					}
-				}
-				break
-			}
+		if existing[memberID] {
+			skipped = append(skipped, memberID)
+			continue
 		}
+		existing[memberID] = true // also dedupes repeats within one request
+		newMembers = append(newMembers, bson.M{
+			"_id":       primitive.NewObjectID(),
+			"userID":    memberID,
+			"status":    "approved",
+			"tenCodeID": "",
+		})
+		added = append(added, memberID)
+	}
 
-		if deptIndex == -1 {
-			config.ErrorStatus("department not found", http.StatusNotFound, w, fmt.Errorf("department not found"))
-			return
-		}
-
-		if userAlreadyExists {
-			config.ErrorStatus("member already exists in the department", http.StatusConflict, w, fmt.Errorf("member already exists in the department"))
-			return
-		}
-
-		// Step 3: Add the member if not already there
+	if len(newMembers) > 0 {
 		update := bson.M{
-			"$addToSet": bson.M{
-				fmt.Sprintf("community.departments.%d.members", deptIndex): bson.M{
-					"_id":       primitive.NewObjectID(),
-					"userID":    memberID,
-					"status":    "approved",
-					"tenCodeID": "",
-				},
+			"$push": bson.M{
+				fmt.Sprintf("community.departments.%d.members", deptIndex): bson.M{"$each": newMembers},
 			},
 		}
-
-		err = c.DB.UpdateOne(context.Background(), bson.M{"_id": cID}, update)
-		if err != nil {
+		if err := c.DB.UpdateOne(ctx, bson.M{"_id": cID}, update); err != nil {
 			config.ErrorStatus("failed to update department members", http.StatusInternalServerError, w, err)
 			return
 		}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Department members updated successfully"}`))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Department members updated successfully",
+		"added":   added,
+		"skipped": skipped,
+	})
 }
 
 // SetMemberTenCodeHandler sets the Ten-Code for a member in a department
@@ -6090,22 +6099,33 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 	offset := (page - 1) * limit
 
 	// Find all users that belong to the community with pagination
-	filter := bson.M{
-		"$and": []bson.M{
-			{"user.communities": bson.M{"$exists": true}},
-			{"user.communities": bson.M{"$ne": nil}},
-			{"user.communities": bson.M{
-				"$elemMatch": bson.M{
-					"communityId": communityID,
-					"status":      "approved",
-				},
-			}},
-		},
+	andClauses := []bson.M{
+		{"user.communities": bson.M{"$exists": true}},
+		{"user.communities": bson.M{"$ne": nil}},
+		{"user.communities": bson.M{
+			"$elemMatch": bson.M{
+				"communityId": communityID,
+				"status":      "approved",
+			},
+		}},
 	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Optional: exclude users already in a given department, matching the v1
+	// members and members/search endpoints, so an "Add Members" picker never
+	// offers someone the department already has.
+	if excludeDeptID := r.URL.Query().Get("exclude_dept_id"); excludeDeptID != "" {
+		if excluded := getDepartmentMemberObjectIDs(ctx, c.DB, communityID, excludeDeptID); len(excluded) > 0 {
+			andClauses = append(andClauses, bson.M{
+				"_id": bson.M{"$nin": excluded},
+			})
+		}
+	}
+
+	filter := bson.M{"$and": andClauses}
 
 	// Execute CountDocuments and Find in parallel for better performance
 	type findResult struct {
