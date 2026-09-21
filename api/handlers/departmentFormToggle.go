@@ -14,11 +14,13 @@ import (
 	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/config"
 	"github.com/linesmerrill/police-cad-api/databases"
+	"github.com/linesmerrill/police-cad-api/models"
 )
 
 // DepartmentFormToggle handles enable/disable of templates per department.
 type DepartmentFormToggle struct {
-	DB databases.DepartmentFormToggleDatabase
+	DB     databases.DepartmentFormToggleDatabase
+	CommDB databases.CommunityDatabase
 }
 
 // SetDepartmentFormToggleHandler upserts the department's enable/disable
@@ -46,6 +48,24 @@ func (h DepartmentFormToggle) SetDepartmentFormToggleHandler(w http.ResponseWrit
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Turning a form on or off for a department is administering the community's
+	// forms, so it needs the same permission as editing one.
+	if h.CommDB != nil {
+		commID, err := primitive.ObjectIDFromHex(body.CommunityID)
+		if err != nil {
+			config.ErrorStatus("invalid community id", http.StatusBadRequest, w, err)
+			return
+		}
+		community, err := h.CommDB.FindOne(ctx, bson.M{"_id": commID})
+		if err != nil || community == nil {
+			config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+			return
+		}
+		if !authorizeCommunityAction(w, r, community, models.PermissionManageForms) {
+			return
+		}
+	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
 	filter := bson.M{

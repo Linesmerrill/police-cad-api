@@ -417,6 +417,10 @@ type TenCodes struct {
 	Category string `json:"category,omitempty" bson:"category,omitempty"`
 }
 
+// PermissionManageForms is the community permission that allows administering
+// this community's forms and reports.
+const PermissionManageForms = "manage forms"
+
 // The categories a ten-code can carry. Anything else is rejected on write.
 const (
 	TenCodeCategoryAvailable = "available"

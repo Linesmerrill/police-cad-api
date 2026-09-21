@@ -72,6 +72,7 @@ var defaultPermissionDefs = []struct {
 	{"manage most wanted", "Allows managing the most wanted list (add, edit, delete, reorder entries)"},
 	{"manage records", "Allows deleting civilian records (citations, written warnings, arrest reports) on departments where civilian record deletion is restricted"},
 	{"manage ranks", "Allows managing LEO ranks and assigning ranks to members"},
+	{"manage forms", "Allows creating, editing and archiving this community's forms and reports"},
 	{"view audit logs", "Allows viewing the community audit log"},
 	{"administrator", "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant."},
 }
@@ -1249,61 +1250,18 @@ func (c Community) AddRoleToCommunityHandler(w http.ResponseWriter, r *http.Requ
 	// Initialize the Members field as an empty array
 	role.Members = []string{}
 
-	var DefaultPermissions = []models.Permission{
-		{
+	// Every role starts with the full permission list, disabled. Built from
+	// defaultPermissionDefs so a new permission cannot be added there and
+	// silently miss new roles: this list had already drifted, and was missing
+	// manage ranks, view audit logs and manage community events.
+	DefaultPermissions := make([]models.Permission, 0, len(defaultPermissionDefs))
+	for _, def := range defaultPermissionDefs {
+		DefaultPermissions = append(DefaultPermissions, models.Permission{
 			ID:          primitive.NewObjectID(),
-			Name:        "manage community settings",
-			Description: "Allows managing community settings",
+			Name:        def.Name,
+			Description: def.Description,
 			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage community events",
-			Description: "Allows managing community events",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage departments",
-			Description: "Allows managing departments",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage roles",
-			Description: "Allows managing roles",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage members",
-			Description: "Allows managing members",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage bans",
-			Description: "Allows managing bans",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage most wanted",
-			Description: "Allows managing the most wanted list (add, edit, delete, reorder entries)",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "manage records",
-			Description: "Allows deleting civilian records (citations, written warnings, arrest reports) on departments where civilian record deletion is restricted",
-			Enabled:     false,
-		},
-		{
-			ID:          primitive.NewObjectID(),
-			Name:        "administrator",
-			Description: "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant.",
-			Enabled:     false,
-		},
+		})
 	}
 
 	// Add default permissions to the role
