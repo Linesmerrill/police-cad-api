@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -186,4 +187,55 @@ func TestMemberStatusCounts_RejectsAnInvalidCommunityID(t *testing.T) {
 	http.HandlerFunc(c.MemberStatusCountsHandler).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// Banning and unbanning had no permission check at all: anyone who could reach
+// the endpoint could ban anyone from any community.
+
+func banRequest(t *testing.T, actorID string) *http.Request {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"communityId": statusCommunityID})
+	assert.NoError(t, err)
+	url := "/api/v1/user/" + pickerPendingUser + "/ban-community"
+	if actorID != "" {
+		url += "?userId=" + actorID
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
+	assert.NoError(t, err)
+	return mux.SetURLVars(req, map[string]string{"userId": pickerPendingUser})
+}
+
+func communityOwnedBy(t *testing.T, ownerID string) *models.Community {
+	t.Helper()
+	cID, err := primitive.ObjectIDFromHex(statusCommunityID)
+	assert.NoError(t, err)
+	return &models.Community{ID: cID, Details: models.CommunityDetails{OwnerID: ownerID}}
+}
+
+func TestBanUserFromCommunity_RefusesSomeoneWhoCannotManageBans(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).
+		Return(communityOwnedBy(t, "507f1f77bcf86cd799439099"), nil)
+
+	udb := &mocks.UserDatabase{}
+	u := handlers.User{DB: udb, CDB: cdb}
+
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(u.BanUserFromCommunityHandler).ServeHTTP(rr, banRequest(t, pickerApprovedUser))
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	cdb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestBanUserFromCommunity_RefusesAnUnidentifiedCaller(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).
+		Return(communityOwnedBy(t, pickerApprovedUser), nil)
+
+	u := handlers.User{DB: &mocks.UserDatabase{}, CDB: cdb}
+
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(u.BanUserFromCommunityHandler).ServeHTTP(rr, banRequest(t, ""))
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }

@@ -2088,6 +2088,19 @@ func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Lifting a ban is an administrative act on that community, same as applying
+	// one, and this had no check either.
+	unbanCtx, unbanCancel := api.WithQueryTimeout(r.Context())
+	defer unbanCancel()
+	community, err := u.CDB.FindOne(unbanCtx, bson.M{"_id": cID})
+	if err != nil || community == nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage bans") {
+		return
+	}
+
 	// Delete the matching community object from the user's array of communities
 	userFilter := bson.M{"_id": uID}
 	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
