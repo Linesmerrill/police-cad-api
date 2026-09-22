@@ -2612,6 +2612,18 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	// Banning someone is an administrative act on that community, so the caller
+	// has to be able to manage its bans. This had no check at all: anyone who
+	// could reach the endpoint could ban anyone from any community.
+	community, err := u.CDB.FindOne(ctx, bson.M{"_id": cID})
+	if err != nil || community == nil {
+		config.ErrorStatus("community not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !authorizeCommunityAction(w, r, community, "manage bans") {
+		return
+	}
+
 	// Fetch user to determine prior community status — we only decrement
 	// membersCount if this user was previously "approved" (counted).
 	var bannedUser models.User
