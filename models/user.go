@@ -69,7 +69,9 @@ type UserDetails struct {
 	Suspension *Suspension `json:"suspension,omitempty" bson:"suspension,omitempty"`
 	// LegalHold blocks every deletion path while set. Written when a report is
 	// escalated to the CyberTipline, which carries a preservation obligation.
-	LegalHold *LegalHold `json:"legalHold,omitempty" bson:"legalHold,omitempty"`
+	// Never serialised: user documents are served by public endpoints, and the
+	// mere presence of a hold says a child-safety escalation happened.
+	LegalHold *LegalHold `json:"-" bson:"legalHold,omitempty"`
 	ResetPasswordToken       string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires     interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	EmailVerified            *bool                 `json:"emailVerified" bson:"emailVerified"`
