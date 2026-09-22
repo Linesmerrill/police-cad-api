@@ -45,7 +45,7 @@ func rejectServerOwnedCommunityFields(req map[string]interface{}) error {
 	return nil
 }
 
-// delistedVisibilityError refuses to set a community public while it is
+// delistedVisibilityError refuses to make a community public while it is
 // delisted by moderation.
 //
 // The delisting already keeps it out of every discovery surface whatever its
@@ -59,6 +59,12 @@ func delistedVisibilityError(req map[string]interface{}, community *models.Commu
 		return nil
 	}
 	if community == nil || !community.Details.ListingSuspension.InForce(now) {
+		return nil
+	}
+	// Re-sending the value it already has changes nothing. The website's
+	// profile form sends visibility on every save, so refusing a no-op would
+	// stop a delisted owner who was already public from editing anything.
+	if strings.EqualFold(strings.TrimSpace(community.Details.Visibility), "public") {
 		return nil
 	}
 	ls := community.Details.ListingSuspension

@@ -91,6 +91,14 @@ func TestCommunityPatch_AllowsEverythingElse(t *testing.T) {
 		{"public once the delisting has lifted", delistedCommunity(time.Now().Add(-time.Hour)), `{"visibility": "public"}`},
 		{"public when never delisted", &models.Community{}, `{"visibility": "public"}`},
 		{"other settings while delisted", delistedCommunity(time.Now().Add(time.Hour)), `{"description": "new"}`},
+		// The website's profile form sends visibility on every save. A
+		// community already public when it was delisted must still be able to
+		// save its name and description.
+		{"re-sending public when already public", func() *models.Community {
+			c := delistedCommunity(time.Now().Add(time.Hour))
+			c.Details.Visibility = "public"
+			return c
+		}(), `{"visibility": "public", "name": "Red Red RP", "description": "edited"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
