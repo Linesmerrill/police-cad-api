@@ -368,8 +368,10 @@ func (ra ReportAdmin) applyPenalty(ctx context.Context, offense models.ContentOf
 			return err
 		}
 		suspension := models.ListingSuspension{
-			Until:     offense.ExpiresAt,
-			OffenseID: offense.ID.Hex(),
+			Until:          offense.ExpiresAt,
+			Category:       offense.ReportedIssue,
+			CategoryPhrase: models.IssuePhrase(offense.ReportedIssue),
+			OffenseID:      offense.ID.Hex(),
 			Reason:    offense.Reason,
 			IssuedBy:  admin,
 			IssuedAt:  primitive.NewDateTimeFromTime(now),

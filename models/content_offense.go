@@ -88,11 +88,15 @@ const (
 // restore window.
 type Suspension struct {
 	// Until is nil for a permanent suspension.
-	Until     *primitive.DateTime `json:"until,omitempty" bson:"until,omitempty"`
-	OffenseID string              `json:"offenseId,omitempty" bson:"offenseId,omitempty"`
-	Reason    string              `json:"reason,omitempty" bson:"reason,omitempty"`
-	IssuedBy  string              `json:"issuedBy,omitempty" bson:"issuedBy,omitempty"`
-	IssuedAt  primitive.DateTime  `json:"issuedAt,omitempty" bson:"issuedAt,omitempty"`
+	Until *primitive.DateTime `json:"until,omitempty" bson:"until,omitempty"`
+	// OffenseID, Reason and IssuedBy are staff-only. The user document is
+	// served by public endpoints (profiles, member lists), and the reason on
+	// an escalated account names a child-safety escalation: showing it would
+	// tip off the one person who must not know. They never leave the API.
+	OffenseID string             `json:"-" bson:"offenseId,omitempty"`
+	Reason    string             `json:"-" bson:"reason,omitempty"`
+	IssuedBy  string             `json:"-" bson:"issuedBy,omitempty"`
+	IssuedAt  primitive.DateTime `json:"issuedAt,omitempty" bson:"issuedAt,omitempty"`
 }
 
 // ListingSuspension removes a community from every discovery surface for a
@@ -104,11 +108,20 @@ type Suspension struct {
 // its own field also lets it expire on its own.
 type ListingSuspension struct {
 	// Until is nil for an indefinite delisting.
-	Until     *primitive.DateTime `json:"until,omitempty" bson:"until,omitempty"`
-	OffenseID string              `json:"offenseId,omitempty" bson:"offenseId,omitempty"`
-	Reason    string              `json:"reason,omitempty" bson:"reason,omitempty"`
-	IssuedBy  string              `json:"issuedBy,omitempty" bson:"issuedBy,omitempty"`
-	IssuedAt  primitive.DateTime  `json:"issuedAt,omitempty" bson:"issuedAt,omitempty"`
+	Until *primitive.DateTime `json:"until,omitempty" bson:"until,omitempty"`
+
+	// Category and CategoryPhrase say why, in the same categorical wording as
+	// the notice the owner was emailed ("spam or repeated unwanted messages").
+	// They are shown to the community's owner and staff in settings, so the
+	// community is not just mysteriously hidden. Never the report text.
+	Category       string `json:"category,omitempty" bson:"category,omitempty"`
+	CategoryPhrase string `json:"categoryPhrase,omitempty" bson:"categoryPhrase,omitempty"`
+
+	// Staff-only, like Suspension: the community document is public.
+	OffenseID string             `json:"-" bson:"offenseId,omitempty"`
+	Reason    string             `json:"-" bson:"reason,omitempty"`
+	IssuedBy  string             `json:"-" bson:"issuedBy,omitempty"`
+	IssuedAt  primitive.DateTime `json:"issuedAt,omitempty" bson:"issuedAt,omitempty"`
 }
 
 // LegalHold marks an account whose data must be retained, set when a report is

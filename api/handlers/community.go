@@ -1161,6 +1161,26 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Fields the server owns are never written through this catch-all. See
+	// serverOwnedCommunityFields for what that closed.
+	if err := rejectServerOwnedCommunityFields(req); err != nil {
+		config.ErrorStatus(err.Error(), http.StatusForbidden, w, err)
+		return
+	}
+
+	// A delisted community cannot be flipped public until the delisting ends.
+	if _, setsVisibility := req["visibility"]; setsVisibility {
+		vctx, vcancel := api.WithQueryTimeout(r.Context())
+		current, findErr := c.DB.FindOne(vctx, bson.M{"_id": objID})
+		vcancel()
+		if findErr == nil {
+			if err := delistedVisibilityError(req, current, time.Now()); err != nil {
+				config.ErrorStatus(err.Error(), http.StatusConflict, w, err)
+				return
+			}
+		}
+	}
+
 	// Validate and fix creation limit fields if they're empty (should only be int values)
 	creationLimitFields := []string{"civilianCreationLimit", "vehicleCreationLimit", "firearmCreationLimit"}
 	for _, field := range creationLimitFields {
