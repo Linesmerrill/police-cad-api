@@ -2073,6 +2073,14 @@ func (u User) AddCommunityToUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Deciding someone's membership is an administrative act, so the caller has
+	// to be able to manage members here. This endpoint approves, declines and
+	// bans people, and had no check at all: anyone who could reach it could
+	// approve themselves into any community.
+	if !authorizeCommunityAction(w, r, communityDoc, "manage members") {
+		return
+	}
+
 	// Fetch the user document
 	filter := bson.M{"_id": uID}
 	var user models.User
