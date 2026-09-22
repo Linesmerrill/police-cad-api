@@ -77,6 +77,13 @@ var defaultPermissionDefs = []struct {
 	{"administrator", "Members with this permission will have every permission and will also bypass all community specific permissions or restrictions (for example, these members would get access to all settings and pages). This is a dangerous permission to grant."},
 }
 
+// isApprovedDepartmentMember reports whether a department member entry counts
+// as membership. "approved" is what the member list shows; a "pending" request
+// and a "denied" one are entries in the same array but are not membership.
+func isApprovedDepartmentMember(m models.MemberStatus) bool {
+	return m.Status == "approved"
+}
+
 // getDepartmentMemberObjectIDs returns the ObjectIDs of users currently in
 // the given department. Used by the community-members and members/search
 // endpoints to optionally exclude users already in a department (so the
@@ -106,7 +113,12 @@ func getDepartmentMemberObjectIDs(ctx context.Context, commDB databases.Communit
 		seen := make(map[string]bool, len(dept.Members))
 		ids := make([]primitive.ObjectID, 0, len(dept.Members))
 		for _, m := range dept.Members {
-			if m.UserID == "" || seen[m.UserID] {
+			// Approved members only. A pending join request is an entry in this
+			// same list, and excluding those hid the requester from the Add
+			// Members picker while the department's own member list — which
+			// shows approved members only — said they were not in it. The
+			// person simply could not be added by anyone.
+			if m.UserID == "" || seen[m.UserID] || !isApprovedDepartmentMember(m) {
 				continue
 			}
 			seen[m.UserID] = true
@@ -3070,9 +3082,17 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	existing := make(map[string]bool)
+	// An entry in the members array is not the same as membership: a pending
+	// join request and a denied one live in that array too, and only "approved"
+	// counts as being in the department.
+	approved := make(map[string]bool)
+	awaiting := make(map[string]bool)
 	for _, m := range communityDoc.Details.Departments[deptIndex].Members {
-		existing[m.UserID] = true
+		if isApprovedDepartmentMember(m) {
+			approved[m.UserID] = true
+			continue
+		}
+		awaiting[m.UserID] = true
 	}
 
 	// Someone already in the department is skipped, not an error. The pickers that
@@ -3081,18 +3101,28 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 	// "Failed to add user" for a request that had nothing wrong with it. Rejecting
 	// the whole call also half-applied a bulk add: members before the duplicate were
 	// already written when the error went back.
+	//
+	// Someone with a pending or denied entry is approved rather than added again.
+	// Adding them by hand is exactly what approving them means, and a second entry
+	// would leave the department holding two rows for one person.
 	newMembers := []interface{}{}
+	promote := []string{}
 	added := []string{}
 	skipped := []string{}
 	for _, memberID := range requestBody.Members {
 		if memberID == "" {
 			continue
 		}
-		if existing[memberID] {
+		if approved[memberID] {
 			skipped = append(skipped, memberID)
 			continue
 		}
-		existing[memberID] = true // also dedupes repeats within one request
+		approved[memberID] = true // also dedupes repeats within one request
+		if awaiting[memberID] {
+			promote = append(promote, memberID)
+			added = append(added, memberID)
+			continue
+		}
 		newMembers = append(newMembers, bson.M{
 			"_id":       primitive.NewObjectID(),
 			"userID":    memberID,
@@ -3102,10 +3132,29 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 		added = append(added, memberID)
 	}
 
+	membersPath := fmt.Sprintf("community.departments.%d.members", deptIndex)
+
+	// Promotions and the push go in separate writes: Mongo refuses a $set and a
+	// $push that touch the same array in one update.
+	if len(promote) > 0 {
+		set := bson.M{}
+		filters := make([]interface{}, 0, len(promote))
+		for i, memberID := range promote {
+			alias := fmt.Sprintf("m%d", i)
+			set[fmt.Sprintf("%s.$[%s].status", membersPath, alias)] = "approved"
+			filters = append(filters, bson.M{alias + ".userID": memberID})
+		}
+		opts := options.Update().SetArrayFilters(options.ArrayFilters{Filters: filters})
+		if err := c.DB.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$set": set}, opts); err != nil {
+			config.ErrorStatus("failed to approve department members", http.StatusInternalServerError, w, err)
+			return
+		}
+	}
+
 	if len(newMembers) > 0 {
 		update := bson.M{
 			"$push": bson.M{
-				fmt.Sprintf("community.departments.%d.members", deptIndex): bson.M{"$each": newMembers},
+				membersPath: bson.M{"$each": newMembers},
 			},
 		}
 		if err := c.DB.UpdateOne(ctx, bson.M{"_id": cID}, update); err != nil {
@@ -3117,9 +3166,10 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Department members updated successfully",
-		"added":   added,
-		"skipped": skipped,
+		"message":  "Department members updated successfully",
+		"added":    added,
+		"approved": promote,
+		"skipped":  skipped,
 	})
 }
 

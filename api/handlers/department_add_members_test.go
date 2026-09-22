@@ -133,24 +133,6 @@ func TestUpdateDepartmentMembers_ExistingMemberIsSkippedNotRejected(t *testing.T
 	cdb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 }
 
-// A pending join request is still an entry in the members list. Adding that person
-// by hand must not be refused either.
-func TestUpdateDepartmentMembers_PendingMemberIsSkipped(t *testing.T) {
-	cdb := &mocks.CommunityDatabase{}
-	cdb.On("FindOne", mock.Anything, mock.Anything).
-		Return(communityWithDepartmentMembers(t, models.MemberStatus{
-			UserID: addMembersExistingUser,
-			Status: "pending",
-		}), nil)
-
-	c := handlers.Community{DB: cdb}
-	rr := httptest.NewRecorder()
-	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, []interface{}{addMembersExistingUser}, decodeAddMembersBody(t, rr)["skipped"])
-}
-
 // A bulk add used to stop at the first duplicate, leaving the members before it
 // written and the ones after it dropped, under an error toast.
 func TestUpdateDepartmentMembers_BulkAddSkipsOnlyTheDuplicate(t *testing.T) {
@@ -218,4 +200,90 @@ func TestUpdateDepartmentMembers_UnknownDepartmentIsNotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 	cdb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// The follow-up report: a private department where searching for a member in
+// the Add Members picker found nobody, while the same person showed up fine in
+// another department. They had a pending join request, which is an entry in the
+// same members array — so the picker excluded them as "already in the
+// department" while the department's own list, which shows approved members
+// only, said they were not in it. Nobody could add them at all.
+
+func TestUpdateDepartmentMembers_PendingMemberIsApprovedNotDuplicated(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).
+		Return(communityWithDepartmentMembers(t, models.MemberStatus{
+			UserID: addMembersExistingUser,
+			Status: "pending",
+		}), nil)
+
+	var captured interface{}
+	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) { captured = args.Get(2) }).
+		Return(nil)
+
+	c := handlers.Community{DB: cdb}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Approved in place: a $set on the existing entry, never a second row.
+	set, ok := (captured).(bson.M)["$set"].(bson.M)
+	assert.True(t, ok, "expected a $set, got %#v", captured)
+	assert.Equal(t, "approved", set["community.departments.0.members.$[m0].status"])
+
+	body := decodeAddMembersBody(t, rr)
+	assert.Equal(t, []interface{}{addMembersExistingUser}, body["added"])
+	assert.Equal(t, []interface{}{addMembersExistingUser}, body["approved"])
+	assert.Empty(t, body["skipped"])
+}
+
+func TestUpdateDepartmentMembers_DeniedMemberCanBeAddedBack(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).
+		Return(communityWithDepartmentMembers(t, models.MemberStatus{
+			UserID: addMembersExistingUser,
+			Status: "denied",
+		}), nil)
+	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	c := handlers.Community{DB: cdb}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, []interface{}{addMembersExistingUser}, decodeAddMembersBody(t, rr)["approved"])
+}
+
+// A pending request and a brand new member in the same click: one write each,
+// and the new member is still pushed.
+func TestUpdateDepartmentMembers_MixOfPendingAndNew(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).
+		Return(communityWithDepartmentMembers(t, models.MemberStatus{
+			UserID: addMembersExistingUser,
+			Status: "pending",
+		}), nil)
+
+	var updates []interface{}
+	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) { updates = append(updates, args.Get(2)) }).
+		Return(nil)
+	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) { updates = append(updates, args.Get(2)) }).
+		Return(nil)
+
+	c := handlers.Community{DB: cdb}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(
+		t, addMembersExistingUser, addMembersNewUser,
+	))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Len(t, updates, 2, "one write to approve, one to push")
+
+	body := decodeAddMembersBody(t, rr)
+	assert.Equal(t, []interface{}{addMembersExistingUser, addMembersNewUser}, body["added"])
+	assert.Equal(t, []interface{}{addMembersExistingUser}, body["approved"])
 }
