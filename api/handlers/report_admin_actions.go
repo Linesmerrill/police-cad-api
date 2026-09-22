@@ -336,8 +336,11 @@ func (ra ReportAdmin) AdminUpholdReportHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// One strike, and every report it answers is closed with it.
+	decision := newReportDecision(models.ReportStatusResolved, req.CurrentUser, req.Note, now)
+	decision.OffenseID = offense.ID.Hex()
+	decision.Action = plan.Action
 	for _, rep := range c.ladder {
-		ra.closeReport(ctx, rep, models.ReportStatusResolved, admin, adminID(req.CurrentUser), req.Note, offense.ID.Hex(), plan.Action, now)
+		ra.closeReport(ctx, rep, decision)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -395,29 +398,66 @@ func (ra ReportAdmin) applyPenalty(ctx context.Context, offense models.ContentOf
 	return err
 }
 
-// closeReport records the decision on the report itself.
-func (ra ReportAdmin) closeReport(ctx context.Context, report models.Report, status, admin, adminAccountID, note, offenseID, action string, now time.Time) {
+// reportDecision is one decision, applied to every report it closes.
+type reportDecision struct {
+	// ID is shared by every report this decision closes, so a reopen can find
+	// them all again.
+	ID        string
+	Status    string
+	Admin     string
+	AdminID   string
+	Note      string
+	OffenseID string
+	Action    string
+	At        time.Time
+}
+
+func newReportDecision(status string, currentUser map[string]interface{}, note string, now time.Time) reportDecision {
+	return reportDecision{
+		ID:      primitive.NewObjectID().Hex(),
+		Status:  status,
+		Admin:   adminDisplayName(currentUser),
+		AdminID: adminID(currentUser),
+		Note:    strings.TrimSpace(note),
+		At:      now,
+	}
+}
+
+// closeReport records a decision on one report, and appends it to the
+// report's history.
+func (ra ReportAdmin) closeReport(ctx context.Context, report models.Report, d reportDecision) {
+	at := primitive.NewDateTimeFromTime(d.At)
 	set := bson.M{
-		"status":         status,
-		"reviewedByName": admin,
-		"reviewedById":   adminAccountID,
-		"reviewedAt":     primitive.NewDateTimeFromTime(now),
-		"updatedAt":      primitive.NewDateTimeFromTime(now),
+		"status":         d.Status,
+		"reviewedByName": d.Admin,
+		"reviewedById":   d.AdminID,
+		"reviewedAt":     at,
+		"updatedAt":      at,
 		"tier":           report.EffectiveTier(),
+		"decisionId":     d.ID,
 		// active=false retires the legacy flag as each report is decided,
 		// rather than in one sweep that would rewrite history.
 		"active": false,
 	}
-	if note != "" {
-		set["internalNote"] = note
+	if d.Note != "" {
+		set["internalNote"] = d.Note
 	}
-	if offenseID != "" {
-		set["offenseId"] = offenseID
+	if d.OffenseID != "" {
+		set["offenseId"] = d.OffenseID
 	}
-	if action != "" {
-		set["actionTaken"] = action
+	if d.Action != "" {
+		set["actionTaken"] = d.Action
 	}
-	if err := ra.RDB.UpdateOne(ctx, bson.M{"_id": report.ID}, bson.M{"$set": set}); err != nil {
+	event := models.ReportEvent{
+		Action:         d.Status,
+		PreviousStatus: report.EffectiveStatus(),
+		By:             d.Admin,
+		ByID:           d.AdminID,
+		Reason:         d.Note,
+		DecisionID:     d.ID,
+		At:             at,
+	}
+	if err := ra.RDB.UpdateOne(ctx, bson.M{"_id": report.ID}, bson.M{"$set": set, "$push": bson.M{"history": event}}); err != nil {
 		zap.S().Errorw("failed to close report", "reportId", report.ID.Hex(), "error", err)
 	}
 }
@@ -509,10 +549,9 @@ func (ra ReportAdmin) AdminDismissReportHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	closing := onTrack(group, reportTrack(*report))
-	admin := adminDisplayName(req.CurrentUser)
-	now := time.Now()
+	decision := newReportDecision(status, req.CurrentUser, req.Note, time.Now())
 	for _, rep := range closing {
-		ra.closeReport(ctx, rep, status, admin, adminID(req.CurrentUser), req.Note, "", "", now)
+		ra.closeReport(ctx, rep, decision)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "report closed", "status": status, "reportCount": len(closing)})
 }

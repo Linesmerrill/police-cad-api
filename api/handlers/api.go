@@ -281,6 +281,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/reports/{reportId}/uphold", http.HandlerFunc(reportAdmin.AdminUpholdReportHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reports/{reportId}/dismiss", http.HandlerFunc(reportAdmin.AdminDismissReportHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reports/{reportId}/escalate", http.HandlerFunc(reportAdmin.AdminEscalateReportHandler)).Methods("POST")
+	apiCreate.Handle("/admin/reports/{reportId}/reopen", http.HandlerFunc(reportAdmin.AdminReopenReportHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reports/{reportId}", http.HandlerFunc(reportAdmin.AdminGetReportHandler)).Methods("GET")
 	apiCreate.Handle("/admin/reports", http.HandlerFunc(reportAdmin.AdminListReportsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/offenses/{offenseId}/reverse", http.HandlerFunc(reportAdmin.AdminReverseOffenseHandler)).Methods("POST")

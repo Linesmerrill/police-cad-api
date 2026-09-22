@@ -45,6 +45,48 @@ type Report struct {
 	EscalatedBy string              `bson:"escalatedBy,omitempty" json:"escalatedBy,omitempty"`
 
 	UpdatedAt *primitive.DateTime `bson:"updatedAt,omitempty" json:"updatedAt,omitempty"`
+
+	// DecisionID is shared by every report closed by the same decision. A
+	// dismissal closes the whole case, so reopening one has to find the others
+	// it closed; this is how.
+	DecisionID string `bson:"decisionId,omitempty" json:"decisionId,omitempty"`
+
+	// History is every decision and reopen on this report, oldest first. The
+	// reviewedBy fields only ever hold the latest decision; this keeps the
+	// ones before it, including who reopened a report and why.
+	History []ReportEvent `bson:"history,omitempty" json:"history,omitempty"`
+}
+
+// ReportEvent is one entry in a report's history.
+type ReportEvent struct {
+	Action         string             `bson:"action" json:"action"` // resolved | dismissed | welfare | escalated | reopened
+	PreviousStatus string             `bson:"previousStatus,omitempty" json:"previousStatus,omitempty"`
+	By             string             `bson:"by" json:"by"` // admin display name, never an email
+	ByID           string             `bson:"byId,omitempty" json:"byId,omitempty"`
+	Reason         string             `bson:"reason,omitempty" json:"reason,omitempty"`
+	DecisionID     string             `bson:"decisionId,omitempty" json:"decisionId,omitempty"`
+	At             primitive.DateTime `bson:"at" json:"at"`
+}
+
+// Report history actions.
+const (
+	ReportEventReopened = "reopened"
+)
+
+// IsReopenable reports whether a closed report can be put back in the queue.
+//
+// Only reports closed with no action qualify. An upheld report carries a
+// strike, and reopening it would leave that strike standing on a report marked
+// new; the strike is undone with Reverse instead. An escalated report has been
+// handed to the CyberTipline under a legal hold, and taking it back out of the
+// queue's escalated state is not something a misclick should be able to do.
+func (r Report) IsReopenable() bool {
+	switch r.EffectiveStatus() {
+	case ReportStatusDismissed, ReportStatusWelfare:
+		return true
+	default:
+		return false
+	}
 }
 
 // Report workflow states.

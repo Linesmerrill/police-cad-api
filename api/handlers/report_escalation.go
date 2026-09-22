@@ -242,8 +242,19 @@ func (ra ReportAdmin) AdminEscalateReportHandler(w http.ResponseWriter, r *http.
 	if strings.TrimSpace(req.Note) != "" {
 		set["internalNote"] = req.Note
 	}
+	decisionID := primitive.NewObjectID().Hex()
+	set["decisionId"] = decisionID
 	for _, rep := range escalating {
-		if err := ra.RDB.UpdateOne(ctx, bson.M{"_id": rep.ID}, bson.M{"$set": set}); err != nil {
+		event := models.ReportEvent{
+			Action:         models.ReportStatusEscalated,
+			PreviousStatus: rep.EffectiveStatus(),
+			By:             admin,
+			ByID:           adminID(req.CurrentUser),
+			Reason:         strings.TrimSpace(req.Note),
+			DecisionID:     decisionID,
+			At:             primitive.NewDateTimeFromTime(now),
+		}
+		if err := ra.RDB.UpdateOne(ctx, bson.M{"_id": rep.ID}, bson.M{"$set": set, "$push": bson.M{"history": event}}); err != nil {
 			zap.S().Errorw("failed to mark report escalated", "reportId", rep.ID.Hex(), "error", err)
 		}
 	}
