@@ -3212,6 +3212,54 @@ func (c Community) UpdateDepartmentMembersHandler(w http.ResponseWriter, r *http
 		}
 	}
 
+	// Tell the people who were just added. Adding someone here is the same event
+	// as approving their request from a notification, and that path has always
+	// told them — this one told nobody, so a member could be put into a
+	// department and never learn they were in it.
+	if len(added) > 0 {
+		department := communityDoc.Details.Departments[deptIndex]
+		actorID := resolveActorFromRequest(r)
+		promoted := make(map[string]bool, len(promote))
+		for _, memberID := range promote {
+			promoted[memberID] = true
+		}
+
+		for _, memberID := range added {
+			previousStatus := ""
+			if promoted[memberID] {
+				previousStatus = "pending"
+
+				// Their request has been actioned, so clear the join_request
+				// notification from every admin who received one. Otherwise it
+				// lingers as "requesting to join" for all other staff, who can
+				// each spend time on a request that is already handled. Mirrors
+				// UpdateDepartmentJoinRequestHandler.
+				notifMatch := bson.M{
+					"type":       "join_request",
+					"sentFromID": memberID,
+					"data1":      communityID,
+					"data3":      departmentID,
+				}
+				// Best-effort cleanup — never fail the add if this errors.
+				_, _ = c.UDB.UpdateMany(ctx,
+					bson.M{"user.notifications": bson.M{"$elemMatch": notifMatch}},
+					bson.M{"$pull": bson.M{"user.notifications": notifMatch}},
+				)
+			}
+
+			notifyJoinResolved(ctx, c.UDB, c.PTDB, c.UPDB, JoinResolution{
+				Status:         "approved",
+				PreviousStatus: previousStatus,
+				RequesterID:    memberID,
+				ActorID:        actorID,
+				CommunityID:    communityID,
+				CommunityName:  communityDoc.Details.Name,
+				DepartmentID:   departmentID,
+				DepartmentName: department.Name,
+			})
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{

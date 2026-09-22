@@ -93,6 +93,23 @@ func decodeAddMembersBody(t *testing.T, rr *httptest.ResponseRecorder) map[strin
 	return body
 }
 
+// departmentHandler wires the databases the handler touches: the community, and
+// the user and preference databases the "you were added" notification needs.
+// No push-token database, so the push half is skipped.
+// Notification writes are allowed but not asserted here; dedicated tests below
+// cover what gets sent.
+func departmentHandler(cdb *mocks.CommunityDatabase) handlers.Community {
+	udb := &mocks.UserDatabase{}
+	udb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	udb.On("UpdateMany", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	udb.On("FindOne", mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	updb := &mocks.UserPreferencesDatabase{}
+	updb.On("FindOne", mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	return handlers.Community{DB: cdb, UDB: udb, UPDB: updb}
+}
+
 func TestUpdateDepartmentMembers_AddsANewMember(t *testing.T) {
 	cdb := &mocks.CommunityDatabase{}
 	cdb.On("FindOne", mock.Anything, mock.Anything).
@@ -103,7 +120,7 @@ func TestUpdateDepartmentMembers_AddsANewMember(t *testing.T) {
 		Run(func(args mock.Arguments) { captured = args.Get(2) }).
 		Return(nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersNewUser))
 
@@ -122,7 +139,7 @@ func TestUpdateDepartmentMembers_ExistingMemberIsSkippedNotRejected(t *testing.T
 			Status: "approved",
 		}), nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
 
@@ -148,7 +165,7 @@ func TestUpdateDepartmentMembers_BulkAddSkipsOnlyTheDuplicate(t *testing.T) {
 		Run(func(args mock.Arguments) { captured = args.Get(2) }).
 		Return(nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(
 		t, addMembersNewUser, addMembersExistingUser, addMembersSecondUser,
@@ -174,7 +191,7 @@ func TestUpdateDepartmentMembers_RepeatedIDInOneRequestIsAddedOnce(t *testing.T)
 		Run(func(args mock.Arguments) { captured = args.Get(2) }).
 		Return(nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(
 		t, addMembersNewUser, addMembersNewUser,
@@ -194,7 +211,7 @@ func TestUpdateDepartmentMembers_UnknownDepartmentIsNotFound(t *testing.T) {
 	cdb := &mocks.CommunityDatabase{}
 	cdb.On("FindOne", mock.Anything, mock.Anything).Return(community, nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersNewUser))
 
@@ -222,7 +239,7 @@ func TestUpdateDepartmentMembers_PendingMemberIsApprovedNotDuplicated(t *testing
 		Run(func(args mock.Arguments) { captured = args.Get(2) }).
 		Return(nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
 
@@ -248,7 +265,7 @@ func TestUpdateDepartmentMembers_DeniedMemberCanBeAddedBack(t *testing.T) {
 		}), nil)
 	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
 
@@ -274,7 +291,7 @@ func TestUpdateDepartmentMembers_MixOfPendingAndNew(t *testing.T) {
 		Run(func(args mock.Arguments) { updates = append(updates, args.Get(2)) }).
 		Return(nil)
 
-	c := handlers.Community{DB: cdb}
+	c := departmentHandler(cdb)
 	rr := httptest.NewRecorder()
 	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(
 		t, addMembersExistingUser, addMembersNewUser,
@@ -286,4 +303,119 @@ func TestUpdateDepartmentMembers_MixOfPendingAndNew(t *testing.T) {
 	body := decodeAddMembersBody(t, rr)
 	assert.Equal(t, []interface{}{addMembersExistingUser, addMembersNewUser}, body["added"])
 	assert.Equal(t, []interface{}{addMembersExistingUser}, body["approved"])
+}
+
+// Adding someone to a department is the same event as approving their request
+// from a notification, and that path has always told them. This one told
+// nobody, so a member could be put into a department and never learn they were
+// in it — and a request approved from the picker stayed in every admin's
+// notification list looking unhandled.
+
+// capturedNotification digs the pushed notification out of an $push update.
+func capturedNotification(t *testing.T, update interface{}) (models.Notification, bool) {
+	t.Helper()
+	doc, ok := update.(bson.M)
+	if !ok {
+		return models.Notification{}, false
+	}
+	push, ok := doc["$push"].(bson.M)
+	if !ok {
+		return models.Notification{}, false
+	}
+	notif, ok := push["user.notifications"].(models.Notification)
+	return notif, ok
+}
+
+func TestUpdateDepartmentMembers_TellsANewMemberTheyWereAdded(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	community := communityWithDepartmentMembers(t)
+	community.Details.Name = "Redgum RP"
+	community.Details.Departments[0].Name = "Fire & Rescue"
+	cdb.On("FindOne", mock.Anything, mock.Anything).Return(community, nil)
+	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	udb := &mocks.UserDatabase{}
+	var notifications []models.Notification
+	udb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			if notif, ok := capturedNotification(t, args.Get(2)); ok {
+				notifications = append(notifications, notif)
+			}
+		}).
+		Return(nil, nil).Maybe()
+	udb.On("UpdateMany", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	c := handlers.Community{DB: cdb, UDB: udb}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersNewUser))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Len(t, notifications, 1, "the new member was told nothing")
+	assert.Equal(t, addMembersNewUser, notifications[0].SentToID)
+	assert.Equal(t, "You were added to Fire & Rescue in Redgum RP", notifications[0].Message,
+		"someone who never asked was not approved for anything")
+}
+
+func TestUpdateDepartmentMembers_TellsAPendingMemberTheyWereApproved(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	community := communityWithDepartmentMembers(t, models.MemberStatus{
+		UserID: addMembersExistingUser,
+		Status: "pending",
+	})
+	community.Details.Name = "Redgum RP"
+	community.Details.Departments[0].Name = "Fire & Rescue"
+	cdb.On("FindOne", mock.Anything, mock.Anything).Return(community, nil)
+	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	udb := &mocks.UserDatabase{}
+	var notifications []models.Notification
+	var clearedRequests int
+	udb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			if notif, ok := capturedNotification(t, args.Get(2)); ok {
+				notifications = append(notifications, notif)
+			}
+		}).
+		Return(nil, nil).Maybe()
+	udb.On("UpdateMany", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) { clearedRequests++ }).
+		Return(nil, nil).Maybe()
+
+	c := handlers.Community{DB: cdb, UDB: udb}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Len(t, notifications, 1)
+	assert.Equal(t, "You were approved for Fire & Rescue in Redgum RP", notifications[0].Message,
+		"they did ask, so this is an approval")
+	assert.Equal(t, 1, clearedRequests,
+		"the admins' join_request notification has to go, or it reads as unhandled")
+}
+
+// Nobody is told about a member the department already had.
+func TestUpdateDepartmentMembers_SkippedMemberIsNotNotified(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).
+		Return(communityWithDepartmentMembers(t, models.MemberStatus{
+			UserID: addMembersExistingUser,
+			Status: "approved",
+		}), nil)
+
+	udb := &mocks.UserDatabase{}
+	var notifications []models.Notification
+	udb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			if notif, ok := capturedNotification(t, args.Get(2)); ok {
+				notifications = append(notifications, notif)
+			}
+		}).
+		Return(nil, nil).Maybe()
+
+	c := handlers.Community{DB: cdb, UDB: udb}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(c.UpdateDepartmentMembersHandler).ServeHTTP(rr, newAddMembersRequest(t, addMembersExistingUser))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Empty(t, notifications)
 }

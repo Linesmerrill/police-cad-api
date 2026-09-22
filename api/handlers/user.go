@@ -855,6 +855,12 @@ func sendNotificationPush(
 	notif models.Notification,
 	senderUsername string,
 ) {
+	// Matches the updb guard below: a handler wired without a push-token
+	// database must not panic a goroutine and take the process with it.
+	if ptdb == nil {
+		return
+	}
+
 	ctx := context.Background()
 
 	// Look up push tokens for the recipient
