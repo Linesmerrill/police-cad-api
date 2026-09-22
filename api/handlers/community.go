@@ -711,6 +711,27 @@ func (c Community) CommunitiesByOwnerIDHandlerV2(w http.ResponseWriter, r *http.
 	})
 }
 
+// memberStatusFilter reads the optional ?status= on the members endpoints. The
+// members list has always meant approved members and still does by default;
+// naming a status lists the people in that state instead, which is how the
+// Members screen shows who is waiting on a join request without needing a
+// second endpoint.
+//
+// An unknown value falls back to approved rather than returning an empty list,
+// so a typo in a client cannot make a community look deserted.
+func memberStatusFilter(r *http.Request) string {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status"))) {
+	case models.CommunityMemberStatusPending:
+		return models.CommunityMemberStatusPending
+	case models.CommunityMemberStatusDeclined:
+		return models.CommunityMemberStatusDeclined
+	case models.CommunityMemberStatusBanned:
+		return models.CommunityMemberStatusBanned
+	default:
+		return models.CommunityMemberStatusApproved
+	}
+}
+
 // CommunityMembersHandler returns all members of a community
 // Deprecated: Use FetchCommunityMembersHandlerV2 instead
 func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Request) {
@@ -734,13 +755,14 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 
 	// Find all users that belong to the community with pagination
+	memberStatus := memberStatusFilter(r)
 	andClauses := []bson.M{
 		{"user.communities": bson.M{"$exists": true}},
 		{"user.communities": bson.M{"$ne": nil}},
 		{"user.communities": bson.M{
 			"$elemMatch": bson.M{
 				"communityId": communityID,
-				"status":      "approved",
+				"status":      memberStatus,
 			},
 		}},
 	}
@@ -6165,13 +6187,14 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 	offset := (page - 1) * limit
 
 	// Find all users that belong to the community with pagination
+	memberStatus := memberStatusFilter(r)
 	andClauses := []bson.M{
 		{"user.communities": bson.M{"$exists": true}},
 		{"user.communities": bson.M{"$ne": nil}},
 		{"user.communities": bson.M{
 			"$elemMatch": bson.M{
 				"communityId": communityID,
-				"status":      "approved",
+				"status":      memberStatus,
 			},
 		}},
 	}
@@ -7425,13 +7448,14 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 		},
 	}
 
+	memberStatus := memberStatusFilter(r)
 	andClauses := []bson.M{
-		// User must be a member of the community with status "approved"
+		// Members of the community in the requested state, approved by default
 		{
 			"user.communities": bson.M{
 				"$elemMatch": bson.M{
 					"communityId": communityID,
-					"status":      "approved",
+					"status":      memberStatus,
 				},
 			},
 		},

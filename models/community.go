@@ -421,6 +421,20 @@ type TenCodes struct {
 // this community's forms and reports.
 const PermissionManageForms = "manage forms"
 
+// The states a person can be in with respect to a community. These live on the
+// user document, in user.communities[].status, and the join request is the same
+// row as the membership — asking to join writes "pending" and approving flips
+// it to "approved".
+//
+// "declined" is a decision that can be revisited: the person may ask again.
+// "banned" cannot, and is mirrored in the community's banList.
+const (
+	CommunityMemberStatusPending  = "pending"
+	CommunityMemberStatusApproved = "approved"
+	CommunityMemberStatusDeclined = "declined"
+	CommunityMemberStatusBanned   = "banned"
+)
+
 // The categories a ten-code can carry. Anything else is rejected on write.
 const (
 	TenCodeCategoryAvailable = "available"

@@ -330,6 +330,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/members/search", api.Middleware(http.HandlerFunc(c.SearchCommunityMembersHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/members", api.Middleware(http.HandlerFunc(c.CommunityMembersHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/members", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersHandlerV2))).Methods("GET")
+	apiV2.Handle("/community/{communityId}/member-status-counts", api.Middleware(http.HandlerFunc(c.MemberStatusCountsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/units", api.Middleware(http.HandlerFunc(c.FetchCommunityUnitsHandlerV2))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/roles", api.Middleware(http.HandlerFunc(c.GetRolesByCommunityIDHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/roles", api.Middleware(http.HandlerFunc(c.AddRoleToCommunityHandler))).Methods("POST")
