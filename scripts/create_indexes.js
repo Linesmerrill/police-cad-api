@@ -995,5 +995,61 @@ createIndexSafe(
   { name: "housePromos_slug_unique_idx", unique: true, background: true }
 );
 
+// Moderation queue. The console's default order is severity then oldest
+// first, which is the whole point of the queue: a child-safety report must
+// never end up on page three, which is how the first sixteen months of them
+// went unread.
+createIndexSafe(
+  db.reports,
+  { severityRank: 1, createdAt: 1 },
+  { name: "reports_severity_created_idx", background: true }
+);
+
+// Every report against one target, for the repeat-offender count shown on each
+// queue row and the history on the detail page.
+createIndexSafe(
+  db.reports,
+  { itemId: 1 },
+  { name: "reports_item_idx", background: true }
+);
+
+// The reporter's own history, which is how coordinated reporting becomes
+// visible.
+createIndexSafe(
+  db.reports,
+  { reportedById: 1 },
+  { name: "reports_reporter_idx", background: true }
+);
+
+// The status rail counts.
+createIndexSafe(
+  db.reports,
+  { status: 1 },
+  { name: "reports_status_idx", background: true }
+);
+
+// Moderation offenses, counted per target to work out the next rung of the
+// ladder. Scope is in the key because a user ladder and a community ladder are
+// counted separately.
+createIndexSafe(
+  db.content_offenses,
+  { scope: 1, userId: 1, status: 1 },
+  { name: "content_offenses_user_idx", background: true }
+);
+
+createIndexSafe(
+  db.content_offenses,
+  { scope: 1, communityId: 1, status: 1 },
+  { name: "content_offenses_community_idx", background: true }
+);
+
+// Communities under a moderation delisting are excluded from every discovery
+// surface, so the exclusion is on the hot path of browse and search.
+createIndexSafe(
+  db.communities,
+  { "community.listingSuspension.until": 1 },
+  { name: "communities_listing_suspension_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

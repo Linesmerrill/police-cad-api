@@ -256,3 +256,34 @@ func (o ContentOffense) InForce(now time.Time) bool {
 func (o ContentOffense) CountsTowardEscalation() bool {
 	return o.Status == ContentOffenseStatusActive
 }
+
+// Severity ranks, lowest first, so a Mongo sort on the stored rank puts the
+// reports that matter soonest at the top. A Child Safety report must never be
+// on page three, which is exactly how the first sixteen months of them went
+// unread.
+const (
+	SeverityRankEscalate = 0
+	SeverityRankWelfare  = 1
+	SeverityRankSerious  = 2
+	SeverityRankMinor    = 3
+)
+
+// ReportSeverityRank returns the sort rank for a reported issue.
+//
+// It is stored on the report rather than derived at read time because Mongo
+// cannot sort by a value it does not hold. A report written before this field
+// existed has no rank, which sorts as null and therefore first: an
+// unclassified report surfaces at the top of the queue rather than being
+// buried, which is the right direction to fail.
+func ReportSeverityRank(issue string) int {
+	switch ReportTierForIssue(issue) {
+	case ReportTierEscalate:
+		return SeverityRankEscalate
+	case ReportTierWelfare:
+		return SeverityRankWelfare
+	case ReportTierSerious:
+		return SeverityRankSerious
+	default:
+		return SeverityRankMinor
+	}
+}

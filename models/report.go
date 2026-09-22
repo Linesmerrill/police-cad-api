@@ -20,6 +20,10 @@ type Report struct {
 	// stale API deploy must never be able to hide a report by omitting a field.
 	Status string `bson:"status,omitempty" json:"status,omitempty"`
 
+	// SeverityRank is stored so the queue can sort by it. Escalate first, then
+	// welfare, serious and minor. See ReportSeverityRank.
+	SeverityRank *int `bson:"severityRank,omitempty" json:"severityRank,omitempty"`
+
 	// Tier is stored at review time rather than derived on every read, so that
 	// a later change to the tier map cannot silently rewrite the basis on which
 	// a past decision was made.

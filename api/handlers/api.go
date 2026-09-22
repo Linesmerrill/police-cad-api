@@ -99,6 +99,12 @@ func (a *App) New() *mux.Router {
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
+	reportAdmin := ReportAdmin{
+		RDB:  databases.NewReportDatabase(a.dbHelper),
+		CODB: databases.NewContentOffenseDatabase(a.dbHelper),
+		UDB:  databases.NewUserDatabase(a.dbHelper),
+		CDB:  databases.NewCommunityDatabase(a.dbHelper),
+	}
 	cloudinaryHandler := CloudinaryHandler{}
 	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	betaFeedback := BetaFeedback{DB: databases.NewBetaFeedbackDatabase(a.dbHelper)}
@@ -266,6 +272,18 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/cases/{id}", http.HandlerFunc(adminHandler.AdminGetCaseHandler)).Methods("GET")
 	apiCreate.Handle("/admin/cases", http.HandlerFunc(adminHandler.AdminCreateCaseHandler)).Methods("POST")
 	apiCreate.Handle("/admin/cases", http.HandlerFunc(adminHandler.AdminListCasesHandler)).Methods("GET")
+
+	// Moderation queue for user-submitted reports. These carry named
+	// accusations about real accounts, so unlike the other /admin routes they
+	// also require the first-party gateway secret and are proxied by the
+	// website rather than called from browser JavaScript.
+	apiCreate.Handle("/admin/reports/{reportId}/uphold/preview", http.HandlerFunc(reportAdmin.AdminUpholdPreviewHandler)).Methods("POST")
+	apiCreate.Handle("/admin/reports/{reportId}/uphold", http.HandlerFunc(reportAdmin.AdminUpholdReportHandler)).Methods("POST")
+	apiCreate.Handle("/admin/reports/{reportId}/dismiss", http.HandlerFunc(reportAdmin.AdminDismissReportHandler)).Methods("POST")
+	apiCreate.Handle("/admin/reports/{reportId}/escalate", http.HandlerFunc(reportAdmin.AdminEscalateReportHandler)).Methods("POST")
+	apiCreate.Handle("/admin/reports/{reportId}", http.HandlerFunc(reportAdmin.AdminGetReportHandler)).Methods("GET")
+	apiCreate.Handle("/admin/reports", http.HandlerFunc(reportAdmin.AdminListReportsHandler)).Methods("GET")
+	apiCreate.Handle("/admin/offenses/{offenseId}/reverse", http.HandlerFunc(reportAdmin.AdminReverseOffenseHandler)).Methods("POST")
 
 	// Admin community management routes
 	apiCreate.Handle("/admin/communities/{id}/transfer-ownership", http.HandlerFunc(adminHandler.AdminTransferOwnershipHandler)).Methods("POST")
