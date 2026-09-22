@@ -87,6 +87,16 @@ func stubTargetUser(mockUserDB *mocks.UserDatabase, username, email string) {
 	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": oid}).Return(result)
 }
 
+// stubOpenCase answers the lookup for every open report about the same target.
+func stubOpenCase(t *testing.T, rdb *mocks.ReportDatabase, reports ...*models.Report) {
+	t.Helper()
+	docs := make([]interface{}, 0, len(reports))
+	for _, r := range reports {
+		docs = append(docs, r)
+	}
+	rdb.On("Find", mock.Anything, mock.Anything, mock.Anything).Return(reportCursor(t, docs...), nil)
+}
+
 func newReportAdmin(rdb *mocks.ReportDatabase, codb *mocks.ContentOffenseDatabase, udb *mocks.UserDatabase, cdb *mocks.CommunityDatabase) ReportAdmin {
 	return ReportAdmin{RDB: rdb, CODB: codb, UDB: udb, CDB: cdb}
 }
@@ -141,6 +151,7 @@ func TestAdminUphold_RefusesAChildSafetyReport(t *testing.T) {
 	reportOID, _ := primitive.ObjectIDFromHex(testReportID)
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).
 		Return(testReport("Child Safety", "user"), nil)
+	stubOpenCase(t, mockReportDB, testReport("Child Safety", "user"))
 	stubTargetUser(mockUserDB, "suspect", "suspect@example.com")
 	mockOffenseDB.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
 	mockOffenseDB.On("FindOne", mock.Anything, mock.Anything).Return(nil, mongo.ErrNoDocuments)
@@ -171,6 +182,7 @@ func TestAdminUphold_RefusesASelfHarmReport(t *testing.T) {
 	reportOID, _ := primitive.ObjectIDFromHex(testReportID)
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).
 		Return(testReport("Suicide or Self-Harm", "user"), nil)
+	stubOpenCase(t, mockReportDB, testReport("Suicide or Self-Harm", "user"))
 	stubTargetUser(mockUserDB, "kid", "kid@example.com")
 	mockOffenseDB.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
 	mockOffenseDB.On("FindOne", mock.Anything, mock.Anything).Return(nil, mongo.ErrNoDocuments)
@@ -200,6 +212,7 @@ func TestAdminUphold_FirstMinorOffenseWarnsWithoutSuspending(t *testing.T) {
 
 	reportOID, _ := primitive.ObjectIDFromHex(testReportID)
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).Return(testReport("Spam", "user"), nil)
+	stubOpenCase(t, mockReportDB, testReport("Spam", "user"))
 	mockReportDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	stubTargetUser(mockUserDB, "spammer", "")
 	mockOffenseDB.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
@@ -238,6 +251,7 @@ func TestAdminUphold_FirstSeriousOffenseSuspendsForAWeek(t *testing.T) {
 	targetOID, _ := primitive.ObjectIDFromHex(testTargetID)
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).
 		Return(testReport("Abuse & Harassment", "user"), nil)
+	stubOpenCase(t, mockReportDB, testReport("Abuse & Harassment", "user"))
 	mockReportDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	stubTargetUser(mockUserDB, "bully", "")
 	mockOffenseDB.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
@@ -290,6 +304,7 @@ func TestAdminUphold_RefusesWhileAPenaltyIsRunning(t *testing.T) {
 
 	reportOID, _ := primitive.ObjectIDFromHex(testReportID)
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).Return(testReport("Hate", "user"), nil)
+	stubOpenCase(t, mockReportDB, testReport("Hate", "user"))
 	stubTargetUser(mockUserDB, "bully", "")
 	mockOffenseDB.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(1), nil)
 
@@ -337,6 +352,7 @@ func TestAdminDismiss_SelfHarmClosesAsWelfare(t *testing.T) {
 	reportOID, _ := primitive.ObjectIDFromHex(testReportID)
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).
 		Return(testReport("Suicide or Self-Harm", "user"), nil)
+	stubOpenCase(t, mockReportDB, testReport("Suicide or Self-Harm", "user"))
 
 	var update bson.M
 	mockReportDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).
@@ -371,6 +387,7 @@ func TestAdminEscalate_HoldsSuspendsAndBuildsThePackage(t *testing.T) {
 	report := testReport("Child Safety", "user")
 	report.AdditionalDetails = "Caught him asking underage kids for photos in a party"
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).Return(report, nil)
+	stubOpenCase(t, mockReportDB, report)
 	mockReportDB.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	stubTargetUser(mockUserDB, "suspect", "suspect@example.com")
 
@@ -445,6 +462,7 @@ func TestAdminUphold_RefusesAClosedReport(t *testing.T) {
 	closed := testReport("Spam", "user")
 	closed.Status = models.ReportStatusResolved
 	mockReportDB.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).Return(closed, nil)
+	stubOpenCase(t, mockReportDB, closed)
 
 	ra := newReportAdmin(mockReportDB, &mocks.ContentOffenseDatabase{}, &mocks.UserDatabase{}, &mocks.CommunityDatabase{})
 
@@ -460,13 +478,10 @@ func TestAdminUphold_RefusesAClosedReport(t *testing.T) {
 
 // The queue's "new" filter has to include the forty reports written before the
 // status field existed, or the backlog is invisible.
-func TestReportQueueFilter_NewIncludesReportsWithNoStatus(t *testing.T) {
-	req, _ := http.NewRequest("GET", "/api/v1/admin/reports?status=new", nil)
-	filter := reportQueueFilter(req)
-
-	or, ok := filter["$or"].([]bson.M)
+func TestStatusClause_NewIncludesReportsWithNoStatus(t *testing.T) {
+	or, ok := statusClause("new")["$or"].([]bson.M)
 	if !ok {
-		t.Fatalf("expected an $or, got %#v", filter)
+		t.Fatalf("expected an $or, got %#v", statusClause("new"))
 	}
 	var sawNull bool
 	for _, branch := range or {
@@ -477,6 +492,40 @@ func TestReportQueueFilter_NewIncludesReportsWithNoStatus(t *testing.T) {
 		}
 	}
 	assert.True(t, sawNull, "a report with no status is new and must appear in the new filter")
+	assert.Nil(t, statusClause(""), "no status means no filter")
+}
+
+// A report with a missing or unexpected itemType must still land in a tab,
+// or it is in the queue but visible nowhere.
+func TestTypeClause_UserTabCatchesEverythingThatIsNotACommunity(t *testing.T) {
+	assert.Equal(t, bson.M{"itemType": "community"}, typeClause("community"))
+	assert.Equal(t, bson.M{"itemType": bson.M{"$ne": "community"}}, typeClause("user"))
+	assert.Nil(t, typeClause(""))
+	assert.Equal(t, "", normalizeReportItemType("ad"))
+	assert.Equal(t, "community", normalizeReportItemType(" Community "))
+}
+
+// Status "new" and a search both carry an $or. Merged into one map, the second
+// would silently replace the first and the filter would drop a condition.
+func TestAndClauses_KeepsTwoOrsApart(t *testing.T) {
+	search := bson.M{"$or": []bson.M{{"reportedById": "a"}, {"itemId": "a"}}}
+	got := andClauses(typeClause("user"), nil, search, statusClause("new"))
+
+	and, ok := got["$and"].([]bson.M)
+	if !assert.True(t, ok, "expected an $and, got %#v", got) {
+		return
+	}
+	assert.Len(t, and, 3, "nil clauses are dropped, the rest kept separately")
+	var ors int
+	for _, c := range and {
+		if _, has := c["$or"]; has {
+			ors++
+		}
+	}
+	assert.Equal(t, 2, ors, "both $or clauses survive")
+
+	assert.Equal(t, bson.M{}, andClauses(nil, nil))
+	assert.Equal(t, typeClause("community"), andClauses(typeClause("community")))
 }
 
 func TestReportPaging_ClampsTheLimit(t *testing.T) {

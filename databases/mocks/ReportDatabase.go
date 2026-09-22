@@ -44,6 +44,34 @@ func (_m *ReportDatabase) DeleteOne(ctx context.Context, filter interface{}, opt
 }
 
 // Find provides a mock function with given fields: ctx, filter, opts
+func (_m *ReportDatabase) Aggregate(ctx context.Context, pipeline interface{}) (databases.MongoCursor, error) {
+	ret := _m.Called(ctx, pipeline)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Aggregate")
+	}
+
+	var r0 databases.MongoCursor
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) (databases.MongoCursor, error)); ok {
+		return rf(ctx, pipeline)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}) databases.MongoCursor); ok {
+		r0 = rf(ctx, pipeline)
+	} else {
+		r0 = ret.Get(0).(databases.MongoCursor)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}) error); ok {
+		r1 = rf(ctx, pipeline)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// CountDocuments provides a mock function
 func (_m *ReportDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {

@@ -16,6 +16,7 @@ type ReportDatabase interface {
 	FindOne(ctx context.Context, filter interface{}) (*models.Report, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
+	Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error)
 	InsertOne(ctx context.Context, report models.Report, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
@@ -51,6 +52,14 @@ func (c *reportDatabase) Find(ctx context.Context, filter interface{}, opts ...*
 
 func (c *reportDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	return c.db.Collection(reportName).CountDocuments(ctx, filter, opts...)
+}
+
+func (c *reportDatabase) Aggregate(ctx context.Context, pipeline interface{}) (MongoCursor, error) {
+	cursor, err := c.db.Collection(reportName).Aggregate(ctx, pipeline)
+	if err != nil {
+		return MongoCursor{}, err
+	}
+	return *cursor, nil
 }
 
 func (c *reportDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {

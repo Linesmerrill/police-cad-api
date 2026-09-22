@@ -53,8 +53,53 @@ type cyberTiplinePackage struct {
 	// never paraphrased or trimmed.
 	ReportText string `json:"reportText"`
 
+	// Related are the other open child safety reports about the same account,
+	// filed by other people. Each is reproduced verbatim like the first.
+	Related []cyberTiplineRelated `json:"related,omitempty"`
+
 	// PlainText is the whole package as one block for the clipboard.
 	PlainText string `json:"plainText"`
+}
+
+type cyberTiplineRelated struct {
+	FiledAt          string `json:"filedAt"`
+	ReporterUsername string `json:"reporterUsername,omitempty"`
+	ReporterUserID   string `json:"reporterUserId,omitempty"`
+	ReportText       string `json:"reportText"`
+}
+
+// addRelatedReports appends further reports about the same account to the
+// package, and to its clipboard text, above the actions-taken footer.
+func (pkg *cyberTiplinePackage) addRelatedReports(reports []models.Report, reporterName func(string) string) {
+	if len(reports) == 0 {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("\nFURTHER REPORTS ABOUT THE SAME ACCOUNT (" + fmt.Sprint(len(reports)) + ")\n")
+	for i, rep := range reports {
+		rel := cyberTiplineRelated{
+			FiledAt:          rep.CreatedAt.Time().UTC().Format(time.RFC3339),
+			ReporterUsername: reporterName(rep.ReportedByID),
+			ReporterUserID:   rep.ReportedByID,
+			ReportText:       rep.AdditionalDetails,
+		}
+		pkg.Related = append(pkg.Related, rel)
+
+		b.WriteString(fmt.Sprintf("  %d. Filed %s by %s (%s)\n", i+1, rel.FiledAt, orNotRecorded(rel.ReporterUsername), orNotRecorded(rel.ReporterUserID)))
+		if strings.TrimSpace(rel.ReportText) == "" {
+			b.WriteString("     (no detail written)\n")
+			continue
+		}
+		for _, line := range strings.Split(rel.ReportText, "\n") {
+			b.WriteString("     " + line + "\n")
+		}
+	}
+	marker := "\nPLATFORM ACTIONS TAKEN\n"
+	if i := strings.Index(pkg.PlainText, marker); i >= 0 {
+		pkg.PlainText = pkg.PlainText[:i] + b.String() + pkg.PlainText[i:]
+	} else {
+		pkg.PlainText += b.String()
+	}
 }
 
 // buildCyberTiplinePackage assembles the submission.
@@ -153,8 +198,24 @@ func (ra ReportAdmin) AdminEscalateReportHandler(w http.ResponseWriter, r *http.
 	admin := adminDisplayName(req.CurrentUser)
 	now := time.Now()
 
+	// Every open child safety report about the same account is part of the
+	// same escalation. The report acted on is included even if it was filed
+	// under another category, because a person decided it belongs here.
+	escalating := []models.Report{*report}
+	if group, err := ra.openReportsAgainst(ctx, *report); err == nil {
+		for _, rep := range onTrack(group, reportTrackEscalate) {
+			if rep.ID != report.ID {
+				escalating = append(escalating, rep)
+			}
+		}
+	}
+
 	reporterName, _ := ra.contactFor(ctx, report.ReportedByID)
 	pkg := buildCyberTiplinePackage(*report, target, ra.signupDate(ctx, target.UserID), reporterName, admin, now)
+	pkg.addRelatedReports(escalating[1:], func(id string) string {
+		name, _ := ra.contactFor(ctx, id)
+		return name
+	})
 
 	// Suspend indefinitely and hold the data. Order matters: the hold is what
 	// stops a later deletion destroying what has to be preserved, so it is
@@ -173,6 +234,7 @@ func (ra ReportAdmin) AdminEscalateReportHandler(w http.ResponseWriter, r *http.
 		"escalatedAt":    primitive.NewDateTimeFromTime(now),
 		"escalatedBy":    admin,
 		"reviewedByName": admin,
+		"reviewedById":   adminID(req.CurrentUser),
 		"reviewedAt":     primitive.NewDateTimeFromTime(now),
 		"updatedAt":      primitive.NewDateTimeFromTime(now),
 		"active":         false,
@@ -180,8 +242,10 @@ func (ra ReportAdmin) AdminEscalateReportHandler(w http.ResponseWriter, r *http.
 	if strings.TrimSpace(req.Note) != "" {
 		set["internalNote"] = req.Note
 	}
-	if err := ra.RDB.UpdateOne(ctx, bson.M{"_id": report.ID}, bson.M{"$set": set}); err != nil {
-		zap.S().Errorw("failed to mark report escalated", "reportId", report.ID.Hex(), "error", err)
+	for _, rep := range escalating {
+		if err := ra.RDB.UpdateOne(ctx, bson.M{"_id": rep.ID}, bson.M{"$set": set}); err != nil {
+			zap.S().Errorw("failed to mark report escalated", "reportId", rep.ID.Hex(), "error", err)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -307,6 +371,7 @@ func (ra ReportAdmin) AdminReverseOffenseHandler(w http.ResponseWriter, r *http.
 	if err := ra.CODB.UpdateOne(ctx, bson.M{"_id": oid}, bson.M{"$set": bson.M{
 		"status":         models.ContentOffenseStatusReversed,
 		"reversedBy":     admin,
+		"reversedById":   adminID(req.CurrentUser),
 		"reversedAt":     now,
 		"reversalReason": strings.TrimSpace(req.Reason),
 	}}); err != nil {
