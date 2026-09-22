@@ -179,15 +179,43 @@ func TestCommunity_CommunityHandler_InvalidObjectID_ReturnsBadRequest(t *testing
 // -----------------------------------------------------------------------------
 
 // banUserRequest builds the wire request for BanUserFromCommunityHandler.
+// banActorID is the admin performing the ban. Banning is an administrative act
+// on the community, so the request has to identify an actor who is allowed to
+// do it; resolveActorFromRequest reads the bearer token first and falls back to
+// ?userId=.
+const banActorID = "507f1f77bcf86cd7994390ad"
+
 func banUserRequest(t *testing.T, userID, communityID string) *http.Request {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"communityId": communityID})
-	req, err := http.NewRequest("POST", "/api/v1/user/"+userID+"/ban-community", strings.NewReader(string(body)))
+	req, err := http.NewRequest("POST",
+		"/api/v1/user/"+userID+"/ban-community?userId="+banActorID,
+		strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return mux.SetURLVars(req, map[string]string{"userId": userID})
+}
+
+// stubBannableCommunity returns a community the acting admin owns, so the
+// permission gate passes and the test can assert what it is actually about.
+// The handler loads the community twice, once for the gate and once for the
+// department cleanup, and this single expectation serves both.
+// stubBanActorLookup covers the audit trail's lookup of the acting admin,
+// which runs in a goroutine after the ban succeeds. Without it the mock
+// panics off the main test goroutine.
+func stubBanActorLookup(mockUserDB *mocks.UserDatabase) {
+	actorObjectID, _ := primitive.ObjectIDFromHex(banActorID)
+	stubUserFindOne(mockUserDB, actorObjectID, &models.User{ID: banActorID})
+}
+
+func stubBannableCommunity(mockCommunityDB *mocks.CommunityDatabase, communityObjectID primitive.ObjectID) {
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{
+			ID:      communityObjectID,
+			Details: models.CommunityDetails{OwnerID: banActorID},
+		}, nil)
 }
 
 // stubUserFindOne wires up u.DB.FindOne to decode into the supplied user model.
@@ -235,11 +263,10 @@ func TestUser_BanUserFromCommunityHandler_PriorStatusApproved_DecrementsCount(t 
 		bson.M{"$inc": bson.M{"community.membersCount": -1}},
 	).Return(nil)
 
-	// Ban also clears department membership: it loads the community then $pulls
-	// the user from each department. Return a community with no departments so
-	// the cleanup loop is a no-op for this count-focused test.
-	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
-		Return(&models.Community{}, nil)
+	// No departments on the community, so the membership cleanup loop is a
+	// no-op for this count-focused test.
+	stubBannableCommunity(mockCommunityDB, communityObjectID)
+	stubBanActorLookup(mockUserDB)
 
 	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
 
@@ -289,8 +316,8 @@ func TestUser_BanUserFromCommunityHandler_PriorStatusPending_DoesNotDecrement(t 
 	).Return(nil)
 
 	// Ban clears department membership (loads community, then $pulls per dept).
-	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
-		Return(&models.Community{}, nil)
+	stubBannableCommunity(mockCommunityDB, communityObjectID)
+	stubBanActorLookup(mockUserDB)
 
 	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
 
@@ -317,9 +344,15 @@ func TestUser_BanUserFromCommunityHandler_UserNotMember_ReturnsBadRequest(t *tes
 	communityID := "507f1f77bcf86cd799439012"
 	otherCommunityID := "507f1f77bcf86cd7994390aa"
 	userObjectID, _ := primitive.ObjectIDFromHex(userID)
+	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
 
 	mockUserDB := &mocks.UserDatabase{}
 	mockCommunityDB := &mocks.CommunityDatabase{}
+
+	// The permission gate loads the community before anything else, so this
+	// has to be authorized for the test to reach the membership check it is
+	// about.
+	stubBannableCommunity(mockCommunityDB, communityObjectID)
 
 	stubUserFindOne(mockUserDB, userObjectID, &models.User{
 		ID: userID,
@@ -348,9 +381,12 @@ func TestUser_BanUserFromCommunityHandler_AlreadyBanned_IsIdempotent(t *testing.
 	userID := "507f1f77bcf86cd799439011"
 	communityID := "507f1f77bcf86cd799439012"
 	userObjectID, _ := primitive.ObjectIDFromHex(userID)
+	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
 
 	mockUserDB := &mocks.UserDatabase{}
 	mockCommunityDB := &mocks.CommunityDatabase{}
+
+	stubBannableCommunity(mockCommunityDB, communityObjectID)
 
 	stubUserFindOne(mockUserDB, userObjectID, &models.User{
 		ID: userID,
@@ -372,6 +408,61 @@ func TestUser_BanUserFromCommunityHandler_AlreadyBanned_IsIdempotent(t *testing.
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "User already banned from community")
 	mockUserDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+	mockCommunityDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// The gate itself had no coverage, which is how every test in this file came
+// to exercise an unauthorized request without noticing.
+func TestUser_BanUserFromCommunityHandler_NonStaffIsForbidden(t *testing.T) {
+	userID := "507f1f77bcf86cd799439011"
+	communityID := "507f1f77bcf86cd799439012"
+	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+
+	mockUserDB := &mocks.UserDatabase{}
+	mockCommunityDB := &mocks.CommunityDatabase{}
+
+	// Owned by somebody else, and the actor holds no role on it.
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{
+			ID:      communityObjectID,
+			Details: models.CommunityDetails{OwnerID: "507f1f77bcf86cd7994390ff"},
+		}, nil)
+
+	u := handlers.User{DB: mockUserDB, CDB: mockCommunityDB}
+
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(u.BanUserFromCommunityHandler).ServeHTTP(rr, banUserRequest(t, userID, communityID))
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	// Nothing about the target is even read, let alone written.
+	mockUserDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+	mockCommunityDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestUser_BanUserFromCommunityHandler_MissingActorIsUnauthorized(t *testing.T) {
+	userID := "507f1f77bcf86cd799439011"
+	communityID := "507f1f77bcf86cd799439012"
+	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+
+	mockUserDB := &mocks.UserDatabase{}
+	mockCommunityDB := &mocks.CommunityDatabase{}
+	stubBannableCommunity(mockCommunityDB, communityObjectID)
+
+	u := handlers.User{DB: mockUserDB, CDB: mockCommunityDB}
+
+	// Same request without the ?userId= the gate resolves an actor from.
+	body, _ := json.Marshal(map[string]string{"communityId": communityID})
+	req, err := http.NewRequest("POST", "/api/v1/user/"+userID+"/ban-community", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req = mux.SetURLVars(req, map[string]string{"userId": userID})
+
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(u.BanUserFromCommunityHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	mockCommunityDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -410,8 +501,8 @@ func TestUser_BanUserFromCommunityHandler_DecrementFailureIsNonFatal(t *testing.
 	).Return(errors.New("transient mongo error"))
 
 	// Ban clears department membership (loads community, then $pulls per dept).
-	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
-		Return(&models.Community{}, nil)
+	stubBannableCommunity(mockCommunityDB, communityObjectID)
+	stubBanActorLookup(mockUserDB)
 
 	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
 
@@ -426,7 +517,7 @@ func TestUser_BanUserFromCommunityHandler_DecrementFailureIsNonFatal(t *testing.
 	time.Sleep(50 * time.Millisecond)
 
 	assert.Equal(t, http.StatusOK, rr.Code,
-		"decrement failure must be non-fatal — the ban itself succeeded")
+		"decrement failure must be non-fatal, the ban itself succeeded")
 	assert.Contains(t, rr.Body.String(), "User banned from community successfully")
 	mockUserDB.AssertExpectations(t)
 	mockCommunityDB.AssertExpectations(t)
