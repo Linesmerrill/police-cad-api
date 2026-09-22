@@ -8,6 +8,10 @@ const (
 	ReportTypeUserReport  ReportType = "USER_REPORT"
 	ReportTypeAdReport    ReportType = "AD_REPORT"
 	ReportTypeContentFlag ReportType = "CONTENT_FLAG"
+	// ReportTypeCommunityReport is a report about a community itself, filed
+	// from its page. AD_REPORT stays the type for a report about a promoted
+	// community card in the app.
+	ReportTypeCommunityReport ReportType = "COMMUNITY_REPORT"
 )
 
 // ValidReportTypes returns all valid ReportType values
@@ -16,6 +20,7 @@ func ValidReportTypes() []ReportType {
 		ReportTypeUserReport,
 		ReportTypeAdReport,
 		ReportTypeContentFlag,
+		ReportTypeCommunityReport,
 	}
 }
 
