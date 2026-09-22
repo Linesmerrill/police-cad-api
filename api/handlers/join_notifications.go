@@ -80,7 +80,13 @@ func BuildJoinResolvedNotification(res JoinResolution) (models.Notification, boo
 	switch {
 	case res.Status == JoinStatusApproved && res.IsDepartment():
 		notifType = NotificationDepartmentApproved
-		message = "You were approved for " + departmentName + " in " + communityName
+		// Someone an admin added directly never asked for anything, so telling
+		// them they were "approved" describes a request they did not make.
+		if res.PreviousStatus == "" {
+			message = "You were added to " + departmentName + " in " + communityName
+		} else {
+			message = "You were approved for " + departmentName + " in " + communityName
+		}
 	case res.Status == JoinStatusDeclined && res.IsDepartment():
 		notifType = NotificationDepartmentDeclined
 		message = "Your request to join " + departmentName + " in " + communityName + " was declined"
