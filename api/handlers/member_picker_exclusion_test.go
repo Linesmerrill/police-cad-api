@@ -135,6 +135,25 @@ func TestMemberPicker_ExcludesApprovedMembersOnly(t *testing.T) {
 		"a pending or denied entry is not membership, so those people stay in the picker")
 }
 
+// The picker has to tell the two apart: someone who has not asked to join, and
+// someone whose request is sitting there waiting. Without that, an admin adding
+// members cannot see why one name behaves differently from another.
+func TestMemberPicker_ReportsWhoIsWaitingToJoin(t *testing.T) {
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).
+		Return(communityWithMixedDepartmentMembers(t), nil).Maybe()
+
+	membership := handlers.DepartmentMembershipForTest(cdb, pickerCommunityID, pickerDepartmentID)
+
+	assert.Equal(t, map[string]string{
+		pickerPendingUser: "pending",
+		pickerDeniedUser:  "denied",
+	}, membership.Requests, "an approved member is not a request")
+
+	assert.Len(t, membership.ApprovedIDs, 1)
+	assert.Equal(t, pickerApprovedUser, membership.ApprovedIDs[0].Hex())
+}
+
 func TestMemberPicker_WithoutTheParameterExcludesNobody(t *testing.T) {
 	c, filters := pickerHandler(t)
 

@@ -84,51 +84,70 @@ func isApprovedDepartmentMember(m models.MemberStatus) bool {
 	return m.Status == "approved"
 }
 
-// getDepartmentMemberObjectIDs returns the ObjectIDs of users currently in
-// the given department. Used by the community-members and members/search
-// endpoints to optionally exclude users already in a department (so the
-// "Add Members" screen on mobile/web doesn't have to filter client-side and
-// shrink each page below the requested limit). Returns nil on any lookup
-// failure — callers should treat that as "no exclusion".
-func getDepartmentMemberObjectIDs(ctx context.Context, commDB databases.CommunityDatabase, communityID, departmentID string) []primitive.ObjectID {
+// departmentMembership is what a department's members array says about the
+// people in a community: who is in it, and who is waiting on a decision.
+type departmentMembership struct {
+	// ApprovedIDs are the users actually in the department.
+	ApprovedIDs []primitive.ObjectID
+	// Requests maps a user id to the status of their entry when it is not
+	// membership: "pending" for a join request nobody has actioned, "denied"
+	// for one that was turned down.
+	Requests map[string]string
+}
+
+// getDepartmentMembership reads the given department's members array. Used by
+// the community-members and members/search endpoints so the "Add Members"
+// screen on mobile and web can leave out people already in the department
+// without filtering client-side and shrinking each page below the requested
+// limit, and can show who is waiting to join. Returns the zero value on any
+// lookup failure — callers treat that as "no exclusion, nothing pending".
+func getDepartmentMembership(ctx context.Context, commDB databases.CommunityDatabase, communityID, departmentID string) departmentMembership {
+	empty := departmentMembership{}
 	if communityID == "" || departmentID == "" {
-		return nil
+		return empty
 	}
 	cID, err := primitive.ObjectIDFromHex(communityID)
 	if err != nil {
-		return nil
+		return empty
 	}
 	dID, err := primitive.ObjectIDFromHex(departmentID)
 	if err != nil {
-		return nil
+		return empty
 	}
 	community, err := commDB.FindOne(ctx, bson.M{"_id": cID})
 	if err != nil || community == nil {
-		return nil
+		return empty
 	}
 	for _, dept := range community.Details.Departments {
 		if dept.ID != dID {
 			continue
 		}
 		seen := make(map[string]bool, len(dept.Members))
-		ids := make([]primitive.ObjectID, 0, len(dept.Members))
+		out := departmentMembership{
+			ApprovedIDs: make([]primitive.ObjectID, 0, len(dept.Members)),
+			Requests:    map[string]string{},
+		}
 		for _, m := range dept.Members {
-			// Approved members only. A pending join request is an entry in this
-			// same list, and excluding those hid the requester from the Add
-			// Members picker while the department's own member list — which
-			// shows approved members only — said they were not in it. The
-			// person simply could not be added by anyone.
-			if m.UserID == "" || seen[m.UserID] || !isApprovedDepartmentMember(m) {
+			if m.UserID == "" || seen[m.UserID] {
 				continue
 			}
 			seen[m.UserID] = true
+			// Approved members only are excluded. A pending join request is an
+			// entry in this same list, and excluding those hid the requester
+			// from the picker while the department's own member list — which
+			// shows approved members only — said they were not in it. The
+			// person simply could not be added by anyone.
+			if !isApprovedDepartmentMember(m) {
+				out.Requests[m.UserID] = m.Status
+				continue
+			}
 			if oid, oerr := primitive.ObjectIDFromHex(m.UserID); oerr == nil {
-				ids = append(ids, oid)
+				out.ApprovedIDs = append(out.ApprovedIDs, oid)
 			}
 		}
-		return ids
+		return out
 	}
-	return nil
+	return empty
 }
 
 // backfillPermissions adds any missing default permissions to a role's permission list.
@@ -726,11 +745,15 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 		}},
 	}
 
-	// Optional: exclude users already in a given department.
+	// Optional: exclude users already in a given department, and report who is
+	// waiting on a join request to it so the picker can say so.
+	departmentRequests := map[string]string{}
 	if excludeDeptID := r.URL.Query().Get("exclude_dept_id"); excludeDeptID != "" {
-		if excluded := getDepartmentMemberObjectIDs(ctx, c.DB, communityID, excludeDeptID); len(excluded) > 0 {
+		membership := getDepartmentMembership(ctx, c.DB, communityID, excludeDeptID)
+		departmentRequests = membership.Requests
+		if len(membership.ApprovedIDs) > 0 {
 			andClauses = append(andClauses, bson.M{
-				"_id": bson.M{"$nin": excluded},
+				"_id": bson.M{"$nin": membership.ApprovedIDs},
 			})
 		}
 	}
@@ -774,6 +797,10 @@ func (c Community) CommunityMembersHandler(w http.ResponseWriter, r *http.Reques
 		"totalUsers":  totalUsers,
 		"page":        page,
 		"limit":       limit,
+		// Who among these has a join request outstanding on the department the
+		// caller asked to exclude, keyed by user id: "pending" or "denied".
+		// Empty unless exclude_dept_id was given.
+		"departmentRequests": departmentRequests,
 	}
 
 	b, err := json.Marshal(response)
@@ -6155,11 +6182,15 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 
 	// Optional: exclude users already in a given department, matching the v1
 	// members and members/search endpoints, so an "Add Members" picker never
-	// offers someone the department already has.
+	// offers someone the department already has, and report who is waiting on a
+	// join request to it.
+	departmentRequests := map[string]string{}
 	if excludeDeptID := r.URL.Query().Get("exclude_dept_id"); excludeDeptID != "" {
-		if excluded := getDepartmentMemberObjectIDs(ctx, c.DB, communityID, excludeDeptID); len(excluded) > 0 {
+		membership := getDepartmentMembership(ctx, c.DB, communityID, excludeDeptID)
+		departmentRequests = membership.Requests
+		if len(membership.ApprovedIDs) > 0 {
 			andClauses = append(andClauses, bson.M{
-				"_id": bson.M{"$nin": excluded},
+				"_id": bson.M{"$nin": membership.ApprovedIDs},
 			})
 		}
 	}
@@ -6248,6 +6279,10 @@ func (c Community) FetchCommunityMembersHandlerV2(w http.ResponseWriter, r *http
 	// Build response
 	response := map[string]interface{}{
 		"members": populatedMembers,
+		// Who among these has a join request outstanding on the department the
+		// caller asked to exclude, keyed by user id: "pending" or "denied".
+		// Empty unless exclude_dept_id was given.
+		"departmentRequests": departmentRequests,
 		"pagination": map[string]interface{}{
 			"currentPage": page,
 			"totalPages":  totalPages,
@@ -7406,11 +7441,15 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 
 	// Optional: exclude users already in a given department so callers like
 	// the mobile "Add Members" screen don't have to filter client-side and
-	// shrink each page below the requested limit.
+	// shrink each page below the requested limit, and report who is waiting on
+	// a join request to it.
+	departmentRequests := map[string]string{}
 	if excludeDeptID := r.URL.Query().Get("exclude_dept_id"); excludeDeptID != "" {
-		if excluded := getDepartmentMemberObjectIDs(ctx, c.DB, communityID, excludeDeptID); len(excluded) > 0 {
+		membership := getDepartmentMembership(ctx, c.DB, communityID, excludeDeptID)
+		departmentRequests = membership.Requests
+		if len(membership.ApprovedIDs) > 0 {
 			andClauses = append(andClauses, bson.M{
-				"_id": bson.M{"$nin": excluded},
+				"_id": bson.M{"$nin": membership.ApprovedIDs},
 			})
 		}
 	}
@@ -7471,6 +7510,10 @@ func (c *Community) SearchCommunityMembersHandler(w http.ResponseWriter, r *http
 	// Build response
 	response := map[string]interface{}{
 		"members": populatedMembers,
+		// Who among these has a join request outstanding on the department the
+		// caller asked to exclude, keyed by user id: "pending" or "denied".
+		// Empty unless exclude_dept_id was given.
+		"departmentRequests": departmentRequests,
 		"pagination": map[string]interface{}{
 			"currentPage": page,
 			"totalPages":  totalPages,
