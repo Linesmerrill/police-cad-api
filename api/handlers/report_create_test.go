@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -142,4 +143,67 @@ func TestCreateReport_ASecondOpenReportIsNotStoredAgain(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), `"message"`, "the mobile app treats any message as success")
 	assert.Contains(t, rr.Body.String(), `"duplicate": true`)
 	rdb.AssertNotCalled(t, "InsertOne", mock.Anything, mock.Anything)
+}
+
+func getOpen(t *testing.T, rdb *mocks.ReportDatabase, query, tokenUser string, withSecret bool) *httptest.ResponseRecorder {
+	t.Helper()
+	req, _ := http.NewRequest("GET", "/api/v1/report/open?"+query, nil)
+	if tokenUser != "" {
+		req = req.WithContext(api.WithAuthenticatedUserID(req.Context(), tokenUser))
+	}
+	if withSecret {
+		req.Header.Set(apiGatewayHeader, testGatewayKey)
+	}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(Report{RDB: rdb}.OpenReportHandler).ServeHTTP(rr, req)
+	return rr
+}
+
+func TestOpenReport_TellsTheTokenUserTheyAlreadyReported(t *testing.T) {
+	rdb := &mocks.ReportDatabase{}
+	rdb.On("CountDocuments", mock.Anything, mock.MatchedBy(func(f interface{}) bool {
+		return strings.Contains(fmt.Sprint(f), createTokenUser) && strings.Contains(fmt.Sprint(f), createTargetID)
+	})).Return(int64(1), nil)
+
+	rr := getOpen(t, rdb, "itemId="+createTargetID+"&itemType=community", createTokenUser, false)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `{"open": true}`, rr.Body.String())
+}
+
+func TestOpenReport_NoOpenReportMeansFalse(t *testing.T) {
+	rdb := &mocks.ReportDatabase{}
+	rdb.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
+	rr := getOpen(t, rdb, "itemId="+createTargetID+"&itemType=user", createTokenUser, false)
+	assert.JSONEq(t, `{"open": false}`, rr.Body.String())
+}
+
+// Without the gateway secret a reportedById in the query is ignored, so no one
+// can ask whether another player has reported someone.
+func TestOpenReport_IgnoresANamedUserWithoutTheGatewaySecret(t *testing.T) {
+	withGatewayKey(t)
+	rdb := &mocks.ReportDatabase{}
+	rr := getOpen(t, rdb, "itemId="+createTargetID+"&itemType=community&reportedById="+createReporterID, "", false)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	rdb.AssertNotCalled(t, "CountDocuments", mock.Anything, mock.Anything)
+}
+
+// The website asks through its own server, naming the session user and
+// proving it is our server with the secret.
+func TestOpenReport_AcceptsANamedUserFromOurServer(t *testing.T) {
+	withGatewayKey(t)
+	rdb := &mocks.ReportDatabase{}
+	rdb.On("CountDocuments", mock.Anything, mock.MatchedBy(func(f interface{}) bool {
+		return strings.Contains(fmt.Sprint(f), createReporterID)
+	})).Return(int64(1), nil)
+
+	rr := getOpen(t, rdb, "itemId="+createTargetID+"&itemType=community&reportedById="+createReporterID, "", true)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `{"open": true}`, rr.Body.String())
+}
+
+func TestOpenReport_RejectsABadTarget(t *testing.T) {
+	for _, q := range []string{"itemId=abc&itemType=user", "itemId=" + createTargetID + "&itemType=post"} {
+		rr := getOpen(t, &mocks.ReportDatabase{}, q, createTokenUser, false)
+		assert.Equal(t, http.StatusBadRequest, rr.Code, q)
+	}
 }
