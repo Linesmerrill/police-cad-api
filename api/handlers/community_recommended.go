@@ -206,8 +206,8 @@ func recommendedMatch(tag string, excludedIDs []primitive.ObjectID) bson.M {
 		match["_id"] = bson.M{"$nin": excludedIDs}
 	}
 	// Our own demo communities are excluded on top of whatever the caller is
-	// already a member of.
-	return excludeDemoCommunities(match)
+	// already a member of, and so is anything under a moderation delisting.
+	return excludeDelistedCommunities(excludeDemoCommunities(match))
 }
 
 // FetchRecommendedCommunitiesHandler returns public communities worth joining,

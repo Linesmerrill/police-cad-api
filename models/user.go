@@ -62,6 +62,14 @@ type UserDetails struct {
 	RestoreUntil             interface{}           `json:"restoreUntil" bson:"restoreUntil"`
 	DeactivationReason       string                `json:"deactivationReason,omitempty" bson:"deactivationReason,omitempty"`
 	DeactivatedByAdminID     string                `json:"deactivatedByAdminId,omitempty" bson:"deactivatedByAdminId,omitempty"`
+	// Suspension is a moderation lock from an upheld report. Deliberately kept
+	// out of the IsDeactivated/RestoreUntil fields above: those belong to
+	// account deactivation, which a user can also do to themselves, and
+	// RestoreUntil already means the self-service restore window.
+	Suspension *Suspension `json:"suspension,omitempty" bson:"suspension,omitempty"`
+	// LegalHold blocks every deletion path while set. Written when a report is
+	// escalated to the CyberTipline, which carries a preservation obligation.
+	LegalHold *LegalHold `json:"legalHold,omitempty" bson:"legalHold,omitempty"`
 	ResetPasswordToken       string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires     interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
 	EmailVerified            *bool                 `json:"emailVerified" bson:"emailVerified"`

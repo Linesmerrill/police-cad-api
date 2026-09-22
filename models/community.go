@@ -74,6 +74,10 @@ type CommunityDetails struct {
 	ImageLink                     string                  `json:"imageLink" bson:"imageLink"`
 	MapLink                       string                  `json:"mapLink" bson:"mapLink"`
 	Visibility                    string                  `json:"visibility" bson:"visibility"`
+	// ListingSuspension delists the community from discovery for a period.
+	// Visibility above stays the owner's own setting and is never written by
+	// moderation, so relisting cannot hand back a state we invented.
+	ListingSuspension *ListingSuspension `json:"listingSuspension,omitempty" bson:"listingSuspension,omitempty"`
 	PromotionalText               string                  `json:"promotionalText" bson:"promotionalText"`
 	PromotionalDescription        string                  `json:"promotionalDescription" bson:"promotionalDescription"`
 	InviteCodeIds                 []string                `json:"inviteCodeIds" bson:"inviteCodeIds"`

@@ -97,7 +97,7 @@ func Middleware(next http.Handler) http.Handler {
 					"error", err)
 				// Note: Removed WWW-Authenticate header to prevent iOS from hanging on 401 responses
 				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte(fmt.Sprintf(`{"error": "unauthorized", "message": "%s"}`, err.Error())))
+				w.Write(unauthorizedBody(err.Error()))
 				return
 			}
 			zap.S().Infow("auth/token: authentication successful",
@@ -282,6 +282,16 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 			"email", email,
 			"userID", dbEmailResp.ID)
 		return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
+	}
+
+	// Check if the user is serving a moderation suspension. This is the single
+	// enforcement point: expiry is computed here rather than flipped by a cron,
+	// so a suspension lifts itself the moment it elapses.
+	if err := SuspensionLoginError(dbEmailResp.Details.Suspension, time.Now()); err != nil {
+		zap.S().Warnw("ValidateUser: account is suspended",
+			"email", email,
+			"userID", dbEmailResp.ID)
+		return nil, err
 	}
 
 	// Store user ID in the request context so CreateToken can use it without another DB query
