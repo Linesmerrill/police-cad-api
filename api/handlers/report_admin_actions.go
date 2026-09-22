@@ -184,7 +184,13 @@ func (ra ReportAdmin) AdminUpholdPreviewHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	plan, target, err := ra.planForReport(ctx, *report)
+	c, err := ra.caseFor(ctx, *report)
+	if err != nil {
+		config.ErrorStatus("failed to load the case", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	plan, target, err := ra.planForReport(ctx, c.subject)
 	if err != nil {
 		config.ErrorStatus("failed to build the plan", http.StatusInternalServerError, w, err)
 		return
@@ -194,9 +200,15 @@ func (ra ReportAdmin) AdminUpholdPreviewHandler(w http.ResponseWriter, r *http.R
 		"plan":         plan,
 		"contactEmail": target.ContactEmail,
 		"targetName":   noticeTargetName(target),
+		"reportIds":    reportIDs(c.ladder),
+		"reportCount":  len(c.ladder),
+		"issue":        c.subject.ReportedIssue,
 	}
-	if plan.Ladders && !plan.AlreadyInForce {
-		params := noticeParams(plan, target, report.ReportedIssue, "")
+	if c.blockedByEscalation {
+		body["blockedByEscalation"] = true
+	}
+	if plan.Ladders && !plan.AlreadyInForce && !c.blockedByEscalation {
+		params := noticeParams(plan, target, c.subject.ReportedIssue, "")
 		htmlBody, textBody := templates.RenderContentOffenseEmail(params)
 		body["email"] = map[string]string{
 			"subject": templates.ContentOffenseSubject(params),
@@ -248,7 +260,18 @@ func (ra ReportAdmin) AdminUpholdReportHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	plan, target, err := ra.planForReport(ctx, *report)
+	c, err := ra.caseFor(ctx, *report)
+	if err != nil {
+		config.ErrorStatus("failed to load the case", http.StatusInternalServerError, w, err)
+		return
+	}
+	if c.blockedByEscalation {
+		config.ErrorStatus("this account has an open child safety report", http.StatusConflict, w,
+			fmt.Errorf("escalate the child safety report before upholding anything else against the same target"))
+		return
+	}
+
+	plan, target, err := ra.planForReport(ctx, c.subject)
 	if err != nil {
 		config.ErrorStatus("failed to build the plan", http.StatusInternalServerError, w, err)
 		return
@@ -275,13 +298,14 @@ func (ra ReportAdmin) AdminUpholdReportHandler(w http.ResponseWriter, r *http.Re
 		CommunityName: target.CommunityName,
 		Username:      target.ContactUsername,
 		Email:         target.ContactEmail,
-		ReportIDs:     []string{report.ID.Hex()},
-		ReportedIssue: report.ReportedIssue,
+		ReportIDs:     reportIDs(c.ladder),
+		ReportedIssue: c.subject.ReportedIssue,
 		Tier:          plan.Tier,
 		OffenseNumber: plan.OffenseNumber,
 		Penalty:       plan.Action,
 		Reason:        strings.TrimSpace(req.Reason),
 		IssuedBy:      admin,
+		IssuedByID:    adminID(req.CurrentUser),
 		IssuedAt:      primitive.NewDateTimeFromTime(now),
 		Status:        models.ContentOffenseStatusActive,
 	}
@@ -305,20 +329,24 @@ func (ra ReportAdmin) AdminUpholdReportHandler(w http.ResponseWriter, r *http.Re
 
 	emailed := false
 	if req.SendEmail == nil || *req.SendEmail {
-		params := noticeParams(plan, target, report.ReportedIssue, "")
+		params := noticeParams(plan, target, c.subject.ReportedIssue, "")
 		if err := ra.sendOffenseNotice(ctx, offense, params); err == nil {
 			emailed = true
 		}
 	}
 
-	ra.closeReport(ctx, *report, models.ReportStatusResolved, admin, req.Note, offense.ID.Hex(), plan.Action, now)
+	// One strike, and every report it answers is closed with it.
+	for _, rep := range c.ladder {
+		ra.closeReport(ctx, rep, models.ReportStatusResolved, admin, adminID(req.CurrentUser), req.Note, offense.ID.Hex(), plan.Action, now)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":   "report upheld",
-		"offenseId": offense.ID.Hex(),
-		"penalty":   plan.Action,
-		"expiresAt": plan.ExpiresAt,
-		"emailed":   emailed,
+		"message":     "report upheld",
+		"offenseId":   offense.ID.Hex(),
+		"reportCount": len(c.ladder),
+		"penalty":     plan.Action,
+		"expiresAt":   plan.ExpiresAt,
+		"emailed":     emailed,
 	})
 }
 
@@ -368,10 +396,11 @@ func (ra ReportAdmin) applyPenalty(ctx context.Context, offense models.ContentOf
 }
 
 // closeReport records the decision on the report itself.
-func (ra ReportAdmin) closeReport(ctx context.Context, report models.Report, status, admin, note, offenseID, action string, now time.Time) {
+func (ra ReportAdmin) closeReport(ctx context.Context, report models.Report, status, admin, adminAccountID, note, offenseID, action string, now time.Time) {
 	set := bson.M{
 		"status":         status,
 		"reviewedByName": admin,
+		"reviewedById":   adminAccountID,
 		"reviewedAt":     primitive.NewDateTimeFromTime(now),
 		"updatedAt":      primitive.NewDateTimeFromTime(now),
 		"tier":           report.EffectiveTier(),
@@ -472,6 +501,48 @@ func (ra ReportAdmin) AdminDismissReportHandler(w http.ResponseWriter, r *http.R
 		status = models.ReportStatusWelfare
 	}
 
-	ra.closeReport(ctx, *report, status, adminDisplayName(req.CurrentUser), req.Note, "", "", time.Now())
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "report closed", "status": status})
+	// Close the whole case on this track. Other tracks stay open: dismissing
+	// spam must not close a child safety allegation against the same account.
+	group, err := ra.openReportsAgainst(ctx, *report)
+	if err != nil {
+		config.ErrorStatus("failed to load the case", http.StatusInternalServerError, w, err)
+		return
+	}
+	closing := onTrack(group, reportTrack(*report))
+	admin := adminDisplayName(req.CurrentUser)
+	now := time.Now()
+	for _, rep := range closing {
+		ra.closeReport(ctx, rep, status, admin, adminID(req.CurrentUser), req.Note, "", "", now)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "report closed", "status": status, "reportCount": len(closing)})
+}
+
+// reportCase is the set of open reports about one target that a decision on a
+// ladder report would act on.
+type reportCase struct {
+	// ladder is every open minor or serious report about the target. Upholding
+	// issues one strike for all of them.
+	ladder []models.Report
+	// subject is the report the strike is issued under: the most severe issue
+	// in the case, so a case of one hate and two spam reports is a hate case.
+	subject models.Report
+	// blockedByEscalation is set when the same target has an open child safety
+	// report. That has to be escalated first, not overtaken by a week's ban.
+	blockedByEscalation bool
+}
+
+func (ra ReportAdmin) caseFor(ctx context.Context, report models.Report) (reportCase, error) {
+	group, err := ra.openReportsAgainst(ctx, report)
+	if err != nil {
+		return reportCase{}, err
+	}
+	c := reportCase{subject: report}
+	if reportTrack(report) != reportTrackLadder {
+		c.ladder = []models.Report{report}
+		return c, nil
+	}
+	c.ladder = onTrack(group, reportTrackLadder)
+	c.subject.ReportedIssue = mostSevereIssue(c.ladder, report.ReportedIssue)
+	c.blockedByEscalation = len(onTrack(group, reportTrackEscalate)) > 0
+	return c, nil
 }

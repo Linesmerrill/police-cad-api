@@ -43,9 +43,12 @@ type ContentOffense struct {
 	OffenseNumber int    `json:"offenseNumber" bson:"offenseNumber"` // 1-based, drives the ladder
 	Penalty       string `json:"penalty" bson:"penalty"`             // warning | suspension | permanent
 
-	Reason   string             `json:"reason" bson:"reason"` // staff-written, internal only
-	IssuedBy string             `json:"issuedBy" bson:"issuedBy"`
-	IssuedAt primitive.DateTime `json:"issuedAt" bson:"issuedAt"`
+	Reason string `json:"reason" bson:"reason"` // staff-written, internal only
+	// IssuedBy is the admin's display name, shown in the console. Never an
+	// email address. IssuedByID is the admin account, for the audit trail.
+	IssuedBy   string             `json:"issuedBy" bson:"issuedBy"`
+	IssuedByID string             `json:"issuedById,omitempty" bson:"issuedById,omitempty"`
+	IssuedAt   primitive.DateTime `json:"issuedAt" bson:"issuedAt"`
 
 	// ExpiresAt is nil for a warning and for a permanent removal. Those two are
 	// told apart by Penalty, never by a nil expiry.
@@ -53,6 +56,7 @@ type ContentOffense struct {
 
 	Status         string              `json:"status" bson:"status"` // "active" | "reversed"
 	ReversedBy     string              `json:"reversedBy,omitempty" bson:"reversedBy,omitempty"`
+	ReversedByID   string              `json:"reversedById,omitempty" bson:"reversedById,omitempty"`
 	ReversedAt     *primitive.DateTime `json:"reversedAt,omitempty" bson:"reversedAt,omitempty"`
 	ReversalReason string              `json:"reversalReason,omitempty" bson:"reversalReason,omitempty"`
 

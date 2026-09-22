@@ -9,7 +9,13 @@
 // Idempotent: only documents missing a field are touched, so re-running it
 // cannot reclassify a report a staff member has already decided.
 //
-//   mongosh "$DB_URI/$DB_NAME" --file scripts/backfill_report_queue.js
+// DB_URI ends in connection options (?retryWrites=...&w=majority), so the
+// database name cannot be appended to it: "$DB_URI/$DB_NAME" turns the write
+// concern into "majority/<dbname>" and every write fails to acknowledge. Connect
+// with the bare URI and select the database first:
+//
+//   mongosh "$DB_URI" --eval "db = db.getSiblingDB('$DB_NAME')" \
+//     --file scripts/backfill_report_queue.js
 //
 // Mirrors models.ReportTierForIssue / models.ReportSeverityRank. If the tiers
 // there change, a report already triaged keeps the tier it was judged under:
