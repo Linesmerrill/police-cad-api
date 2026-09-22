@@ -29,6 +29,15 @@ func HardDeleteCommunityWithCascade(
 	communityID string,
 	cID primitive.ObjectID,
 ) {
+	// A community whose owner is under a legal hold is evidence. Nothing here
+	// may run against it, including the daily scheduler tick and the admin
+	// "force delete now" button.
+	if CommunityUnderLegalHold(ctx, cdb, udb, cID) {
+		zap.S().Warnw("hard delete refused: the community owner is under a legal hold",
+			"communityId", communityID)
+		return
+	}
+
 	if err := cdb.DeleteOne(ctx, bson.M{"_id": cID}); err != nil {
 		zap.S().Errorw("hard delete: failed to delete community document",
 			"communityId", communityID, "error", err)

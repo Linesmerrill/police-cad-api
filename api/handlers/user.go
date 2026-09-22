@@ -1957,7 +1957,7 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 	if len(communityObjectIDs) > 50 {
 		// Use aggregation pipeline: sample large pool, then filter out user communities
 		pipeline := mongo.Pipeline{
-			{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
+			{{"$match", excludeDelistedCommunities(excludeDemoCommunities(bson.M{"community.visibility": "public"}))}},
 			{{"$sample", bson.M{"size": limit * 5}}}, // Sample 5x the limit to account for filtering
 		}
 		
@@ -1992,10 +1992,10 @@ func (u User) GetRandomCommunitiesHandler(w http.ResponseWriter, r *http.Request
 		}
 	} else {
 		// For users with few communities, use direct Find with $nin (more efficient)
-		filter := bson.M{
+		filter := excludeDelistedCommunities(bson.M{
 			"_id":                  bson.M{"$nin": communityObjectIDs},
 			"community.visibility": "public",
-		}
+		})
 		// Use _id sort instead of $natural for better performance (can use _id index)
 		opt := options.Find().SetSkip(int64(offset)).SetLimit(int64(limit)).SetSort(bson.M{"_id": 1})
 
@@ -4650,7 +4650,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	// Build the aggregation pipeline
 	pipeline := mongo.Pipeline{
 		// Filter for communities with visibility set to public
-		{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
+		{{"$match", excludeDelistedCommunities(excludeDemoCommunities(bson.M{"community.visibility": "public"}))}},
 
 		// Add a numeric rank for subscription tiers
 		{{"$addFields", bson.M{
@@ -4698,7 +4698,7 @@ func (u User) GetPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Create the paginated response
-	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDemoCommunities(bson.M{"community.visibility": "public"}))
+	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDelistedCommunities(excludeDemoCommunities(bson.M{"community.visibility": "public"})))
 	paginatedResponse := PaginatedDataResponse{
 		Page:       Page,
 		TotalCount: totalCount,
@@ -4735,7 +4735,7 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 
 	// Aggregation pipeline
 	pipeline := mongo.Pipeline{
-		{{"$match", excludeDemoCommunities(bson.M{"community.visibility": "public"})}},
+		{{"$match", excludeDelistedCommunities(excludeDemoCommunities(bson.M{"community.visibility": "public"}))}},
 		{{"$addFields", bson.M{
 			"subscriptionRank": bson.M{
 				"$switch": bson.M{
@@ -4817,7 +4817,7 @@ func (u User) FetchPrioritizedCommunitiesHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Count total matching documents (use same ctx from aggregation)
-	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDemoCommunities(bson.M{"community.visibility": "public"}))
+	totalCount, _ := u.CDB.CountDocuments(ctx, excludeDelistedCommunities(excludeDemoCommunities(bson.M{"community.visibility": "public"})))
 
 	// Return response
 	response := map[string]interface{}{

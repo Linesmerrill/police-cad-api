@@ -178,3 +178,28 @@ func gatewayForbidden(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusForbidden)
 	_, _ = w.Write([]byte(`{"error":"forbidden","message":"Direct API access is not allowed. This API is restricted to the Lines Police CAD website and mobile app."}`))
 }
+
+// GatewaySecretConfigured reports whether the shared secret is set. When it is
+// not, the gateway is disabled everywhere and any endpoint relying on it is
+// unprotected.
+func GatewaySecretConfigured() bool {
+	return os.Getenv(apiGatewayKeyEnv) != ""
+}
+
+// HasValidGatewaySecret reports whether the request presents the first-party
+// gateway secret, i.e. came from the website backend rather than a browser.
+//
+// ApiKeyGateway lets our own web origins through without the secret, which is
+// right for ordinary traffic but not for endpoints that must never be callable
+// from page JavaScript. Those call this directly.
+func HasValidGatewaySecret(r *http.Request) bool {
+	key := os.Getenv(apiGatewayKeyEnv)
+	if key == "" {
+		return false
+	}
+	provided := r.Header.Get(apiGatewayHeader)
+	if provided == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(key)) == 1
+}

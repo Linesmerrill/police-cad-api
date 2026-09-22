@@ -343,7 +343,7 @@ func (s Search) SearchHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	communityOptions := options.Find().SetLimit(limit).SetSkip(skip)
-	communityCursor, err := s.CommDB.Find(ctx, communityFilter, communityOptions)
+	communityCursor, err := s.CommDB.Find(ctx, excludeDelistedCommunities(communityFilter), communityOptions)
 	if err != nil {
 		config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
 		return
@@ -432,7 +432,7 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		communityOptions = options.Find().SetLimit(limit).SetSkip(skip)
 	}
 	
-	communityCursor, err := s.CommDB.Find(ctx, communityFilter, communityOptions)
+	communityCursor, err := s.CommDB.Find(ctx, excludeDelistedCommunities(communityFilter), communityOptions)
 	if err != nil {
 		// If text search fails (e.g., index doesn't exist), fallback to regex
 		if queryLen >= 3 {
@@ -444,7 +444,7 @@ func (s Search) SearchCommunityHandler(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 			communityOptions = options.Find().SetLimit(limit).SetSkip(skip)
-			communityCursor, err = s.CommDB.Find(ctx, communityFilter, communityOptions)
+			communityCursor, err = s.CommDB.Find(ctx, excludeDelistedCommunities(communityFilter), communityOptions)
 			if err != nil {
 				config.ErrorStatus("failed to search communities", http.StatusInternalServerError, w, err)
 				return

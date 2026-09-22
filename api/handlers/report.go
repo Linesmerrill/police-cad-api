@@ -34,6 +34,12 @@ func (re Report) CreateReportHandler(w http.ResponseWriter, r *http.Request) {
 	report.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 	// Set the report to active by default
 	report.Active = true
+	// New reports enter the moderation queue unread, ranked so the severe ones
+	// sort to the top of it.
+	report.Status = models.ReportStatusNew
+	rank := models.ReportSeverityRank(report.ReportedIssue)
+	report.SeverityRank = &rank
+	report.Tier = models.ReportTierForIssue(report.ReportedIssue)
 
 	// Insert the new report into the database
 	_, err := re.RDB.InsertOne(context.Background(), report)
