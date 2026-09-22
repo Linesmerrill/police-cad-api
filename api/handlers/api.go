@@ -801,6 +801,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/invite/{invite_code}", api.Middleware(http.HandlerFunc(ic.InviteCodeByCodeHandler))).Methods("GET")
 
 	apiCreate.Handle("/report", api.Middleware(http.HandlerFunc(report.CreateReportHandler))).Methods("POST")
+	apiCreate.Handle("/report/open", api.Middleware(http.HandlerFunc(report.OpenReportHandler))).Methods("GET")
 
 	apiCreate.Handle("/search/communities", api.Middleware(http.HandlerFunc(search.SearchCommunityHandler))).Methods("GET")
 	apiCreate.Handle("/search", api.Middleware(http.HandlerFunc(search.SearchHandler))).Methods("GET")

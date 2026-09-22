@@ -132,3 +132,44 @@ func (re Report) hasOpenReport(ctx context.Context, report models.Report) bool {
 	))
 	return err == nil && n > 0
 }
+
+// OpenReportHandler says whether the caller already has an undecided report
+// about a target, so a client can say "you've already reported this" when the
+// form opens rather than walking the player through it only to discard the
+// second report on submit.
+//
+// GET /api/v1/report/open?itemId=&itemType=
+//
+// The caller is the token user (the mobile app). The website has no token and
+// asks through its own server, which names the session user in reportedById
+// and proves it is our server with the gateway secret; a reportedById without
+// that secret is ignored, so nobody can probe another player's reports.
+func (re Report) OpenReportHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	report := models.Report{
+		ItemID:   strings.TrimSpace(q.Get("itemId")),
+		ItemType: strings.ToLower(strings.TrimSpace(q.Get("itemType"))),
+	}
+
+	report.ReportedByID = api.GetAuthenticatedUserIDFromContext(r.Context())
+	if report.ReportedByID == "" && HasValidGatewaySecret(r) {
+		report.ReportedByID = strings.TrimSpace(q.Get("reportedById"))
+	}
+	if report.ReportedByID == "" {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no reporting user"))
+		return
+	}
+	if _, err := primitive.ObjectIDFromHex(report.ItemID); err != nil {
+		config.ErrorStatus("itemId must be a valid id", http.StatusBadRequest, w, err)
+		return
+	}
+	if report.ItemType != reportItemTypeUser && report.ItemType != reportItemTypeCommunity {
+		config.ErrorStatus("itemType must be user or community", http.StatusBadRequest, w, fmt.Errorf("itemType %q", report.ItemType))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	writeJSON(w, http.StatusOK, map[string]bool{"open": re.hasOpenReport(ctx, report)})
+}
