@@ -178,3 +178,33 @@ func TestDismiss_RecordsHistoryAndASharedDecision(t *testing.T) {
 		assert.Equal(t, first, event.DecisionID)
 	}
 }
+
+// The uphold reason used to land only on the strike, leaving the reports and
+// their history blank for the next admin. It is now on both.
+func TestUphold_RecordsTheReasonOnTheReportsAndHistory(t *testing.T) {
+	withGatewayKey(t)
+	rdb, codb, udb := &mocks.ReportDatabase{}, &mocks.ContentOffenseDatabase{}, &mocks.UserDatabase{}
+
+	spam := testReport("Spam", "user")
+	reportOID, _ := primitive.ObjectIDFromHex(testReportID)
+	rdb.On("FindOne", mock.Anything, bson.M{"_id": reportOID}).Return(spam, nil)
+	stubOpenCase(t, rdb, spam)
+	var update bson.M
+	rdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(a mock.Arguments) { update = a.Get(2).(bson.M) }).Return(nil)
+	stubTargetUser(udb, "spammer", "")
+	codb.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
+	codb.On("FindOne", mock.Anything, mock.Anything).Return(nil, assert.AnError)
+	codb.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
+
+	ra := newReportAdmin(rdb, codb, udb, &mocks.CommunityDatabase{})
+	req := adminRequest(t, "POST", "/api/v1/admin/reports/"+testReportID+"/uphold",
+		adminBody(t, map[string]interface{}{"reason": "confirmed with the real owner", "sendEmail": false}),
+		map[string]string{"reportId": testReportID})
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(ra.AdminUpholdReportHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	assert.Equal(t, "confirmed with the real owner", update["$set"].(bson.M)["internalNote"])
+	assert.Equal(t, "confirmed with the real owner", update["$push"].(bson.M)["history"].(models.ReportEvent).Reason)
+}
