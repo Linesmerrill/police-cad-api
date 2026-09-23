@@ -550,6 +550,11 @@ func (ra ReportAdmin) AdminDismissReportHandler(w http.ResponseWriter, r *http.R
 	if report.EffectiveTier() == models.ReportTierWelfare {
 		status = models.ReportStatusWelfare
 	}
+	// "It did not happen here" is its own outcome, not a judgement that the
+	// report was nothing. Kept separate so the backlog of them is countable.
+	if strings.EqualFold(strings.TrimSpace(req.Outcome), models.ReportStatusOffPlatform) {
+		status = models.ReportStatusOffPlatform
+	}
 
 	// Close the whole case on this track. Other tracks stay open: dismissing
 	// spam must not close a child safety allegation against the same account.

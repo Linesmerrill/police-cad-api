@@ -20,12 +20,28 @@ import (
 // Report handles report-related requests
 type Report struct {
 	RDB databases.ReportDatabase
+	// DBHelper reads the reported content so the server can snapshot it
+	// itself. A client-supplied copy would let a reporter invent what someone
+	// wrote, and would vanish the moment the author edited it.
+	DBHelper databases.DatabaseHelper
 }
 
 // MaxReportDetailsLength bounds the free-text note. The website and the
 // mobile app enforce the same limit in their inputs, so a player hits it while
 // typing rather than on submit.
 const MaxReportDetailsLength = 2000
+
+// MinReportDetailsLength is what a report needs to be actionable. Every report
+// filed before this was a category and nothing else, or a sentence about
+// something that happened on Discord. Staff cannot verify either.
+//
+// Only asked of clients that send a location, so an older mobile build keeps
+// working until people update.
+const MinReportDetailsLength = 20
+
+// issueImpersonation needs to know who is being impersonated, or the claim
+// cannot be checked at all.
+const issueImpersonation = "impersonation"
 
 // validateNewReport checks a report before it is stored. It used to accept
 // anything, including a report with no target or no reporter, which then sat
@@ -51,6 +67,28 @@ func validateNewReport(r models.Report) error {
 	if len([]rune(r.AdditionalDetails)) > MaxReportDetailsLength {
 		return fmt.Errorf("additional details must be %d characters or fewer", MaxReportDetailsLength)
 	}
+	if len([]rune(r.ImpersonatedName)) > MaxReportDetailsLength {
+		return fmt.Errorf("the name being impersonated must be %d characters or fewer", MaxReportDetailsLength)
+	}
+
+	switch r.Location {
+	case models.LocationUnknown:
+		// An older mobile build, which never asked. Accepted and labelled.
+		return nil
+	case models.LocationInApp:
+	default:
+		// Clients send people to the right platform instead of filing here, so
+		// anything else is a client that skipped the question.
+		return fmt.Errorf("reports can only be filed about content in Lines Police CAD")
+	}
+
+	if len([]rune(strings.TrimSpace(r.AdditionalDetails))) < MinReportDetailsLength {
+		return fmt.Errorf("please describe what you saw, in at least %d characters", MinReportDetailsLength)
+	}
+	if strings.EqualFold(strings.TrimSpace(r.ReportedIssue), issueImpersonation) &&
+		strings.TrimSpace(r.ImpersonatedName) == "" {
+		return fmt.Errorf("tell us who this account is pretending to be")
+	}
 	return nil
 }
 
@@ -73,6 +111,8 @@ func (re Report) CreateReportHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	report.ItemType = strings.ToLower(strings.TrimSpace(report.ItemType))
 	report.ReportedIssue = strings.TrimSpace(report.ReportedIssue)
+	report.Location = strings.ToLower(strings.TrimSpace(report.Location))
+	report.ImpersonatedName = strings.TrimSpace(report.ImpersonatedName)
 
 	if err := validateNewReport(report); err != nil {
 		config.ErrorStatus(err.Error(), http.StatusBadRequest, w, err)
@@ -81,6 +121,25 @@ func (re Report) CreateReportHandler(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Load the reported content and copy what it says. Nothing the client sent
+	// about the content is trusted.
+	if report.Target != nil && re.DBHelper != nil {
+		resolver := targetResolver{db: re.DBHelper}
+		resolved, err := resolver.resolveTarget(ctx, *report.Target)
+		if err != nil {
+			config.ErrorStatus(err.Error(), http.StatusBadRequest, w, err)
+			return
+		}
+		if !resolver.reporterCanSee(ctx, report.ReportedByID, resolved.requiresMembershipOf) {
+			// Members-only content. Without this anyone could file reports
+			// about a community they have never been in.
+			config.ErrorStatus("you can only report things you can see", http.StatusForbidden, w,
+				fmt.Errorf("reporter is not a member of %s", resolved.requiresMembershipOf))
+			return
+		}
+		report.Snapshot = &resolved.snapshot
+	}
 
 	// One open report per person per target. A second tap, or someone filing
 	// the same complaint over and over, adds nothing a moderator does not
@@ -172,4 +231,12 @@ func (re Report) OpenReportHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	writeJSON(w, http.StatusOK, map[string]bool{"open": re.hasOpenReport(ctx, report)})
+}
+
+// ReportableTargetsHandler lists what can be reported and which parts of each,
+// so the website and the app render the same choices without repeating them.
+//
+// GET /api/v1/report/targets
+func (re Report) ReportableTargetsHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{"kinds": models.ReportableKinds()})
 }

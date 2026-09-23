@@ -207,3 +207,77 @@ func TestOpenReport_RejectsABadTarget(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rr.Code, q)
 	}
 }
+
+// Every Child Safety report filed so far described something on Discord, Xbox
+// or in a game. We cannot see it, cannot verify it, and the platform that
+// could never hears. Clients ask where it happened and send people elsewhere.
+func TestCreateReport_RefusesAnythingButInApp(t *testing.T) {
+	for _, loc := range []string{"discord", "xbox", "playstation", "in_game", "elsewhere"} {
+		rdb := &mocks.ReportDatabase{}
+		rr := postReport(t, rdb, createBody(t, map[string]interface{}{
+			"location": loc, "additionalDetails": "they said something awful in a voice call",
+		}), createTokenUser)
+		assert.Equal(t, http.StatusBadRequest, rr.Code, loc)
+		assert.Contains(t, rr.Body.String(), "Lines Police CAD")
+		rdb.AssertNotCalled(t, "InsertOne", mock.Anything, mock.Anything)
+	}
+}
+
+// A category with no detail is not actionable, and most of the backlog is
+// exactly that.
+func TestCreateReport_InAppNeedsRealDetail(t *testing.T) {
+	for _, details := range []string{"", "   ", "spam", "he is bad"} {
+		rdb := &mocks.ReportDatabase{}
+		rr := postReport(t, rdb, createBody(t, map[string]interface{}{
+			"location": "in_app", "additionalDetails": details,
+		}), createTokenUser)
+		assert.Equal(t, http.StatusBadRequest, rr.Code, details)
+		assert.Contains(t, rr.Body.String(), "at least 20 characters")
+		rdb.AssertNotCalled(t, "InsertOne", mock.Anything, mock.Anything)
+	}
+}
+
+func TestCreateReport_ImpersonationMustNameWhoIsBeingImpersonated(t *testing.T) {
+	rdb := &mocks.ReportDatabase{}
+	body := createBody(t, map[string]interface{}{
+		"location": "in_app", "reportedIssue": "Impersonation",
+		"additionalDetails": "this community copied the real one's name and logo",
+	})
+	rr := postReport(t, rdb, body, createTokenUser)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "pretending to be")
+	rdb.AssertNotCalled(t, "InsertOne", mock.Anything, mock.Anything)
+
+	rdb = &mocks.ReportDatabase{}
+	rdb.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
+	var stored models.Report
+	rdb.On("InsertOne", mock.Anything, mock.Anything).
+		Run(func(a mock.Arguments) { stored = a.Get(1).(models.Report) }).
+		Return(&mocks.InsertOneResultHelper{}, nil)
+	body = createBody(t, map[string]interface{}{
+		"location": "in_app", "reportedIssue": "Impersonation",
+		"additionalDetails": "this community copied the real one's name and logo",
+		"impersonatedName":  "TROPICAL RP",
+	})
+	rr = postReport(t, rdb, body, createTokenUser)
+	assert.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	assert.Equal(t, "TROPICAL RP", stored.ImpersonatedName)
+	assert.Equal(t, models.LocationInApp, stored.Location)
+}
+
+// An older mobile build never asked where it happened. Its reports still come
+// in, labelled, rather than being thrown away while people update.
+func TestCreateReport_OlderClientWithNoLocationStillAccepted(t *testing.T) {
+	rdb := &mocks.ReportDatabase{}
+	rdb.On("CountDocuments", mock.Anything, mock.Anything).Return(int64(0), nil)
+	var stored models.Report
+	rdb.On("InsertOne", mock.Anything, mock.Anything).
+		Run(func(a mock.Arguments) { stored = a.Get(1).(models.Report) }).
+		Return(&mocks.InsertOneResultHelper{}, nil)
+
+	// No location, no details: exactly what the app sends today.
+	rr := postReport(t, rdb, createBody(t, map[string]interface{}{"additionalDetails": ""}), createTokenUser)
+
+	assert.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	assert.Equal(t, models.LocationUnknown, stored.EffectiveLocation())
+}

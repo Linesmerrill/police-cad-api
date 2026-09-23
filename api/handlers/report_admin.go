@@ -35,6 +35,9 @@ type ReportAdmin struct {
 	CODB databases.ContentOffenseDatabase
 	UDB  databases.UserDatabase
 	CDB  databases.CommunityDatabase
+	// DBHelper reads reported content for the snapshot shown on the report,
+	// and clears it when staff take it down.
+	DBHelper databases.DatabaseHelper
 }
 
 const (
@@ -49,6 +52,8 @@ type reportAdminRequest struct {
 	Reason      string                 `json:"reason"`
 	Note        string                 `json:"note"`
 	SendEmail   *bool                  `json:"sendEmail"`
+	// Outcome lets a dismissal say it was off-platform rather than nothing.
+	Outcome string `json:"outcome"`
 }
 
 // adminDisplayName is what a decision is attributed to on screen: the admin's
@@ -530,6 +535,7 @@ func (ra ReportAdmin) statusCounts(ctx context.Context, scope ...bson.M) (map[st
 		models.ReportStatusUnderReview,
 		models.ReportStatusResolved,
 		models.ReportStatusDismissed,
+		models.ReportStatusOffPlatform,
 		models.ReportStatusEscalated,
 		models.ReportStatusWelfare,
 	} {
