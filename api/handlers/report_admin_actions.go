@@ -336,7 +336,15 @@ func (ra ReportAdmin) AdminUpholdReportHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// One strike, and every report it answers is closed with it.
-	decision := newReportDecision(models.ReportStatusResolved, req.CurrentUser, req.Note, now)
+	// The console sends the uphold's written reason as "reason", which went only
+	// onto the strike. Record it on the reports and their history too, so other
+	// admins reading the case see why, the same as for a dismissal. A separate
+	// note, if one is ever sent, wins.
+	note := strings.TrimSpace(req.Note)
+	if note == "" {
+		note = strings.TrimSpace(req.Reason)
+	}
+	decision := newReportDecision(models.ReportStatusResolved, req.CurrentUser, note, now)
 	decision.OffenseID = offense.ID.Hex()
 	decision.Action = plan.Action
 	for _, rep := range c.ladder {
