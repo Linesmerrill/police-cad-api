@@ -20,6 +20,20 @@ type Report struct {
 	// stale API deploy must never be able to hide a report by omitting a field.
 	Status string `bson:"status,omitempty" json:"status,omitempty"`
 
+	// Location says where the reported behaviour happened. Reports about
+	// Discord, Xbox or an in-game voice chat are not ours to judge: we cannot
+	// see the content, cannot verify it, and the platform that could never
+	// hears about it. Clients ask first and send people elsewhere, so a report
+	// that reaches us should always be LocationInApp.
+	//
+	// Empty means an older mobile build that predates the question. Those are
+	// still accepted and labelled in the queue rather than thrown away.
+	Location string `bson:"location,omitempty" json:"location,omitempty"`
+
+	// ImpersonatedName is who the reported account is pretending to be, asked
+	// only for Impersonation. Without it staff cannot check the claim.
+	ImpersonatedName string `bson:"impersonatedName,omitempty" json:"impersonatedName,omitempty"`
+
 	// SeverityRank is stored so the queue can sort by it. Escalate first, then
 	// welfare, serious and minor. See ReportSeverityRank.
 	SeverityRank *int `bson:"severityRank,omitempty" json:"severityRank,omitempty"`
@@ -82,11 +96,28 @@ const (
 // queue's escalated state is not something a misclick should be able to do.
 func (r Report) IsReopenable() bool {
 	switch r.EffectiveStatus() {
-	case ReportStatusDismissed, ReportStatusWelfare:
+	case ReportStatusDismissed, ReportStatusWelfare, ReportStatusOffPlatform:
 		return true
 	default:
 		return false
 	}
+}
+
+// Where the reported behaviour happened.
+const (
+	// LocationInApp is the only location we accept a report for.
+	LocationInApp = "in_app"
+	// LocationUnknown is an older client that never asked.
+	LocationUnknown = ""
+)
+
+// EffectiveLocation returns the report's location, with the empty value of an
+// older client called out rather than silently reading as in-app.
+func (r Report) EffectiveLocation() string {
+	if r.Location == "" {
+		return LocationUnknown
+	}
+	return r.Location
 }
 
 // Report workflow states.
@@ -100,6 +131,10 @@ const (
 	// ReportStatusDismissed means no action was warranted. Nothing is recorded
 	// against the accused.
 	ReportStatusDismissed = "dismissed"
+	// ReportStatusOffPlatform closes a report about something that did not
+	// happen in this product. Kept separate from dismissed so the backlog of
+	// them is countable and does not read as "we decided this was nothing".
+	ReportStatusOffPlatform = "off_platform"
 	// ReportStatusEscalated means it was handed to the CyberTipline and the
 	// account is under a legal hold.
 	ReportStatusEscalated = "escalated"
