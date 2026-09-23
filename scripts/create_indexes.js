@@ -1051,5 +1051,14 @@ createIndexSafe(
   { name: "communities_listing_suspension_idx", background: true }
 );
 
+// Reports pointing at one piece of content: used to show a target's report
+// history on the content itself, and to find every report about a comment when
+// it is taken down.
+createIndexSafe(
+  db.reports,
+  { "target.kind": 1, "target.id": 1 },
+  { name: "reports_target_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

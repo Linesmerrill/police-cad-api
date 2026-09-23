@@ -34,6 +34,16 @@ type Report struct {
 	// only for Impersonation. Without it staff cannot check the claim.
 	ImpersonatedName string `bson:"impersonatedName,omitempty" json:"impersonatedName,omitempty"`
 
+	// Target is the one piece of content the report is about. Without it a
+	// report is an accusation against a person with nothing attached, which
+	// staff cannot verify and which is most of what has been filed.
+	Target *ReportTarget `bson:"target,omitempty" json:"target,omitempty"`
+
+	// Snapshot is what that content said when it was reported, copied by the
+	// server from the content itself. Editing or deleting it afterwards can no
+	// longer erase what was reported.
+	Snapshot *ReportSnapshot `bson:"snapshot,omitempty" json:"snapshot,omitempty"`
+
 	// SeverityRank is stored so the queue can sort by it. Escalate first, then
 	// welfare, serious and minor. See ReportSeverityRank.
 	SeverityRank *int `bson:"severityRank,omitempty" json:"severityRank,omitempty"`
@@ -57,6 +67,10 @@ type Report struct {
 	// Escalation, for Child Safety reports handed to the NCMEC CyberTipline.
 	EscalatedAt *primitive.DateTime `bson:"escalatedAt,omitempty" json:"escalatedAt,omitempty"`
 	EscalatedBy string              `bson:"escalatedBy,omitempty" json:"escalatedBy,omitempty"`
+
+	// ContentRemovedAt is set when staff took the reported content down. The
+	// snapshot is kept: it is the record of what was there.
+	ContentRemovedAt *primitive.DateTime `bson:"contentRemovedAt,omitempty" json:"contentRemovedAt,omitempty"`
 
 	UpdatedAt *primitive.DateTime `bson:"updatedAt,omitempty" json:"updatedAt,omitempty"`
 
@@ -118,6 +132,46 @@ func (r Report) EffectiveLocation() string {
 		return LocationUnknown
 	}
 	return r.Location
+}
+
+// ReportTarget points at one piece of content.
+type ReportTarget struct {
+	// Kind is what sort of content it is, from the registry of reportable
+	// content. See ReportableKinds.
+	Kind string `bson:"kind" json:"kind"`
+	// ID is the content's own id. For content that lives inside another
+	// document, such as a comment, ParentID is the document holding it.
+	ID       string `bson:"id" json:"id"`
+	ParentID string `bson:"parentId,omitempty" json:"parentId,omitempty"`
+	// Fields are the specific parts being reported, such as the name or the
+	// image. Empty means the content as a whole.
+	Fields []string `bson:"fields,omitempty" json:"fields,omitempty"`
+}
+
+// ReportSnapshot is the server's own copy of the reported content, taken when
+// the report was filed.
+type ReportSnapshot struct {
+	// Text is the human-written wording, one entry per reported field, in the
+	// order the fields were given.
+	Text []SnapshotField `bson:"text,omitempty" json:"text,omitempty"`
+	// ImageURLs are any images that were part of it.
+	ImageURLs []string `bson:"imageUrls,omitempty" json:"imageUrls,omitempty"`
+	// AuthorID and AuthorName are whoever wrote it, resolved server-side. The
+	// strike goes to them, not to whoever happens to own the container.
+	AuthorID   string `bson:"authorId,omitempty" json:"authorId,omitempty"`
+	AuthorName string `bson:"authorName,omitempty" json:"authorName,omitempty"`
+	// Where it lives, for the admin link.
+	CommunityID string `bson:"communityId,omitempty" json:"communityId,omitempty"`
+	// Label is how to describe it in the console, e.g. "Community profile".
+	Label     string             `bson:"label,omitempty" json:"label,omitempty"`
+	CapturedAt primitive.DateTime `bson:"capturedAt" json:"capturedAt"`
+}
+
+// SnapshotField is one reported field and what it said.
+type SnapshotField struct {
+	Field string `bson:"field" json:"field"`
+	Label string `bson:"label,omitempty" json:"label,omitempty"`
+	Value string `bson:"value" json:"value"`
 }
 
 // Report workflow states.

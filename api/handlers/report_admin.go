@@ -35,6 +35,9 @@ type ReportAdmin struct {
 	CODB databases.ContentOffenseDatabase
 	UDB  databases.UserDatabase
 	CDB  databases.CommunityDatabase
+	// DBHelper reads reported content for the snapshot shown on the report,
+	// and clears it when staff take it down.
+	DBHelper databases.DatabaseHelper
 }
 
 const (
