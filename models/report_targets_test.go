@@ -88,7 +88,7 @@ func TestLookupReportableKind_IsForgivingAboutCase(t *testing.T) {
 	if _, ok := LookupReportableKind("  Community "); !ok {
 		t.Error("case and spacing should not matter")
 	}
-	if _, ok := LookupReportableKind("civilian"); ok {
-		t.Error("roleplay records are not reportable yet")
+	if _, ok := LookupReportableKind("arrest_report"); ok {
+		t.Error("a kind nobody registered is not reportable")
 	}
 }

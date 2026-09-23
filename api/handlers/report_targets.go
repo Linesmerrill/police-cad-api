@@ -63,6 +63,8 @@ func (t targetResolver) resolveTarget(ctx context.Context, target models.ReportT
 		return t.resolveRpPromotion(ctx, kind, target)
 	case models.TargetContentCreator:
 		return t.resolveContentCreator(ctx, kind, target)
+	case models.TargetCivilian, models.TargetVehicle, models.TargetFirearm:
+		return t.resolveRoleplayRecord(ctx, kind, target)
 	default:
 		// A kind in the registry with no resolver here cannot be snapshotted,
 		// so it must not be reportable. A test keeps the two in step.
@@ -341,4 +343,58 @@ func (t targetResolver) resolveContentCreator(ctx context.Context, kind models.R
 	}
 	snap.AuthorName = doc.DisplayName
 	return resolvedTarget{snapshot: snap}, nil
+}
+
+// roleplayCollections maps each roleplay record to its collection and the
+// field its details hang off, since each wraps its own document.
+var roleplayCollections = map[string]struct{ collection, wrapper string }{
+	models.TargetCivilian: {"civilians", "civilian"},
+	models.TargetVehicle:  {"vehicles", "vehicle"},
+	models.TargetFirearm:  {"firearms", "firearm"},
+}
+
+// resolveRoleplayRecord snapshots a character, vehicle or firearm.
+//
+// These are read as a loose document rather than through their typed models,
+// because all three share this one resolver and only a handful of fields are
+// reportable. Every other field on the record, the roleplay itself, is left
+// alone: it is the community's own fiction and none of our business.
+func (t targetResolver) resolveRoleplayRecord(ctx context.Context, kind models.ReportableKind, target models.ReportTarget) (resolvedTarget, error) {
+	spec, ok := roleplayCollections[kind.Kind]
+	if !ok {
+		return resolvedTarget{}, errTargetGone
+	}
+	oid, err := objectID(target.ID)
+	if err != nil {
+		return resolvedTarget{}, errTargetGone
+	}
+
+	var doc bson.M
+	if err := t.db.Collection(spec.collection).FindOne(ctx, bson.M{"_id": oid}).Decode(&doc); err != nil {
+		return resolvedTarget{}, errTargetGone
+	}
+	details, _ := doc[spec.wrapper].(bson.M)
+	if details == nil {
+		return resolvedTarget{}, errTargetGone
+	}
+
+	text := func(field string) string {
+		v, _ := details[field].(string)
+		return v
+	}
+	snap := snapshotOf(kind, target, map[string]string{
+		"firstName": text("firstName"),
+		"lastName":  text("lastName"),
+		"plate":     text("plate"),
+		"model":     text("model"),
+		"name":      text("name"),
+		"image":     text("image"),
+	}, nil)
+
+	// The record belongs to whoever created it, so the strike lands on them
+	// and not on the community it was played in.
+	snap.AuthorID = text("userID")
+	community := text("activeCommunityID")
+	snap.CommunityID = community
+	return resolvedTarget{snapshot: snap, requiresMembershipOf: community}, nil
 }

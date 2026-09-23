@@ -132,6 +132,12 @@ func removeReportedContent(ctx context.Context, db databases.DatabaseHelper, tar
 		return clearFields(ctx, db, "featureRequests", target.ID, "", fields)
 	case models.TargetFeatureRequestReply:
 		return clearArrayFields(ctx, db, "featureRequests", target.ParentID, "comments", target.ID, fields)
+	case models.TargetCivilian, models.TargetVehicle, models.TargetFirearm:
+		// Blanking the name or the photo leaves the record itself intact. The
+		// character keeps its history and its owner can rename it; we are
+		// removing the wording, not deleting somebody's roleplay.
+		spec := roleplayCollections[kind.Kind]
+		return clearFields(ctx, db, spec.collection, target.ID, spec.wrapper+".", fields)
 	default:
 		// Promotions are taken down through the Server Promos panel, which
 		// also deletes the Discord message. Creator profiles are removed

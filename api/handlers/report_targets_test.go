@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.mongodb.org/mongo-driver/bson"
 
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -138,7 +139,7 @@ func TestResolveTarget_MissingContentIsNotAnError_ToReportOn(t *testing.T) {
 func TestResolveTarget_RefusesWhatIsNotReportable(t *testing.T) {
 	db := &mocks.DatabaseHelper{}
 	for _, target := range []models.ReportTarget{
-		{Kind: "civilian", ID: targetCommunityID},
+		{Kind: "arrest_report", ID: targetCommunityID},
 		{Kind: "", ID: targetCommunityID},
 		{Kind: models.TargetCommunity, ID: targetCommunityID, Fields: []string{"ownerID"}},
 	} {
@@ -179,7 +180,8 @@ func TestReporterCanSee_MembersOnlyContent(t *testing.T) {
 func TestEveryReportableKindResolves(t *testing.T) {
 	for name := range models.ReportableKinds() {
 		db := &mocks.DatabaseHelper{}
-		for _, coll := range []string{"communities", "users", "announcements", "featureRequests", "content_creators"} {
+		for _, coll := range []string{"communities", "users", "announcements", "featureRequests", "content_creators",
+			"civilians", "vehicles", "firearms"} {
 			stubCollection(db, coll, nil, false)
 		}
 		_, err := targetResolver{db: db}.resolveTarget(context.Background(), models.ReportTarget{
@@ -189,4 +191,68 @@ func TestEveryReportableKindResolves(t *testing.T) {
 		// these stubs means "gone". Anything else means no resolver.
 		assert.ErrorIs(t, err, errTargetGone, "%s has no resolver", name)
 	}
+}
+
+// A character's name and photo are reportable; the rest of its record, the
+// roleplay itself, is nobody's business but the community's.
+func TestResolveTarget_SnapshotsARoleplayRecord(t *testing.T) {
+	db := &mocks.DatabaseHelper{}
+	stubCollection(db, "civilians", func(v interface{}) {
+		doc := v.(*bson.M)
+		*doc = bson.M{"civilian": bson.M{
+			"firstName":         "Something",
+			"lastName":          "Vile",
+			"image":             "https://img/face.png",
+			"userID":            targetOtherUserID,
+			"activeCommunityID": targetCommunityID,
+			"occupation":        "Paramedic",
+		}}
+	}, true)
+
+	got, err := targetResolver{db: db}.resolveTarget(context.Background(), models.ReportTarget{
+		Kind: models.TargetCivilian, ID: targetCommunityID, Fields: []string{"lastName", "image"},
+	})
+	assert.NoError(t, err)
+
+	// Only the fields the reporter pointed at travel with the report. The
+	// first name was not one of them, and the occupation is not reportable
+	// at all: it is roleplay, and the community polices its own.
+	assert.Equal(t, []models.SnapshotField{
+		{Field: "lastName", Label: "Their last name", Value: "Vile"},
+	}, got.snapshot.Text)
+	assert.Equal(t, []string{"https://img/face.png"}, got.snapshot.ImageURLs)
+
+	// The strike lands on whoever made the character, and only its own
+	// community's members could have seen it.
+	assert.Equal(t, targetOtherUserID, got.snapshot.AuthorID)
+	assert.Equal(t, targetCommunityID, got.snapshot.CommunityID)
+	assert.Equal(t, targetCommunityID, got.requiresMembershipOf)
+}
+
+// All three records share one resolver, so a vehicle must not pick up the
+// fields that belong to a character.
+func TestResolveTarget_RoleplayRecordsOnlyCarryTheirOwnFields(t *testing.T) {
+	db := &mocks.DatabaseHelper{}
+	stubCollection(db, "vehicles", func(v interface{}) {
+		doc := v.(*bson.M)
+		*doc = bson.M{"vehicle": bson.M{"plate": "SLUR123", "model": "Bison", "color": "red"}}
+	}, true)
+
+	// A character's field on a vehicle is refused outright rather than
+	// quietly dropped, because it means the client is confused about what it
+	// is reporting and the snapshot would be misleading either way.
+	_, err := targetResolver{db: db}.resolveTarget(context.Background(), models.ReportTarget{
+		Kind: models.TargetVehicle, ID: targetCommunityID, Fields: []string{"plate", "firstName"},
+	})
+	assert.Error(t, err)
+
+	got, err := targetResolver{db: db}.resolveTarget(context.Background(), models.ReportTarget{
+		Kind: models.TargetVehicle, ID: targetCommunityID, Fields: []string{"plate"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []models.SnapshotField{
+		{Field: "plate", Label: "Its plate", Value: "SLUR123"},
+	}, got.snapshot.Text)
+	assert.Equal(t, "Vehicle", got.snapshot.Label)
+	assert.Empty(t, got.snapshot.ImageURLs)
 }

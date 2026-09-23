@@ -17,6 +17,13 @@ const (
 	TargetFeatureRequestReply = "feature_request_comment"
 	TargetRpPromotion         = "rp_promotion"
 	TargetContentCreator      = "content_creator"
+
+	// Roleplay records. These are a community's own fiction, seen only by its
+	// members, so its staff police the roleplay itself. What reaches us is a
+	// name written to be a slur, or a real photograph uploaded as a character.
+	TargetCivilian = "civilian"
+	TargetVehicle  = "vehicle"
+	TargetFirearm  = "firearm"
 )
 
 // ReportableField is one part of a piece of content that can be reported on
@@ -110,6 +117,29 @@ var reportableKinds = map[string]ReportableKind{
 			{Name: "features", Label: "Its features"},
 			{Name: "requirements", Label: "Its requirements"},
 			{Name: "bannerImage", Label: "Its banner", Image: true},
+		},
+	},
+	TargetCivilian: {
+		Kind: TargetCivilian, Label: "Character", MembersOnly: true,
+		Fields: []ReportableField{
+			{Name: "firstName", Label: "Their first name"},
+			{Name: "lastName", Label: "Their last name"},
+			{Name: "image", Label: "Their photo", Image: true},
+		},
+	},
+	TargetVehicle: {
+		Kind: TargetVehicle, Label: "Vehicle", MembersOnly: true,
+		Fields: []ReportableField{
+			{Name: "plate", Label: "Its plate"},
+			{Name: "model", Label: "Its model"},
+			{Name: "image", Label: "Its photo", Image: true},
+		},
+	},
+	TargetFirearm: {
+		Kind: TargetFirearm, Label: "Firearm", MembersOnly: true,
+		Fields: []ReportableField{
+			{Name: "name", Label: "Its name"},
+			{Name: "image", Label: "Its photo", Image: true},
 		},
 	},
 	TargetContentCreator: {
