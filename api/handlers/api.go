@@ -98,12 +98,14 @@ func (a *App) New() *mux.Router {
 	}
 	s := Spotlight{DB: databases.NewSpotlightDatabase(a.dbHelper)}
 	search := Search{UserDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
-	report := Report{RDB: databases.NewReportDatabase(a.dbHelper)}
+	report := Report{RDB: databases.NewReportDatabase(a.dbHelper), DBHelper: a.dbHelper}
 	reportAdmin := ReportAdmin{
 		RDB:  databases.NewReportDatabase(a.dbHelper),
 		CODB: databases.NewContentOffenseDatabase(a.dbHelper),
 		UDB:  databases.NewUserDatabase(a.dbHelper),
 		CDB:  databases.NewCommunityDatabase(a.dbHelper),
+
+		DBHelper: a.dbHelper,
 	}
 	cloudinaryHandler := CloudinaryHandler{}
 	userPrefs := UserPreferences{DB: databases.NewUserPreferencesDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
@@ -282,6 +284,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/reports/{reportId}/dismiss", http.HandlerFunc(reportAdmin.AdminDismissReportHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reports/{reportId}/escalate", http.HandlerFunc(reportAdmin.AdminEscalateReportHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reports/{reportId}/reopen", http.HandlerFunc(reportAdmin.AdminReopenReportHandler)).Methods("POST")
+	apiCreate.Handle("/admin/reports/{reportId}/remove-content", http.HandlerFunc(reportAdmin.AdminRemoveReportedContentHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reports/{reportId}", http.HandlerFunc(reportAdmin.AdminGetReportHandler)).Methods("GET")
 	apiCreate.Handle("/admin/reports", http.HandlerFunc(reportAdmin.AdminListReportsHandler)).Methods("GET")
 	apiCreate.Handle("/admin/offenses/{offenseId}/reverse", http.HandlerFunc(reportAdmin.AdminReverseOffenseHandler)).Methods("POST")
@@ -802,6 +805,7 @@ func (a *App) New() *mux.Router {
 
 	apiCreate.Handle("/report", api.Middleware(http.HandlerFunc(report.CreateReportHandler))).Methods("POST")
 	apiCreate.Handle("/report/open", api.Middleware(http.HandlerFunc(report.OpenReportHandler))).Methods("GET")
+	apiCreate.Handle("/report/targets", api.Middleware(http.HandlerFunc(report.ReportableTargetsHandler))).Methods("GET")
 
 	apiCreate.Handle("/search/communities", api.Middleware(http.HandlerFunc(search.SearchCommunityHandler))).Methods("GET")
 	apiCreate.Handle("/search", api.Middleware(http.HandlerFunc(search.SearchHandler))).Methods("GET")
