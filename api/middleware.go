@@ -33,9 +33,9 @@ type MiddlewareDB struct {
 
 var authenticator auth.Authenticator
 
-// basicCache caches successful basic-auth (login) credential checks. It stays
+// logins lets a repeat login skip bcrypt. See login_cache.go. It stays
 // in-memory because losing it on restart only costs one extra bcrypt per login.
-var basicCache store.Cache
+var logins *loginCache
 
 // tokenCache holds bearer tokens. It is backed by MongoDB (see token_store.go)
 // so tokens survive restarts and are shared across dynos — a prerequisite for
@@ -95,6 +95,16 @@ func Middleware(next http.Handler) http.Handler {
 					"url", r.URL.Path,
 					"email", email,
 					"error", err)
+				// Could not look the user up at all: say so with a 503, which
+				// the app retries, rather than a 401, which it treats as a
+				// wrong password and answers by deleting the saved login.
+				if isAuthUnavailable(err) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("Retry-After", "5")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					w.Write(unavailableBody(errAuthUnavailable.Error()))
+					return
+				}
 				// Note: Removed WWW-Authenticate header to prevent iOS from hanging on 401 responses
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write(unauthorizedBody(err.Error()))
@@ -191,32 +201,24 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBody)
 }
 
-// SetupGoGuardian sets up the go-guardian middleware. The basic strategy uses
-// an in-memory cache (a bcrypt optimization), while the bearer strategy uses a
-// MongoDB-backed token store so tokens survive restarts and work across dynos.
+// SetupGoGuardian sets up the go-guardian middleware. The basic strategy reads
+// the user on every login and skips only bcrypt when it can (login_cache.go),
+// while the bearer strategy uses a MongoDB-backed token store so tokens survive
+// restarts and work across dynos.
 func (m MiddlewareDB) SetupGoGuardian(dbHelper databases.DatabaseHelper) {
 	authenticator = auth.New()
-	basicCache = store.NewFIFO(context.Background(), time.Hour*24*365*100) // 100 years ttl
+	logins = newLoginCache(loginCacheTTL, loginCacheMaxEntries)
 	tokenCache = newMongoTokenStore(dbHelper)
-	basicStrategy := basic.New(m.ValidateUser, basicCache)
+	// Deliberately not basic.New: go-guardian's cached strategy answers from
+	// its cache without reading the user, which is the bug login_cache.go
+	// describes.
+	basicStrategy := basic.AuthenticateFunc(m.ValidateUser)
 	tokenStrategy := bearer.New(bearer.NoOpAuthenticate, tokenCache)
 
 	authenticator.EnableStrategy(basic.StrategyKey, basicStrategy)
 	authenticator.EnableStrategy(bearer.CachedStrategyKey, tokenStrategy)
 }
 
-// InvalidateAuthCache removes a user's cached basic-auth credentials so they
-// must re-authenticate with their new password after a change. Bearer tokens
-// are keyed by token (not email) and are unaffected here, matching prior
-// behavior.
-func InvalidateAuthCache(email string) error {
-	if basicCache == nil {
-		return nil
-	}
-	return basicCache.Delete(strings.ToLower(email), nil)
-}
-
-// ValidateUser validates a user
 func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, password string) (auth.Info, error) {
 	usernameHash := sha256.Sum256([]byte(strings.ToLower(email)))
 
@@ -246,7 +248,10 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 				"email", email,
 				"error", err)
 		}
-		return nil, fmt.Errorf("failed to validate user by email, %v", err)
+		if err == mongo.ErrNoDocuments || strings.Contains(err.Error(), "no documents") {
+			return nil, fmt.Errorf("invalid credentials")
+		}
+		return nil, fmt.Errorf("%w: %v", errAuthUnavailable, err)
 	}
 
 	expectedUsernameHash := sha256.Sum256([]byte(strings.ToLower(dbEmailResp.Details.Email)))
@@ -267,13 +272,18 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp.Details.Password), []byte(password))
-	if err != nil {
-		zap.S().Warnw("ValidateUser: password mismatch",
-			"email", email,
-			"userID", dbEmailResp.ID,
-			"error", err)
-		return nil, fmt.Errorf("invalid credentials")
+	// Skip bcrypt only when this exact password already matched this exact
+	// stored hash. A changed password has a new hash, so it misses.
+	if !logins.matches(dbEmailResp.ID, dbEmailResp.Details.Password, password) {
+		err = bcrypt.CompareHashAndPassword([]byte(dbEmailResp.Details.Password), []byte(password))
+		if err != nil {
+			zap.S().Warnw("ValidateUser: password mismatch",
+				"email", email,
+				"userID", dbEmailResp.ID,
+				"error", err)
+			return nil, fmt.Errorf("invalid credentials")
+		}
+		logins.remember(dbEmailResp.ID, dbEmailResp.Details.Password, password)
 	}
 
 	// Check if the user is deactivated

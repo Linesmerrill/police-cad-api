@@ -5853,12 +5853,8 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		"matchedCount", result.MatchedCount,
 		"modifiedCount", result.ModifiedCount)
 
-	// Invalidate the auth cache for this user so they must re-authenticate with new password
-	if err := api.InvalidateAuthCache(email); err != nil {
-		zap.S().Warnw("Failed to invalidate auth cache (password still updated)",
-			"email", email,
-			"error", err)
-	}
+	// No auth cache to clear: a login reads the user every time and the new
+	// hash retires any remembered password on every dyno (api/login_cache.go).
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
