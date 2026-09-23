@@ -49,3 +49,17 @@ func unauthorizedBody(reason string) []byte {
 	}
 	return body
 }
+
+// unavailableBody builds the 503 response body for a login that could not be
+// checked at all, in the same shape as unauthorizedBody so clients read the
+// message from one place.
+func unavailableBody(reason string) []byte {
+	body, err := json.Marshal(map[string]string{
+		"error":   "unavailable",
+		"message": reason,
+	})
+	if err != nil {
+		return []byte(`{"error": "unavailable", "message": "sign-in is temporarily unavailable"}`)
+	}
+	return body
+}
