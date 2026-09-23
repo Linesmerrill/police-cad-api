@@ -705,6 +705,16 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The message is written here, not by the caller. See notificationKinds:
+	// this endpoint used to deliver arbitrary text from any user to any other
+	// user, with no reporting and no audit.
+	fixedMessage, allowed := notificationMessageFor(notification)
+	if !allowed {
+		config.ErrorStatus("unsupported notification type", http.StatusBadRequest, w,
+			fmt.Errorf("type %q", notification.Type))
+		return
+	}
+
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -740,7 +750,7 @@ func (u User) AddNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		SentFromID: notification.SentFromID,
 		SentToID:   notification.SentToID,
 		Type:       notification.Type,
-		Message:    notification.Message,
+		Message:    fixedMessage,
 		Data1:      notification.Data1,
 		Data2:      notification.Data2,
 		Data3:      notification.Data3,
