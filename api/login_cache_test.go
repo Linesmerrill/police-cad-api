@@ -168,3 +168,28 @@ func TestValidateUser_DatabaseTroubleIsNotAWrongPassword(t *testing.T) {
 	assert.Error(t, err)
 	assert.False(t, isAuthUnavailable(err), "no such account is a real refusal")
 }
+
+// The post-login hook runs only for a login that succeeds, and never for a
+// wrong password or a deactivated account.
+func TestValidateUser_RunsAfterLoginOnlyOnSuccess(t *testing.T) {
+	withFreshLoginCache(t)
+	user := models.User{ID: "u1", Details: models.UserDetails{Email: "a@b.com", Password: hashOf(t, "pw")}}
+	var seen []string
+	m := MiddlewareDB{
+		DB:         userDBReturning(func() (models.User, error) { return user, nil }),
+		AfterLogin: func(_ context.Context, u *models.User) { seen = append(seen, u.ID) },
+	}
+
+	_, err := m.ValidateUser(context.Background(), nil, "a@b.com", "wrong")
+	assert.Error(t, err)
+	assert.Empty(t, seen, "wrong password")
+
+	_, err = m.ValidateUser(context.Background(), nil, "a@b.com", "pw")
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"u1"}, seen)
+
+	user.Details.IsDeactivated = true
+	_, err = m.ValidateUser(context.Background(), nil, "a@b.com", "pw")
+	assert.Error(t, err)
+	assert.Equal(t, []string{"u1"}, seen, "deactivated")
+}
