@@ -299,6 +299,14 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Self-healing: make the owner an approved member of their own community.
+	// Pre-2025 communities never gave their owner a user.communities entry, so
+	// every surface offered them "Request to Join". Runs before the live member
+	// count below so the count includes them. See owner_membership_heal.go.
+	if healOwnerMembership(ctx, c.UDB, dbResp) {
+		zap.S().Infow("healed owner membership", "community_id", commID, "owner_id", dbResp.Details.OwnerID)
+	}
+
 	// Ensure no role has nil Permissions or Members — nil slices serialize as
 	// JSON null, which crashes mobile clients that call .some() on the array.
 	for i := range dbResp.Details.Roles {
