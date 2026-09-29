@@ -29,6 +29,10 @@ import (
 // MiddlewareDB is a struct that holds the database
 type MiddlewareDB struct {
 	DB databases.UserDatabase
+	// AfterLogin, when set, runs after a successful credential check with the
+	// user just read. It must not fail the login. The handlers package uses it
+	// to bring V1 members back into their community (v1_member_heal.go).
+	AfterLogin func(context.Context, *models.User)
 }
 
 var authenticator auth.Authenticator
@@ -302,6 +306,10 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 			"email", email,
 			"userID", dbEmailResp.ID)
 		return nil, err
+	}
+
+	if m.AfterLogin != nil {
+		m.AfterLogin(queryCtx, &dbEmailResp)
 	}
 
 	// Store user ID in the request context so CreateToken can use it without another DB query

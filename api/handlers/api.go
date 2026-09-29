@@ -35,7 +35,10 @@ type App struct {
 // New creates a new mux router and all the routes
 func (a *App) New() *mux.Router {
 	// setup go-guardian for middleware
-	m := api.MiddlewareDB{DB: databases.NewUserDatabase(a.dbHelper)}
+	m := api.MiddlewareDB{
+		DB:         databases.NewUserDatabase(a.dbHelper),
+		AfterLogin: NewV1MemberHealer(databases.NewUserDatabase(a.dbHelper), databases.NewCommunityDatabase(a.dbHelper)),
+	}
 	m.SetupGoGuardian(a.dbHelper)
 
 	r := mux.NewRouter()
