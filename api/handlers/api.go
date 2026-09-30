@@ -244,6 +244,26 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/forgot-password", http.HandlerFunc(adminHandler.AdminForgotPasswordHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reset-password", http.HandlerFunc(adminHandler.AdminResetPasswordHandler)).Methods("POST")
 
+	// Owner-only financial P&L dashboard (see FINANCE.md). All gated by
+	// RequireOwner — the admin doc is re-read on every request.
+	financeHandler := Finance{
+		ADB:  databases.NewAdminDatabase(a.dbHelper),
+		SEDB: seDB,
+		EDB:  databases.NewFinanceExpenseDatabase(a.dbHelper),
+	}
+	apiCreate.Handle("/admin/finance/summary", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.SummaryHandler))).Methods("GET")
+	apiCreate.Handle("/admin/finance/expenses", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.ListExpensesHandler))).Methods("GET")
+	apiCreate.Handle("/admin/finance/expenses", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.CreateExpenseHandler))).Methods("POST")
+	apiCreate.Handle("/admin/finance/expenses/{id}", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.UpdateExpenseHandler))).Methods("PUT")
+	apiCreate.Handle("/admin/finance/expenses/{id}", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.DeleteExpenseHandler))).Methods("DELETE")
+	apiCreate.Handle("/admin/finance/adsense/oauth/start", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.AdSenseOAuthStartHandler))).Methods("GET")
+	// NOTE: the OAuth callback is intentionally NOT wrapped in RequireOwner.
+	// Google redirects the owner's *browser* here, which carries no API JWT.
+	// Authorization comes from the single-use, 128-bit, 10-minute-expiry
+	// `state` minted by the owner-only /oauth/start call and verified inside
+	// the handler. Do not add RequireOwner here or the connect flow breaks.
+	apiCreate.Handle("/admin/finance/adsense/oauth/callback", http.HandlerFunc(financeHandler.AdSenseOAuthCallbackHandler)).Methods("GET")
+
 	// Admin console routes (moved to appear before general user routes)
 	// Search routes (most specific first)
 	apiCreate.Handle("/admin/search/users", http.HandlerFunc(adminHandler.AdminUserSearchHandler)).Methods("POST")
