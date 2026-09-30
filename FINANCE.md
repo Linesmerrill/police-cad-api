@@ -2,22 +2,25 @@
 
 Owner-only financial endpoints for the LPC P&L dashboard. All routes live
 under `/api/v1/admin/finance/` and are gated by the `RequireOwner`
-middleware — with one deliberate exception: the AdSense OAuth callback
-(see below), which Google's servers hit via the owner's browser redirect
-and which is instead authorized by its single-use OAuth `state`. Secrets come from Heroku config vars; nothing secret is stored
-in code or the database (except encrypted-at-rest config on Heroku's side).
+middleware (no exceptions). Secrets come from Heroku config vars; nothing
+secret is stored in code or the database (the Plaid access token is never
+stored in Mongo — it comes from the `PLAID_ACCESS_TOKEN` env var).
+
+**Single source of truth: the bank.** Plaid bank sync is the SOLE
+income/expense source for the P&L (cash basis). There is no manual expense
+entry and no ad-network integration: `subscription_events` (Stripe +
+RevenueCat) is kept only as an earned-revenue complement, and the bank
+numbers are what drive `income.total`, `expenses`, and `profit`.
 
 ## Endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/admin/finance/summary?from=YYYY-MM&to=YYYY-MM` | Monthly P&L (see JSON shape below). `from`/`to` default to the last 12 months. 400 on bad format. |
-| GET | `/api/v1/admin/finance/expenses?from=YYYY-MM-DD&to=YYYY-MM-DD` | List expenses; defaults to current month-to-date. Returns `{expenses:[...], total}`. |
-| POST | `/api/v1/admin/finance/expenses` | Create an expense. Body: `{date, amount, currency, category, vendor, notes, source}`. |
-| PUT | `/api/v1/admin/finance/expenses/{id}` | Replace editable fields; returns the updated doc. 404 if missing. |
-| DELETE | `/api/v1/admin/finance/expenses/{id}` | Delete; returns `{success:true}`. |
-| GET | `/api/v1/admin/finance/adsense/oauth/start` | Returns `{url}` — the Google consent URL for AdSense. |
-| GET | `/api/v1/admin/finance/adsense/oauth/callback?code=&state=` | Exchanges the code; returns the refresh token **once** with instructions to store it as `ADSENSE_REFRESH_TOKEN`. |
+| POST | `/api/v1/admin/finance/plaid/link-token` | Returns `{link_token, expiration}` — Plaid Link token (products=[transactions], country_codes=[US]) for the owner to connect a bank. 503 when Plaid isn't configured. |
+| POST | `/api/v1/admin/finance/plaid/exchange` | Body: `{public_token}`. Exchanges the Link public_token for an access token and returns `{access_token, item_id, message}` **once**; the message tells the owner to set the Heroku config var `PLAID_ACCESS_TOKEN`. The token is never logged and never stored in the DB. 503 when Plaid isn't configured. |
+| POST | `/api/v1/admin/finance/plaid/sync` | Runs Plaid `/transactions/sync` from the stored cursor, looping while `has_more`; upserts added/modified (by `transaction_id`), deletes removed; persists the new cursor + `last_sync_at` + accounts snapshot; returns `{added, modified, removed, has_more:false}`. 503 when not connected. |
+| GET | `/api/v1/admin/finance/plaid/status` | Returns `{connected, last_sync, accounts:[{name, mask, type}], item_id?}`. `connected` = `PLAID_ACCESS_TOKEN` is set. Never 503s — this is how the owner learns the bank isn't connected yet. |
 
 Every route returns 401 for missing/invalid/expired tokens or unknown/inactive
 admins, and 403 for authenticated non-owners.
@@ -29,42 +32,58 @@ admins, and 403 for authenticated non-owners.
   "months": [
     {
       "month": "2026-09",
-      "income": { "stripe": 123.45, "iap_gross": 200.0, "iap_net": 170.0,
-                  "adsense": 0, "admob": 0, "total": 293.45 },
-      "expenses": 50.0,
-      "profit": 243.45,
+      "income": { "stripe": 123.45, "iap_gross": 200.0, "iap_net": 170.0, "total": 310.20 },
+      "expenses": 88.10,
+      "profit": 222.10,
+      "bank": { "connected": true, "income": 310.20, "expenses": 88.10 },
       "sources": {
         "stripe":     {"connected": true},
         "revenuecat": {"connected": true},
-        "adsense":    {"connected": false},
-        "admob":      {"connected": false}
+        "bank":       {"connected": true}
       }
     }
   ],
-  "warnings": ["adsense: failed to refresh access token (...)"]
+  "bank_connected": true,
+  "warnings": ["bank: failed to read transactions (...)"]
 }
 ```
 
 `warnings` is omitted when empty. It carries non-fatal degradation notes
-(e.g. AdSense failures) — the summary still renders with that source at 0.
+(e.g. Plaid failures) — the summary still renders with bank numbers at 0.
 
 ### Aggregation rules
 
-- Month bucket = UTC month of the event's `purchasedAt`. Events with nil
-  `purchasedAt` are skipped.
+- Month bucket = UTC month of the event's `purchasedAt` (subscription
+  events) or the bank transaction's posted `date`. Events with nil
+  `purchasedAt` are skipped. **Pending bank transactions are excluded.**
 - `income.stripe`: sum of `priceUsd` where `provider="stripe"` and
   `eventType="invoice.payment_succeeded"`.
 - `income.iap_gross`: `provider="revenuecat"` with `eventType` in
   `INITIAL_PURCHASE` / `RENEWAL`, **minus** `REFUND` sums.
 - `income.iap_net` = `iap_gross` × `IAP_NET_RATE` (see assumption below).
-- `income.total` = `stripe` + `iap_net` + `adsense` + `admob`.
-- `expenses`: sum of `amount` from the `finance_expenses` collection by UTC
-  month of `date`.
+  These three are the earned-revenue complement — they do **not** drive the
+  P&L when a bank is connected.
+- `bank.income`: sum of `|amount|` for bank transactions with `amount < 0`
+  (Plaid sign convention: negative = money in).
+- `bank.expenses`: sum of `amount` for bank transactions with `amount > 0`
+  (positive = money out).
+- When the bank is connected (`bank_connected: true`): `income.total` =
+  `bank.income`, `expenses` = `bank.expenses` (cash basis — no
+  double-counting with the subscription events).
+- When the bank is NOT connected (`bank_connected: false`): `bank.*` = 0 /
+  `connected: false`, `income.total` = `stripe` + `iap_net`, `expenses` = 0,
+  `profit` = `income.total`. The web frontend shows a "connect your bank"
+  empty state off the `bank_connected` flag.
 - `profit` = `total` − `expenses`. All money values rounded to 2 decimals
   (rounded once, at the end).
-- `sources.stripe` / `sources.revenuecat` are always `connected: true`
-  (DB-backed). AdSense is connected only when fully configured *and* the
-  fetch succeeds. AdMob is a stub: always `connected: false`, income 0.
+
+### ⚠️ Cash-basis semantics (important)
+
+Bank payouts lag earned revenue: AdSense pays ~3 weeks after month-end,
+Apple/Google pay app-store proceeds ~45 days after the sale. The P&L is
+intentionally cash basis (money in the bank), so a big launch month will
+show subscription revenue in `income.stripe`/`iap_*` before it shows up in
+`bank.income`. That is expected, not a bug.
 
 ### ⚠️ IAP net-rate assumption (important)
 
@@ -92,59 +111,60 @@ in `api/handlers/api.go`:
 
 The `roles` claim in the JWT is **never trusted on its own** — the document
 is re-read on every request, so a tampered or stale claim cannot escalate.
-The verified `*models.AdminUser` is placed in the request context for
-downstream handlers (used for expense `createdBy`).
 
-## Expenses
+## Plaid bank sync
 
-Stored in the `finance_expenses` collection (`databases/finance.go`,
-`models/finance.go`):
+Plaid is the bank-data pipeline. Two Mongo collections
+(`databases/finance.go`, `models/finance.go`):
 
-| Field | Notes |
-|---|---|
-| `date` | Date of the expense; API accepts `YYYY-MM-DD` (or RFC3339), returns `YYYY-MM-DD` |
-| `amount` | Float > 0 (400 otherwise), rounded to 2 decimals |
-| `currency` | Default `"USD"`, uppercased |
-| `category` / `vendor` / `notes` | Free-form strings |
-| `source` | Enum `manual` / `csv` / `plaid` (default `manual`; 400 on anything else). `plaid` is accepted but reserved for the v2 bank auto-sync — nothing writes it yet. |
-| `createdBy` | `<owner admin id>|<email>` of the creating owner |
-| `createdAt` | Server timestamp |
+- `bank_transactions` (unique index on `transaction_id`, ensured async at
+  startup in `api/handlers/api.go`): `transaction_id`, `account_id`,
+  `account_name`, `account_mask`, `name`, `merchant_name`, `amount`
+  (Plaid-signed), `direction` derived from the sign (`"in"` when amount < 0,
+  `"out"` when amount > 0, `"none"` for the zero edge case), `date` (posted
+  date, UTC), `pending`, Plaid `category` + `personal_finance_category`
+  primary, `source="plaid"`, `created_at`/`updated_at`.
+- `finance_plaid_state` (single document): `item_id`, `cursor`,
+  `last_sync_at`, `accounts` snapshot (`account_id`, `name`, `mask`, `type`,
+  `subtype`). **The access token is never stored here** — only in the
+  `PLAID_ACCESS_TOKEN` env var.
 
-PUT replaces all editable fields; `createdBy`/`createdAt` are preserved.
-
-## AdSense OAuth (user-consent flow)
-
-AdSense does not support service accounts, so connection is a one-time
-owner consent flow:
-
-1. `GET .../adsense/oauth/start` → `{url}`. The `state` is a 32-byte random
-   value stored in-memory, single-use, 10-minute expiry.
-2. The owner approves at Google and lands on the redirect URI, which should
-   forward `code` + `state` to `GET .../adsense/oauth/callback`.
-3. The callback verifies state (400 if missing/expired/reused), exchanges the
-   code at Google's token endpoint, and returns `{refresh_token, message}`
-   **displayed once**. The message tells the owner to set the Heroku config
-   var `ADSENSE_REFRESH_TOKEN`. The token is never logged.
-
-When `ADSENSE_CLIENT_ID`, `ADSENSE_CLIENT_SECRET`, `ADSENSE_REDIRECT_URI`
-and `ADSENSE_REFRESH_TOKEN` are all set, the summary endpoint exchanges the
-refresh token for an access token, calls AdSense `accounts.list`, then
-`reports:generate` (DATE dimension × EARNINGS metric, USD) over the requested
-range, and aggregates earnings by month into `income.adsense`. Any failure
-degrades gracefully: `adsense=0`, `connected=false`, plus a `warnings` entry.
+The Plaid client is wrapped in the `plaidSyncClient` interface
+(api/handlers/finance_plaid.go) so the sync logic is unit-testable with a
+mock; the production implementation uses the official Plaid Go SDK
+(`github.com/plaid/plaid-go/v39`, pinned in `go.mod`).
 
 ## Environment variables
 
 | Var | Required | Notes |
 |---|---|---|
 | `JWT_SECRET` | yes | Existing. Signs/verifies admin JWTs. |
+| `PLAID_CLIENT_ID` | for Plaid | Plaid dashboard → API keys. |
+| `PLAID_SECRET` | for Plaid | Plaid dashboard → API keys. |
+| `PLAID_ENV` | no | `sandbox` (default) / `development` / `production`. |
+| `PLAID_ACCESS_TOKEN` | for bank sync | Set from the one-time `/plaid/exchange` output. |
 | `IAP_NET_RATE` | no | Decimal fraction for `iap_net` math. Default `0.85`. |
-| `ADSENSE_CLIENT_ID` | for AdSense | Google OAuth client ID. |
-| `ADSENSE_CLIENT_SECRET` | for AdSense | Google OAuth client secret. |
-| `ADSENSE_REDIRECT_URI` | for AdSense | Must exactly match the URI registered in Google Cloud Console. |
-| `ADSENSE_REFRESH_TOKEN` | for AdSense earnings | Set from the one-time OAuth callback output. |
 
-Env var names are fixed — do not rename.
+Env var names are fixed — do not rename. Any Plaid endpoint when
+unconfigured returns 503 naming the missing vars.
+
+### Plaid setup steps for the owner
+
+1. Sign up at [dashboard.plaid.com](https://dashboard.plaid.com) and create
+   an app.
+2. Copy the **sandbox** client ID and secret for testing now, and set
+   `PLAID_CLIENT_ID` / `PLAID_SECRET` as Heroku config vars on the API app.
+   (Production access requires Plaid's approval — apply in the dashboard
+   when ready, then switch `PLAID_ENV=production`.)
+3. In the Finance tab, click the connect-bank flow: the API's
+   `POST /admin/finance/plaid/link-token` returns a Link token, Link opens
+   for the owner to pick their bank, and the resulting `public_token` is
+   sent to `POST /admin/finance/plaid/exchange`.
+4. The exchange response shows the access token **once** — set it as the
+   Heroku config var `PLAID_ACCESS_TOKEN`.
+5. `POST /admin/finance/plaid/sync` pulls transactions; repeat after new
+   bank activity (or wire a scheduler later). `GET /admin/finance/summary`
+   then shows the cash-basis P&L.
 
 ## Running the tests
 
@@ -155,30 +175,42 @@ ensure it is on `PATH`).
 cd ~/workspace/lpc-applications/police-cad-api
 go build ./...
 go vet ./...
-go test ./api/handlers/ -run 'TestRequireOwner|TestBuildFinanceSummary|TestParseSummaryRange|TestIAPNetRate|TestParseExpenseDate|TestValidExpenseSource' -v
+go test ./api/handlers/ -run 'TestRequireOwner|TestBuildFinanceSummary|TestParseSummaryRange|TestIAPNetRate|TestPlaid|TestBankTransaction|TestNewPlaid|TestRunPlaidSync' -v
 ```
 
-Tests live in `api/handlers/finance_test.go` and follow the repo's existing
-`*_test.go` conventions (testify + `databases/mocks` + httptest):
+Tests live in `api/handlers/finance_test.go` and
+`api/handlers/finance_plaid_test.go` and follow the repo's existing
+`*_test.go` conventions (testify + `databases/mocks` + httptest, plus
+in-memory fakes for the Plaid client and the bank/state DB interfaces):
 
 - `TestRequireOwner_*`: valid owner JWT → passes; legacy `Role=="owner"` →
   passes; non-owner → 403; bad signature → 401; **tampered roles claim with
   non-owner doc → 403** (proves the claim is not trusted); inactive owner,
   expired token, missing header, non-admin scope, unknown admin → 401.
 - `TestBuildFinanceSummary_*`: monthly bucketing (UTC), refund subtraction,
-  net-rate math, rounding, nil-`purchasedAt` skipping, empty months,
-  AdSense aggregation, plus range/date/source validation helpers.
+  net-rate math, rounding, nil-`purchasedAt` skipping, empty months, bank
+  cash-basis mode (pending excluded, abs-value income, UTC bucketing,
+  zero-amount edge), bank_connected true/false modes, plus
+  range/date validation helpers.
+- `TestPlaidDirection_*` / `TestBankTransactionFromPlaid_*`: Plaid
+  sign-convention derivation (negative→in, positive→out, zero→none) and the
+  transaction→document mapping.
+- `TestRunPlaidSync_*`: sync upsert/delete logic against a mock Plaid
+  client — add new, modify existing, remove deleted, cursor persisted
+  through the `has_more` loop, accounts snapshot, error propagation.
+- `TestPlaid{LinkToken,Exchange,Sync,Status}_*`: 503s when unconfigured
+  (naming the missing vars), 400 on bad exchange body, the exchange
+  one-time token + item-ID persistence, sync cursor persistence, status
+  connected/disconnected shapes, and **RequireOwner enforced on all four
+  Plaid routes** (401 without token, 403 for non-owners).
 
 ## Deferred to v2
 
-- **Plaid bank auto-sync**: bank is the source of truth for money in/out
-  (per 2026-09-30 decision). A Plaid connection would auto-import
-  transactions into `finance_expenses` with `source="plaid"` and reconcile
-  against Stripe/AdSense/Apple payouts. The `plaid` source enum value is
-  already accepted and reserved.
-- **AdMob**: currently a stub (`connected:false`, income 0). Needs the
-  AdMob API with its own OAuth setup.
-- **CSV import endpoint**: bulk expense import (`source="csv"` enum exists;
-  no upload endpoint yet).
-- **Expense categories taxonomy**: currently free-form strings.
-- **Multi-currency expenses**: stored as-is; no FX conversion.
+- **AdMob / AdSense earnings breakdown**: dropped from scope. The bank is
+  the single P&L source of truth; ad payouts arrive as bank deposits.
+- **CSV import**: no bulk-import endpoint.
+- **Scheduled sync**: `POST /admin/finance/plaid/sync` is manual today; a
+  cron could trigger it automatically.
+- **Transaction categorization rules**: Plaid categories are stored as-is;
+  no custom mapping yet.
+- **Multi-currency**: stored as-is; no FX conversion.

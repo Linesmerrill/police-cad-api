@@ -164,6 +164,19 @@ func financeTime(year, month, day int) *time.Time {
 	return &t
 }
 
+func financeBankTx(id string, amount float64, date time.Time, pending bool) models.BankTransaction {
+	return models.BankTransaction{
+		TransactionID: id,
+		AccountID:     "acc-1",
+		Name:          "tx " + id,
+		Amount:        amount,
+		Direction:     plaidDirection(amount),
+		Date:          date,
+		Pending:       pending,
+		Source:        "plaid",
+	}
+}
+
 func TestBuildFinanceSummary_BasicAggregation(t *testing.T) {
 	events := []models.SubscriptionEvent{
 		{Provider: "stripe", EventType: "invoice.payment_succeeded", PriceUSD: 10.0, PurchasedAt: financeTime(2026, 8, 5)},
@@ -177,31 +190,29 @@ func TestBuildFinanceSummary_BasicAggregation(t *testing.T) {
 		// Other providers never count as revenue.
 		{Provider: "mobile_app", EventType: "mobile_subscribe", PriceUSD: 30.0, PurchasedAt: financeTime(2026, 8, 13)},
 	}
-	expenses := []models.FinanceExpense{
-		{Date: *financeTime(2026, 8, 20), Amount: 15.0},
-	}
 
 	start, _ := time.Parse("2006-01", "2026-08")
 	end, _ := time.Parse("2006-01", "2026-08")
-	resp := buildFinanceSummary(events, expenses, start, end, 0.85, nil, false)
+	// Bank not connected: total = stripe + iap_net, expenses = 0.
+	resp := buildFinanceSummary(events, nil, start, end, 0.85, false)
 
 	assert.Len(t, resp.Months, 1)
+	assert.False(t, resp.BankConnected)
 	m := resp.Months[0]
 	assert.Equal(t, "2026-08", m.Month)
 	// iap_gross = 20 + 5 - 7 = 18; iap_net = 18 * 0.85 = 15.30
 	assert.Equal(t, 10.0, m.Income.Stripe)
 	assert.Equal(t, 18.0, m.Income.IAPGross)
 	assert.Equal(t, 15.3, m.Income.IAPNet)
-	assert.Equal(t, 0.0, m.Income.AdSense)
-	assert.Equal(t, 0.0, m.Income.AdMob)
-	// total = stripe + iap_net (admob 0)
 	assert.Equal(t, 25.3, m.Income.Total)
-	assert.Equal(t, 15.0, m.Expenses)
-	assert.Equal(t, 10.3, m.Profit)
+	assert.Equal(t, 0.0, m.Expenses)
+	assert.Equal(t, 25.3, m.Profit)
+	assert.False(t, m.Bank.Connected)
+	assert.Equal(t, 0.0, m.Bank.Income)
+	assert.Equal(t, 0.0, m.Bank.Expenses)
 	assert.True(t, m.Sources.Stripe.Connected)
 	assert.True(t, m.Sources.RevenueCat.Connected)
-	assert.False(t, m.Sources.AdSense.Connected)
-	assert.False(t, m.Sources.AdMob.Connected)
+	assert.False(t, m.Sources.Bank.Connected)
 }
 
 func TestBuildFinanceSummary_MonthBucketingAndEmptyMonths(t *testing.T) {
@@ -211,7 +222,7 @@ func TestBuildFinanceSummary_MonthBucketingAndEmptyMonths(t *testing.T) {
 	}
 	start, _ := time.Parse("2006-01", "2026-06")
 	end, _ := time.Parse("2006-01", "2026-08")
-	resp := buildFinanceSummary(events, nil, start, end, 0.85, nil, false)
+	resp := buildFinanceSummary(events, nil, start, end, 0.85, false)
 
 	assert.Len(t, resp.Months, 3)
 	assert.Equal(t, "2026-06", resp.Months[0].Month)
@@ -228,36 +239,75 @@ func TestBuildFinanceSummary_NetRateMathAndRounding(t *testing.T) {
 	events := []models.SubscriptionEvent{
 		{Provider: "revenuecat", EventType: "RENEWAL", PriceUSD: 9.99, PurchasedAt: financeTime(2026, 9, 2)},
 	}
-	expenses := []models.FinanceExpense{
-		{Date: *financeTime(2026, 9, 3), Amount: 0.005}, // rounds to 0.01
-	}
 	start, _ := time.Parse("2006-01", "2026-09")
 	end, _ := time.Parse("2006-01", "2026-09")
 
 	// Default rate 0.85: 9.99 * 0.85 = 8.4915 -> 8.49
-	resp := buildFinanceSummary(events, expenses, start, end, 0.85, nil, false)
+	resp := buildFinanceSummary(events, nil, start, end, 0.85, false)
 	m := resp.Months[0]
 	assert.Equal(t, 8.49, m.Income.IAPNet)
 	assert.Equal(t, 8.49, m.Income.Total)
-	assert.Equal(t, 0.01, m.Expenses)
-	assert.Equal(t, 8.49, m.Profit) // 9.99*0.85 - 0.005, rounded once at the end
+	assert.Equal(t, 0.0, m.Expenses)
+	assert.Equal(t, 8.49, m.Profit)
 
 	// Custom rate via env override path: 9.99 * 0.9 = 8.991 -> 8.99
-	resp = buildFinanceSummary(events, expenses, start, end, 0.9, nil, false)
+	resp = buildFinanceSummary(events, nil, start, end, 0.9, false)
 	assert.Equal(t, 8.99, resp.Months[0].Income.IAPNet)
 }
 
-func TestBuildFinanceSummary_AdSenseEarnings(t *testing.T) {
-	adsense := map[string]float64{"2026-09": 42.5, "2026-08": 10.0}
+func TestBuildFinanceSummary_BankConnectedUsesCashBasis(t *testing.T) {
+	events := []models.SubscriptionEvent{
+		{Provider: "stripe", EventType: "invoice.payment_succeeded", PriceUSD: 10.0, PurchasedAt: financeTime(2026, 9, 2)},
+		{Provider: "revenuecat", EventType: "RENEWAL", PriceUSD: 100.0, PurchasedAt: financeTime(2026, 9, 3)},
+	}
+	txs := []models.BankTransaction{
+		financeBankTx("in-1", -250.75, time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC), false),  // income
+		financeBankTx("out-1", 80.10, time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC), false),   // expense
+		financeBankTx("pend-1", -999.99, time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC), true), // pending: excluded
+	}
+	start, _ := time.Parse("2006-01", "2026-09")
+	end, _ := time.Parse("2006-01", "2026-09")
+	resp := buildFinanceSummary(events, txs, start, end, 0.85, true)
+
+	assert.True(t, resp.BankConnected)
+	m := resp.Months[0]
+	// The subscription detail is still computed (earned-revenue complement)…
+	assert.Equal(t, 10.0, m.Income.Stripe)
+	assert.Equal(t, 85.0, m.Income.IAPNet) // 100 * 0.85
+	// …but the P&L itself is cash basis from the bank.
+	assert.Equal(t, 250.75, m.Income.Total)
+	assert.Equal(t, 80.10, m.Expenses)
+	assert.Equal(t, 170.65, m.Profit)
+	assert.True(t, m.Bank.Connected)
+	assert.Equal(t, 250.75, m.Bank.Income)
+	assert.Equal(t, 80.10, m.Bank.Expenses)
+	assert.True(t, m.Sources.Bank.Connected)
+}
+
+func TestBuildFinanceSummary_BankUTCBucketing(t *testing.T) {
+	// 2026-09-01 00:30 +02:00 is still August in UTC — bucket must use UTC.
+	tm := time.Date(2026, 9, 1, 0, 30, 0, 0, time.FixedZone("CEST", 2*3600))
+	txs := []models.BankTransaction{
+		financeBankTx("edge-1", -5.0, tm, false),
+	}
 	start, _ := time.Parse("2006-01", "2026-08")
 	end, _ := time.Parse("2006-01", "2026-09")
-	resp := buildFinanceSummary(nil, nil, start, end, 0.85, adsense, true)
+	resp := buildFinanceSummary(nil, txs, start, end, 0.85, true)
+	assert.Equal(t, 5.0, resp.Months[0].Bank.Income)
+	assert.Equal(t, 0.0, resp.Months[1].Bank.Income)
+}
 
-	assert.Equal(t, 10.0, resp.Months[0].Income.AdSense)
-	assert.Equal(t, 10.0, resp.Months[0].Income.Total)
-	assert.True(t, resp.Months[0].Sources.AdSense.Connected)
-	assert.Equal(t, 42.5, resp.Months[1].Income.AdSense)
-	assert.True(t, resp.Months[1].Sources.AdSense.Connected)
+func TestBuildFinanceSummary_ZeroAmountExcluded(t *testing.T) {
+	txs := []models.BankTransaction{
+		financeBankTx("zero-1", 0, time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC), false),
+	}
+	start, _ := time.Parse("2006-01", "2026-09")
+	end, _ := time.Parse("2006-01", "2026-09")
+	resp := buildFinanceSummary(nil, txs, start, end, 0.85, true)
+	m := resp.Months[0]
+	assert.Equal(t, 0.0, m.Bank.Income)
+	assert.Equal(t, 0.0, m.Bank.Expenses)
+	assert.Equal(t, 0.0, m.Income.Total)
 }
 
 func TestBuildFinanceSummary_UTCBucketing(t *testing.T) {
@@ -268,7 +318,7 @@ func TestBuildFinanceSummary_UTCBucketing(t *testing.T) {
 	}
 	start, _ := time.Parse("2006-01", "2026-07")
 	end, _ := time.Parse("2006-01", "2026-08")
-	resp := buildFinanceSummary(events, nil, start, end, 0.85, nil, false)
+	resp := buildFinanceSummary(events, nil, start, end, 0.85, false)
 	assert.Equal(t, 5.0, resp.Months[0].Income.Stripe)
 	assert.Equal(t, 0.0, resp.Months[1].Income.Stripe)
 }
@@ -311,21 +361,4 @@ func TestIAPNetRate(t *testing.T) {
 
 	t.Setenv("IAP_NET_RATE", "1.5")
 	assert.Equal(t, 0.85, iapNetRate())
-}
-
-func TestParseExpenseDate(t *testing.T) {
-	d, err := parseExpenseDate("2026-09-15")
-	assert.NoError(t, err)
-	assert.Equal(t, "2026-09-15", d.Format("2006-01-02"))
-
-	_, err = parseExpenseDate("not-a-date")
-	assert.Error(t, err)
-}
-
-func TestValidExpenseSource(t *testing.T) {
-	assert.True(t, validExpenseSource("manual"))
-	assert.True(t, validExpenseSource("csv"))
-	assert.True(t, validExpenseSource("plaid"))
-	assert.False(t, validExpenseSource("bank"))
-	assert.False(t, validExpenseSource(""))
 }

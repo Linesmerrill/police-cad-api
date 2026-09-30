@@ -5,12 +5,15 @@ package handlers
 // Routes (registered in api.go, gated by RequireOwner):
 //
 //	GET  /api/v1/admin/finance/summary?from=YYYY-MM&to=YYYY-MM
-//	GET  /api/v1/admin/finance/expenses?from=YYYY-MM-DD&to=YYYY-MM-DD
-//	POST /api/v1/admin/finance/expenses
-//	PUT  /api/v1/admin/finance/expenses/{id}
-//	DELETE /api/v1/admin/finance/expenses/{id}
-//	GET  /api/v1/admin/finance/adsense/oauth/start
-//	GET  /api/v1/admin/finance/adsense/oauth/callback?code=&state=
+//	POST /api/v1/admin/finance/plaid/link-token
+//	POST /api/v1/admin/finance/plaid/exchange
+//	POST /api/v1/admin/finance/plaid/sync
+//	GET  /api/v1/admin/finance/plaid/status
+//
+// Plaid bank sync is the sole income/expense source for the P&L (cash
+// basis). The subscription_events detail (Stripe + IAP gross/net) is kept as
+// an earned-revenue complement. The Plaid access token is NEVER stored in
+// the database — it comes from the PLAID_ACCESS_TOKEN env var.
 
 import (
 	"context"
@@ -23,10 +26,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -34,9 +35,11 @@ import (
 
 // Finance bundles the finance endpoints and their database dependencies.
 type Finance struct {
-	ADB  databases.AdminDatabase
-	SEDB databases.SubscriptionEventDatabase
-	EDB  databases.FinanceExpenseDatabase
+	ADB   databases.AdminDatabase
+	SEDB  databases.SubscriptionEventDatabase
+	BTDB  databases.BankTransactionDatabase
+	PSDB  databases.PlaidStateDatabase
+	Plaid plaidSyncClient
 }
 
 // ---------------------------------------------------------------------------
@@ -216,33 +219,38 @@ func iapNetRate() float64 {
 
 // financeMonthAccum accumulates raw (unrounded) totals for one month.
 type financeMonthAccum struct {
-	stripe   float64
-	iapGross float64
-	adsense  float64
-	expenses float64
+	stripe      float64
+	iapGross    float64
+	bankIncome  float64
+	bankExpense float64
 }
 
-// buildFinanceSummary buckets subscription events and expenses into months
-// between start and end (inclusive) and computes the P&L per month.
+// buildFinanceSummary buckets subscription events and bank transactions into
+// months between start and end (inclusive) and computes the P&L per month.
 //
 // Aggregation rules (pure — all inputs are arguments, so this is unit-testable):
-//   - Month bucket = UTC month of the event's purchasedAt; events with nil
-//     purchasedAt are skipped.
+//   - Month bucket = UTC month of the event's purchasedAt (subscription
+//     events) or the bank transaction's posted date; events with nil
+//     purchasedAt are skipped, and PENDING bank transactions are excluded.
 //   - stripe: sum priceUsd where provider="stripe" and
 //     eventType="invoice.payment_succeeded".
 //   - iap_gross: provider="revenuecat", eventType in {INITIAL_PURCHASE,
 //     RENEWAL} summed, minus eventType="REFUND" sums.
 //   - iap_net = iap_gross * netRate (see IAP_NET_RATE).
-//   - income.total = stripe + iap_net + adsense + admob (admob always 0 in v1).
-//   - expenses: sum of expense amounts by month of the expense date (UTC).
+//   - bank.income: sum of |amount| for bank transactions with amount < 0
+//     (Plaid sign convention: negative = inflow).
+//   - bank.expenses: sum of amount for bank transactions with amount > 0
+//     (positive = outflow).
+//   - When bankConnected: income.total = bank.income, expenses =
+//     bank.expenses (cash basis — the bank is the single source of truth).
+//     When not connected: income.total = stripe + iap_net, expenses = 0.
 //   - profit = total - expenses. All money values rounded to 2 decimals.
 func buildFinanceSummary(
 	events []models.SubscriptionEvent,
-	expenses []models.FinanceExpense,
+	bankTxs []models.BankTransaction,
 	start, end time.Time,
 	netRate float64,
-	adsenseByMonth map[string]float64,
-	adsenseConnected bool,
+	bankConnected bool,
 ) models.FinanceSummaryResponse {
 	acc := map[string]*financeMonthAccum{}
 	get := func(key string) *financeMonthAccum {
@@ -273,45 +281,61 @@ func buildFinanceSummary(
 			}
 		}
 	}
-	for _, ex := range expenses {
-		get(monthKey(ex.Date)).expenses += ex.Amount
-	}
-	for key, v := range adsenseByMonth {
-		get(key).adsense += v
+	for _, tx := range bankTxs {
+		if tx.Pending {
+			continue
+		}
+		a := get(monthKey(tx.Date))
+		switch {
+		case tx.Amount < 0:
+			a.bankIncome += -tx.Amount
+		case tx.Amount > 0:
+			a.bankExpense += tx.Amount
+		}
 	}
 
 	var months []models.FinanceMonth
 	for m := start; !m.After(end); m = m.AddDate(0, 1, 0) {
 		key := m.Format("2006-01")
 		a := acc[key]
-		var stripe, iapGross, adsense, exp float64
+		var stripe, iapGross, bInc, bExp float64
 		if a != nil {
-			stripe, iapGross, adsense, exp = a.stripe, a.iapGross, a.adsense, a.expenses
+			stripe, iapGross, bInc, bExp = a.stripe, a.iapGross, a.bankIncome, a.bankExpense
 		}
 		iapNet := iapGross * netRate
-		total := stripe + iapNet + adsense // admob is 0 in v1
+
+		var total, exp float64
+		var bank models.FinanceBankMonth
+		if bankConnected {
+			total = bInc
+			exp = bExp
+			bank = models.FinanceBankMonth{Connected: true, Income: round2(bInc), Expenses: round2(bExp)}
+		} else {
+			total = stripe + iapNet
+			exp = 0
+			bank = models.FinanceBankMonth{Connected: false}
+		}
+
 		months = append(months, models.FinanceMonth{
 			Month: key,
 			Income: models.FinanceMonthIncome{
 				Stripe:   round2(stripe),
 				IAPGross: round2(iapGross),
 				IAPNet:   round2(iapNet),
-				AdSense:  round2(adsense),
-				AdMob:    0,
 				Total:    round2(total),
 			},
 			Expenses: round2(exp),
 			Profit:   round2(total - exp),
+			Bank:     bank,
 			Sources: models.FinanceMonthSources{
 				Stripe:     models.FinanceSourceStatus{Connected: true},
 				RevenueCat: models.FinanceSourceStatus{Connected: true},
-				AdSense:    models.FinanceSourceStatus{Connected: adsenseConnected},
-				AdMob:      models.FinanceSourceStatus{Connected: false},
+				Bank:       models.FinanceSourceStatus{Connected: bankConnected},
 			},
 		})
 	}
 
-	return models.FinanceSummaryResponse{Months: months}
+	return models.FinanceSummaryResponse{Months: months, BankConnected: bankConnected}
 }
 
 // SummaryHandler implements GET /api/v1/admin/finance/summary.
@@ -347,310 +371,33 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var expenses []models.FinanceExpense
-	expCursor, err := f.EDB.Find(ctx, bson.M{
-		"date": bson.M{
-			"$gte": start,
-			"$lt":  end.AddDate(0, 1, 0),
-		},
-	})
-	if err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to read expenses")
-		return
-	}
-	defer expCursor.Close(ctx)
-	if allErr := expCursor.All(ctx, &expenses); allErr != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to read expenses")
-		return
-	}
-
+	bankConnected := plaidAccessTokenConfigured()
+	var bankTxs []models.BankTransaction
 	var warnings []string
-	adsenseByMonth, adsenseConnected, adsenseWarnings := fetchAdSenseEarnings(ctx, start, end)
-	warnings = append(warnings, adsenseWarnings...)
+	if bankConnected {
+		txCursor, err := f.BTDB.Find(ctx, bson.M{
+			"date": bson.M{
+				"$gte": start,
+				"$lt":  end.AddDate(0, 1, 0),
+			},
+		})
+		if err != nil {
+			// Degrade gracefully: summary still renders, bank shows 0 and a
+			// warning explains why.
+			warnings = append(warnings, "bank: failed to read transactions ("+err.Error()+")")
+		} else {
+			defer txCursor.Close(ctx)
+			if allErr := txCursor.All(ctx, &bankTxs); allErr != nil {
+				warnings = append(warnings, "bank: failed to read transactions ("+allErr.Error()+")")
+				bankTxs = nil
+			}
+		}
+	}
 
-	resp := buildFinanceSummary(events, expenses, start, end, iapNetRate(), adsenseByMonth, adsenseConnected)
+	resp := buildFinanceSummary(events, bankTxs, start, end, iapNetRate(), bankConnected)
 	if len(warnings) > 0 {
 		resp.Warnings = warnings
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// ---------------------------------------------------------------------------
-// Expenses CRUD
-// ---------------------------------------------------------------------------
-
-func financeExpenseToDTO(e models.FinanceExpense) models.FinanceExpenseDTO {
-	return models.FinanceExpenseDTO{
-		ID:        e.ID.Hex(),
-		Date:      e.Date.UTC().Format("2006-01-02"),
-		Amount:    e.Amount,
-		Currency:  e.Currency,
-		Category:  e.Category,
-		Vendor:    e.Vendor,
-		Notes:     e.Notes,
-		Source:    e.Source,
-		CreatedBy: e.CreatedBy,
-		CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339),
-	}
-}
-
-// expenseInput is the writable subset of an expense accepted from the API.
-type expenseInput struct {
-	Date     string  `json:"date"`
-	Amount   float64 `json:"amount"`
-	Currency string  `json:"currency"`
-	Category string  `json:"category"`
-	Vendor   string  `json:"vendor"`
-	Notes    string  `json:"notes"`
-	Source   string  `json:"source"`
-}
-
-func validExpenseSource(s string) bool {
-	switch s {
-	case models.ExpenseSourceManual, models.ExpenseSourceCSV, models.ExpenseSourcePlaid:
-		return true
-	}
-	return false
-}
-
-// parseExpenseDate accepts "YYYY-MM-DD" (preferred) or RFC3339.
-func parseExpenseDate(raw string) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if t, err := time.Parse("2006-01-02", raw); err == nil {
-		return t, nil
-	}
-	if t, err := time.Parse(time.RFC3339, raw); err == nil {
-		return t, nil
-	}
-	return time.Time{}, errors.New("invalid date format, expected YYYY-MM-DD")
-}
-
-// expenseFilterFromRange parses ?from=YYYY-MM-DD&to=YYYY-MM-DD for the expenses
-// endpoints. Empty values default to the current calendar month to date.
-func expenseFilterFromRange(from, to string) (start, end time.Time, err error) {
-	now := time.Now().UTC()
-	if from == "" && to == "" {
-		start = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-		end = now
-		return start, end, nil
-	}
-	if from == "" || to == "" {
-		return time.Time{}, time.Time{}, errors.New("both from and to must be provided (YYYY-MM-DD)")
-	}
-	start, err = parseExpenseDate(from)
-	if err != nil {
-		return time.Time{}, time.Time{}, errors.New("invalid from format, expected YYYY-MM-DD")
-	}
-	end, err = parseExpenseDate(to)
-	if err != nil {
-		return time.Time{}, time.Time{}, errors.New("invalid to format, expected YYYY-MM-DD")
-	}
-	if end.Before(start) {
-		return time.Time{}, time.Time{}, errors.New("to must not be before from")
-	}
-	return start, end, nil
-}
-
-// ListExpensesHandler implements GET /api/v1/admin/finance/expenses.
-func (f Finance) ListExpensesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	start, end, err := expenseFilterFromRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
-	if err != nil {
-		writeFinanceError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	cursor, err := f.EDB.Find(
-		ctx,
-		bson.M{"date": bson.M{"$gte": start, "$lte": end}},
-		options.Find().SetSort(bson.M{"date": -1}),
-	)
-	if err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to read expenses")
-		return
-	}
-	defer cursor.Close(ctx)
-
-	var expenses []models.FinanceExpense
-	if allErr := cursor.All(ctx, &expenses); allErr != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to read expenses")
-		return
-	}
-
-	dtos := make([]models.FinanceExpenseDTO, 0, len(expenses))
-	var total float64
-	for _, e := range expenses {
-		dtos = append(dtos, financeExpenseToDTO(e))
-		total += e.Amount
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(models.FinanceExpenseListResponse{
-		Expenses: dtos,
-		Total:    round2(total),
-	})
-}
-
-// CreateExpenseHandler implements POST /api/v1/admin/finance/expenses.
-func (f Finance) CreateExpenseHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var in expenseInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeFinanceError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	date, err := parseExpenseDate(in.Date)
-	if err != nil {
-		writeFinanceError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if in.Amount <= 0 {
-		writeFinanceError(w, http.StatusBadRequest, "amount must be greater than 0")
-		return
-	}
-	source := strings.TrimSpace(strings.ToLower(in.Source))
-	if source == "" {
-		source = models.ExpenseSourceManual
-	}
-	if !validExpenseSource(source) {
-		writeFinanceError(w, http.StatusBadRequest, "invalid source, expected one of: manual, csv, plaid")
-		return
-	}
-	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
-	if currency == "" {
-		currency = "USD"
-	}
-
-	createdBy := ""
-	if admin := financeAdminFromContext(r.Context()); admin != nil {
-		createdBy = admin.ID.Hex() + "|" + admin.Email
-	}
-
-	expense := models.FinanceExpense{
-		ID:        primitive.NewObjectID(),
-		Date:      date.UTC(),
-		Amount:    round2(in.Amount),
-		Currency:  currency,
-		Category:  strings.TrimSpace(in.Category),
-		Vendor:    strings.TrimSpace(in.Vendor),
-		Notes:     strings.TrimSpace(in.Notes),
-		Source:    source,
-		CreatedBy: createdBy,
-		CreatedAt: time.Now().UTC(),
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	if _, err := f.EDB.InsertOne(ctx, expense); err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to create expense")
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(financeExpenseToDTO(expense))
-}
-
-// UpdateExpenseHandler implements PUT /api/v1/admin/finance/expenses/{id}.
-// It replaces all editable fields (date, amount, currency, category, vendor,
-// notes, source); createdBy/createdAt are preserved.
-func (f Finance) UpdateExpenseHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	idHex := mux.Vars(r)["id"]
-	id, err := primitive.ObjectIDFromHex(idHex)
-	if err != nil {
-		writeFinanceError(w, http.StatusBadRequest, "invalid expense id")
-		return
-	}
-
-	var in expenseInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeFinanceError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	date, err := parseExpenseDate(in.Date)
-	if err != nil {
-		writeFinanceError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if in.Amount <= 0 {
-		writeFinanceError(w, http.StatusBadRequest, "amount must be greater than 0")
-		return
-	}
-	source := strings.TrimSpace(strings.ToLower(in.Source))
-	if source == "" {
-		source = models.ExpenseSourceManual
-	}
-	if !validExpenseSource(source) {
-		writeFinanceError(w, http.StatusBadRequest, "invalid source, expected one of: manual, csv, plaid")
-		return
-	}
-	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
-	if currency == "" {
-		currency = "USD"
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-
-	res, err := f.EDB.UpdateOne(
-		ctx,
-		bson.M{"_id": id},
-		bson.M{"$set": bson.M{
-			"date":     date.UTC(),
-			"amount":   round2(in.Amount),
-			"currency": currency,
-			"category": strings.TrimSpace(in.Category),
-			"vendor":   strings.TrimSpace(in.Vendor),
-			"notes":    strings.TrimSpace(in.Notes),
-			"source":   source,
-		}},
-	)
-	if err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to update expense")
-		return
-	}
-	if res.MatchedCount == 0 {
-		writeFinanceError(w, http.StatusNotFound, "expense not found")
-		return
-	}
-
-	var updated models.FinanceExpense
-	if derr := f.EDB.FindOne(ctx, bson.M{"_id": id}).Decode(&updated); derr != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to read updated expense")
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(financeExpenseToDTO(updated))
-}
-
-// DeleteExpenseHandler implements DELETE /api/v1/admin/finance/expenses/{id}.
-func (f Finance) DeleteExpenseHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	idHex := mux.Vars(r)["id"]
-	id, err := primitive.ObjectIDFromHex(idHex)
-	if err != nil {
-		writeFinanceError(w, http.StatusBadRequest, "invalid expense id")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	if err := f.EDB.DeleteOne(ctx, bson.M{"_id": id}); err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to delete expense")
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

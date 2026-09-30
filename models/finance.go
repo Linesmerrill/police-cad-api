@@ -2,47 +2,58 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// Expense sources recognized by the finance module. "plaid" is accepted but
-// reserved for the v2 bank auto-sync (see FINANCE.md) — nothing writes it yet.
+// Bank sync direction values. Plaid signs transaction amounts so that
+// positive = money OUT of the account and negative = money IN. The direction
+// field on BankTransaction records this derivation.
 const (
-	ExpenseSourceManual = "manual"
-	ExpenseSourceCSV    = "csv"
-	ExpenseSourcePlaid  = "plaid"
+	BankDirectionIn   = "in"
+	BankDirectionOut  = "out"
+	BankDirectionNone = "none" // zero-amount edge case
 )
 
-// FinanceExpense is one owner-tracked expense row in the finance_expenses
-// collection. It is the counterpart to revenue aggregated from
-// subscription_events.
-type FinanceExpense struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Date      time.Time          `bson:"date" json:"date"`
-	Amount    float64            `bson:"amount" json:"amount"`
-	Currency  string             `bson:"currency" json:"currency"`
-	Category  string             `bson:"category,omitempty" json:"category,omitempty"`
-	Vendor    string             `bson:"vendor,omitempty" json:"vendor,omitempty"`
-	Notes     string             `bson:"notes,omitempty" json:"notes,omitempty"`
-	Source    string             `bson:"source" json:"source"`
-	CreatedBy string             `bson:"createdBy" json:"createdBy"`
-	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
+// BankTransaction is one Plaid transaction row in the bank_transactions
+// collection. Money amounts keep Plaid's sign convention: amount < 0 is an
+// inflow (income), amount > 0 is an outflow (expense). The access token that
+// produced the row is NEVER stored in the DB — it lives in the
+// PLAID_ACCESS_TOKEN env var.
+type BankTransaction struct {
+	TransactionID          string    `bson:"transaction_id" json:"transaction_id"`
+	AccountID              string    `bson:"account_id" json:"account_id"`
+	AccountName            string    `bson:"account_name,omitempty" json:"account_name,omitempty"`
+	AccountMask            string    `bson:"account_mask,omitempty" json:"account_mask,omitempty"`
+	Name                   string    `bson:"name" json:"name"`
+	MerchantName           string    `bson:"merchant_name,omitempty" json:"merchant_name,omitempty"`
+	Amount                 float64   `bson:"amount" json:"amount"` // Plaid-signed
+	Direction              string    `bson:"direction" json:"direction"` // "in" | "out" | "none"
+	Date                   time.Time `bson:"date" json:"date"`           // posted date (UTC)
+	Pending                bool      `bson:"pending" json:"pending"`
+	Category               []string  `bson:"category,omitempty" json:"category,omitempty"`
+	PersonalFinanceCategory  string    `bson:"personal_finance_category,omitempty" json:"personal_finance_category,omitempty"`
+	Source                 string    `bson:"source" json:"source"` // always "plaid"
+	CreatedAt              time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt              time.Time `bson:"updated_at" json:"updated_at"`
 }
 
-// FinanceExpenseDTO is the API representation of a FinanceExpense. The date
-// is rendered as "YYYY-MM-DD" (UTC) so consumers never have to parse RFC3339.
-type FinanceExpenseDTO struct {
-	ID        string `json:"id"`
-	Date      string `json:"date"`
-	Amount    float64 `json:"amount"`
-	Currency  string `json:"currency"`
-	Category  string `json:"category,omitempty"`
-	Vendor    string `json:"vendor,omitempty"`
-	Notes     string `json:"notes,omitempty"`
-	Source    string `json:"source"`
-	CreatedBy string `json:"createdBy"`
-	CreatedAt string `json:"createdAt"`
+// PlaidAccountSnapshot is one linked account stored in finance_plaid_state.
+type PlaidAccountSnapshot struct {
+	AccountID string `bson:"account_id" json:"account_id"`
+	Name      string `bson:"name" json:"name"`
+	Mask      string `bson:"mask,omitempty" json:"mask,omitempty"`
+	Type      string `bson:"type,omitempty" json:"type,omitempty"`
+	Subtype   string `bson:"subtype,omitempty" json:"subtype,omitempty"`
+}
+
+// PlaidSyncState is the single document in finance_plaid_state that tracks a
+// Plaid transactions/sync cursor. The access token is NEVER stored here — it
+// comes from the PLAID_ACCESS_TOKEN env var.
+type PlaidSyncState struct {
+	ItemID    string                `bson:"item_id,omitempty" json:"item_id,omitempty"`
+	Cursor    string                `bson:"cursor,omitempty" json:"cursor,omitempty"`
+	LastSyncAt time.Time            `bson:"last_sync_at,omitempty" json:"last_sync_at,omitempty"`
+	Accounts  []PlaidAccountSnapshot `bson:"accounts,omitempty" json:"accounts,omitempty"`
+	UpdatedAt time.Time             `bson:"updated_at" json:"updated_at"`
 }
 
 // FinanceSourceStatus reports whether a revenue source is connected for a month.
@@ -54,21 +65,29 @@ type FinanceSourceStatus struct {
 type FinanceMonthSources struct {
 	Stripe     FinanceSourceStatus `json:"stripe"`
 	RevenueCat FinanceSourceStatus `json:"revenuecat"`
-	AdSense    FinanceSourceStatus `json:"adsense"`
-	AdMob      FinanceSourceStatus `json:"admob"`
+	Bank       FinanceSourceStatus `json:"bank"`
 }
 
-// FinanceMonthIncome is the income breakdown for one month. IAP figures come
-// from RevenueCat webhook events in subscription_events; iap_net is an
-// *estimate* of iap_gross minus the app-store cut (see IAP_NET_RATE).
+// FinanceMonthIncome is the income breakdown for one month. Stripe and IAP
+// figures come from subscription_events (earned-revenue complement); the
+// P&L total itself is the bank income when a bank is connected (cash basis).
 type FinanceMonthIncome struct {
 	Stripe   float64 `json:"stripe"`
 	IAPGross float64 `json:"iap_gross"`
 	IAPNet   float64 `json:"iap_net"`
-	AdSense  float64 `json:"adsense"`
-	AdMob    float64 `json:"admob"`
-	// Total is income recognized for P&L: stripe + iap_net + adsense + admob.
+	// Total is the P&L income: bank income when connected, otherwise
+	// stripe + iap_net.
 	Total float64 `json:"total"`
+}
+
+// FinanceBankMonth is the bank-sourced income/expense breakdown for one
+// month. Income = sum of |amount| where amount < 0 (inflows); Expenses =
+// sum of amount where amount > 0 (outflows). Pending transactions are
+// excluded.
+type FinanceBankMonth struct {
+	Connected bool    `json:"connected"`
+	Income    float64 `json:"income"`
+	Expenses  float64 `json:"expenses"`
 }
 
 // FinanceMonth is one month of the P&L. Field names are a contract with the
@@ -78,17 +97,13 @@ type FinanceMonth struct {
 	Income   FinanceMonthIncome  `json:"income"`
 	Expenses float64             `json:"expenses"`
 	Profit   float64             `json:"profit"`
+	Bank     FinanceBankMonth    `json:"bank"`
 	Sources  FinanceMonthSources `json:"sources"`
 }
 
 // FinanceSummaryResponse is the GET /admin/finance/summary payload.
 type FinanceSummaryResponse struct {
-	Months   []FinanceMonth `json:"months"`
-	Warnings []string       `json:"warnings,omitempty"`
-}
-
-// FinanceExpenseListResponse is the GET /admin/finance/expenses payload.
-type FinanceExpenseListResponse struct {
-	Expenses []FinanceExpenseDTO `json:"expenses"`
-	Total    float64             `json:"total"`
+	Months        []FinanceMonth `json:"months"`
+	BankConnected bool           `json:"bank_connected"`
+	Warnings      []string       `json:"warnings,omitempty"`
 }
