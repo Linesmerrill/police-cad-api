@@ -110,15 +110,14 @@ func (c *plaidAPIClient) SyncTransactions(ctx context.Context, accessToken, curs
 	}, nil
 }
 
-// plaidEnvironment maps PLAID_ENV to a Plaid API environment. Default is
-// sandbox. (The SDK only defines Sandbox and Production constants; the
-// development URL is spelled out.)
+// plaidEnvironment maps PLAID_ENV to a Plaid API environment: "production",
+// or sandbox for anything else. Plaid retired its Development environment in
+// 2024, so "development" is no longer an option; it falls back to sandbox
+// rather than pointing at a host that no longer answers.
 func plaidEnvironment() plaid.Environment {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("PLAID_ENV"))) {
 	case "production":
 		return plaid.Production
-	case "development":
-		return plaid.Environment("https://development.plaid.com")
 	default:
 		return plaid.Sandbox
 	}

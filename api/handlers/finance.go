@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -179,6 +180,10 @@ func monthKey(t time.Time) string {
 // range [start, end]. When both are empty it defaults to the last 12 months
 // (current month plus the 11 before it). Returns 400-style errors for bad
 // formats.
+// maxSummaryMonths bounds one summary request, which reads every transaction
+// and subscription event in the range.
+const maxSummaryMonths = 60
+
 func parseSummaryRange(from, to string) (start, end time.Time, err error) {
 	now := time.Now().UTC()
 	if from == "" && to == "" {
@@ -199,6 +204,9 @@ func parseSummaryRange(from, to string) (start, end time.Time, err error) {
 	}
 	if end.Before(start) {
 		return time.Time{}, time.Time{}, errors.New("to must not be before from")
+	}
+	if end.After(start.AddDate(0, maxSummaryMonths-1, 0)) {
+		return time.Time{}, time.Time{}, fmt.Errorf("range is too long: at most %d months", maxSummaryMonths)
 	}
 	return start, end, nil
 }
@@ -281,8 +289,11 @@ func buildFinanceSummary(
 			}
 		}
 	}
+	// Moves between the owner's own linked accounts are neither income nor
+	// expense (finance_transfers.go).
+	internal := internalTransferIDs(bankTxs)
 	for _, tx := range bankTxs {
-		if tx.Pending {
+		if tx.Pending || internal[tx.TransactionID] {
 			continue
 		}
 		a := get(monthKey(tx.Date))
@@ -360,10 +371,14 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	var events []models.SubscriptionEvent
+	var warnings []string
 	if err == nil {
 		defer cursor.Close(ctx)
 		if allErr := cursor.All(ctx, &events); allErr != nil {
+			// Say so: silently dropping them showed $0 subscription revenue
+			// as if it were real.
 			events = nil
+			warnings = append(warnings, "subscriptions: failed to read subscription events ("+allErr.Error()+")")
 		}
 	}
 	if err != nil {
@@ -373,12 +388,14 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 
 	bankConnected := plaidAccessTokenConfigured()
 	var bankTxs []models.BankTransaction
-	var warnings []string
 	if bankConnected {
+		// Read a few days either side of the range so a transfer whose two
+		// ends straddle the boundary still pairs up. Only months inside the
+		// range are reported.
 		txCursor, err := f.BTDB.Find(ctx, bson.M{
 			"date": bson.M{
-				"$gte": start,
-				"$lt":  end.AddDate(0, 1, 0),
+				"$gte": start.Add(-internalTransferWindow),
+				"$lt":  end.AddDate(0, 1, 0).Add(internalTransferWindow),
 			},
 		})
 		if err != nil {
