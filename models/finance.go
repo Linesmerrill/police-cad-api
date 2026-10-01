@@ -58,7 +58,14 @@ type PlaidSyncState struct {
 
 // FinanceSourceStatus reports whether a revenue source is connected for a month.
 type FinanceSourceStatus struct {
+	// Connected means data has arrived from this source. For Stripe and
+	// RevenueCat that is "at least one revenue event has ever been
+	// recorded", not a constant: both used to read Connected while every
+	// payment was missing.
 	Connected bool `json:"connected"`
+	// Events is how many revenue events (payments, purchases, renewals) fall
+	// in the period. Set on the summary-level sources only.
+	Events int `json:"events,omitempty"`
 }
 
 // FinanceMonthSources describes per-source connectivity for one month.
@@ -105,5 +112,8 @@ type FinanceMonth struct {
 type FinanceSummaryResponse struct {
 	Months        []FinanceMonth `json:"months"`
 	BankConnected bool           `json:"bank_connected"`
-	Warnings      []string       `json:"warnings,omitempty"`
+	// Sources is the status of each source over the whole requested range,
+	// with event counts, for the badges above the P&L.
+	Sources  FinanceMonthSources `json:"sources"`
+	Warnings []string            `json:"warnings,omitempty"`
 }
