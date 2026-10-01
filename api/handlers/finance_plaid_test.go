@@ -542,8 +542,9 @@ func TestPlaidEnvironment_DefaultsToSandbox(t *testing.T) {
 	t.Setenv("PLAID_ENV", "production")
 	assert.Equal(t, plaid.Production, plaidEnvironment())
 
+	// Plaid retired Development in 2024; it falls back to sandbox.
 	t.Setenv("PLAID_ENV", "development")
-	assert.Equal(t, plaid.Environment("https://development.plaid.com"), plaidEnvironment())
+	assert.Equal(t, plaid.Sandbox, plaidEnvironment())
 
 	t.Setenv("PLAID_ENV", "bogus")
 	assert.Equal(t, plaid.Sandbox, plaidEnvironment())

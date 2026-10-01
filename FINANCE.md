@@ -67,6 +67,15 @@ admins, and 403 for authenticated non-owners.
   (Plaid sign convention: negative = money in).
 - `bank.expenses`: sum of `amount` for bank transactions with `amount > 0`
   (positive = money out).
+- **Moves between your own linked accounts are excluded from both.** When the
+  same amount leaves one linked account and arrives in another within 4 days,
+  both ends are skipped: a checking-to-savings transfer is not income or an
+  expense, and paying off a linked credit card would otherwise count every
+  card purchase twice. Pairing is by amount, account and date, not by Plaid's
+  category, because a card payment is the only record of card spending when
+  the card is *not* linked, and Plaid labels some real revenue payouts as
+  transfers. A transfer to an account that is not linked (for example your
+  personal account) still counts, since that money did leave the business.
 - When the bank is connected (`bank_connected: true`): `income.total` =
   `bank.income`, `expenses` = `bank.expenses` (cash basis — no
   double-counting with the subscription events).
@@ -141,7 +150,7 @@ mock; the production implementation uses the official Plaid Go SDK
 | `JWT_SECRET` | yes | Existing. Signs/verifies admin JWTs. |
 | `PLAID_CLIENT_ID` | for Plaid | Plaid dashboard → API keys. |
 | `PLAID_SECRET` | for Plaid | Plaid dashboard → API keys. |
-| `PLAID_ENV` | no | `sandbox` (default) / `development` / `production`. |
+| `PLAID_ENV` | no | `sandbox` (default) or `production`. Plaid retired its Development environment in 2024; any other value means sandbox. |
 | `PLAID_ACCESS_TOKEN` | for bank sync | Set from the one-time `/plaid/exchange` output. |
 | `IAP_NET_RATE` | no | Decimal fraction for `iap_net` math. Default `0.85`. |
 
