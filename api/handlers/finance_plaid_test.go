@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -86,18 +88,140 @@ func (f *fakeBankTxDB) UpdateOne(ctx context.Context, filter interface{}, update
 	if !ok {
 		return nil, errors.New("fake only supports bson.M filters")
 	}
-	id, _ := fm["transaction_id"].(string)
 	um, ok := update.(bson.M)
 	if !ok {
 		return nil, errors.New("fake only supports bson.M updates")
 	}
-	doc, _ := um["$set"].(models.BankTransaction)
-	_, existed := f.docs[id]
-	f.docs[id] = doc
-	if existed {
-		return &mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil
+	for id, doc := range f.docs {
+		if fakeMatches(doc, fm) {
+			f.docs[id] = fakeApply(doc, um, false)
+			return &mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil
+		}
 	}
-	return &mongo.UpdateResult{MatchedCount: 0, UpsertedCount: 1}, nil
+	upsert := false
+	for _, o := range opts {
+		if o != nil && o.Upsert != nil && *o.Upsert {
+			upsert = true
+		}
+	}
+	if !upsert {
+		return &mongo.UpdateResult{}, nil
+	}
+	doc := fakeApply(models.BankTransaction{}, um, true)
+	if doc.TransactionID == "" {
+		doc.TransactionID, _ = fm["transaction_id"].(string)
+	}
+	f.docs[doc.TransactionID] = doc
+	return &mongo.UpdateResult{UpsertedCount: 1}, nil
+}
+
+func (f *fakeBankTxDB) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+	fm, _ := filter.(bson.M)
+	um, _ := update.(bson.M)
+	res := &mongo.UpdateResult{}
+	for id, doc := range f.docs {
+		if fakeMatches(doc, fm) {
+			f.docs[id] = fakeApply(doc, um, false)
+			res.MatchedCount++
+			res.ModifiedCount++
+		}
+	}
+	return res, nil
+}
+
+// fakeApply runs $set, $unset and (on insert) $setOnInsert against a
+// transaction by round-tripping it through BSON, the way Mongo would.
+func fakeApply(doc models.BankTransaction, update bson.M, inserting bool) models.BankTransaction {
+	raw, _ := bson.Marshal(doc)
+	m := bson.M{}
+	_ = bson.Unmarshal(raw, &m)
+	merge := func(v interface{}) {
+		b, _ := bson.Marshal(v)
+		add := bson.M{}
+		_ = bson.Unmarshal(b, &add)
+		for k, val := range add {
+			m[k] = val
+		}
+	}
+	if v, ok := update["$set"]; ok {
+		merge(v)
+	}
+	if v, ok := update["$setOnInsert"]; ok && inserting {
+		merge(v)
+	}
+	if v, ok := update["$unset"].(bson.M); ok {
+		for k := range v {
+			delete(m, k)
+		}
+	}
+	out := models.BankTransaction{}
+	b, _ := bson.Marshal(m)
+	_ = bson.Unmarshal(b, &out)
+	return out
+}
+
+// fakeMatches evaluates the subset of query operators the finance handlers
+// use: equality, $in, $ne, $exists, $gte and $lt. $or is treated as a match.
+func fakeMatches(doc models.BankTransaction, filter bson.M) bool {
+	raw, _ := bson.Marshal(doc)
+	m := bson.M{}
+	_ = bson.Unmarshal(raw, &m)
+	for key, want := range filter {
+		if key == "$or" {
+			continue
+		}
+		got, present := m[key]
+		if s, ok := got.(string); ok && s == "" {
+			got = nil
+		}
+		ops, isOps := want.(bson.M)
+		if !isOps {
+			if fmt.Sprint(got) != fmt.Sprint(want) {
+				return false
+			}
+			continue
+		}
+		for op, arg := range ops {
+			switch op {
+			case "$in":
+				found := false
+				for _, a := range arg.(bson.A) {
+					if (a == nil || a == "") && got == nil {
+						found = true
+					} else if a != nil && fmt.Sprint(a) == fmt.Sprint(got) {
+						found = true
+					}
+				}
+				if !found {
+					return false
+				}
+			case "$ne":
+				if fmt.Sprint(got) == fmt.Sprint(arg) {
+					return false
+				}
+			case "$exists":
+				if present != arg.(bool) {
+					return false
+				}
+			case "$gte", "$lt":
+				gt, ok1 := got.(primitive.DateTime)
+				at, ok2 := arg.(time.Time)
+				if !ok1 || !ok2 {
+					continue
+				}
+				if op == "$gte" && gt.Time().Before(at) {
+					return false
+				}
+				if op == "$lt" && !gt.Time().Before(at) {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 func (f *fakeBankTxDB) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
@@ -115,9 +239,12 @@ func (f *fakeBankTxDB) DeleteMany(ctx context.Context, filter interface{}, opts 
 }
 
 func (f *fakeBankTxDB) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*databases.MongoCursor, error) {
+	fm, _ := filter.(bson.M)
 	docs := make([]interface{}, 0, len(f.docs))
 	for _, d := range f.docs {
-		docs = append(docs, d)
+		if fakeMatches(d, fm) {
+			docs = append(docs, d)
+		}
 	}
 	cur, err := databases.NewMongoCursorFromDocuments(docs)
 	if err != nil {
@@ -127,7 +254,14 @@ func (f *fakeBankTxDB) Find(ctx context.Context, filter interface{}, opts ...*op
 }
 
 func (f *fakeBankTxDB) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
-	return int64(len(f.docs)), nil
+	fm, _ := filter.(bson.M)
+	n := int64(0)
+	for _, d := range f.docs {
+		if fakeMatches(d, fm) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (f *fakeBankTxDB) EnsureUniqueTransactionIDIndex(ctx context.Context) error { return nil }

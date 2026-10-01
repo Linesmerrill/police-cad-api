@@ -42,6 +42,10 @@ type Finance struct {
 	BTDB  databases.BankTransactionDatabase
 	PSDB  databases.PlaidStateDatabase
 	Plaid plaidSyncClient
+	// TagDB and RuleDB hold the owner's transaction tags and merchant rules
+	// (finance_tags.go). Optional: without them nothing is tagged.
+	TagDB  databases.FinanceDocDatabase
+	RuleDB databases.FinanceDocDatabase
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +303,7 @@ func buildFinanceSummary(
 	// expense (finance_transfers.go).
 	internal := internalTransferIDs(bankTxs)
 	for _, tx := range bankTxs {
-		if tx.Pending || internal[tx.TransactionID] {
+		if !countsTowardPL(tx, internal) {
 			continue
 		}
 		a := get(monthKey(tx.Date))
@@ -464,6 +468,11 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 	stripeEver, _ := f.SEDB.CountDocuments(ctx, revenueEventFilter("stripe"), options.Count().SetLimit(1))
 	revenueCatEver, _ := f.SEDB.CountDocuments(ctx, revenueEventFilter("revenuecat"), options.Count().SetLimit(1))
 	applySourceHistory(&resp, stripeEver > 0, revenueCatEver > 0)
+
+	// Where the money came from and went, by tag (finance_tags.go).
+	if bankConnected {
+		resp.ByTag = tagTotals(bankTxs, start, end, f.tagsByID(ctx))
+	}
 	if len(warnings) > 0 {
 		resp.Warnings = warnings
 	}

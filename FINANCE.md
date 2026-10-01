@@ -103,6 +103,31 @@ Apple subscriptions can be 30%, so treat this as approximate. Override with
 the `IAP_NET_RATE` env var (a decimal fraction, e.g. `0.85`). Invalid or
 out-of-range values fall back to 0.85.
 
+## Tags, hiding and merchant rules
+
+The owner labels bank transactions (Steam, Google Ads, ...) and hides the ones
+that don't belong in the business's books. One tag per transaction, so the
+by-tag totals add up to the P&L.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/admin/finance/transactions` | `from`, `to` (YYYY-MM), `page` (1-based), `limit` (≤100), `tag` (id or `untagged`), `hidden` (`exclude` default, `include`, `only`), `search`. Returns `{data, totalCount, page, limit}`, newest first; each row has `internal_transfer`. |
+| PATCH | `/admin/finance/transactions/{transaction_id}` | `{hidden?, tag_id?, apply_to_merchant?}`. `tag_id: ""` removes the tag. `apply_to_merchant` saves a rule and tags the merchant's other **untagged** transactions. |
+| GET / POST | `/admin/finance/tags` | `{name, color?}`; names unique ignoring case; colour `#rrggbb`, else the next palette colour. |
+| PATCH / DELETE | `/admin/finance/tags/{id}` | Deleting untags its transactions and removes its rules. |
+| GET | `/admin/finance/tag-rules` | Merchant → tag. |
+| DELETE | `/admin/finance/tag-rules/{id}` | Transactions it already tagged keep their tag. |
+
+- **Hidden** transactions are left out of the P&L and the by-tag totals, like
+  pending ones and internal transfers.
+- **The summary** gains `by_tag: {income: [...], expenses: [...]}`, each
+  `{tag_id, name, color, amount}` largest first, with an Untagged slice last.
+- **Plaid sync never touches the owner's fields.** It `$set`s only the fields
+  Plaid owns; `created_at`, `hidden` and a rule's tag are `$setOnInsert`.
+- **Rules** match `merchant_key`: the merchant name (or the description when
+  Plaid has none), lowercased with whitespace collapsed. A new transaction
+  gets its merchant's tag on arrival.
+
 ## How RequireOwner works
 
 `Finance.RequireOwner` (api/handlers/finance.go) is standard

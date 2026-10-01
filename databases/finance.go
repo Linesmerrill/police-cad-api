@@ -23,6 +23,7 @@ const (
 type BankTransactionDatabase interface {
 	InsertOne(ctx context.Context, tx models.BankTransaction, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 	DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*MongoCursor, error)
@@ -45,6 +46,10 @@ func (b *bankTransactionDatabase) InsertOne(ctx context.Context, tx models.BankT
 
 func (b *bankTransactionDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	return b.db.Collection(bankTransactionCollectionName).UpdateOne(ctx, filter, update, opts...)
+}
+
+func (b *bankTransactionDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return b.db.Collection(bankTransactionCollectionName).UpdateMany(ctx, filter, update, opts...)
 }
 
 func (b *bankTransactionDatabase) DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error {
