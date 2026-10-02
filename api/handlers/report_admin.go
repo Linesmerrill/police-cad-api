@@ -705,6 +705,7 @@ func (ra ReportAdmin) AdminGetReportHandler(w http.ResponseWriter, r *http.Reque
 		"offenses":      offenses,
 		"otherReports":  siblings,
 		"reporterStats": ra.reporterStats(ctx, report.ReportedByID),
+		"people":        ra.peopleFor(ctx, *report),
 	})
 }
 
