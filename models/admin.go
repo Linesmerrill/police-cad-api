@@ -31,6 +31,28 @@ type AdminUser struct {
 	LinkedAt              *time.Time          `bson:"linkedAt,omitempty" json:"linkedAt,omitempty"`
 	LinkedTermsAcceptedAt *time.Time          `bson:"linkedTermsAcceptedAt,omitempty" json:"linkedTermsAcceptedAt,omitempty"`
 	LinkedTermsVersion    string              `bson:"linkedTermsVersion,omitempty" json:"linkedTermsVersion,omitempty"`
+
+	// MFA holds the admin's authenticator-app enrollment. Never serialized:
+	// the secret and backup-code hashes must not leave the server.
+	MFA *AdminMFA `bson:"mfa,omitempty" json:"-"`
+}
+
+// AdminMFA is an admin's TOTP (authenticator app) second factor.
+//
+// Secret is set only once enrollment is confirmed with a valid code; until
+// then the candidate lives in PendingSecret. LastUsedStep is the TOTP time
+// step of the last accepted code, so a code can't be replayed. BackupCodes
+// are bcrypt hashes of single-use recovery codes.
+type AdminMFA struct {
+	Enabled        bool       `bson:"enabled"`
+	Secret         string     `bson:"secret,omitempty"`
+	EnabledAt      *time.Time `bson:"enabledAt,omitempty"`
+	PendingSecret  string     `bson:"pendingSecret,omitempty"`
+	PendingAt      *time.Time `bson:"pendingAt,omitempty"`
+	BackupCodes    []string   `bson:"backupCodes,omitempty"`
+	LastUsedStep   int64      `bson:"lastUsedStep,omitempty"`
+	FailedAttempts int        `bson:"failedAttempts,omitempty"`
+	LockedUntil    *time.Time `bson:"lockedUntil,omitempty"`
 }
 
 // LinkLPCAccountRequest is the payload to link an admin to an LPC user.

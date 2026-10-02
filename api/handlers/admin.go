@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"go.mongodb.org/mongo-driver/bson"
@@ -238,35 +237,33 @@ func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
-	if len(jwtSecret) == 0 {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "server misconfigured"})
+	// With two-factor on, the password alone only earns a short-lived
+	// challenge; AdminLoginMFAHandler trades it plus a code for a token.
+	if mfaEnabled(admin) {
+		challenge, err := issueMFAChallenge(admin)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "server misconfigured"})
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":   false,
+			"error":     "Two-factor code required",
+			"code":      "MFA_REQUIRED",
+			"challenge": challenge,
+		})
 		return
 	}
 
-	claims := jwt.MapClaims{
-		"sub":   admin.ID.Hex(),
-		"email": admin.Email,
-		"roles": admin.Roles,
-		"scope": "admin",
-		"typ":   "access",
-		"iat":   time.Now().Unix(),
-		"exp":   time.Now().Add(24 * time.Hour).Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(jwtSecret)
+	signed, err := issueAdminToken(admin, false)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "token generation failed"})
 		return
 	}
 
-	var resp adminLoginResponse
-	resp.Token = signed
-	resp.Admin.ID = admin.ID.Hex()
-	resp.Admin.Email = admin.Email
-	resp.Admin.Roles = admin.Roles
+	resp := adminLoginBody(admin, signed)
 
 	// Track admin login activity
 	h.trackAdminLogin(admin.ID, r)
