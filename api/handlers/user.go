@@ -5362,6 +5362,9 @@ func parseRevenueCatEvent(body map[string]interface{}) (*revenueCatEvent, error)
 // (provider, providerEventId) plus a pre-flight dedupe lookup, so RevenueCat
 // retries are safe.
 func (u User) HandleRevenueCatWebhook(w http.ResponseWriter, r *http.Request) {
+	if !authorizeRevenueCatWebhook(w, r) {
+		return
+	}
 	payload, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		config.ErrorStatus("failed to read webhook payload", http.StatusBadRequest, w, err)
