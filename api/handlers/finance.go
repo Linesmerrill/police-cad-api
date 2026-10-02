@@ -80,6 +80,8 @@ func writeFinanceError(w http.ResponseWriter, status int, msg string) {
 //  3. The admin_users document for sub exists and is active (unknown/inactive -> 401).
 //  4. The document itself grants the owner role — "owner" in Roles or
 //     Role == "owner" (authenticated but not an owner -> 403).
+//  5. The token passed two-factor (mfa claim) and the owner's two-factor is
+//     still on (otherwise 403 with code MFA_REQUIRED).
 //
 // The roles claim in the token is deliberately NOT trusted on its own: the
 // document is always re-read so a revoked or tampered claim cannot escalate.
@@ -144,6 +146,17 @@ func (f Finance) RequireOwner(next http.Handler) http.Handler {
 		}
 		if !isOwner {
 			writeFinanceError(w, http.StatusForbidden, "owner role required")
+			return
+		}
+		// Bank data needs a session that passed two-factor, from an owner
+		// whose two-factor is still on.
+		if !claimsMFA(claims) || !mfaEnabled(admin) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "Two-factor authentication is required for Finance.",
+				"code":  "MFA_REQUIRED",
+			})
 			return
 		}
 

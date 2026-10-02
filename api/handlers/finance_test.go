@@ -30,6 +30,7 @@ func financeTestToken(t *testing.T, secret string, mutate func(jwt.MapClaims)) s
 		"roles": []string{"admin"},
 		"scope": "admin",
 		"typ":   "access",
+		"mfa":   true,
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(time.Hour).Unix(),
 	}
@@ -74,7 +75,25 @@ func financeOwnerDoc() *models.AdminUser {
 		Role:   "admin",
 		Roles:  []string{"owner", "admin"},
 		Active: true,
+		MFA:    &models.AdminMFA{Enabled: true, Secret: "JBSWY3DPEHPK3PXP"},
 	}
+}
+
+func TestRequireOwner_TokenWithoutMFAGets403(t *testing.T) {
+	f, h := requireOwnerFixture(t, financeOwnerDoc(), nil)
+	token := financeTestToken(t, financeTestSecret, func(c jwt.MapClaims) { delete(c, "mfa") })
+	rec := runRequireOwner(t, f, h, token)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "MFA_REQUIRED")
+}
+
+func TestRequireOwner_MFATokenButMFADisabledGets403(t *testing.T) {
+	admin := financeOwnerDoc()
+	admin.MFA = nil
+	f, h := requireOwnerFixture(t, admin, nil)
+	rec := runRequireOwner(t, f, h, financeTestToken(t, financeTestSecret, nil))
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "MFA_REQUIRED")
 }
 
 func TestRequireOwner_ValidOwnerPasses(t *testing.T) {

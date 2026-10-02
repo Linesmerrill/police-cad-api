@@ -239,6 +239,13 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
 	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
 	apiCreate.Handle("/admin/login", http.HandlerFunc(adminHandler.AdminLoginHandler)).Methods("POST")
+	// Admin two-factor authentication (admin_mfa.go).
+	apiCreate.Handle("/admin/login/mfa", http.HandlerFunc(adminHandler.AdminLoginMFAHandler)).Methods("POST")
+	apiCreate.Handle("/admin/mfa", http.HandlerFunc(adminHandler.AdminMFAStatusHandler)).Methods("GET")
+	apiCreate.Handle("/admin/mfa/setup", http.HandlerFunc(adminHandler.AdminMFASetupHandler)).Methods("POST")
+	apiCreate.Handle("/admin/mfa/enable", http.HandlerFunc(adminHandler.AdminMFAEnableHandler)).Methods("POST")
+	apiCreate.Handle("/admin/mfa/backup-codes", http.HandlerFunc(adminHandler.AdminMFABackupCodesHandler)).Methods("POST")
+	apiCreate.Handle("/admin/mfa/disable", http.HandlerFunc(adminHandler.AdminMFADisableHandler)).Methods("POST")
 	apiCreate.Handle("/admin/logout", http.HandlerFunc(adminHandler.AdminLogoutHandler)).Methods("POST")
 	apiCreate.Handle("/admin/heartbeat", http.HandlerFunc(adminHandler.AdminHeartbeatHandler)).Methods("POST")
 	apiCreate.Handle("/admin/forgot-password", http.HandlerFunc(adminHandler.AdminForgotPasswordHandler)).Methods("POST")
