@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Bank sync direction values. Plaid signs transaction amounts so that
@@ -32,6 +34,13 @@ type BankTransaction struct {
 	Category               []string  `bson:"category,omitempty" json:"category,omitempty"`
 	PersonalFinanceCategory  string    `bson:"personal_finance_category,omitempty" json:"personal_finance_category,omitempty"`
 	Source                 string    `bson:"source" json:"source"` // always "plaid"
+	// MerchantKey is the merchant name (or the description when Plaid has no
+	// merchant), lowercased and trimmed: what tag rules match on.
+	MerchantKey string `bson:"merchant_key,omitempty" json:"merchant_key,omitempty"`
+	// Hidden and TagID are the owner's, set from the Finance tab. Plaid sync
+	// never writes them: it only $sets the fields Plaid owns.
+	Hidden bool   `bson:"hidden" json:"hidden"`
+	TagID  string `bson:"tag_id,omitempty" json:"tag_id,omitempty"`
 	CreatedAt              time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt              time.Time `bson:"updated_at" json:"updated_at"`
 }
@@ -58,7 +67,14 @@ type PlaidSyncState struct {
 
 // FinanceSourceStatus reports whether a revenue source is connected for a month.
 type FinanceSourceStatus struct {
+	// Connected means data has arrived from this source. For Stripe and
+	// RevenueCat that is "at least one revenue event has ever been
+	// recorded", not a constant: both used to read Connected while every
+	// payment was missing.
 	Connected bool `json:"connected"`
+	// Events is how many revenue events (payments, purchases, renewals) fall
+	// in the period. Set on the summary-level sources only.
+	Events int `json:"events,omitempty"`
 }
 
 // FinanceMonthSources describes per-source connectivity for one month.
@@ -101,9 +117,56 @@ type FinanceMonth struct {
 	Sources  FinanceMonthSources `json:"sources"`
 }
 
+// FinanceTag is one of the owner's labels for bank transactions.
+type FinanceTag struct {
+	ID    primitive.ObjectID `bson:"_id,omitempty" json:"_id"`
+	Name  string             `bson:"name" json:"name"`
+	// NameKey is the lowercased name, unique, so "Steam" and "steam" are one.
+	NameKey   string    `bson:"name_key" json:"-"`
+	Color     string    `bson:"color" json:"color"`
+	CreatedAt time.Time `bson:"created_at" json:"created_at"`
+}
+
+// FinanceTagRule tags every new transaction from one merchant.
+type FinanceTagRule struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"_id"`
+	MerchantKey string             `bson:"merchant_key" json:"merchant_key"`
+	// Merchant is how the merchant read when the rule was made, for display.
+	Merchant  string    `bson:"merchant" json:"merchant"`
+	TagID     string    `bson:"tag_id" json:"tag_id"`
+	CreatedAt time.Time `bson:"created_at" json:"created_at"`
+}
+
+// FinanceTagTotal is one slice of a by-tag pie chart. An empty TagID is the
+// Untagged slice.
+type FinanceTagTotal struct {
+	TagID  string  `json:"tag_id"`
+	Name   string  `json:"name"`
+	Color  string  `json:"color"`
+	Amount float64 `json:"amount"`
+}
+
+// FinanceByTag is money in and money out over the range, split by tag.
+type FinanceByTag struct {
+	Income   []FinanceTagTotal `json:"income"`
+	Expenses []FinanceTagTotal `json:"expenses"`
+}
+
+// FinanceTransactionView is one row of the Finance tab's transaction list.
+type FinanceTransactionView struct {
+	BankTransaction `bson:",inline"`
+	// InternalTransfer marks one end of a move between two linked accounts,
+	// which the P&L leaves out.
+	InternalTransfer bool `json:"internal_transfer"`
+}
+
 // FinanceSummaryResponse is the GET /admin/finance/summary payload.
 type FinanceSummaryResponse struct {
 	Months        []FinanceMonth `json:"months"`
 	BankConnected bool           `json:"bank_connected"`
-	Warnings      []string       `json:"warnings,omitempty"`
+	// Sources is the status of each source over the whole requested range,
+	// with event counts, for the badges above the P&L.
+	Sources  FinanceMonthSources `json:"sources"`
+	ByTag    FinanceByTag        `json:"by_tag"`
+	Warnings []string            `json:"warnings,omitempty"`
 }

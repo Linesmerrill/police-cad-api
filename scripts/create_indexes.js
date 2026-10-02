@@ -1060,5 +1060,29 @@ createIndexSafe(
   { name: "reports_target_idx", background: true }
 );
 
+// Finance tab (owner-only). Tag names and merchant rules are unique, so a
+// double-click cannot create two "Steam" tags or two rules for one merchant.
+// The transaction list filters by date and tag, and rules match on merchant.
+createIndexSafe(
+  db.finance_tags,
+  { name_key: 1 },
+  { name: "finance_tags_name_key_unique", unique: true, background: true }
+);
+createIndexSafe(
+  db.finance_tag_rules,
+  { merchant_key: 1 },
+  { name: "finance_tag_rules_merchant_key_unique", unique: true, background: true }
+);
+createIndexSafe(
+  db.bank_transactions,
+  { date: -1, transaction_id: -1 },
+  { name: "bank_transactions_date_idx", background: true }
+);
+createIndexSafe(
+  db.bank_transactions,
+  { merchant_key: 1, tag_id: 1 },
+  { name: "bank_transactions_merchant_tag_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

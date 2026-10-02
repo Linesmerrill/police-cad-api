@@ -278,6 +278,7 @@ func bankTransactionFromPlaid(t plaid.Transaction, acctName, acctMask string, no
 		Category:               t.GetCategory(),
 		PersonalFinanceCategory:  pfcPrimary,
 		Source:                 "plaid",
+		MerchantKey:            merchantKey(t.GetMerchantName(), t.GetName()),
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
@@ -289,6 +290,8 @@ func bankTransactionFromPlaid(t plaid.Transaction, acctName, acctMask string, no
 // accounts snapshot. It is the unit-testable core of PlaidSyncHandler.
 func (f Finance) runPlaidSync(ctx context.Context, c plaidSyncClient, accessToken, startCursor string) (added, modified, removed int, accounts []models.PlaidAccountSnapshot, nextCursor string, err error) {
 	cursor := startCursor
+	// Merchant rules tag new transactions on arrival. Loaded once per sync.
+	rules := f.tagRulesByMerchant(ctx)
 	for {
 		page, pageErr := c.SyncTransactions(ctx, accessToken, cursor)
 		if pageErr != nil {
@@ -306,7 +309,7 @@ func (f Finance) runPlaidSync(ctx context.Context, c plaidSyncClient, accessToke
 			doc := bankTransactionFromPlaid(t, acct.GetName(), nullableStringValue(acct.Mask), now)
 			if _, uerr := f.BTDB.UpdateOne(ctx,
 				bson.M{"transaction_id": doc.TransactionID},
-				bson.M{"$set": doc},
+				plaidUpsert(doc, rules[doc.MerchantKey]),
 				options.Update().SetUpsert(true),
 			); uerr != nil {
 				return added, modified, removed, accounts, cursor, uerr
@@ -318,7 +321,7 @@ func (f Finance) runPlaidSync(ctx context.Context, c plaidSyncClient, accessToke
 			doc := bankTransactionFromPlaid(t, acct.GetName(), nullableStringValue(acct.Mask), now)
 			if _, uerr := f.BTDB.UpdateOne(ctx,
 				bson.M{"transaction_id": doc.TransactionID},
-				bson.M{"$set": doc},
+				plaidUpsert(doc, rules[doc.MerchantKey]),
 				options.Update().SetUpsert(true),
 			); uerr != nil {
 				return added, modified, removed, accounts, cursor, uerr

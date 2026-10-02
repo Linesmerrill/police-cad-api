@@ -263,12 +263,23 @@ func (a *App) New() *mux.Router {
 		BTDB:  bankTxDB,
 		PSDB:  databases.NewPlaidStateDatabase(a.dbHelper),
 		Plaid: newPlaidClientFromEnv(),
+		// Owner's transaction tags and merchant rules (finance_tags.go).
+		TagDB:  databases.NewFinanceTagDatabase(a.dbHelper),
+		RuleDB: databases.NewFinanceTagRuleDatabase(a.dbHelper),
 	}
 	apiCreate.Handle("/admin/finance/summary", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.SummaryHandler))).Methods("GET")
 	apiCreate.Handle("/admin/finance/plaid/link-token", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidLinkTokenHandler))).Methods("POST")
 	apiCreate.Handle("/admin/finance/plaid/exchange", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidExchangeHandler))).Methods("POST")
 	apiCreate.Handle("/admin/finance/plaid/sync", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidSyncHandler))).Methods("POST")
 	apiCreate.Handle("/admin/finance/plaid/status", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidStatusHandler))).Methods("GET")
+	apiCreate.Handle("/admin/finance/transactions", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.ListTransactionsHandler))).Methods("GET")
+	apiCreate.Handle("/admin/finance/transactions/{transaction_id}", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PatchTransactionHandler))).Methods("PATCH")
+	apiCreate.Handle("/admin/finance/tags", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.ListTagsHandler))).Methods("GET")
+	apiCreate.Handle("/admin/finance/tags", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.CreateTagHandler))).Methods("POST")
+	apiCreate.Handle("/admin/finance/tags/{id}", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PatchTagHandler))).Methods("PATCH")
+	apiCreate.Handle("/admin/finance/tags/{id}", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.DeleteTagHandler))).Methods("DELETE")
+	apiCreate.Handle("/admin/finance/tag-rules", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.ListTagRulesHandler))).Methods("GET")
+	apiCreate.Handle("/admin/finance/tag-rules/{id}", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.DeleteTagRuleHandler))).Methods("DELETE")
 
 	// Admin console routes (moved to appear before general user routes)
 	// Search routes (most specific first)

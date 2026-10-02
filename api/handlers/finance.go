@@ -29,6 +29,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -41,6 +42,10 @@ type Finance struct {
 	BTDB  databases.BankTransactionDatabase
 	PSDB  databases.PlaidStateDatabase
 	Plaid plaidSyncClient
+	// TagDB and RuleDB hold the owner's transaction tags and merchant rules
+	// (finance_tags.go). Optional: without them nothing is tagged.
+	TagDB  databases.FinanceDocDatabase
+	RuleDB databases.FinanceDocDatabase
 }
 
 // ---------------------------------------------------------------------------
@@ -165,8 +170,9 @@ const revenueCatRefundEvent = "REFUND"
 // revenueCatPurchaseEvents are the RevenueCat event types that count toward
 // IAP gross revenue.
 var revenueCatPurchaseEvents = map[string]bool{
-	"INITIAL_PURCHASE": true,
-	"RENEWAL":          true,
+	"INITIAL_PURCHASE":      true,
+	"RENEWAL":               true,
+	"NON_RENEWING_PURCHASE": true,
 }
 
 // stripePaymentEvent is the Stripe event type that counts toward Stripe revenue.
@@ -270,6 +276,8 @@ func buildFinanceSummary(
 		return a
 	}
 
+	// Revenue events seen in the range, per source, for the badges.
+	var stripeEvents, revenueCatEvents int
 	for _, e := range events {
 		if e.PurchasedAt == nil {
 			continue
@@ -279,11 +287,13 @@ func buildFinanceSummary(
 		case "stripe":
 			if e.EventType == stripePaymentEvent {
 				get(key).stripe += e.PriceUSD
+				stripeEvents++
 			}
 		case "revenuecat":
 			switch {
 			case revenueCatPurchaseEvents[e.EventType]:
 				get(key).iapGross += e.PriceUSD
+				revenueCatEvents++
 			case e.EventType == revenueCatRefundEvent:
 				get(key).iapGross -= e.PriceUSD
 			}
@@ -293,7 +303,7 @@ func buildFinanceSummary(
 	// expense (finance_transfers.go).
 	internal := internalTransferIDs(bankTxs)
 	for _, tx := range bankTxs {
-		if tx.Pending || internal[tx.TransactionID] {
+		if !countsTowardPL(tx, internal) {
 			continue
 		}
 		a := get(monthKey(tx.Date))
@@ -338,15 +348,52 @@ func buildFinanceSummary(
 			Expenses: round2(exp),
 			Profit:   round2(total - exp),
 			Bank:     bank,
+			// SummaryHandler raises these to "ever received" (applySourceHistory).
 			Sources: models.FinanceMonthSources{
-				Stripe:     models.FinanceSourceStatus{Connected: true},
-				RevenueCat: models.FinanceSourceStatus{Connected: true},
+				Stripe:     models.FinanceSourceStatus{Connected: stripeEvents > 0},
+				RevenueCat: models.FinanceSourceStatus{Connected: revenueCatEvents > 0},
 				Bank:       models.FinanceSourceStatus{Connected: bankConnected},
 			},
 		})
 	}
 
-	return models.FinanceSummaryResponse{Months: months, BankConnected: bankConnected}
+	return models.FinanceSummaryResponse{
+		Months:        months,
+		BankConnected: bankConnected,
+		Sources: models.FinanceMonthSources{
+			Stripe:     models.FinanceSourceStatus{Connected: stripeEvents > 0, Events: stripeEvents},
+			RevenueCat: models.FinanceSourceStatus{Connected: revenueCatEvents > 0, Events: revenueCatEvents},
+			Bank:       models.FinanceSourceStatus{Connected: bankConnected},
+		},
+	}
+}
+
+// applySourceHistory marks a source connected when it has ever recorded a
+// revenue event, even if none fall in the requested range. A quiet month is
+// not a broken integration; a source that has never sent a payment is.
+func applySourceHistory(resp *models.FinanceSummaryResponse, stripeEver, revenueCatEver bool) {
+	resp.Sources.Stripe.Connected = resp.Sources.Stripe.Connected || stripeEver
+	resp.Sources.RevenueCat.Connected = resp.Sources.RevenueCat.Connected || revenueCatEver
+	for i := range resp.Months {
+		resp.Months[i].Sources.Stripe.Connected = resp.Sources.Stripe.Connected
+		resp.Months[i].Sources.RevenueCat.Connected = resp.Sources.RevenueCat.Connected
+	}
+}
+
+// revenueEventFilter matches the events that count as revenue for one
+// provider, outside sandbox.
+func revenueEventFilter(provider string) bson.M {
+	f := bson.M{"provider": provider, "environment": bson.M{"$ne": "SANDBOX"}, "priceUsd": bson.M{"$gt": 0}}
+	if provider == "stripe" {
+		f["eventType"] = stripePaymentEvent
+	} else {
+		types := make([]string, 0, len(revenueCatPurchaseEvents))
+		for t := range revenueCatPurchaseEvents {
+			types = append(types, t)
+		}
+		f["eventType"] = bson.M{"$in": types}
+	}
+	return f
 }
 
 // SummaryHandler implements GET /api/v1/admin/finance/summary.
@@ -369,6 +416,9 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 			"$gte": start,
 			"$lt":  end.AddDate(0, 1, 0),
 		},
+		// Test-mode Stripe payments and RevenueCat sandbox purchases are not
+		// revenue.
+		"environment": bson.M{"$ne": "SANDBOX"},
 	})
 	var events []models.SubscriptionEvent
 	var warnings []string
@@ -412,6 +462,17 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := buildFinanceSummary(events, bankTxs, start, end, iapNetRate(), bankConnected)
+
+	// Has each source ever sent a payment? Distinguishes a quiet range from
+	// an integration that has never delivered one.
+	stripeEver, _ := f.SEDB.CountDocuments(ctx, revenueEventFilter("stripe"), options.Count().SetLimit(1))
+	revenueCatEver, _ := f.SEDB.CountDocuments(ctx, revenueEventFilter("revenuecat"), options.Count().SetLimit(1))
+	applySourceHistory(&resp, stripeEver > 0, revenueCatEver > 0)
+
+	// Where the money came from and went, by tag (finance_tags.go).
+	if bankConnected {
+		resp.ByTag = tagTotals(bankTxs, start, end, f.tagsByID(ctx))
+	}
 	if len(warnings) > 0 {
 		resp.Warnings = warnings
 	}

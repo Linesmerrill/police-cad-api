@@ -3871,6 +3871,16 @@ func (u User) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	// for searchability of the subscription_events row.
 	stripeSubID, stripeCustomerID := extractStripeIdentifiers(event.Data.Raw)
 
+	// What a paid invoice was worth and when it was paid, so the Finance tab
+	// can count it. These were never recorded, so Stripe revenue read $0.
+	var stripePriceUSD float64
+	var stripePaidAt *time.Time
+	if event.Type == "invoice.payment_succeeded" {
+		if price, paidAt, ok := stripeInvoicePayment(event.Data.Raw); ok {
+			stripePriceUSD, stripePaidAt = price, paidAt
+		}
+	}
+
 	rr := rec.record(r.Context(), subscriptionEventInput{
 		Provider:          "stripe",
 		ProviderEventID:   event.ID,
@@ -3879,6 +3889,8 @@ func (u User) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		TransactionIDHint: stripeSubID,
 		TransactionID:     stripeSubID,
 		ProductID:         stripeCustomerID, // not a product, but useful for searchability via the lookup endpoint
+		PriceUSD:          stripePriceUSD,
+		PurchasedAt:       stripePaidAt,
 		Environment:       stripeEnv(event.Livemode),
 		RawPayload:        payload,
 		SourceIP:          r.RemoteAddr,
