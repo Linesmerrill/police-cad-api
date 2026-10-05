@@ -38,9 +38,39 @@ type fakePlaidClient struct {
 	exchangeToken string
 	exchangeItem  string
 	exchangeErr   error
+
+	linkOpts     []plaidLinkOptions
+	accounts     []plaid.AccountBase
+	accountsErr  error
+	webhookURLs  []string
+	webhookErr   error
+	verifyKey    plaid.JWKPublicKey
+	verifyKeyErr error
+	keyFetches   int
+	firedCodes   []string
 }
 
-func (f *fakePlaidClient) CreateLinkToken(ctx context.Context) (string, time.Time, error) {
+func (f *fakePlaidClient) GetAccounts(ctx context.Context, accessToken string) ([]plaid.AccountBase, error) {
+	return f.accounts, f.accountsErr
+}
+
+func (f *fakePlaidClient) UpdateItemWebhook(ctx context.Context, accessToken, url string) error {
+	f.webhookURLs = append(f.webhookURLs, url)
+	return f.webhookErr
+}
+
+func (f *fakePlaidClient) WebhookVerificationKey(ctx context.Context, keyID string) (plaid.JWKPublicKey, error) {
+	f.keyFetches++
+	return f.verifyKey, f.verifyKeyErr
+}
+
+func (f *fakePlaidClient) FireSandboxWebhook(ctx context.Context, accessToken, code string) error {
+	f.firedCodes = append(f.firedCodes, code)
+	return nil
+}
+
+func (f *fakePlaidClient) CreateLinkToken(ctx context.Context, opts plaidLinkOptions) (string, time.Time, error) {
+	f.linkOpts = append(f.linkOpts, opts)
 	if f.linkErr != nil {
 		return "", time.Time{}, f.linkErr
 	}
@@ -305,9 +335,39 @@ func (f *fakePlaidStateDB) UpdateOne(ctx context.Context, filter interface{}, up
 	if !ok {
 		return nil, errors.New("fake only supports bson.M updates")
 	}
+	if unset, ok := um["$unset"].(bson.M); ok {
+		for k := range unset {
+			switch k {
+			case "cursor":
+				f.state.Cursor = ""
+			case "item_error_code":
+				f.state.ItemErrorCode = ""
+			case "consent_expires_at":
+				f.state.ConsentExpiresAt = nil
+			case "new_accounts_available":
+				f.state.NewAccountsAvailable = false
+			case "webhook_url":
+				f.state.WebhookURL = ""
+			case "accounts":
+				f.state.Accounts = nil
+			}
+		}
+	}
 	set, _ := um["$set"].(bson.M)
 	for k, v := range set {
 		switch k {
+		case "item_status":
+			f.state.ItemStatus, _ = v.(string)
+		case "item_error_code":
+			f.state.ItemErrorCode, _ = v.(string)
+		case "new_accounts_available":
+			f.state.NewAccountsAvailable, _ = v.(bool)
+		case "webhook_url":
+			f.state.WebhookURL, _ = v.(string)
+		case "consent_expires_at":
+			if ts, ok := v.(time.Time); ok {
+				f.state.ConsentExpiresAt = &ts
+			}
 		case "cursor":
 			f.state.Cursor, _ = v.(string)
 		case "item_id":

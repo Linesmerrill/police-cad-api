@@ -6,7 +6,8 @@ package handlers
 // basis). All routes are gated by RequireOwner (no exceptions).
 //
 // Env vars (fixed names): PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV
-// (sandbox|development|production, default sandbox), PLAID_ACCESS_TOKEN.
+// (sandbox|production, default sandbox), PLAID_ACCESS_TOKEN, and
+// PLAID_WEBHOOK_URL (webhooks and update mode, finance_plaid_webhook.go).
 //
 // The access token is NEVER stored in Mongo — it comes from the
 // PLAID_ACCESS_TOKEN env var. Sync state (cursor, last sync, accounts
@@ -48,14 +49,34 @@ type plaidSyncPage struct {
 // plaidSyncClient abstracts the Plaid API calls used by the finance module
 // so sync logic is unit-testable with a mock.
 type plaidSyncClient interface {
-	// CreateLinkToken mints a Plaid Link token for the owner to connect a bank.
-	CreateLinkToken(ctx context.Context) (linkToken string, expiration time.Time, err error)
+	// CreateLinkToken mints a Plaid Link token: for connecting a bank, or,
+	// with opts.AccessToken, update mode on the existing connection.
+	CreateLinkToken(ctx context.Context, opts plaidLinkOptions) (linkToken string, expiration time.Time, err error)
 	// ExchangePublicToken exchanges a Link public_token for an access token.
 	// Callers must never log the returned access token.
 	ExchangePublicToken(ctx context.Context, publicToken string) (accessToken, itemID string, err error)
 	// SyncTransactions fetches one /transactions/sync page starting at
 	// cursor (empty cursor = full history).
 	SyncTransactions(ctx context.Context, accessToken, cursor string) (plaidSyncPage, error)
+	// GetAccounts calls /accounts/get. Its error carries the item's state,
+	// e.g. ITEM_LOGIN_REQUIRED.
+	GetAccounts(ctx context.Context, accessToken string) ([]plaid.AccountBase, error)
+	// UpdateItemWebhook points an existing item's webhooks at url.
+	UpdateItemWebhook(ctx context.Context, accessToken, url string) error
+	// WebhookVerificationKey fetches the public key that signed a webhook.
+	WebhookVerificationKey(ctx context.Context, keyID string) (plaid.JWKPublicKey, error)
+	// FireSandboxWebhook asks Plaid to send a test webhook (Sandbox only).
+	FireSandboxWebhook(ctx context.Context, accessToken, code string) error
+}
+
+// plaidLinkOptions configures a Link token.
+type plaidLinkOptions struct {
+	// AccessToken switches Link to update mode on that item.
+	AccessToken string
+	// AccountSelection lets the owner add or remove accounts in update mode.
+	AccountSelection bool
+	// WebhookURL, when set, is where Plaid sends this item's webhooks.
+	WebhookURL string
 }
 
 // plaidAPIClient is the production plaidSyncClient backed by the official
@@ -64,14 +85,27 @@ type plaidAPIClient struct {
 	api *plaid.APIClient
 }
 
-func (c *plaidAPIClient) CreateLinkToken(ctx context.Context) (string, time.Time, error) {
-	resp, _, err := c.api.PlaidApi.LinkTokenCreate(ctx).LinkTokenCreateRequest(plaid.LinkTokenCreateRequest{
+func (c *plaidAPIClient) CreateLinkToken(ctx context.Context, opts plaidLinkOptions) (string, time.Time, error) {
+	req := plaid.LinkTokenCreateRequest{
 		ClientName:   "Lines Police CAD",
 		Language:     "en",
 		CountryCodes: []plaid.CountryCode{plaid.COUNTRYCODE_US},
 		User:         &plaid.LinkTokenCreateRequestUser{ClientUserId: "lpc-owner"},
-		Products:     []plaid.Products{plaid.PRODUCTS_TRANSACTIONS},
-	}).Execute()
+	}
+	if opts.WebhookURL != "" {
+		req.Webhook = plaid.PtrString(opts.WebhookURL)
+	}
+	if opts.AccessToken != "" {
+		// Update mode: the existing item, and no products (Plaid rejects
+		// products on an update-mode token).
+		req.AccessToken = *plaid.NewNullableString(plaid.PtrString(opts.AccessToken))
+		if opts.AccountSelection {
+			req.Update = &plaid.LinkTokenCreateRequestUpdate{AccountSelectionEnabled: plaid.PtrBool(true)}
+		}
+	} else {
+		req.Products = []plaid.Products{plaid.PRODUCTS_TRANSACTIONS}
+	}
+	resp, _, err := c.api.PlaidApi.LinkTokenCreate(ctx).LinkTokenCreateRequest(req).Execute()
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -108,6 +142,64 @@ func (c *plaidAPIClient) SyncTransactions(ctx context.Context, accessToken, curs
 		NextCursor: resp.GetNextCursor(),
 		HasMore:    resp.GetHasMore(),
 	}, nil
+}
+
+func (c *plaidAPIClient) GetAccounts(ctx context.Context, accessToken string) ([]plaid.AccountBase, error) {
+	resp, _, err := c.api.PlaidApi.AccountsGet(ctx).AccountsGetRequest(plaid.AccountsGetRequest{AccessToken: accessToken}).Execute()
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetAccounts(), nil
+}
+
+func (c *plaidAPIClient) UpdateItemWebhook(ctx context.Context, accessToken, url string) error {
+	_, _, err := c.api.PlaidApi.ItemWebhookUpdate(ctx).ItemWebhookUpdateRequest(plaid.ItemWebhookUpdateRequest{
+		AccessToken: accessToken,
+		Webhook:     *plaid.NewNullableString(plaid.PtrString(url)),
+	}).Execute()
+	return err
+}
+
+func (c *plaidAPIClient) WebhookVerificationKey(ctx context.Context, keyID string) (plaid.JWKPublicKey, error) {
+	resp, _, err := c.api.PlaidApi.WebhookVerificationKeyGet(ctx).WebhookVerificationKeyGetRequest(
+		plaid.WebhookVerificationKeyGetRequest{KeyId: keyID},
+	).Execute()
+	if err != nil {
+		return plaid.JWKPublicKey{}, err
+	}
+	return resp.GetKey(), nil
+}
+
+func (c *plaidAPIClient) FireSandboxWebhook(ctx context.Context, accessToken, code string) error {
+	req := plaid.SandboxItemFireWebhookRequest{AccessToken: accessToken, WebhookCode: code}
+	webhookType := plaid.WEBHOOKTYPE_ITEM
+	if code == "SYNC_UPDATES_AVAILABLE" || code == "DEFAULT_UPDATE" {
+		webhookType = plaid.WEBHOOKTYPE_TRANSACTIONS
+	}
+	req.WebhookType = &webhookType
+	_, _, err := c.api.PlaidApi.SandboxItemFireWebhook(ctx).SandboxItemFireWebhookRequest(req).Execute()
+	return err
+}
+
+// plaidCodedError is any error that carries a Plaid error_code directly.
+type plaidCodedError interface {
+	PlaidErrorCode() string
+}
+
+// plaidErrorCode returns Plaid's error_code from an API error, or "".
+func plaidErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var coded plaidCodedError
+	if errors.As(err, &coded) {
+		return coded.PlaidErrorCode()
+	}
+	pe, perr := plaid.ToPlaidError(err)
+	if perr != nil {
+		return ""
+	}
+	return pe.ErrorCode
 }
 
 // plaidEnvironment maps PLAID_ENV to a Plaid API environment: "production",
@@ -172,8 +264,11 @@ func plaidDirection(amount float64) string {
 // ---------------------------------------------------------------------------
 
 // PlaidLinkTokenHandler implements POST /api/v1/admin/finance/plaid/link-token.
-// Returns {"link_token": ..., "expiration": ...} for the owner to initialize
-// Plaid Link (e.g. in the admin console).
+// Body (optional): {"mode": "update" | "new_accounts"}. With no mode it mints
+// a token to connect a bank. "update" opens Link on the existing connection
+// to repair it (update mode), "new_accounts" does the same with account
+// selection on so newly available accounts can be added. Returns
+// {"link_token": ..., "expiration": ...}.
 func (f Finance) PlaidLinkTokenHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -184,9 +279,31 @@ func (f Finance) PlaidLinkTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var in struct {
+		Mode string `json:"mode"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&in)
+	}
+	opts := plaidLinkOptions{WebhookURL: plaidWebhookURL()}
+	switch in.Mode {
+	case "":
+	case "update", "new_accounts":
+		accessToken := os.Getenv("PLAID_ACCESS_TOKEN")
+		if accessToken == "" {
+			writeFinanceError(w, http.StatusConflict, "no bank is connected to update")
+			return
+		}
+		opts.AccessToken = accessToken
+		opts.AccountSelection = in.Mode == "new_accounts"
+	default:
+		writeFinanceError(w, http.StatusBadRequest, "mode must be update or new_accounts")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	linkToken, expiration, err := c.CreateLinkToken(ctx)
+	linkToken, expiration, err := c.CreateLinkToken(ctx, opts)
 	if err != nil {
 		writeFinanceError(w, http.StatusBadGateway, "failed to create Plaid Link token: "+err.Error())
 		return
@@ -236,12 +353,18 @@ func (f Finance) PlaidExchangeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Remember the item ID for /plaid/status (the access token itself is
 	// never stored).
+	// A new item starts clean: the old item's cursor would be rejected and
+	// its status no longer applies.
 	if itemID != "" {
-		_, _ = f.PSDB.UpdateOne(ctx,
-			bson.M{},
-			bson.M{"$set": bson.M{"item_id": itemID, "updated_at": time.Now().UTC()}},
-			options.Update().SetUpsert(true),
-		)
+		update := bson.M{"$set": bson.M{"item_id": itemID, "updated_at": time.Now().UTC()}}
+		if state, serr := f.plaidSyncState(ctx); serr == nil && state.ItemID != itemID {
+			update["$set"].(bson.M)["item_status"] = models.PlaidItemStatusOK
+			update["$unset"] = bson.M{
+				"cursor": "", "item_error_code": "", "consent_expires_at": "",
+				"new_accounts_available": "", "webhook_url": "", "accounts": "",
+			}
+		}
+		_, _ = f.PSDB.UpdateOne(ctx, bson.M{}, update, options.Update().SetUpsert(true))
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -388,6 +511,7 @@ func (f Finance) plaidSyncState(ctx context.Context) (models.PlaidSyncState, err
 // /transactions/sync from the stored cursor (looping while has_more),
 // upserts added/modified transactions, deletes removed ones, persists the
 // new cursor + last_sync_at + accounts snapshot, and returns the counts.
+// The same sync runs on its own when Plaid sends SYNC_UPDATES_AVAILABLE.
 func (f Finance) PlaidSyncHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -407,29 +531,13 @@ func (f Finance) PlaidSyncHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	state, err := f.plaidSyncState(ctx)
+	added, modified, removed, err := f.syncAndSave(ctx, c, accessToken)
 	if err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to read Plaid sync state")
-		return
-	}
-
-	added, modified, removed, accounts, nextCursor, err := f.runPlaidSync(ctx, c, accessToken, state.Cursor)
-	if err != nil {
+		if errors.Is(err, errPlaidStatePersist) {
+			writeFinanceError(w, http.StatusInternalServerError, "sync succeeded but failed to persist the sync cursor")
+			return
+		}
 		writeFinanceError(w, http.StatusBadGateway, "Plaid sync failed: "+err.Error())
-		return
-	}
-
-	if _, err := f.PSDB.UpdateOne(ctx,
-		bson.M{},
-		bson.M{"$set": bson.M{
-			"cursor":       nextCursor,
-			"last_sync_at": time.Now().UTC(),
-			"accounts":     accounts,
-			"updated_at":   time.Now().UTC(),
-		}},
-		options.Update().SetUpsert(true),
-	); err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "sync succeeded but failed to persist the sync cursor")
 		return
 	}
 
@@ -443,9 +551,11 @@ func (f Finance) PlaidSyncHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // PlaidStatusHandler implements GET /api/v1/admin/finance/plaid/status.
-// Returns {"connected": ..., "last_sync": ..., "accounts": [...], "item_id": ...}.
-// It reports connection state and never 503s — this is how the owner learns
-// the bank is not connected yet.
+// Returns {"connected", "last_sync", "accounts", "item_id", "item_status",
+// "consent_expires_at", "new_accounts_available"}. When a bank is connected it
+// also checks the item with /accounts/get, so a connection that broke without
+// a webhook (or before webhooks were set up) still shows as needing a fix.
+// It never 503s: this is how the owner learns the bank is not connected yet.
 func (f Finance) PlaidStatusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -458,6 +568,12 @@ func (f Finance) PlaidStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if accessToken := os.Getenv("PLAID_ACCESS_TOKEN"); accessToken != "" {
+		if c := f.plaidClient(); c != nil {
+			state = f.refreshItem(ctx, c, accessToken, state)
+		}
+	}
+
 	type accountView struct {
 		Name string `json:"name"`
 		Mask string `json:"mask,omitempty"`
@@ -468,15 +584,25 @@ func (f Finance) PlaidStatusHandler(w http.ResponseWriter, r *http.Request) {
 		accounts = append(accounts, accountView{Name: a.Name, Mask: a.Mask, Type: a.Type})
 	}
 
+	itemStatus := state.ItemStatus
+	if itemStatus == "" {
+		itemStatus = models.PlaidItemStatusOK
+	}
 	resp := map[string]interface{}{
-		"connected": plaidAccessTokenConfigured(),
-		"accounts":  accounts,
+		"connected":              plaidAccessTokenConfigured(),
+		"accounts":               accounts,
+		"item_status":            itemStatus,
+		"new_accounts_available": state.NewAccountsAvailable,
+		"sandbox":                plaidEnvironment() == plaid.Sandbox,
 	}
 	if itemID := strings.TrimSpace(state.ItemID); itemID != "" {
 		resp["item_id"] = itemID
 	}
 	if !state.LastSyncAt.IsZero() {
 		resp["last_sync"] = state.LastSyncAt.UTC().Format(time.RFC3339)
+	}
+	if state.ConsentExpiresAt != nil {
+		resp["consent_expires_at"] = state.ConsentExpiresAt.UTC().Format(time.RFC3339)
 	}
 
 	w.WriteHeader(http.StatusOK)
