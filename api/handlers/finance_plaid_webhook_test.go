@@ -451,3 +451,43 @@ func TestPlaidErrorReason_PlainErrorPassesThrough(t *testing.T) {
 	assert.Equal(t, "", plaidErrorReason(nil))
 	assert.Equal(t, "boom", plaidErrorReason(errors.New("boom")))
 }
+
+func TestPlaidUpdateComplete_DropsDeselectedAccounts(t *testing.T) {
+	t.Setenv("PLAID_ACCESS_TOKEN", "access-1")
+	checking := plaid.AccountBase{AccountId: "acc-checking", Name: "Checking"}
+	client := &fakePlaidClient{accounts: []plaid.AccountBase{checking}}
+	btdb := newFakeBankTxDB()
+	btdb.docs["t1"] = models.BankTransaction{TransactionID: "t1", AccountID: "acc-checking", Source: "plaid"}
+	btdb.docs["t2"] = models.BankTransaction{TransactionID: "t2", AccountID: "acc-taxes", Source: "plaid"}
+	psdb := &fakePlaidStateDB{hasState: true, state: models.PlaidSyncState{ItemID: "item-1"}}
+	prev := plaidBackgroundSync
+	plaidBackgroundSync = func(Finance) {}
+	t.Cleanup(func() { plaidBackgroundSync = prev })
+
+	f := plaidOwnerFixture(financeOwnerDoc(), client, btdb, psdb)
+	token := financeTestToken(t, financeTestSecret, nil)
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidUpdateCompleteHandler)), http.MethodPost, "/x", `{}`, token)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"removed_transactions":1`)
+	assert.Contains(t, btdb.docs, "t1")
+	assert.NotContains(t, btdb.docs, "t2")
+	require.Len(t, psdb.state.Accounts, 1)
+	assert.Equal(t, "Checking", psdb.state.Accounts[0].Name)
+}
+
+func TestPlaidUpdateComplete_NoAccountsAnswerDeletesNothing(t *testing.T) {
+	t.Setenv("PLAID_ACCESS_TOKEN", "access-1")
+	client := &fakePlaidClient{accountsErr: errors.New("timeout")}
+	btdb := newFakeBankTxDB()
+	btdb.docs["t1"] = models.BankTransaction{TransactionID: "t1", AccountID: "acc-checking", Source: "plaid"}
+	prev := plaidBackgroundSync
+	plaidBackgroundSync = func(Finance) {}
+	t.Cleanup(func() { plaidBackgroundSync = prev })
+
+	f := plaidOwnerFixture(financeOwnerDoc(), client, btdb, &fakePlaidStateDB{hasState: true})
+	token := financeTestToken(t, financeTestSecret, nil)
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidUpdateCompleteHandler)), http.MethodPost, "/x", `{}`, token)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, btdb.docs, 1)
+}

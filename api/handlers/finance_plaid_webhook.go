@@ -433,8 +433,46 @@ func (f Finance) PlaidUpdateCompleteHandler(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 
 	f.setItemStatus(ctx, models.PlaidItemStatusOK, "", bson.M{"new_accounts_available": false})
+	removed := f.dropDeselectedAccounts(ctx)
 	plaidBackgroundSync(f)
-	writeAdminJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeAdminJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "removed_transactions": removed})
+}
+
+// dropDeselectedAccounts runs after Link in update mode, where the owner may
+// have unticked accounts (e.g. a tax savings account). Plaid stops sharing
+// those, but their transactions were already synced: delete the ones whose
+// account is no longer on the item, so they drop out of the P&L. Only runs
+// when /accounts/get answers with at least one account, so a failed or empty
+// answer never deletes everything.
+func (f Finance) dropDeselectedAccounts(ctx context.Context) int64 {
+	c := f.plaidClient()
+	token := f.connectedPlaidToken(ctx)
+	if c == nil || token == "" {
+		return 0
+	}
+	accounts, err := c.GetAccounts(ctx, token)
+	if err != nil || len(accounts) == 0 {
+		return 0
+	}
+	ids := make([]string, 0, len(accounts))
+	snap := make([]models.PlaidAccountSnapshot, 0, len(accounts))
+	for _, a := range accounts {
+		ids = append(ids, a.GetAccountId())
+		snap = append(snap, models.PlaidAccountSnapshot{
+			AccountID: a.GetAccountId(),
+			Name:      a.GetName(),
+			Mask:      nullableStringValue(a.Mask),
+			Type:      string(a.GetType()),
+			Subtype:   nullableSubtypeValue(a.Subtype),
+		})
+	}
+	_, _ = f.PSDB.UpdateOne(ctx, bson.M{}, bson.M{"$set": bson.M{"accounts": snap}}, options.Update().SetUpsert(true))
+	n, err := f.BTDB.DeleteMany(ctx, bson.M{"source": "plaid", "account_id": bson.M{"$nin": ids}})
+	if err != nil {
+		zap.S().Warnw("failed to drop transactions from deselected accounts", "error", err)
+		return 0
+	}
+	return n
 }
 
 // plaidSandboxWebhookCodes are the test webhooks the sandbox route may fire.
