@@ -73,6 +73,10 @@ type plaidSyncClient interface {
 	RemoveItem(ctx context.Context, accessToken string) error
 }
 
+// plaidHistoryDays is how much transaction history a new connection asks
+// for: 730 days, the most Plaid allows.
+const plaidHistoryDays = 730
+
 // plaidLinkOptions configures a Link token.
 type plaidLinkOptions struct {
 	// AccessToken switches Link to update mode on that item.
@@ -108,6 +112,10 @@ func (c *plaidAPIClient) CreateLinkToken(ctx context.Context, opts plaidLinkOpti
 		}
 	} else {
 		req.Products = []plaid.Products{plaid.PRODUCTS_TRANSACTIONS}
+		// History is fixed when the connection is created, and Plaid's
+		// default is only 90 days. Ask for the most it allows (24 months)
+		// so the P&L can look back past one quarter.
+		req.Transactions = &plaid.LinkTokenTransactions{DaysRequested: plaid.PtrInt32(plaidHistoryDays)}
 	}
 	resp, _, err := c.api.PlaidApi.LinkTokenCreate(ctx).LinkTokenCreateRequest(req).Execute()
 	if err != nil {
