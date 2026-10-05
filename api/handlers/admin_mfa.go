@@ -27,10 +27,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"image/png"
@@ -103,13 +101,6 @@ func issueAdminToken(admin *models.AdminUser, mfa bool) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
 }
 
-// passwordFingerprint ties a refresh token to the password it was issued
-// under, so changing the password ends every session that could renew.
-func passwordFingerprint(admin *models.AdminUser) string {
-	sum := sha256.Sum256([]byte(admin.Password))
-	return hex.EncodeToString(sum[:8])
-}
-
 // issueAdminRefreshToken signs a 30-day token that can only be traded for a
 // new access token (AdminTokenRefreshHandler). The website keeps it in its
 // server-side session, matching its 30-day session cookie, so an owner
@@ -125,7 +116,7 @@ func issueAdminRefreshToken(admin *models.AdminUser, mfa bool) (string, error) {
 		"scope": adminRefreshScope,
 		"typ":   "refresh",
 		"mfa":   mfa,
-		"pwf":   passwordFingerprint(admin),
+		"sv":    admin.SessionVersion,
 		"iat":   now.Unix(),
 		"exp":   now.Add(adminRefreshTTL).Unix(),
 	}
@@ -655,7 +646,8 @@ type adminRefreshRequest struct {
 // AdminTokenRefreshHandler implements POST /api/v1/admin/token/refresh
 // {refreshToken}. It trades a refresh token for a new access token (and a new
 // refresh token), re-checking the admin first: the account must still be
-// active, the password unchanged since the refresh token was issued, and, for
+// active, the password unchanged since the refresh token was issued
+// (SessionVersion), and, for
 // a session that passed two-factor, two-factor must still be on. Otherwise
 // it's a 401 and the owner signs in again.
 func (h Admin) AdminTokenRefreshHandler(w http.ResponseWriter, r *http.Request) {
@@ -683,7 +675,7 @@ func (h Admin) AdminTokenRefreshHandler(w http.ResponseWriter, r *http.Request) 
 		writeAdminError(w, http.StatusUnauthorized, "Your session has ended. Sign in again.", "REFRESH_INVALID")
 		return
 	}
-	if pwf, _ := claims["pwf"].(string); subtle.ConstantTimeCompare([]byte(pwf), []byte(passwordFingerprint(admin))) != 1 {
+	if sv, _ := claims["sv"].(float64); int(sv) != admin.SessionVersion {
 		writeAdminError(w, http.StatusUnauthorized, "Your password changed. Sign in again.", "REFRESH_INVALID")
 		return
 	}

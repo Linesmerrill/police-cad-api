@@ -386,7 +386,11 @@ func (h Admin) AdminResetPasswordHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Update admin password
-	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": reset.AdminID}, bson.M{"$set": bson.M{"password": string(newHash)}})
+	_, err = h.ADB.UpdateOne(r.Context(), bson.M{"_id": reset.AdminID}, bson.M{
+		"$set": bson.M{"password": string(newHash)},
+		// Ends sessions that could renew themselves with a refresh token.
+		"$inc": bson.M{"sessionVersion": 1},
+	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{

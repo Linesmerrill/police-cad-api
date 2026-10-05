@@ -35,6 +35,11 @@ type AdminUser struct {
 	// MFA holds the admin's authenticator-app enrollment. Never serialized:
 	// the secret and backup-code hashes must not leave the server.
 	MFA *AdminMFA `bson:"mfa,omitempty" json:"-"`
+
+	// SessionVersion goes up when the password changes. Refresh tokens carry
+	// the version they were issued under, so a password change ends every
+	// session that could renew itself.
+	SessionVersion int `bson:"sessionVersion,omitempty" json:"-"`
 }
 
 // AdminMFA is an admin's TOTP (authenticator app) second factor.

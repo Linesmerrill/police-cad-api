@@ -338,7 +338,6 @@ func TestAdminTokenRefresh_KeepsTheMFAClaim(t *testing.T) {
 
 func TestAdminTokenRefresh_Refusals(t *testing.T) {
 	admin := mfaAdmin()
-	admin.Password = "hash-v1"
 	h, _ := mfaHandler(t, admin, 1)
 	refreshMFA, _ := issueAdminRefreshToken(admin, true)
 	access, _ := issueAdminToken(admin, true)
@@ -352,7 +351,7 @@ func TestAdminTokenRefresh_Refusals(t *testing.T) {
 
 	// Password changed since: refused.
 	admin.MFA = &models.AdminMFA{Enabled: true, Secret: mfaTestSecret}
-	admin.Password = "hash-v2"
+	admin.SessionVersion = 1
 	assert.Equal(t, http.StatusUnauthorized, refreshWith(t, h, refreshMFA).Code)
 }
 
