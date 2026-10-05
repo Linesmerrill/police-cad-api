@@ -5,6 +5,7 @@ package handlers
 //	POST /api/v1/webhooks/plaid                          (public, signature-verified)
 //	POST /api/v1/admin/finance/plaid/update-complete     (RequireOwner)
 //	POST /api/v1/admin/finance/plaid/sandbox-webhook     (RequireOwner, Sandbox only)
+//	POST /api/v1/admin/finance/plaid/disconnect          (RequireOwner)
 //
 // Plaid signs every webhook with a JWT in the Plaid-Verification header
 // (ES256, key fetched by kid from /webhook_verification_key/get). The body
@@ -135,13 +136,13 @@ func (f Finance) syncAndSave(ctx context.Context, c plaidSyncClient, accessToken
 }
 
 func (f Finance) syncInBackground() {
-	accessToken := os.Getenv("PLAID_ACCESS_TOKEN")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	accessToken := f.connectedPlaidToken(ctx)
 	c := f.plaidClient()
 	if accessToken == "" || c == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
 	if _, _, _, err := f.syncAndSave(ctx, c, accessToken); err != nil {
 		zap.S().Warnw("background Plaid sync failed", "error", err)
 		scheduler.SendWarningAlert(os.Getenv("DYNO"), "Plaid bank sync", err, nil)
@@ -378,8 +379,9 @@ func (f Finance) PlaidWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state, _ := f.plaidSyncState(ctx)
-	// A webhook for an item that has since been replaced is old news.
-	if state.ItemID != "" && ev.ItemID != "" && ev.ItemID != state.ItemID {
+	// A webhook for an item that has since been replaced, or for a bank the
+	// owner disconnected, is old news.
+	if state.DisconnectedAt != nil || (state.ItemID != "" && ev.ItemID != "" && ev.ItemID != state.ItemID) {
 		writeAdminJSON(w, http.StatusOK, map[string]string{"status": "ignored: different item"})
 		return
 	}
@@ -453,7 +455,7 @@ func (f Finance) PlaidSandboxWebhookHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	c := f.plaidClient()
-	accessToken := os.Getenv("PLAID_ACCESS_TOKEN")
+	accessToken := f.connectedPlaidToken(r.Context())
 	if c == nil || accessToken == "" {
 		writeFinanceError(w, http.StatusConflict, "connect a Sandbox bank first")
 		return
@@ -479,13 +481,83 @@ func (f Finance) PlaidSandboxWebhookHandler(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	// The item has to know where to send it.
 	if err := c.UpdateItemWebhook(ctx, accessToken, url); err != nil {
-		writeFinanceError(w, http.StatusBadGateway, "failed to set the item webhook: "+err.Error())
+		writeFinanceError(w, http.StatusBadGateway, "failed to set the item webhook: "+plaidErrorReason(err))
 		return
 	}
 	_, _ = f.PSDB.UpdateOne(ctx, bson.M{}, bson.M{"$set": bson.M{"webhook_url": url}}, options.Update().SetUpsert(true))
 	if err := c.FireSandboxWebhook(ctx, accessToken, in.Code); err != nil {
-		writeFinanceError(w, http.StatusBadGateway, "failed to fire the test webhook: "+err.Error())
+		writeFinanceError(w, http.StatusBadGateway, "failed to fire the test webhook: "+plaidErrorReason(err))
 		return
 	}
 	writeAdminJSON(w, http.StatusOK, map[string]string{"status": "fired", "code": in.Code})
+}
+
+// plaidGoneCodes mean the item no longer exists at Plaid, so removing it
+// again has nothing left to do.
+var plaidGoneCodes = map[string]bool{
+	"ITEM_NOT_FOUND":       true,
+	"INVALID_ACCESS_TOKEN": true,
+}
+
+// PlaidDisconnectHandler implements POST /api/v1/admin/finance/plaid/disconnect
+// {"delete_data": bool}. It calls /item/remove, so the access token stops
+// working and Plaid stops billing for the item, and marks the bank as
+// disconnected. With delete_data (the Finance tab's default) it also deletes
+// every synced bank transaction: once the bank is gone there's no reason to
+// keep its data. Tags and merchant rules are the owner's own and are kept.
+func (f Finance) PlaidDisconnectHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	c := f.plaidClient()
+	if c == nil {
+		writeFinanceError(w, http.StatusServiceUnavailable, "Plaid is not configured")
+		return
+	}
+	var in struct {
+		DeleteData bool `json:"delete_data"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	accessToken := f.connectedPlaidToken(ctx)
+	if accessToken == "" {
+		writeFinanceError(w, http.StatusConflict, "no bank is connected")
+		return
+	}
+
+	plaidSyncMu.Lock()
+	defer plaidSyncMu.Unlock()
+
+	if err := c.RemoveItem(ctx, accessToken); err != nil && !plaidGoneCodes[plaidErrorCode(err)] {
+		writeFinanceError(w, http.StatusBadGateway, "Plaid could not remove the connection: "+plaidErrorReason(err))
+		return
+	}
+
+	now := time.Now().UTC()
+	if _, err := f.PSDB.UpdateOne(ctx, bson.M{}, bson.M{
+		"$set": bson.M{"disconnected_at": now, "item_status": models.PlaidItemStatusOK, "updated_at": now},
+		"$unset": bson.M{
+			"cursor": "", "accounts": "", "item_error_code": "", "consent_expires_at": "",
+			"new_accounts_available": "", "webhook_url": "",
+		},
+	}, options.Update().SetUpsert(true)); err != nil {
+		writeFinanceError(w, http.StatusInternalServerError, "the bank was removed at Plaid but the state could not be saved")
+		return
+	}
+
+	var deleted int64
+	if in.DeleteData {
+		n, err := f.BTDB.DeleteMany(ctx, bson.M{"source": "plaid"})
+		if err != nil {
+			writeFinanceError(w, http.StatusInternalServerError, "the bank was disconnected but its transactions could not be deleted")
+			return
+		}
+		deleted = n
+	}
+
+	writeAdminJSON(w, http.StatusOK, map[string]interface{}{
+		"disconnected":         true,
+		"deleted_transactions": deleted,
+		"message":              "Disconnected. You can now remove PLAID_ACCESS_TOKEN from the API's Heroku config.",
+	})
 }

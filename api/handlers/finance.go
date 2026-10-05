@@ -449,7 +449,7 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bankConnected := plaidAccessTokenConfigured()
+	bankConnected := f.connectedPlaidToken(ctx) != ""
 	var bankTxs []models.BankTransaction
 	if bankConnected {
 		// Read a few days either side of the range so a transfer whose two
