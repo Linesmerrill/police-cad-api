@@ -272,10 +272,20 @@ func (f *fakeBankTxDB) DeleteOne(ctx context.Context, filter interface{}, opts .
 }
 
 func (f *fakeBankTxDB) DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error) {
-	// Only the {source: plaid} filter the disconnect uses.
+	// The filters the disconnect and account cleanup use: {source: plaid},
+	// optionally with account_id: {$nin: [...]}.
+	keep := map[string]bool{}
+	fm, _ := filter.(bson.M)
+	if acct, ok := fm["account_id"].(bson.M); ok {
+		if nin, ok := acct["$nin"].([]string); ok {
+			for _, id := range nin {
+				keep[id] = true
+			}
+		}
+	}
 	var n int64
 	for id, tx := range f.docs {
-		if tx.Source == "plaid" {
+		if tx.Source == "plaid" && !keep[tx.AccountID] {
 			delete(f.docs, id)
 			n++
 		}
