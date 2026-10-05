@@ -83,8 +83,9 @@ func ApiKeyGateway(next http.Handler) http.Handler {
 			return
 		}
 
-		// Always allow CORS preflight and health checks.
-		if r.Method == http.MethodOptions || isHealthPath(r.URL.Path) {
+		// Always allow CORS preflight, health checks, and webhooks that verify
+		// their own sender.
+		if r.Method == http.MethodOptions || isHealthPath(r.URL.Path) || gatewayExemptPaths[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -117,6 +118,15 @@ func ApiKeyGateway(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// gatewayExemptPaths are webhook receivers that authenticate the caller
+// themselves, so the gateway's user-agent heuristics must not get in the way.
+// Plaid's webhook sender has a generic HTTP client user-agent, which the
+// gateway would otherwise refuse with a 403 before the handler could check
+// Plaid's signature (PlaidWebhookHandler verifies the Plaid-Verification JWT).
+var gatewayExemptPaths = map[string]bool{
+	"/api/v1/webhooks/plaid": true,
 }
 
 func isHealthPath(path string) bool {
