@@ -393,6 +393,19 @@ func applySourceHistory(resp *models.FinanceSummaryResponse, stripeEver, revenue
 	}
 }
 
+// firstRevenueMonth is the YYYY-MM of a provider's earliest revenue event,
+// or "" when it has never recorded one.
+func (f Finance) firstRevenueMonth(ctx context.Context, provider string) string {
+	var ev models.SubscriptionEvent
+	err := f.SEDB.FindOne(ctx, revenueEventFilter(provider),
+		options.FindOne().SetSort(bson.M{"purchasedAt": 1}).SetProjection(bson.M{"purchasedAt": 1}),
+	).Decode(&ev)
+	if err != nil || ev.PurchasedAt == nil {
+		return ""
+	}
+	return ev.PurchasedAt.UTC().Format("2006-01")
+}
+
 // revenueEventFilter matches the events that count as revenue for one
 // provider, outside sandbox.
 func revenueEventFilter(provider string) bson.M {
@@ -476,11 +489,14 @@ func (f Finance) SummaryHandler(w http.ResponseWriter, r *http.Request) {
 
 	resp := buildFinanceSummary(events, bankTxs, start, end, iapNetRate(), bankConnected)
 
-	// Has each source ever sent a payment? Distinguishes a quiet range from
-	// an integration that has never delivered one.
-	stripeEver, _ := f.SEDB.CountDocuments(ctx, revenueEventFilter("stripe"), options.Count().SetLimit(1))
-	revenueCatEver, _ := f.SEDB.CountDocuments(ctx, revenueEventFilter("revenuecat"), options.Count().SetLimit(1))
-	applySourceHistory(&resp, stripeEver > 0, revenueCatEver > 0)
+	// When did each source first send a payment? Distinguishes a quiet range
+	// from an integration that has never delivered one, and tells the page
+	// which months predate tracking (no data, rather than $0).
+	stripeSince := f.firstRevenueMonth(ctx, "stripe")
+	revenueCatSince := f.firstRevenueMonth(ctx, "revenuecat")
+	applySourceHistory(&resp, stripeSince != "", revenueCatSince != "")
+	resp.Sources.Stripe.Since = stripeSince
+	resp.Sources.RevenueCat.Since = revenueCatSince
 
 	// Where the money came from and went, by tag (finance_tags.go).
 	if bankConnected {

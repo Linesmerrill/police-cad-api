@@ -1,6 +1,10 @@
 package handlers
 
 import (
+	"context"
+	"github.com/linesmerrill/police-cad-api/databases"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"testing"
 	"time"
 
@@ -89,4 +93,32 @@ func TestRevenueEventFilter(t *testing.T) {
 	assert.ElementsMatch(t,
 		[]string{"INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"},
 		rc["eventType"].(bson.M)["$in"])
+}
+
+// firstEventDB answers FindOne with one event (or none) and records the
+// filter and sort it was asked for.
+type firstEventDB struct {
+	databases.SubscriptionEventDatabase
+	event   *models.SubscriptionEvent
+	filters []interface{}
+}
+
+func (f *firstEventDB) FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) databases.SingleResultHelper {
+	f.filters = append(f.filters, filter)
+	if f.event == nil {
+		return &fakeSingleResult{err: mongo.ErrNoDocuments}
+	}
+	return &fakeSingleResult{value: *f.event}
+}
+
+func TestFirstRevenueMonth(t *testing.T) {
+	first := time.Date(2026, 5, 14, 9, 0, 0, 0, time.UTC)
+	db := &firstEventDB{event: &models.SubscriptionEvent{PurchasedAt: &first}}
+	f := Finance{SEDB: db}
+	assert.Equal(t, "2026-05", f.firstRevenueMonth(context.Background(), "stripe"))
+	// It looks only at real revenue events for that provider.
+	assert.Equal(t, revenueEventFilter("stripe"), db.filters[0])
+
+	none := Finance{SEDB: &firstEventDB{}}
+	assert.Equal(t, "", none.firstRevenueMonth(context.Background(), "revenuecat"))
 }
