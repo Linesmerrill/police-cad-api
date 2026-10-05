@@ -181,6 +181,24 @@ func (c *plaidAPIClient) FireSandboxWebhook(ctx context.Context, accessToken, co
 	return err
 }
 
+// plaidErrorReason describes a Plaid API error for the owner: Plaid's own
+// error_message and error_code when the response carries them (the SDK's
+// err.Error() is only the HTTP status, e.g. "400 Bad Request"), otherwise
+// the plain error.
+func plaidErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	if pe, perr := plaid.ToPlaidError(err); perr == nil && pe.ErrorCode != "" {
+		msg := pe.ErrorMessage
+		if dm := pe.DisplayMessage.Get(); dm != nil && *dm != "" {
+			msg = *dm
+		}
+		return msg + " (" + pe.ErrorCode + ")"
+	}
+	return err.Error()
+}
+
 // plaidCodedError is any error that carries a Plaid error_code directly.
 type plaidCodedError interface {
 	PlaidErrorCode() string
@@ -305,7 +323,7 @@ func (f Finance) PlaidLinkTokenHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	linkToken, expiration, err := c.CreateLinkToken(ctx, opts)
 	if err != nil {
-		writeFinanceError(w, http.StatusBadGateway, "failed to create Plaid Link token: "+err.Error())
+		writeFinanceError(w, http.StatusBadGateway, "failed to create Plaid Link token: "+plaidErrorReason(err))
 		return
 	}
 
@@ -343,7 +361,7 @@ func (f Finance) PlaidExchangeHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	accessToken, itemID, err := c.ExchangePublicToken(ctx, strings.TrimSpace(in.PublicToken))
 	if err != nil {
-		writeFinanceError(w, http.StatusBadGateway, "failed to exchange public token: "+err.Error())
+		writeFinanceError(w, http.StatusBadGateway, "failed to exchange public token: "+plaidErrorReason(err))
 		return
 	}
 	if accessToken == "" {
@@ -537,7 +555,7 @@ func (f Finance) PlaidSyncHandler(w http.ResponseWriter, r *http.Request) {
 			writeFinanceError(w, http.StatusInternalServerError, "sync succeeded but failed to persist the sync cursor")
 			return
 		}
-		writeFinanceError(w, http.StatusBadGateway, "Plaid sync failed: "+err.Error())
+		writeFinanceError(w, http.StatusBadGateway, "Plaid sync failed: "+plaidErrorReason(err))
 		return
 	}
 

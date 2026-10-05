@@ -479,12 +479,12 @@ func (f Finance) PlaidSandboxWebhookHandler(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	// The item has to know where to send it.
 	if err := c.UpdateItemWebhook(ctx, accessToken, url); err != nil {
-		writeFinanceError(w, http.StatusBadGateway, "failed to set the item webhook: "+err.Error())
+		writeFinanceError(w, http.StatusBadGateway, "failed to set the item webhook: "+plaidErrorReason(err))
 		return
 	}
 	_, _ = f.PSDB.UpdateOne(ctx, bson.M{}, bson.M{"$set": bson.M{"webhook_url": url}}, options.Update().SetUpsert(true))
 	if err := c.FireSandboxWebhook(ctx, accessToken, in.Code); err != nil {
-		writeFinanceError(w, http.StatusBadGateway, "failed to fire the test webhook: "+err.Error())
+		writeFinanceError(w, http.StatusBadGateway, "failed to fire the test webhook: "+plaidErrorReason(err))
 		return
 	}
 	writeAdminJSON(w, http.StatusOK, map[string]string{"status": "fired", "code": in.Code})

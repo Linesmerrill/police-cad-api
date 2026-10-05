@@ -357,3 +357,8 @@ func TestPlaidErrorCode(t *testing.T) {
 	assert.Equal(t, "", plaidErrorCode(errors.New("boom")))
 	assert.Equal(t, "ITEM_LOGIN_REQUIRED", plaidErrorCode(plaidCodeErr("ITEM_LOGIN_REQUIRED")))
 }
+
+func TestPlaidErrorReason_PlainErrorPassesThrough(t *testing.T) {
+	assert.Equal(t, "", plaidErrorReason(nil))
+	assert.Equal(t, "boom", plaidErrorReason(errors.New("boom")))
+}
