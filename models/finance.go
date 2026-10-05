@@ -104,6 +104,10 @@ type FinanceSourceStatus struct {
 	// Events is how many revenue events (payments, purchases, renewals) fall
 	// in the period. Set on the summary-level sources only.
 	Events int `json:"events,omitempty"`
+	// Since is the month (YYYY-MM) of the source's first recorded revenue
+	// event: before it, the source wasn't being tracked, so its months have
+	// no data rather than zero revenue. Summary-level sources only.
+	Since string `json:"since,omitempty"`
 }
 
 // FinanceMonthSources describes per-source connectivity for one month.
