@@ -413,6 +413,15 @@ func (f Finance) PlaidExchangeHandler(w http.ResponseWriter, r *http.Request) {
 	if itemID != "" {
 		update := bson.M{"$set": bson.M{"item_id": itemID, "updated_at": time.Now().UTC()}}
 		if state, serr := f.plaidSyncState(ctx); serr == nil && state.ItemID != itemID {
+			// The new item re-syncs the same history under new transaction
+			// ids, so the old item's transactions would be counted twice.
+			if state.ItemID != "" {
+				if n, derr := f.BTDB.DeleteMany(ctx, bson.M{"source": "plaid"}); derr != nil {
+					zap.S().Warnw("failed to clear the previous bank's transactions", "error", derr)
+				} else if n > 0 {
+					zap.S().Infow("cleared the previous bank's transactions", "count", n)
+				}
+			}
 			if oldToken := plaidConnectedToken(state); oldToken != "" && oldToken != accessToken {
 				if rerr := c.RemoveItem(ctx, oldToken); rerr != nil {
 					zap.S().Warnw("failed to remove the previous Plaid item", "error", plaidErrorReason(rerr))
