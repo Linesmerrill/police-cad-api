@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -16,13 +17,13 @@ import (
 // hidden flag and tag whenever Plaid reported a transaction as modified.
 // created_at, hidden, and a merchant rule's tag are written only when the
 // transaction is first stored, so a tag the owner changed later stands.
-func plaidUpsert(doc models.BankTransaction, ruleTagID string) bson.M {
+func plaidUpsert(doc models.BankTransaction, rule models.FinanceTagRule) bson.M {
 	onInsert := bson.M{
 		"created_at": doc.CreatedAt,
-		"hidden":     false,
+		"hidden":     rule.Hide,
 	}
-	if ruleTagID != "" {
-		onInsert["tag_id"] = ruleTagID
+	if rule.TagID != "" {
+		onInsert["tag_id"] = rule.TagID
 	}
 	return bson.M{
 		"$set": bson.M{
@@ -33,6 +34,7 @@ func plaidUpsert(doc models.BankTransaction, ruleTagID string) bson.M {
 			"name":                      doc.Name,
 			"merchant_name":             doc.MerchantName,
 			"merchant_key":              doc.MerchantKey,
+			"merchant_key_v":            merchantKeyVersion,
 			"amount":                    doc.Amount,
 			"direction":                 doc.Direction,
 			"date":                      doc.Date,
@@ -46,21 +48,44 @@ func plaidUpsert(doc models.BankTransaction, ruleTagID string) bson.M {
 	}
 }
 
-// merchantKey is what a merchant rule matches: the merchant name, or the
-// description when Plaid could not name a merchant, lowercased with its
-// whitespace collapsed.
+// merchantKeyVersion changes whenever merchantKey's output does, so stored
+// keys can be rebuilt (migrateMerchantKeys).
+const merchantKeyVersion = 2
+
+var (
+	merchantMonthWords = regexp.MustCompile(`\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sept?(ember)?|oct(ober)?|nov(ember)?|dec(ember)?)\b`)
+	merchantDigits     = regexp.MustCompile(`[0-9]+`)
+	merchantPunct      = regexp.MustCompile(`[^a-z&' ]+`)
+)
+
+// merchantKey is what rules match on: the merchant name (or the description
+// when Plaid has none), lowercased, without the parts that change from one
+// transaction to the next. Month names, years, dates and reference numbers
+// are dropped, so "Interest earned in May 2026" and "Interest earned in
+// June 2026" are one merchant, as are "Transfer to Bluevine Taxes 5815" and
+// "STEAM GAMES, 4029357733" each time they appear.
 func merchantKey(merchantName, name string) string {
 	s := strings.TrimSpace(merchantName)
 	if s == "" {
 		s = strings.TrimSpace(name)
 	}
-	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+	s = strings.ToLower(s)
+	s = merchantDigits.ReplaceAllString(s, " ")
+	s = merchantMonthWords.ReplaceAllString(s, " ")
+	s = merchantPunct.ReplaceAllString(s, " ")
+	key := strings.Join(strings.Fields(s), " ")
+	if key == "" {
+		// Nothing but numbers or dates: keep the original so it still
+		// identifies something.
+		return strings.ToLower(strings.Join(strings.Fields(merchantName+" "+name), " "))
+	}
+	return key
 }
 
-// tagRulesByMerchant loads the merchant rules as merchant key -> tag ID.
-// A failure to read them only means nothing is tagged this sync.
-func (f Finance) tagRulesByMerchant(ctx context.Context) map[string]string {
-	out := map[string]string{}
+// tagRulesByMerchant loads the merchant rules by merchant key. A failure to
+// read them only means no rule applies this sync.
+func (f Finance) tagRulesByMerchant(ctx context.Context) map[string]models.FinanceTagRule {
+	out := map[string]models.FinanceTagRule{}
 	if f.RuleDB == nil {
 		return out
 	}
@@ -74,8 +99,8 @@ func (f Finance) tagRulesByMerchant(ctx context.Context) map[string]string {
 		return out
 	}
 	for _, r := range rules {
-		if r.MerchantKey != "" && r.TagID != "" {
-			out[r.MerchantKey] = r.TagID
+		if r.MerchantKey != "" && (r.TagID != "" || r.Hide) {
+			out[r.MerchantKey] = r
 		}
 	}
 	return out
