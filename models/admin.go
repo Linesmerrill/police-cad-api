@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"github.com/go-webauthn/webauthn/webauthn"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -58,6 +59,28 @@ type AdminMFA struct {
 	LastUsedStep   int64      `bson:"lastUsedStep,omitempty"`
 	FailedAttempts int        `bson:"failedAttempts,omitempty"`
 	LockedUntil    *time.Time `bson:"lockedUntil,omitempty"`
+
+	// Passkeys are WebAuthn credentials (Face ID, Touch ID, a security key)
+	// that can stand in for the authenticator code. Either kind of factor
+	// keeps two-factor on.
+	Passkeys []AdminPasskey `bson:"passkeys,omitempty"`
+	// PasskeySession is the in-flight registration or login ceremony.
+	PasskeySession *AdminPasskeySession `bson:"passkeySession,omitempty"`
+}
+
+// AdminPasskey is one registered passkey.
+type AdminPasskey struct {
+	Name       string              `bson:"name"`
+	CreatedAt  time.Time           `bson:"createdAt"`
+	LastUsedAt *time.Time          `bson:"lastUsedAt,omitempty"`
+	Credential webauthn.Credential `bson:"credential"`
+}
+
+// AdminPasskeySession holds the WebAuthn challenge between begin and finish.
+type AdminPasskeySession struct {
+	Purpose   string               `bson:"purpose"` // "register" or "login"
+	Data      webauthn.SessionData `bson:"data"`
+	ExpiresAt time.Time            `bson:"expiresAt"`
 }
 
 // LinkLPCAccountRequest is the payload to link an admin to an LPC user.

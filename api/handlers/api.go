@@ -247,6 +247,12 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/mfa/enable", http.HandlerFunc(adminHandler.AdminMFAEnableHandler)).Methods("POST")
 	apiCreate.Handle("/admin/mfa/backup-codes", http.HandlerFunc(adminHandler.AdminMFABackupCodesHandler)).Methods("POST")
 	apiCreate.Handle("/admin/mfa/disable", http.HandlerFunc(adminHandler.AdminMFADisableHandler)).Methods("POST")
+	// Passkeys (admin_passkeys.go).
+	apiCreate.Handle("/admin/mfa/passkeys/register/begin", http.HandlerFunc(adminHandler.AdminPasskeyRegisterBeginHandler)).Methods("POST")
+	apiCreate.Handle("/admin/mfa/passkeys/register/finish", http.HandlerFunc(adminHandler.AdminPasskeyRegisterFinishHandler)).Methods("POST")
+	apiCreate.Handle("/admin/mfa/passkeys/{id}", http.HandlerFunc(adminHandler.AdminPasskeyDeleteHandler)).Methods("DELETE")
+	apiCreate.Handle("/admin/login/passkey/begin", http.HandlerFunc(adminHandler.AdminLoginPasskeyBeginHandler)).Methods("POST")
+	apiCreate.Handle("/admin/login/passkey/finish", http.HandlerFunc(adminHandler.AdminLoginPasskeyFinishHandler)).Methods("POST")
 	apiCreate.Handle("/admin/logout", http.HandlerFunc(adminHandler.AdminLogoutHandler)).Methods("POST")
 	apiCreate.Handle("/admin/heartbeat", http.HandlerFunc(adminHandler.AdminHeartbeatHandler)).Methods("POST")
 	apiCreate.Handle("/admin/forgot-password", http.HandlerFunc(adminHandler.AdminForgotPasswordHandler)).Methods("POST")
