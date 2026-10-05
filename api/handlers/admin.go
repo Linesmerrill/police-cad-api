@@ -38,6 +38,9 @@ type adminLoginRequest struct {
 
 type adminLoginResponse struct {
 	Token string `json:"token"`
+	// RefreshToken renews Token (24h) for up to 30 days; see
+	// AdminTokenRefreshHandler.
+	RefreshToken string `json:"refreshToken,omitempty"`
 	Admin struct {
 		ID    string   `json:"id"`
 		Email string   `json:"email"`
@@ -263,7 +266,14 @@ func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := adminLoginBody(admin, signed)
+	refresh, err := issueAdminRefreshToken(admin, false)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "token generation failed"})
+		return
+	}
+
+	resp := adminLoginBody(admin, signed, refresh)
 
 	// Track admin login activity
 	h.trackAdminLogin(admin.ID, r)

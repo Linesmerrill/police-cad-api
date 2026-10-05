@@ -241,6 +241,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/login", http.HandlerFunc(adminHandler.AdminLoginHandler)).Methods("POST")
 	// Admin two-factor authentication (admin_mfa.go).
 	apiCreate.Handle("/admin/login/mfa", http.HandlerFunc(adminHandler.AdminLoginMFAHandler)).Methods("POST")
+	apiCreate.Handle("/admin/token/refresh", http.HandlerFunc(adminHandler.AdminTokenRefreshHandler)).Methods("POST")
 	apiCreate.Handle("/admin/mfa", http.HandlerFunc(adminHandler.AdminMFAStatusHandler)).Methods("GET")
 	apiCreate.Handle("/admin/mfa/setup", http.HandlerFunc(adminHandler.AdminMFASetupHandler)).Methods("POST")
 	apiCreate.Handle("/admin/mfa/enable", http.HandlerFunc(adminHandler.AdminMFAEnableHandler)).Methods("POST")

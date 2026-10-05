@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -298,4 +300,68 @@ func TestAdminMFAStatus_NeverLeaksSecret(t *testing.T) {
 	body := decodeBody(t, rec)
 	assert.Equal(t, true, body["enabled"])
 	assert.Equal(t, true, body["sessionVerified"])
+}
+
+func refreshWith(t *testing.T, h Admin, refresh string) *httptest.ResponseRecorder {
+	t.Helper()
+	return postJSON(h.AdminTokenRefreshHandler, map[string]string{"refreshToken": refresh}, "")
+}
+
+func TestAdminLogin_ReturnsRefreshTokenThatRenewsAccess(t *testing.T) {
+	admin := mfaAdmin()
+	admin.MFA = nil
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	admin.Password = string(hash)
+	h, _ := mfaHandler(t, admin, 1)
+
+	login := decodeBody(t, postJSON(h.AdminLoginHandler, map[string]string{"email": admin.Email, "password": "pw"}, ""))
+	refresh, _ := login["refreshToken"].(string)
+	require.NotEmpty(t, refresh)
+
+	rec := refreshWith(t, h, refresh)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := decodeBody(t, rec)
+	assert.False(t, tokenHasMFA(t, body["token"].(string)))
+	assert.NotEmpty(t, body["refreshToken"])
+}
+
+func TestAdminTokenRefresh_KeepsTheMFAClaim(t *testing.T) {
+	admin := mfaAdmin()
+	h, _ := mfaHandler(t, admin, 1)
+	challenge, _ := issueMFAChallenge(admin)
+	login := decodeBody(t, postJSON(h.AdminLoginMFAHandler, map[string]string{"challenge": challenge, "code": mfaCodeAt(t, mfaTestSecret, time.Now())}, ""))
+
+	rec := refreshWith(t, h, login["refreshToken"].(string))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, tokenHasMFA(t, decodeBody(t, rec)["token"].(string)))
+}
+
+func TestAdminTokenRefresh_Refusals(t *testing.T) {
+	admin := mfaAdmin()
+	admin.Password = "hash-v1"
+	h, _ := mfaHandler(t, admin, 1)
+	refreshMFA, _ := issueAdminRefreshToken(admin, true)
+	access, _ := issueAdminToken(admin, true)
+
+	// An access token is not a refresh token.
+	assert.Equal(t, http.StatusUnauthorized, refreshWith(t, h, access).Code)
+
+	// Two-factor turned off since: a two-factor session can't renew.
+	admin.MFA = nil
+	assert.Equal(t, http.StatusUnauthorized, refreshWith(t, h, refreshMFA).Code)
+
+	// Password changed since: refused.
+	admin.MFA = &models.AdminMFA{Enabled: true, Secret: mfaTestSecret}
+	admin.Password = "hash-v2"
+	assert.Equal(t, http.StatusUnauthorized, refreshWith(t, h, refreshMFA).Code)
+}
+
+func TestAdminTokenRefresh_InactiveAdmin(t *testing.T) {
+	t.Setenv("JWT_SECRET", financeTestSecret)
+	admin := mfaAdmin()
+	refresh, _ := issueAdminRefreshToken(admin, false)
+	adb := &mocks.AdminDatabase{}
+	adb.On("FindOne", mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+	h := Admin{ADB: adb}
+	assert.Equal(t, http.StatusUnauthorized, refreshWith(t, h, refresh).Code)
 }
