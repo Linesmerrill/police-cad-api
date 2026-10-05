@@ -79,6 +79,10 @@ type PlaidSyncState struct {
 	NewAccountsAvailable bool      `bson:"new_accounts_available,omitempty" json:"new_accounts_available,omitempty"`
 	WebhookURL           string    `bson:"webhook_url,omitempty" json:"webhook_url,omitempty"`
 	LastWebhookAt        time.Time `bson:"last_webhook_at,omitempty" json:"last_webhook_at,omitempty"`
+	// DisconnectedAt is set when the owner disconnected the bank: the item was
+	// removed at Plaid, so the access token in the environment is dead until
+	// a new bank is connected.
+	DisconnectedAt *time.Time `bson:"disconnected_at,omitempty" json:"disconnected_at,omitempty"`
 }
 
 // Plaid item statuses kept in PlaidSyncState.ItemStatus.
