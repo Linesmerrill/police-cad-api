@@ -279,6 +279,10 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/finance/plaid/exchange", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidExchangeHandler))).Methods("POST")
 	apiCreate.Handle("/admin/finance/plaid/sync", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidSyncHandler))).Methods("POST")
 	apiCreate.Handle("/admin/finance/plaid/status", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidStatusHandler))).Methods("GET")
+	apiCreate.Handle("/admin/finance/plaid/update-complete", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidUpdateCompleteHandler))).Methods("POST")
+	apiCreate.Handle("/admin/finance/plaid/sandbox-webhook", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidSandboxWebhookHandler))).Methods("POST")
+	// Plaid webhooks: public, verified by Plaid's signature (finance_plaid_webhook.go).
+	apiCreate.Handle("/webhooks/plaid", http.HandlerFunc(financeHandler.PlaidWebhookHandler)).Methods("POST")
 	apiCreate.Handle("/admin/finance/transactions", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.ListTransactionsHandler))).Methods("GET")
 	apiCreate.Handle("/admin/finance/transactions/{transaction_id}", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PatchTransactionHandler))).Methods("PATCH")
 	apiCreate.Handle("/admin/finance/tags", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.ListTagsHandler))).Methods("GET")

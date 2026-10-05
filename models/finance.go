@@ -63,7 +63,32 @@ type PlaidSyncState struct {
 	LastSyncAt time.Time            `bson:"last_sync_at,omitempty" json:"last_sync_at,omitempty"`
 	Accounts  []PlaidAccountSnapshot `bson:"accounts,omitempty" json:"accounts,omitempty"`
 	UpdatedAt time.Time             `bson:"updated_at" json:"updated_at"`
+
+	// ItemStatus is what Plaid last said about the bank connection: empty or
+	// PlaidItemStatusOK when healthy, otherwise one of the PlaidItemStatus*
+	// values that needs the owner to run Link in update mode.
+	ItemStatus string `bson:"item_status,omitempty" json:"item_status,omitempty"`
+	// ItemErrorCode is Plaid's error_code behind a bad status, for the alert.
+	ItemErrorCode string    `bson:"item_error_code,omitempty" json:"item_error_code,omitempty"`
+	ItemStatusAt  time.Time `bson:"item_status_at,omitempty" json:"item_status_at,omitempty"`
+	// ConsentExpiresAt is when the bank's OAuth consent runs out, from
+	// PENDING_EXPIRATION.
+	ConsentExpiresAt *time.Time `bson:"consent_expires_at,omitempty" json:"consent_expires_at,omitempty"`
+	// NewAccountsAvailable is set by NEW_ACCOUNTS_AVAILABLE and cleared once
+	// the owner has picked accounts in update mode.
+	NewAccountsAvailable bool      `bson:"new_accounts_available,omitempty" json:"new_accounts_available,omitempty"`
+	WebhookURL           string    `bson:"webhook_url,omitempty" json:"webhook_url,omitempty"`
+	LastWebhookAt        time.Time `bson:"last_webhook_at,omitempty" json:"last_webhook_at,omitempty"`
 }
+
+// Plaid item statuses kept in PlaidSyncState.ItemStatus.
+const (
+	PlaidItemStatusOK                = "ok"
+	PlaidItemStatusLoginRequired     = "login_required"
+	PlaidItemStatusPendingExpiration = "pending_expiration"
+	PlaidItemStatusPendingDisconnect = "pending_disconnect"
+	PlaidItemStatusRevoked           = "revoked"
+)
 
 // FinanceSourceStatus reports whether a revenue source is connected for a month.
 type FinanceSourceStatus struct {

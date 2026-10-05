@@ -17,10 +17,13 @@ numbers are what drive `income.total`, `expenses`, and `profit`.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/admin/finance/summary?from=YYYY-MM&to=YYYY-MM` | Monthly P&L (see JSON shape below). `from`/`to` default to the last 12 months. 400 on bad format. |
-| POST | `/api/v1/admin/finance/plaid/link-token` | Returns `{link_token, expiration}` — Plaid Link token (products=[transactions], country_codes=[US]) for the owner to connect a bank. 503 when Plaid isn't configured. |
+| POST | `/api/v1/admin/finance/plaid/link-token` | Body (optional): `{mode: "update" \| "new_accounts"}`. Returns `{link_token, expiration}`. With no mode: a token to connect a bank (products=[transactions], country_codes=[US], webhook=`PLAID_WEBHOOK_URL`). `update`: Link in update mode on the existing item, to repair it. `new_accounts`: update mode with account selection, to add accounts. 409 for a mode when no bank is connected. 503 when Plaid isn't configured. |
 | POST | `/api/v1/admin/finance/plaid/exchange` | Body: `{public_token}`. Exchanges the Link public_token for an access token and returns `{access_token, item_id, message}` **once**; the message tells the owner to set the Heroku config var `PLAID_ACCESS_TOKEN`. The token is never logged and never stored in the DB. 503 when Plaid isn't configured. |
 | POST | `/api/v1/admin/finance/plaid/sync` | Runs Plaid `/transactions/sync` from the stored cursor, looping while `has_more`; upserts added/modified (by `transaction_id`), deletes removed; persists the new cursor + `last_sync_at` + accounts snapshot; returns `{added, modified, removed, has_more:false}`. 503 when not connected. |
-| GET | `/api/v1/admin/finance/plaid/status` | Returns `{connected, last_sync, accounts:[{name, mask, type}], item_id?}`. `connected` = `PLAID_ACCESS_TOKEN` is set. Never 503s — this is how the owner learns the bank isn't connected yet. |
+| GET | `/api/v1/admin/finance/plaid/status` | Returns `{connected, last_sync, accounts:[{name, mask, type}], item_id?, item_status, consent_expires_at?, new_accounts_available, sandbox}`. `connected` = `PLAID_ACCESS_TOKEN` is set. When connected it also calls `/accounts/get` (refreshing accounts and catching a broken login) and points the item's webhooks at `PLAID_WEBHOOK_URL` if needed. Never 503s — this is how the owner learns the bank isn't connected yet. |
+| POST | `/api/v1/admin/finance/plaid/update-complete` | Called when Link in update mode succeeds: `item_status=ok`, clears `consent_expires_at` and `new_accounts_available`, and starts a sync. |
+| POST | `/api/v1/admin/finance/plaid/sandbox-webhook` | Body: `{code}` (default `NEW_ACCOUNTS_AVAILABLE`). Fires a Plaid test webhook at the item. Sandbox only (403 in production). |
+| POST | `/api/v1/webhooks/plaid` | **Public.** Plaid's webhooks, verified by the `Plaid-Verification` JWT (ES256, key from `/webhook_verification_key/get`, body SHA-256 must match, under 5 minutes old); 401 otherwise. See "Webhooks and update mode". |
 
 Every route returns 401 for missing/invalid/expired tokens or unknown/inactive
 admins, and 403 for authenticated non-owners.
@@ -168,6 +171,38 @@ The Plaid client is wrapped in the `plaidSyncClient` interface
 mock; the production implementation uses the official Plaid Go SDK
 (`github.com/plaid/plaid-go/v39`, pinned in `go.mod`).
 
+## Webhooks and update mode
+
+`api/handlers/finance_plaid_webhook.go`. `finance_plaid_state` also keeps
+`item_status` (`ok`, `login_required`, `pending_expiration`,
+`pending_disconnect`, `revoked`), `item_error_code`, `consent_expires_at`,
+`new_accounts_available`, `webhook_url` and `last_webhook_at`.
+
+| Webhook | Effect |
+|---|---|
+| `TRANSACTIONS SYNC_UPDATES_AVAILABLE` | Sync in the background |
+| `ITEM ERROR` (`ITEM_LOGIN_REQUIRED` and other login errors) | `login_required` |
+| `ITEM PENDING_EXPIRATION` | `pending_expiration`, saves `consent_expires_at` |
+| `ITEM PENDING_DISCONNECT` | `pending_disconnect` |
+| `ITEM USER_PERMISSION_REVOKED`, `USER_ACCOUNT_REVOKED` | `revoked` |
+| `ITEM LOGIN_REPAIRED` | `ok` |
+| `ITEM NEW_ACCOUNTS_AVAILABLE` | `new_accounts_available=true` |
+
+Moving into any status other than `ok` posts one amber Discord warning.
+Webhooks for a different `item_id` than the stored one are ignored.
+
+Syncs (button, page load, webhook) share one mutex, and a sync that hits
+`TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION` restarts from the stored
+cursor (up to 3 times). A sync or `/accounts/get` that fails with a login
+error marks the item `login_required`; `/accounts/get` succeeding again
+clears it. Exchanging a token for a **different** item resets the cursor and
+status.
+
+The Finance tab turns the bank line amber for any status other than `ok`
+and offers **Fix connection** (Link with `mode=update`), or **Add accounts**
+(`mode=new_accounts`) when new accounts are available. Success calls
+`update-complete`.
+
 ## Environment variables
 
 | Var | Required | Notes |
@@ -177,6 +212,7 @@ mock; the production implementation uses the official Plaid Go SDK
 | `PLAID_SECRET` | for Plaid | Plaid dashboard → API keys. |
 | `PLAID_ENV` | no | `sandbox` (default) or `production`. Plaid retired its Development environment in 2024; any other value means sandbox. |
 | `PLAID_ACCESS_TOKEN` | for bank sync | Set from the one-time `/plaid/exchange` output. |
+| `PLAID_WEBHOOK_URL` | for webhooks | Public URL of `/api/v1/webhooks/plaid` on this API, e.g. `https://<api-host>/api/v1/webhooks/plaid`. Sent on Link tokens and set on the existing item. |
 | `IAP_NET_RATE` | no | Decimal fraction for `iap_net` math. Default `0.85`. |
 
 Env var names are fixed — do not rename. Any Plaid endpoint when
