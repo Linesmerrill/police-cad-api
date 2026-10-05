@@ -17,6 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/models"
 )
@@ -232,9 +233,14 @@ func (f Finance) ListTransactionsHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	internal := f.internalTransfersAround(ctx, start, end)
+	rules := f.tagRulesByMerchant(ctx)
 	rows := make([]models.FinanceTransactionView, 0, len(txs))
 	for _, tx := range txs {
-		rows = append(rows, models.FinanceTransactionView{BankTransaction: tx, InternalTransfer: internal[tx.TransactionID]})
+		rows = append(rows, models.FinanceTransactionView{
+			BankTransaction:  tx,
+			InternalTransfer: internal[tx.TransactionID],
+			MerchantHidden:   rules[tx.MerchantKey].Hide,
+		})
 	}
 	financeJSON(w, http.StatusOK, map[string]interface{}{
 		"data":       rows,
@@ -269,6 +275,9 @@ type transactionPatch struct {
 	Hidden          *bool   `json:"hidden"`
 	TagID           *string `json:"tag_id"`
 	ApplyToMerchant bool    `json:"apply_to_merchant"`
+	// HideMerchant true hides every transaction from this merchant, now and
+	// as they sync; false stops hiding them and unhides them.
+	HideMerchant *bool `json:"hide_merchant"`
 }
 
 // PatchTransactionHandler implements PATCH
@@ -280,8 +289,8 @@ func (f Finance) PatchTransactionHandler(w http.ResponseWriter, r *http.Request)
 		writeFinanceError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if in.Hidden == nil && in.TagID == nil {
-		writeFinanceError(w, http.StatusBadRequest, "nothing to change: send hidden and/or tag_id")
+	if in.Hidden == nil && in.TagID == nil && in.HideMerchant == nil {
+		writeFinanceError(w, http.StatusBadRequest, "nothing to change: send hidden, tag_id and/or hide_merchant")
 		return
 	}
 
@@ -318,9 +327,27 @@ func (f Finance) PatchTransactionHandler(w http.ResponseWriter, r *http.Request)
 	if len(unset) > 0 {
 		update["$unset"] = unset
 	}
-	if _, err := f.BTDB.UpdateOne(ctx, bson.M{"transaction_id": txID}, update); err != nil {
-		writeFinanceError(w, http.StatusInternalServerError, "failed to update the transaction")
-		return
+	if len(update) > 0 {
+		if _, err := f.BTDB.UpdateOne(ctx, bson.M{"transaction_id": txID}, update); err != nil {
+			writeFinanceError(w, http.StatusInternalServerError, "failed to update the transaction")
+			return
+		}
+	}
+
+	merchantHidden := int64(0)
+	if in.HideMerchant != nil {
+		key := tx.MerchantKey
+		if key == "" {
+			key = merchantKey(tx.MerchantName, tx.Name)
+		}
+		if key == "" {
+			writeFinanceError(w, http.StatusBadRequest, "this transaction has no merchant to make a rule from")
+			return
+		}
+		if merchantHidden, err = f.applyMerchantHide(ctx, key, displayMerchant(tx), *in.HideMerchant); err != nil {
+			writeFinanceError(w, http.StatusInternalServerError, "failed to save the merchant rule")
+			return
+		}
 	}
 
 	alsoTagged := int64(0)
@@ -345,8 +372,9 @@ func (f Finance) PatchTransactionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	financeJSON(w, http.StatusOK, map[string]interface{}{
-		"transaction": updated,
-		"also_tagged": alsoTagged,
+		"transaction":     updated,
+		"also_tagged":     alsoTagged,
+		"merchant_hidden": merchantHidden,
 	})
 }
 
@@ -384,7 +412,7 @@ func (f Finance) applyMerchantRule(ctx context.Context, key, merchant, tagID str
 	if _, err := f.RuleDB.UpdateOne(ctx,
 		bson.M{"merchant_key": key},
 		bson.M{
-			"$set":         bson.M{"merchant_key": key, "merchant": merchant, "tag_id": tagID},
+			"$set":         bson.M{"merchant_key": key, "merchant": merchant, "tag_id": tagID, "key_v": merchantKeyVersion},
 			"$setOnInsert": bson.M{"created_at": time.Now().UTC()},
 		},
 		options.Update().SetUpsert(true),
@@ -405,10 +433,45 @@ func (f Finance) applyMerchantRule(ctx context.Context, key, merchant, tagID str
 	return res.ModifiedCount, nil
 }
 
+// applyMerchantHide saves (hide) or clears (!hide) a rule that hides every
+// transaction from a merchant, and applies it to the ones already synced.
+// Returns how many transactions changed.
+func (f Finance) applyMerchantHide(ctx context.Context, key, merchant string, hide bool) (int64, error) {
+	if f.RuleDB == nil {
+		return 0, errors.New("rules are not configured")
+	}
+	if hide {
+		if _, err := f.RuleDB.UpdateOne(ctx,
+			bson.M{"merchant_key": key},
+			bson.M{
+				"$set":         bson.M{"merchant_key": key, "merchant": merchant, "hide": true, "key_v": merchantKeyVersion},
+				"$setOnInsert": bson.M{"created_at": time.Now().UTC()},
+			},
+			options.Update().SetUpsert(true),
+		); err != nil {
+			return 0, err
+		}
+	} else {
+		// Keep a rule that still tags; drop one that only hid.
+		if _, err := f.RuleDB.UpdateOne(ctx, bson.M{"merchant_key": key}, bson.M{"$unset": bson.M{"hide": ""}}); err != nil {
+			return 0, err
+		}
+		if _, err := f.RuleDB.DeleteMany(ctx, bson.M{"merchant_key": key, "tag_id": bson.M{"$in": bson.A{nil, ""}}}); err != nil {
+			return 0, err
+		}
+	}
+	f.backfillMerchantKeys(ctx)
+	res, err := f.BTDB.UpdateMany(ctx, bson.M{"merchant_key": key}, bson.M{"$set": bson.M{"hidden": hide}})
+	if err != nil || res == nil {
+		return 0, err
+	}
+	return res.ModifiedCount, nil
+}
+
 // backfillMerchantKeys fills merchant_key on transactions stored before it
 // existed. A no-op once they all have one.
 func (f Finance) backfillMerchantKeys(ctx context.Context) {
-	cur, err := f.BTDB.Find(ctx, bson.M{"merchant_key": bson.M{"$exists": false}},
+	cur, err := f.BTDB.Find(ctx, bson.M{"merchant_key_v": bson.M{"$ne": merchantKeyVersion}},
 		options.Find().SetProjection(bson.M{"transaction_id": 1, "name": 1, "merchant_name": 1}))
 	if err != nil {
 		return
@@ -420,7 +483,70 @@ func (f Finance) backfillMerchantKeys(ctx context.Context) {
 	}
 	for _, tx := range txs {
 		_, _ = f.BTDB.UpdateOne(ctx, bson.M{"transaction_id": tx.TransactionID},
-			bson.M{"$set": bson.M{"merchant_key": merchantKey(tx.MerchantName, tx.Name)}})
+			bson.M{"$set": bson.M{"merchant_key": merchantKey(tx.MerchantName, tx.Name), "merchant_key_v": merchantKeyVersion}})
+	}
+}
+
+// migrateMerchantKeys rebuilds merchant keys made by an older merchantKey,
+// on transactions and on rules, then re-applies the rules. Rules that now
+// share a key (one per month of "Interest earned in ...") merge: the newest
+// one's tag and hide win. Safe to run repeatedly; runs at startup.
+func (f Finance) migrateMerchantKeys(ctx context.Context) {
+	f.backfillMerchantKeys(ctx)
+	if f.RuleDB == nil {
+		return
+	}
+	cur, err := f.RuleDB.Find(ctx, bson.M{"key_v": bson.M{"$ne": merchantKeyVersion}},
+		options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}))
+	if err != nil {
+		return
+	}
+	var rules []models.FinanceTagRule
+	if err := cur.All(ctx, &rules); err != nil {
+		cur.Close(ctx)
+		return
+	}
+	cur.Close(ctx)
+	if len(rules) == 0 {
+		return
+	}
+	for _, r := range rules {
+		key := merchantKey(r.Merchant, "")
+		if key == "" {
+			key = r.MerchantKey
+		}
+		// A rule already on the new key (newer, or migrated just before)
+		// absorbs this one.
+		var existing models.FinanceTagRule
+		if ferr := f.RuleDB.FindOne(ctx, bson.M{"merchant_key": key, "key_v": merchantKeyVersion}).Decode(&existing); ferr == nil && existing.ID != r.ID {
+			set := bson.M{}
+			if existing.TagID == "" && r.TagID != "" {
+				set["tag_id"] = r.TagID
+			}
+			if !existing.Hide && r.Hide {
+				set["hide"] = true
+			}
+			if len(set) > 0 {
+				_, _ = f.RuleDB.UpdateOne(ctx, bson.M{"_id": existing.ID}, bson.M{"$set": set})
+			}
+			_ = f.RuleDB.DeleteOne(ctx, bson.M{"_id": r.ID})
+			continue
+		}
+		if _, uerr := f.RuleDB.UpdateOne(ctx, bson.M{"_id": r.ID},
+			bson.M{"$set": bson.M{"merchant_key": key, "key_v": merchantKeyVersion}}); uerr != nil {
+			zap.S().Warnw("failed to migrate a merchant rule", "merchant", r.Merchant, "error", uerr)
+		}
+	}
+	// Apply the rules to what they now match.
+	for key, rule := range f.tagRulesByMerchant(ctx) {
+		if rule.TagID != "" {
+			_, _ = f.BTDB.UpdateMany(ctx,
+				bson.M{"merchant_key": key, "tag_id": bson.M{"$in": bson.A{nil, ""}}},
+				bson.M{"$set": bson.M{"tag_id": rule.TagID}})
+		}
+		if rule.Hide {
+			_, _ = f.BTDB.UpdateMany(ctx, bson.M{"merchant_key": key}, bson.M{"$set": bson.M{"hidden": true}})
+		}
 	}
 }
 
@@ -578,6 +704,15 @@ func (f Finance) DeleteTagHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rulesRemoved := int64(0)
 	if f.RuleDB != nil {
+		// A rule that also hides keeps hiding; it just stops tagging.
+		if hideCur, ferr := f.RuleDB.Find(ctx, bson.M{"tag_id": id, "hide": true}); ferr == nil {
+			var hideRules []models.FinanceTagRule
+			_ = hideCur.All(ctx, &hideRules)
+			hideCur.Close(ctx)
+			for _, hr := range hideRules {
+				_, _ = f.RuleDB.UpdateOne(ctx, bson.M{"_id": hr.ID}, bson.M{"$unset": bson.M{"tag_id": ""}})
+			}
+		}
 		if rulesRemoved, err = f.RuleDB.DeleteMany(ctx, bson.M{"tag_id": id}); err != nil {
 			writeFinanceError(w, http.StatusInternalServerError, "failed to remove its merchant rules")
 			return

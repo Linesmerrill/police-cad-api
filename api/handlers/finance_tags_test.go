@@ -36,9 +36,32 @@ func toM(v interface{}) bson.M {
 	return m
 }
 
+// match handles equality plus the $ne and $in the rule code uses. A missing
+// field compares as nil, the way Mongo matches {field: null}.
 func (f *fakeDocDB) match(doc, filter bson.M) bool {
 	for k, v := range filter {
-		if fmt.Sprint(doc[k]) != fmt.Sprint(v) {
+		got, present := doc[k]
+		if !present {
+			got = nil
+		}
+		if ops, ok := v.(bson.M); ok {
+			if ne, ok := ops["$ne"]; ok && fmt.Sprint(got) == fmt.Sprint(ne) {
+				return false
+			}
+			if in, ok := ops["$in"].(bson.A); ok {
+				found := false
+				for _, want := range in {
+					if (want == nil && (got == nil || got == "")) || (want != nil && fmt.Sprint(got) == fmt.Sprint(want)) {
+						found = true
+					}
+				}
+				if !found {
+					return false
+				}
+			}
+			continue
+		}
+		if fmt.Sprint(got) != fmt.Sprint(v) {
 			return false
 		}
 	}
@@ -79,6 +102,9 @@ func (f *fakeDocDB) UpdateOne(ctx context.Context, filter interface{}, update in
 		if f.match(d, fm) {
 			for k, v := range toM(um["$set"]) {
 				d[k] = v
+			}
+			for k := range toM(um["$unset"]) {
+				delete(d, k)
 			}
 			return &mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil
 		}
@@ -200,8 +226,75 @@ func TestRunPlaidSync_AppliesMerchantRulesToNewTransactions(t *testing.T) {
 
 func TestMerchantKey(t *testing.T) {
 	assert.Equal(t, "steam", merchantKey("  Steam ", "STEAM PURCHASE 123"))
-	assert.Equal(t, "google ads 99", merchantKey("", "GOOGLE   ADS  99"))
+	assert.Equal(t, "google ads", merchantKey("", "GOOGLE   ADS  99"))
 	assert.Equal(t, "", merchantKey("", "  "))
+
+	// What changes between occurrences of the same merchant is dropped.
+	cases := map[string][]string{
+		"interest earned in":         {"Interest earned in May 2026", "Interest earned in June 2026", "Interest earned in Sept 2026"},
+		"transfer to bluevine taxes": {"Transfer to Bluevine Taxes 5815", "Transfer to Bluevine Taxes 5815 "},
+		"steam games":                {"STEAM GAMES, 4029357733", "STEAM GAMES, 4029350001"},
+		"google adsense":             {"GOOGLE, ADSENSE:63", "GOOGLE, ADSENSE:71"},
+	}
+	for want, names := range cases {
+		for _, n := range names {
+			assert.Equal(t, want, merchantKey("", n), n)
+		}
+	}
+	// Different merchants stay different.
+	assert.NotEqual(t, merchantKey("", "Transfer to Bluevine Taxes 5815"), merchantKey("", "Transfer to Bluevine Savings 1234"))
+	// Only numbers: kept, so it still names something.
+	assert.Equal(t, "12345", merchantKey("", "12345"))
+	// "may" inside a word is untouched.
+	assert.Equal(t, "maytag store", merchantKey("", "Maytag Store"))
+}
+
+func TestHideMerchant_HidesPastAndFuture(t *testing.T) {
+	ruleDB := &fakeDocDB{}
+	btdb := newFakeBankTxDB()
+	key := merchantKey("", "Transfer to Bluevine Taxes 5815")
+	btdb.docs["t1"] = models.BankTransaction{TransactionID: "t1", Name: "Transfer to Bluevine Taxes 5815", MerchantKey: key, MerchantKeyVersion: merchantKeyVersion, Source: "plaid"}
+	btdb.docs["t2"] = models.BankTransaction{TransactionID: "t2", Name: "Transfer to Bluevine Taxes 5815", MerchantKey: key, MerchantKeyVersion: merchantKeyVersion, Source: "plaid"}
+	btdb.docs["t3"] = models.BankTransaction{TransactionID: "t3", Name: "Heroku", MerchantKey: "heroku", MerchantKeyVersion: merchantKeyVersion, Source: "plaid"}
+	f := Finance{BTDB: btdb, RuleDB: ruleDB}
+
+	n, err := f.applyMerchantHide(context.Background(), key, "Transfer to Bluevine Taxes 5815", true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+	assert.True(t, btdb.docs["t1"].Hidden)
+	assert.True(t, btdb.docs["t2"].Hidden)
+	assert.False(t, btdb.docs["t3"].Hidden)
+
+	// A transaction arriving later is hidden as it's stored.
+	rule := f.tagRulesByMerchant(context.Background())[key]
+	assert.True(t, rule.Hide)
+	up := plaidUpsert(models.BankTransaction{TransactionID: "t4", MerchantKey: key}, rule)
+	assert.Equal(t, true, up["$setOnInsert"].(bson.M)["hidden"])
+
+	// Turning it off unhides them and drops a hide-only rule.
+	_, err = f.applyMerchantHide(context.Background(), key, "Transfer to Bluevine Taxes 5815", false)
+	require.NoError(t, err)
+	assert.False(t, btdb.docs["t1"].Hidden)
+	assert.Empty(t, f.tagRulesByMerchant(context.Background()))
+}
+
+func TestMigrateMerchantKeys_MergesMonthlyRulesAndRetags(t *testing.T) {
+	tagID := primitive.NewObjectID().Hex()
+	ruleDB := &fakeDocDB{docs: []bson.M{
+		toM(models.FinanceTagRule{ID: primitive.NewObjectID(), MerchantKey: "interest earned in may 2026", Merchant: "Interest earned in May 2026", TagID: tagID, CreatedAt: time.Now().Add(-time.Hour)}),
+		toM(models.FinanceTagRule{ID: primitive.NewObjectID(), MerchantKey: "interest earned in june 2026", Merchant: "Interest earned in June 2026", TagID: tagID, CreatedAt: time.Now()}),
+	}}
+	btdb := newFakeBankTxDB()
+	btdb.docs["i1"] = models.BankTransaction{TransactionID: "i1", Name: "Interest earned in July 2026", MerchantKey: "interest earned in july 2026", Source: "plaid"}
+	f := Finance{BTDB: btdb, RuleDB: ruleDB}
+
+	f.migrateMerchantKeys(context.Background())
+
+	rules := f.tagRulesByMerchant(context.Background())
+	require.Len(t, rules, 1)
+	assert.Equal(t, tagID, rules["interest earned in"].TagID)
+	assert.Equal(t, "interest earned in", btdb.docs["i1"].MerchantKey)
+	assert.Equal(t, tagID, btdb.docs["i1"].TagID, "July's interest is tagged by the merged rule")
 }
 
 // The pies follow the P&L's rules exactly, so each one adds up to its total.

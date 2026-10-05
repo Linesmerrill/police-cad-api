@@ -37,6 +37,9 @@ type BankTransaction struct {
 	// MerchantKey is the merchant name (or the description when Plaid has no
 	// merchant), lowercased and trimmed: what tag rules match on.
 	MerchantKey string `bson:"merchant_key,omitempty" json:"merchant_key,omitempty"`
+	// MerchantKeyVersion is the merchantKey version MerchantKey was made with;
+	// older keys are rebuilt at startup.
+	MerchantKeyVersion int `bson:"merchant_key_v,omitempty" json:"-"`
 	// Hidden and TagID are the owner's, set from the Finance tab. Plaid sync
 	// never writes them: it only $sets the fields Plaid owns.
 	Hidden bool   `bson:"hidden" json:"hidden"`
@@ -165,9 +168,14 @@ type FinanceTagRule struct {
 	ID          primitive.ObjectID `bson:"_id,omitempty" json:"_id"`
 	MerchantKey string             `bson:"merchant_key" json:"merchant_key"`
 	// Merchant is how the merchant read when the rule was made, for display.
-	Merchant  string    `bson:"merchant" json:"merchant"`
-	TagID     string    `bson:"tag_id" json:"tag_id"`
+	Merchant string `bson:"merchant" json:"merchant"`
+	// TagID tags the merchant's transactions; Hide leaves them out of the
+	// P&L. A rule does either or both.
+	TagID     string    `bson:"tag_id,omitempty" json:"tag_id,omitempty"`
+	Hide      bool      `bson:"hide,omitempty" json:"hide,omitempty"`
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
+	// KeyVersion is the merchantKey version MerchantKey was made with.
+	KeyVersion int `bson:"key_v,omitempty" json:"-"`
 }
 
 // FinanceTagTotal is one slice of a by-tag pie chart. An empty TagID is the
@@ -191,6 +199,8 @@ type FinanceTransactionView struct {
 	// InternalTransfer marks one end of a move between two linked accounts,
 	// which the P&L leaves out.
 	InternalTransfer bool `json:"internal_transfer"`
+	// MerchantHidden: a rule hides every transaction from this merchant.
+	MerchantHidden bool `json:"merchant_hidden"`
 }
 
 // FinanceSummaryResponse is the GET /admin/finance/summary payload.

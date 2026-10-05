@@ -281,6 +281,13 @@ func (a *App) New() *mux.Router {
 		TagDB:  databases.NewFinanceTagDatabase(a.dbHelper),
 		RuleDB: databases.NewFinanceTagRuleDatabase(a.dbHelper),
 	}
+	// Rebuild merchant keys made by an older merchantKey (finance_tags.go).
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		financeHandler.migrateMerchantKeys(ctx)
+	}()
+
 	apiCreate.Handle("/admin/finance/summary", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.SummaryHandler))).Methods("GET")
 	apiCreate.Handle("/admin/finance/plaid/link-token", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidLinkTokenHandler))).Methods("POST")
 	apiCreate.Handle("/admin/finance/plaid/exchange", financeHandler.RequireOwner(http.HandlerFunc(financeHandler.PlaidExchangeHandler))).Methods("POST")
