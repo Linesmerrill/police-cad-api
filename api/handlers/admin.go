@@ -255,6 +255,7 @@ func (h Admin) AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 			"error":     "Two-factor code required",
 			"code":      "MFA_REQUIRED",
 			"challenge": challenge,
+			"methods":   mfaMethods(admin),
 		})
 		return
 	}

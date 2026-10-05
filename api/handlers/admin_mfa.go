@@ -171,8 +171,11 @@ func claimsMFA(claims jwt.MapClaims) bool {
 	return v
 }
 
+// mfaEnabled: two-factor is on with at least one factor, an authenticator
+// app secret or a passkey.
 func mfaEnabled(admin *models.AdminUser) bool {
-	return admin != nil && admin.MFA != nil && admin.MFA.Enabled && admin.MFA.Secret != ""
+	return admin != nil && admin.MFA != nil && admin.MFA.Enabled &&
+		(admin.MFA.Secret != "" || len(admin.MFA.Passkeys) > 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +231,7 @@ func verifyAdminSecondFactor(ctx context.Context, adb databases.AdminDatabase, a
 		return false, errMFAInvalid
 	}
 	now := time.Now()
-	if admin.MFA.LockedUntil != nil && now.Before(*admin.MFA.LockedUntil) {
+	if mfaLocked(admin, now) {
 		return false, errMFALocked
 	}
 
@@ -265,23 +268,39 @@ func verifyAdminSecondFactor(ctx context.Context, adb databases.AdminDatabase, a
 	}
 
 	if !ok {
-		failures := admin.MFA.FailedAttempts + 1
-		set := bson.M{"mfa.failedAttempts": failures}
-		if failures >= mfaMaxFailures {
-			set["mfa.failedAttempts"] = 0
-			set["mfa.lockedUntil"] = now.Add(mfaLockout)
-		}
-		_, _ = adb.UpdateOne(ctx, bson.M{"_id": admin.ID}, bson.M{"$set": set})
-		if failures >= mfaMaxFailures {
-			return false, errMFALocked
-		}
-		return false, errMFAInvalid
+		return false, recordMFAFailure(ctx, adb, admin, now)
 	}
+	clearMFAFailures(ctx, adb, admin)
+	return usedBackup, nil
+}
+
+// mfaLocked reports whether too many wrong attempts have locked the second
+// factor for now.
+func mfaLocked(admin *models.AdminUser, now time.Time) bool {
+	return admin.MFA != nil && admin.MFA.LockedUntil != nil && now.Before(*admin.MFA.LockedUntil)
+}
+
+// recordMFAFailure counts a failed second factor (code or passkey) and locks
+// it for mfaLockout after mfaMaxFailures in a row. Returns the error to show.
+func recordMFAFailure(ctx context.Context, adb databases.AdminDatabase, admin *models.AdminUser, now time.Time) error {
+	failures := admin.MFA.FailedAttempts + 1
+	set := bson.M{"mfa.failedAttempts": failures}
+	if failures >= mfaMaxFailures {
+		set["mfa.failedAttempts"] = 0
+		set["mfa.lockedUntil"] = now.Add(mfaLockout)
+	}
+	_, _ = adb.UpdateOne(ctx, bson.M{"_id": admin.ID}, bson.M{"$set": set})
+	if failures >= mfaMaxFailures {
+		return errMFALocked
+	}
+	return errMFAInvalid
+}
+
+func clearMFAFailures(ctx context.Context, adb databases.AdminDatabase, admin *models.AdminUser) {
 	if admin.MFA.FailedAttempts > 0 || admin.MFA.LockedUntil != nil {
 		_, _ = adb.UpdateOne(ctx, bson.M{"_id": admin.ID},
 			bson.M{"$set": bson.M{"mfa.failedAttempts": 0}, "$unset": bson.M{"mfa.lockedUntil": ""}})
 	}
-	return usedBackup, nil
 }
 
 // newBackupCodes returns plaintext codes (shown once) and their bcrypt hashes.
@@ -421,10 +440,13 @@ func (h Admin) adminFromAccessToken(r *http.Request) (*models.AdminUser, jwt.Map
 }
 
 type adminMFAStatus struct {
-	Enabled              bool       `json:"enabled"`
-	EnabledAt            *time.Time `json:"enabledAt,omitempty"`
-	BackupCodesRemaining int        `json:"backupCodesRemaining"`
-	SessionVerified      bool       `json:"sessionVerified"`
+	Enabled              bool                     `json:"enabled"`
+	EnabledAt            *time.Time               `json:"enabledAt,omitempty"`
+	BackupCodesRemaining int                      `json:"backupCodesRemaining"`
+	SessionVerified      bool                     `json:"sessionVerified"`
+	HasAuthenticator     bool                     `json:"hasAuthenticator"`
+	Passkeys             []map[string]interface{} `json:"passkeys"`
+	Methods              []string                 `json:"methods"`
 }
 
 // AdminMFAStatusHandler reports whether MFA is on and whether this session
@@ -435,11 +457,16 @@ func (h Admin) AdminMFAStatusHandler(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, status, msg, "UNAUTHORIZED")
 		return
 	}
-	resp := adminMFAStatus{SessionVerified: claimsMFA(claims) && mfaEnabled(admin)}
+	resp := adminMFAStatus{
+		SessionVerified: claimsMFA(claims) && mfaEnabled(admin),
+		Passkeys:        passkeyViews(admin),
+		Methods:         mfaMethods(admin),
+	}
 	if mfaEnabled(admin) {
 		resp.Enabled = true
 		resp.EnabledAt = admin.MFA.EnabledAt
 		resp.BackupCodesRemaining = len(admin.MFA.BackupCodes)
+		resp.HasAuthenticator = admin.MFA.Secret != ""
 	}
 	writeAdminJSON(w, http.StatusOK, resp)
 }
