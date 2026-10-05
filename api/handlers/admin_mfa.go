@@ -59,6 +59,8 @@ const (
 	mfaBackupCodeCount = 10
 	mfaChallengeScope  = "admin_mfa_challenge"
 	adminTokenTTL      = 24 * time.Hour
+	adminRefreshScope  = "admin_refresh"
+	adminRefreshTTL    = 30 * 24 * time.Hour
 )
 
 var (
@@ -95,6 +97,28 @@ func issueAdminToken(admin *models.AdminUser, mfa bool) (string, error) {
 		"mfa":   mfa,
 		"iat":   now.Unix(),
 		"exp":   now.Add(adminTokenTTL).Unix(),
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
+}
+
+// issueAdminRefreshToken signs a 30-day token that can only be traded for a
+// new access token (AdminTokenRefreshHandler). The website keeps it in its
+// server-side session, matching its 30-day session cookie, so an owner
+// isn't sent back to the login page every 24 hours.
+func issueAdminRefreshToken(admin *models.AdminUser, mfa bool) (string, error) {
+	secret, err := adminJWTSecret()
+	if err != nil {
+		return "", err
+	}
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"sub":   admin.ID.Hex(),
+		"scope": adminRefreshScope,
+		"typ":   "refresh",
+		"mfa":   mfa,
+		"sv":    admin.SessionVersion,
+		"iat":   now.Unix(),
+		"exp":   now.Add(adminRefreshTTL).Unix(),
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
 }
@@ -308,9 +332,10 @@ func mfaErrorStatus(err error) (int, string) {
 	}
 }
 
-func adminLoginBody(admin *models.AdminUser, token string) adminLoginResponse {
+func adminLoginBody(admin *models.AdminUser, token, refresh string) adminLoginResponse {
 	var resp adminLoginResponse
 	resp.Token = token
+	resp.RefreshToken = refresh
 	resp.Admin.ID = admin.ID.Hex()
 	resp.Admin.Email = admin.Email
 	resp.Admin.Roles = admin.Roles
@@ -359,10 +384,15 @@ func (h Admin) AdminLoginMFAHandler(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
 		return
 	}
+	refresh, err := issueAdminRefreshToken(admin, true)
+	if err != nil {
+		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
+		return
+	}
 	h.trackAdminLogin(admin.ID, r)
 	now := time.Now()
 	_, _ = h.ADB.UpdateOne(r.Context(), bson.M{"_id": admin.ID}, bson.M{"$set": bson.M{"lastAccessedAt": now}})
-	writeAdminJSON(w, http.StatusOK, adminLoginBody(admin, token))
+	writeAdminJSON(w, http.StatusOK, adminLoginBody(admin, token, refresh))
 }
 
 // adminFromAccessToken authenticates an admin access token (any active
@@ -529,7 +559,12 @@ func (h Admin) AdminMFAEnableHandler(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
 		return
 	}
-	writeAdminJSON(w, http.StatusOK, map[string]interface{}{"backupCodes": plain, "token": token})
+	refresh, err := issueAdminRefreshToken(admin, true)
+	if err != nil {
+		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, map[string]interface{}{"backupCodes": plain, "token": token, "refreshToken": refresh})
 }
 
 // requireVerifiedAdmin authenticates the token and requires an MFA-verified
@@ -596,5 +631,69 @@ func (h Admin) AdminMFADisableHandler(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
 		return
 	}
-	writeAdminJSON(w, http.StatusOK, map[string]interface{}{"token": token})
+	refresh, err := issueAdminRefreshToken(admin, false)
+	if err != nil {
+		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, map[string]interface{}{"token": token, "refreshToken": refresh})
+}
+
+type adminRefreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+// AdminTokenRefreshHandler implements POST /api/v1/admin/token/refresh
+// {refreshToken}. It trades a refresh token for a new access token (and a new
+// refresh token), re-checking the admin first: the account must still be
+// active, the password unchanged since the refresh token was issued
+// (SessionVersion), and, for
+// a session that passed two-factor, two-factor must still be on. Otherwise
+// it's a 401 and the owner signs in again.
+func (h Admin) AdminTokenRefreshHandler(w http.ResponseWriter, r *http.Request) {
+	var req adminRefreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
+		writeAdminError(w, http.StatusBadRequest, "refreshToken required", "INVALID_REQUEST")
+		return
+	}
+	claims, err := parseAdminJWT(req.RefreshToken)
+	if err != nil {
+		writeAdminError(w, http.StatusUnauthorized, "Your session has ended. Sign in again.", "REFRESH_INVALID")
+		return
+	}
+	if scope, _ := claims["scope"].(string); scope != adminRefreshScope {
+		writeAdminError(w, http.StatusUnauthorized, "Your session has ended. Sign in again.", "REFRESH_INVALID")
+		return
+	}
+	adminID, err := claimsAdminID(claims)
+	if err != nil {
+		writeAdminError(w, http.StatusUnauthorized, "Your session has ended. Sign in again.", "REFRESH_INVALID")
+		return
+	}
+	admin, err := h.ADB.FindOne(r.Context(), bson.M{"_id": adminID, "active": true})
+	if err != nil || admin == nil {
+		writeAdminError(w, http.StatusUnauthorized, "Your session has ended. Sign in again.", "REFRESH_INVALID")
+		return
+	}
+	if sv, _ := claims["sv"].(float64); int(sv) != admin.SessionVersion {
+		writeAdminError(w, http.StatusUnauthorized, "Your password changed. Sign in again.", "REFRESH_INVALID")
+		return
+	}
+	mfa := claimsMFA(claims)
+	if mfa && !mfaEnabled(admin) {
+		writeAdminError(w, http.StatusUnauthorized, "Two-factor changed. Sign in again.", "REFRESH_INVALID")
+		return
+	}
+
+	token, err := issueAdminToken(admin, mfa)
+	if err != nil {
+		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
+		return
+	}
+	refresh, err := issueAdminRefreshToken(admin, mfa)
+	if err != nil {
+		writeAdminError(w, http.StatusInternalServerError, "token generation failed", "SERVER_ERROR")
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, adminLoginBody(admin, token, refresh))
 }
