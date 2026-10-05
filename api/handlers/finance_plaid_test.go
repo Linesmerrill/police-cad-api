@@ -48,6 +48,13 @@ type fakePlaidClient struct {
 	verifyKeyErr error
 	keyFetches   int
 	firedCodes   []string
+	removed      []string
+	removeErr    error
+}
+
+func (f *fakePlaidClient) RemoveItem(ctx context.Context, accessToken string) error {
+	f.removed = append(f.removed, accessToken)
+	return f.removeErr
 }
 
 func (f *fakePlaidClient) GetAccounts(ctx context.Context, accessToken string) ([]plaid.AccountBase, error) {
@@ -265,7 +272,15 @@ func (f *fakeBankTxDB) DeleteOne(ctx context.Context, filter interface{}, opts .
 }
 
 func (f *fakeBankTxDB) DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error) {
-	return 0, nil
+	// Only the {source: plaid} filter the disconnect uses.
+	var n int64
+	for id, tx := range f.docs {
+		if tx.Source == "plaid" {
+			delete(f.docs, id)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (f *fakeBankTxDB) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*databases.MongoCursor, error) {
@@ -350,6 +365,8 @@ func (f *fakePlaidStateDB) UpdateOne(ctx context.Context, filter interface{}, up
 				f.state.WebhookURL = ""
 			case "accounts":
 				f.state.Accounts = nil
+			case "disconnected_at":
+				f.state.DisconnectedAt = nil
 			}
 		}
 	}
@@ -367,6 +384,10 @@ func (f *fakePlaidStateDB) UpdateOne(ctx context.Context, filter interface{}, up
 		case "consent_expires_at":
 			if ts, ok := v.(time.Time); ok {
 				f.state.ConsentExpiresAt = &ts
+			}
+		case "disconnected_at":
+			if ts, ok := v.(time.Time); ok {
+				f.state.DisconnectedAt = &ts
 			}
 		case "cursor":
 			f.state.Cursor, _ = v.(string)

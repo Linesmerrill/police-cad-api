@@ -357,3 +357,92 @@ func TestPlaidErrorCode(t *testing.T) {
 	assert.Equal(t, "", plaidErrorCode(errors.New("boom")))
 	assert.Equal(t, "ITEM_LOGIN_REQUIRED", plaidErrorCode(plaidCodeErr("ITEM_LOGIN_REQUIRED")))
 }
+
+func disconnectFixture(t *testing.T, client *fakePlaidClient) (Finance, *fakePlaidStateDB, *fakeBankTxDB, string) {
+	t.Helper()
+	t.Setenv("PLAID_ACCESS_TOKEN", "access-1")
+	psdb := &fakePlaidStateDB{hasState: true, state: models.PlaidSyncState{ItemID: "item-1", Cursor: "c9",
+		Accounts: []models.PlaidAccountSnapshot{{AccountID: "a1", Name: "Checking"}}}}
+	btdb := newFakeBankTxDB()
+	btdb.docs["tx-1"] = models.BankTransaction{TransactionID: "tx-1", Source: "plaid"}
+	btdb.docs["tx-2"] = models.BankTransaction{TransactionID: "tx-2", Source: "plaid"}
+	f := plaidOwnerFixture(financeOwnerDoc(), client, btdb, psdb)
+	return f, psdb, btdb, financeTestToken(t, financeTestSecret, nil)
+}
+
+func TestPlaidDisconnect_RemovesTheItemAndDeletesData(t *testing.T) {
+	client := &fakePlaidClient{}
+	f, psdb, btdb, token := disconnectFixture(t, client)
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidDisconnectHandler)), http.MethodPost, "/x", `{"delete_data":true}`, token)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"access-1"}, client.removed)
+	assert.NotNil(t, psdb.state.DisconnectedAt)
+	assert.Empty(t, psdb.state.Cursor)
+	assert.Empty(t, psdb.state.Accounts)
+	assert.Empty(t, btdb.docs)
+	assert.Contains(t, rec.Body.String(), `"deleted_transactions":2`)
+
+	// The old token is still in the environment, but nothing uses it now.
+	assert.Equal(t, "", f.connectedPlaidToken(context.Background()))
+	status := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidStatusHandler)), http.MethodGet, "/x", "", token)
+	assert.Contains(t, status.Body.String(), `"connected":false`)
+	sync := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidSyncHandler)), http.MethodPost, "/x", "", token)
+	assert.Equal(t, http.StatusServiceUnavailable, sync.Code)
+}
+
+func TestPlaidDisconnect_KeepsDataWhenAsked(t *testing.T) {
+	f, _, btdb, token := disconnectFixture(t, &fakePlaidClient{})
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidDisconnectHandler)), http.MethodPost, "/x", `{"delete_data":false}`, token)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, btdb.docs, 2)
+}
+
+func TestPlaidDisconnect_ItemAlreadyGoneStillDisconnects(t *testing.T) {
+	f, psdb, _, token := disconnectFixture(t, &fakePlaidClient{removeErr: plaidCodeErr("ITEM_NOT_FOUND")})
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidDisconnectHandler)), http.MethodPost, "/x", `{}`, token)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.NotNil(t, psdb.state.DisconnectedAt)
+}
+
+func TestPlaidDisconnect_PlaidFailureChangesNothing(t *testing.T) {
+	f, psdb, btdb, token := disconnectFixture(t, &fakePlaidClient{removeErr: plaidCodeErr("INTERNAL_SERVER_ERROR")})
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidDisconnectHandler)), http.MethodPost, "/x", `{"delete_data":true}`, token)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Nil(t, psdb.state.DisconnectedAt)
+	assert.Len(t, btdb.docs, 2)
+}
+
+func TestPlaidWebhook_IgnoredAfterDisconnect(t *testing.T) {
+	now := time.Now()
+	f, psdb, signer, syncs := webhookFixture(t, models.PlaidSyncState{ItemID: "item-1", DisconnectedAt: &now})
+	rec := postPlaidWebhook(t, f, signer, `{"webhook_type":"TRANSACTIONS","webhook_code":"SYNC_UPDATES_AVAILABLE","item_id":"item-1"}`)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 0, *syncs)
+	assert.Empty(t, psdb.state.ItemStatus)
+}
+
+func TestPlaidExchange_SwitchingBanksRemovesTheOldItem(t *testing.T) {
+	t.Setenv("PLAID_ACCESS_TOKEN", "access-old")
+	psdb := &fakePlaidStateDB{hasState: true, state: models.PlaidSyncState{ItemID: "old-item"}}
+	client := &fakePlaidClient{exchangeToken: "access-new", exchangeItem: "new-item"}
+	f := plaidOwnerFixture(financeOwnerDoc(), client, newFakeBankTxDB(), psdb)
+	token := financeTestToken(t, financeTestSecret, nil)
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidExchangeHandler)), http.MethodPost, "/x", `{"public_token":"public-x"}`, token)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"access-old"}, client.removed)
+}
+
+func TestPlaidExchange_ReconnectAfterDisconnectClearsIt(t *testing.T) {
+	t.Setenv("PLAID_ACCESS_TOKEN", "access-old")
+	now := time.Now()
+	psdb := &fakePlaidStateDB{hasState: true, state: models.PlaidSyncState{ItemID: "old-item", DisconnectedAt: &now}}
+	client := &fakePlaidClient{exchangeToken: "access-new", exchangeItem: "new-item"}
+	f := plaidOwnerFixture(financeOwnerDoc(), client, newFakeBankTxDB(), psdb)
+	token := financeTestToken(t, financeTestSecret, nil)
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidExchangeHandler)), http.MethodPost, "/x", `{"public_token":"public-x"}`, token)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, psdb.state.DisconnectedAt)
+	// Already removed at disconnect: not removed twice.
+	assert.Empty(t, client.removed)
+}

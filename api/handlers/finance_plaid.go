@@ -27,6 +27,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/models"
 )
@@ -67,6 +68,9 @@ type plaidSyncClient interface {
 	WebhookVerificationKey(ctx context.Context, keyID string) (plaid.JWKPublicKey, error)
 	// FireSandboxWebhook asks Plaid to send a test webhook (Sandbox only).
 	FireSandboxWebhook(ctx context.Context, accessToken, code string) error
+	// RemoveItem calls /item/remove: the access token stops working and
+	// Plaid stops billing for the item.
+	RemoveItem(ctx context.Context, accessToken string) error
 }
 
 // plaidLinkOptions configures a Link token.
@@ -181,6 +185,11 @@ func (c *plaidAPIClient) FireSandboxWebhook(ctx context.Context, accessToken, co
 	return err
 }
 
+func (c *plaidAPIClient) RemoveItem(ctx context.Context, accessToken string) error {
+	_, _, err := c.api.PlaidApi.ItemRemove(ctx).ItemRemoveRequest(plaid.ItemRemoveRequest{AccessToken: accessToken}).Execute()
+	return err
+}
+
 // plaidCodedError is any error that carries a Plaid error_code directly.
 type plaidCodedError interface {
 	PlaidErrorCode() string
@@ -239,10 +248,29 @@ func (f Finance) plaidClient() plaidSyncClient {
 	return newPlaidClientFromEnv()
 }
 
-// plaidAccessTokenConfigured reports whether a bank is connected (the access
-// token is set in the environment).
+// plaidAccessTokenConfigured reports whether an access token is set in the
+// environment. A bank is connected when it is and the owner hasn't
+// disconnected that item (see plaidConnectedToken).
 func plaidAccessTokenConfigured() bool {
 	return os.Getenv("PLAID_ACCESS_TOKEN") != ""
+}
+
+// plaidConnectedToken returns the access token of the connected bank, or ""
+// when there is none or the owner disconnected it (the item is gone at Plaid
+// even if the old token is still in the environment).
+func plaidConnectedToken(state models.PlaidSyncState) string {
+	if state.DisconnectedAt != nil {
+		return ""
+	}
+	return os.Getenv("PLAID_ACCESS_TOKEN")
+}
+
+func (f Finance) connectedPlaidToken(ctx context.Context) string {
+	state, err := f.plaidSyncState(ctx)
+	if err != nil {
+		return ""
+	}
+	return plaidConnectedToken(state)
 }
 
 // plaidDirection derives the money direction from Plaid's sign convention:
@@ -289,7 +317,7 @@ func (f Finance) PlaidLinkTokenHandler(w http.ResponseWriter, r *http.Request) {
 	switch in.Mode {
 	case "":
 	case "update", "new_accounts":
-		accessToken := os.Getenv("PLAID_ACCESS_TOKEN")
+		accessToken := f.connectedPlaidToken(r.Context())
 		if accessToken == "" {
 			writeFinanceError(w, http.StatusConflict, "no bank is connected to update")
 			return
@@ -354,14 +382,20 @@ func (f Finance) PlaidExchangeHandler(w http.ResponseWriter, r *http.Request) {
 	// Remember the item ID for /plaid/status (the access token itself is
 	// never stored).
 	// A new item starts clean: the old item's cursor would be rejected and
-	// its status no longer applies.
+	// its status no longer applies. Switching banks also removes the old item
+	// at Plaid, which would otherwise stay billed with nothing using it.
 	if itemID != "" {
 		update := bson.M{"$set": bson.M{"item_id": itemID, "updated_at": time.Now().UTC()}}
 		if state, serr := f.plaidSyncState(ctx); serr == nil && state.ItemID != itemID {
+			if oldToken := plaidConnectedToken(state); oldToken != "" && oldToken != accessToken {
+				if rerr := c.RemoveItem(ctx, oldToken); rerr != nil {
+					zap.S().Warnw("failed to remove the previous Plaid item", "error", rerr, "code", plaidErrorCode(rerr))
+				}
+			}
 			update["$set"].(bson.M)["item_status"] = models.PlaidItemStatusOK
 			update["$unset"] = bson.M{
 				"cursor": "", "item_error_code": "", "consent_expires_at": "",
-				"new_accounts_available": "", "webhook_url": "", "accounts": "",
+				"new_accounts_available": "", "webhook_url": "", "accounts": "", "disconnected_at": "",
 			}
 		}
 		_, _ = f.PSDB.UpdateOne(ctx, bson.M{}, update, options.Update().SetUpsert(true))
@@ -521,7 +555,7 @@ func (f Finance) PlaidSyncHandler(w http.ResponseWriter, r *http.Request) {
 			"Plaid is not configured: set PLAID_CLIENT_ID and PLAID_SECRET")
 		return
 	}
-	accessToken := os.Getenv("PLAID_ACCESS_TOKEN")
+	accessToken := f.connectedPlaidToken(r.Context())
 	if accessToken == "" {
 		writeFinanceError(w, http.StatusServiceUnavailable,
 			"Plaid is not connected: set PLAID_ACCESS_TOKEN (run the Link flow, then POST /admin/finance/plaid/exchange)")
@@ -568,7 +602,7 @@ func (f Finance) PlaidStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if accessToken := os.Getenv("PLAID_ACCESS_TOKEN"); accessToken != "" {
+	if accessToken := plaidConnectedToken(state); accessToken != "" {
 		if c := f.plaidClient(); c != nil {
 			state = f.refreshItem(ctx, c, accessToken, state)
 		}
@@ -589,7 +623,7 @@ func (f Finance) PlaidStatusHandler(w http.ResponseWriter, r *http.Request) {
 		itemStatus = models.PlaidItemStatusOK
 	}
 	resp := map[string]interface{}{
-		"connected":              plaidAccessTokenConfigured(),
+		"connected":              plaidConnectedToken(state) != "",
 		"accounts":               accounts,
 		"item_status":            itemStatus,
 		"new_accounts_available": state.NewAccountsAvailable,
