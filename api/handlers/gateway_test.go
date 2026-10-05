@@ -36,6 +36,26 @@ func TestApiKeyGateway(t *testing.T) {
 			wantPass:   true,
 		},
 		{
+			// Plaid's sender has a generic client UA; the handler verifies
+			// Plaid's signature itself.
+			name:       "plaid webhook reaches its handler despite a tool UA",
+			keyEnv:     secret,
+			method:     http.MethodPost,
+			path:       "/api/v1/webhooks/plaid",
+			headers:    map[string]string{"User-Agent": "Go-http-client/1.1"},
+			wantStatus: http.StatusOK,
+			wantPass:   true,
+		},
+		{
+			name:       "exemption is exact: other paths still blocked",
+			keyEnv:     secret,
+			method:     http.MethodPost,
+			path:       "/api/v1/webhooks/plaid/extra",
+			headers:    map[string]string{"User-Agent": "Go-http-client/1.1"},
+			wantStatus: http.StatusForbidden,
+			wantPass:   false,
+		},
+		{
 			name:       "valid key allowed",
 			keyEnv:     secret,
 			method:     http.MethodGet,
