@@ -491,3 +491,28 @@ func TestPlaidUpdateComplete_NoAccountsAnswerDeletesNothing(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Len(t, btdb.docs, 1)
 }
+
+func TestPlaidExchange_SwitchingBanksClearsOldTransactions(t *testing.T) {
+	t.Setenv("PLAID_ACCESS_TOKEN", "access-old")
+	psdb := &fakePlaidStateDB{hasState: true, state: models.PlaidSyncState{ItemID: "old-item"}}
+	btdb := newFakeBankTxDB()
+	btdb.docs["old-1"] = models.BankTransaction{TransactionID: "old-1", Source: "plaid"}
+	client := &fakePlaidClient{exchangeToken: "access-new", exchangeItem: "new-item"}
+	f := plaidOwnerFixture(financeOwnerDoc(), client, btdb, psdb)
+	token := financeTestToken(t, financeTestSecret, nil)
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidExchangeHandler)), http.MethodPost, "/x", `{"public_token":"public-x"}`, token)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, btdb.docs)
+}
+
+func TestPlaidExchange_FirstConnectionKeepsNothingToClear(t *testing.T) {
+	t.Setenv("PLAID_ACCESS_TOKEN", "")
+	btdb := newFakeBankTxDB()
+	btdb.docs["manual"] = models.BankTransaction{TransactionID: "manual", Source: "plaid"}
+	client := &fakePlaidClient{exchangeToken: "access-new", exchangeItem: "new-item"}
+	f := plaidOwnerFixture(financeOwnerDoc(), client, btdb, &fakePlaidStateDB{})
+	token := financeTestToken(t, financeTestSecret, nil)
+	rec := runPlaidRequest(t, f, f.RequireOwner(http.HandlerFunc(f.PlaidExchangeHandler)), http.MethodPost, "/x", `{"public_token":"public-x"}`, token)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, btdb.docs, 1)
+}

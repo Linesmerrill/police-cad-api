@@ -73,6 +73,10 @@ type plaidSyncClient interface {
 	RemoveItem(ctx context.Context, accessToken string) error
 }
 
+// plaidHistoryDays is how much transaction history a new connection asks
+// for: 730 days, the most Plaid allows.
+const plaidHistoryDays = 730
+
 // plaidLinkOptions configures a Link token.
 type plaidLinkOptions struct {
 	// AccessToken switches Link to update mode on that item.
@@ -108,6 +112,10 @@ func (c *plaidAPIClient) CreateLinkToken(ctx context.Context, opts plaidLinkOpti
 		}
 	} else {
 		req.Products = []plaid.Products{plaid.PRODUCTS_TRANSACTIONS}
+		// History is fixed when the connection is created, and Plaid's
+		// default is only 90 days. Ask for the most it allows (24 months)
+		// so the P&L can look back past one quarter.
+		req.Transactions = &plaid.LinkTokenTransactions{DaysRequested: plaid.PtrInt32(plaidHistoryDays)}
 	}
 	resp, _, err := c.api.PlaidApi.LinkTokenCreate(ctx).LinkTokenCreateRequest(req).Execute()
 	if err != nil {
@@ -405,6 +413,15 @@ func (f Finance) PlaidExchangeHandler(w http.ResponseWriter, r *http.Request) {
 	if itemID != "" {
 		update := bson.M{"$set": bson.M{"item_id": itemID, "updated_at": time.Now().UTC()}}
 		if state, serr := f.plaidSyncState(ctx); serr == nil && state.ItemID != itemID {
+			// The new item re-syncs the same history under new transaction
+			// ids, so the old item's transactions would be counted twice.
+			if state.ItemID != "" {
+				if n, derr := f.BTDB.DeleteMany(ctx, bson.M{"source": "plaid"}); derr != nil {
+					zap.S().Warnw("failed to clear the previous bank's transactions", "error", derr)
+				} else if n > 0 {
+					zap.S().Infow("cleared the previous bank's transactions", "count", n)
+				}
+			}
 			if oldToken := plaidConnectedToken(state); oldToken != "" && oldToken != accessToken {
 				if rerr := c.RemoveItem(ctx, oldToken); rerr != nil {
 					zap.S().Warnw("failed to remove the previous Plaid item", "error", plaidErrorReason(rerr))
