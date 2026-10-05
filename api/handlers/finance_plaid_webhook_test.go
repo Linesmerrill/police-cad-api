@@ -446,3 +446,8 @@ func TestPlaidExchange_ReconnectAfterDisconnectClearsIt(t *testing.T) {
 	// Already removed at disconnect: not removed twice.
 	assert.Empty(t, client.removed)
 }
+
+func TestPlaidErrorReason_PlainErrorPassesThrough(t *testing.T) {
+	assert.Equal(t, "", plaidErrorReason(nil))
+	assert.Equal(t, "boom", plaidErrorReason(errors.New("boom")))
+}
