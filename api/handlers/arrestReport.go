@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/linesmerrill/police-cad-api/api"
@@ -167,19 +169,25 @@ func (a ArrestReport) DeleteArrestReportHandler(w http.ResponseWriter, r *http.R
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	// Gate: per-issuing-department RestrictCivilianRecordDeletion. Block the
-	// delete unless the requester has community-level bypass (owner /
-	// administrator / manage-records).
-	if a.CommDB != nil {
+	// Gate: the community's "Allow civilians to delete their own records"
+	// setting. Only the arrestee character's owner can be refused; see
+	// civilianRecordDeletionBlocked.
+	if requesterID := recordDeletionRequester(r); requesterID != "" && a.CDB != nil {
 		report, ferr := a.DB.FindOne(ctx, filter)
 		if ferr != nil {
-			config.ErrorStatus("failed to find Arrest report", http.StatusNotFound, w, ferr)
+			if errors.Is(ferr, mongo.ErrNoDocuments) {
+				config.InfoStatus("Arrest report not found", http.StatusNotFound, w, ferr)
+			} else {
+				config.ErrorStatus("failed to find Arrest report", http.StatusInternalServerError, w, ferr)
+			}
 			return
 		}
-		if report != nil {
-			requesterID := api.GetAuthenticatedUserIDFromContext(r.Context())
-			if denied, derr := enforceRecordDeleteRestriction(ctx, w, a.CommDB, report.Details.DepartmentID, requesterID); derr != nil || denied {
-				return
+		if arresteeID, oerr := primitive.ObjectIDFromHex(report.Details.Arrestee.ID); oerr == nil {
+			// An arrestee whose character is gone has no owner to restrict.
+			if civ, cerr := a.CDB.FindOne(ctx, bson.M{"_id": arresteeID}); cerr == nil && civ != nil {
+				if enforceCivilianRecordDeletion(ctx, w, a.CommDB, civ, requesterID, report.Details.DepartmentID, report.Details.ActiveCommunityID) {
+					return
+				}
 			}
 		}
 	}
