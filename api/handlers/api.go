@@ -492,6 +492,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/tenCodes/{codeId}", api.Middleware(http.HandlerFunc(c.UpdateTenCodeHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/tenCodes/{codeId}", api.Middleware(http.HandlerFunc(c.DeleteTenCodeHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/tenCodes", api.Middleware(http.HandlerFunc(c.AddTenCodeHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/members/tenCode/bulk", api.Middleware(http.HandlerFunc(c.BulkSetMemberTenCodeHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/members/{userId}/tenCode", api.Middleware(http.HandlerFunc(c.SetMemberTenCodeHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/members/{userId}/department-callsigns", api.Middleware(http.HandlerFunc(c.GetDepartmentCallSignsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/members/{userId}/department-callsigns", api.Middleware(http.HandlerFunc(c.SetDepartmentCallSignHandler))).Methods("PUT")

@@ -3366,15 +3366,7 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 
 	// Update or add the TenCodeID for the user, preserving existing fields
 	members := community.Details.Members
-	existingMember := members[userID]
-	members[userID] = models.MemberDetail{
-		DepartmentID:         getStringOrDefault(requestBody.DepartmentID, existingMember.DepartmentID),
-		TenCodeID:            getStringOrDefault(requestBody.TenCodeID, existingMember.TenCodeID),
-		IsOnline:             existingMember.IsOnline,
-		ActiveDepartmentID:   getStringOrDefault(requestBody.ActiveDepartmentID, existingMember.ActiveDepartmentID),
-		ActiveDepartmentName: getStringOrDefault(requestBody.ActiveDepartmentName, existingMember.ActiveDepartmentName),
-		DepartmentCallSigns:  existingMember.DepartmentCallSigns,
-	}
+	members[userID] = mergeMemberTenCode(members[userID], requestBody)
 
 	// Update the community in the database
 	filter := bson.M{"_id": cID}
@@ -3386,25 +3378,7 @@ func (c Community) SetMemberTenCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Broadcast the ten-code change so dispatch dashboards update without polling.
-	// Look up the code/description from the community's configured ten-codes
-	// so subscribers don't need a second round-trip.
-	updatedMember := members[userID]
-	var tenCodeStr, tenCodeDesc string
-	for _, tc := range community.Details.TenCodes {
-		if tc.ID.Hex() == updatedMember.TenCodeID {
-			tenCodeStr = tc.Code
-			tenCodeDesc = tc.Description
-			break
-		}
-	}
-	go c.notifyNodeServerPanic("dispatch_unit_status_changed", map[string]interface{}{
-		"communityId":         communityID,
-		"userId":              userID,
-		"tenCodeId":           updatedMember.TenCodeID,
-		"tenCode":             tenCodeStr,
-		"tenCodeDescription":  tenCodeDesc,
-		"activeDepartmentId":  updatedMember.ActiveDepartmentID,
-	})
+	c.notifyUnitStatusChanged(community, communityID, userID, members[userID])
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Ten-Code set successfully"}`))
