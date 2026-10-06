@@ -162,12 +162,6 @@ type bulkMemberTenCodeRequest struct {
 	ActiveDepartmentName string   `json:"activeDepartmentName"`
 }
 
-type bulkItemResult struct {
-	ID    string `json:"id"`
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
-}
-
 // BulkSetMemberTenCodeHandler sets one ten-code on many units at once, for a
 // dispatcher clearing a shift or moving several units to the same status.
 // PUT /api/v1/community/{communityId}/members/tenCode/bulk
