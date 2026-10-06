@@ -2540,45 +2540,9 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Update the user's communities array to remove the specified community
-	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": requestBody.CommunityID}}}
-	_, err = u.DB.UpdateOne(ctx, userFilter, userUpdate)
-	if err != nil {
-		config.ErrorStatus("failed to remove community from user's communities", http.StatusInternalServerError, w, err)
+	if reason, err := u.removeUserFromCommunity(ctx, uID, cID, community); err != nil {
+		config.ErrorStatus(reason, http.StatusInternalServerError, w, err)
 		return
-	}
-
-	// Find the community by community ID and decrement the membersCount
-	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": -1}}
-	err = u.CDB.UpdateOne(ctx, communityFilter, communityUpdate)
-	if err != nil {
-		config.ErrorStatus("failed to decrement community membersCount", http.StatusInternalServerError, w, err)
-		return
-	}
-
-	// Iterate through the roles and remove the user ID from the members array
-	for _, role := range community.Details.Roles {
-		roleFilter := bson.M{"_id": cID, "community.roles._id": role.ID, "community.roles.members": userID}
-		roleUpdate := bson.M{"$pull": bson.M{"community.roles.$.members": userID}}
-		err := u.CDB.UpdateOne(ctx, roleFilter, roleUpdate)
-		if err != nil {
-			config.ErrorStatus("failed to remove user from role members", http.StatusInternalServerError, w, err)
-			return
-		}
-	}
-
-	// Remove the user from every department's members. Without this, department
-	// membership (especially in private/approval-required departments) survived a
-	// community removal — on re-add the user silently regained access without
-	// re-approval, and opening such a department errored. Mirror the roles loop
-	// above, using the same per-department $pull as RemoveUserFromDepartmentHandler.
-	for _, dept := range community.Details.Departments {
-		deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
-		deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
-		if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
-			config.ErrorStatus("failed to remove user from department members", http.StatusInternalServerError, w, err)
-			return
-		}
 	}
 
 	// Audit log — distinguish kick (admin removed member) vs leave (self-initiated)
@@ -2591,6 +2555,60 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"message": "Community and roles updated successfully"}`))
+}
+
+// removeUserFromCommunity performs every write that takes a user out of a
+// community: their communities entry, the membersCount, every role and every
+// department. It is shared by the single remove-community endpoint and the
+// bulk member removal, so a kick does exactly the same thing either way.
+//
+// It does no checking. Callers must already have confirmed the user is in the
+// community, is not its owner, and that the caller is allowed to remove them.
+// On failure it returns a short reason for the client alongside the error.
+//
+// The ids written into the queries are re-derived from the parsed ObjectIDs
+// rather than taken from the request, so nothing the caller sent reaches a
+// query as-is.
+func (u User) removeUserFromCommunity(ctx context.Context, uID, cID primitive.ObjectID, community *models.Community) (string, error) {
+	userID := uID.Hex()
+	communityID := cID.Hex()
+
+	// Update the user's communities array to remove the specified community
+	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}
+	if _, err := u.DB.UpdateOne(ctx, bson.M{"_id": uID}, userUpdate); err != nil {
+		return "failed to remove community from user's communities", err
+	}
+
+	// Find the community by community ID and decrement the membersCount
+	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": -1}}
+	if err := u.CDB.UpdateOne(ctx, bson.M{"_id": cID}, communityUpdate); err != nil {
+		return "failed to decrement community membersCount", err
+	}
+
+	// Iterate through the roles and remove the user ID from the members array
+	for _, role := range community.Details.Roles {
+		roleFilter := bson.M{"_id": cID, "community.roles._id": role.ID, "community.roles.members": userID}
+		roleUpdate := bson.M{"$pull": bson.M{"community.roles.$.members": userID}}
+		err := u.CDB.UpdateOne(ctx, roleFilter, roleUpdate)
+		if err != nil {
+			return "failed to remove user from role members", err
+		}
+	}
+
+	// Remove the user from every department's members. Without this, department
+	// membership (especially in private/approval-required departments) survived a
+	// community removal — on re-add the user silently regained access without
+	// re-approval, and opening such a department errored. Mirror the roles loop
+	// above, using the same per-department $pull as RemoveUserFromDepartmentHandler.
+	for _, dept := range community.Details.Departments {
+		deptFilter := bson.M{"_id": cID, "community.departments._id": dept.ID}
+		deptUpdate := bson.M{"$pull": bson.M{"community.departments.$.members": bson.M{"userID": userID}}}
+		if err := u.CDB.UpdateOne(ctx, deptFilter, deptUpdate); err != nil {
+			return "failed to remove user from department members", err
+		}
+	}
+
+	return "", nil
 }
 
 // BanUserFromCommunityHandler bans a user from a community

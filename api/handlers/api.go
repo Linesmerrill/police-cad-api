@@ -60,7 +60,7 @@ func (a *App) New() *mux.Router {
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB, OffDB: databases.NewRpPromoOffenseDatabase(a.dbHelper)}
-	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper), ACDB: acDB}
+	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper), ACDB: acDB, ALDB: alDB}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
 	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper)}
@@ -417,6 +417,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{user_id}/subscriptions", api.Middleware(http.HandlerFunc(c.GetCommunityUserSubscriptions))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/members/search", api.Middleware(http.HandlerFunc(c.SearchCommunityMembersHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/members", api.Middleware(http.HandlerFunc(c.CommunityMembersHandler))).Methods("GET")
+	apiCreate.Handle("/community/{communityId}/members/bulk-remove", api.Middleware(http.HandlerFunc(u.BulkRemoveCommunityMembersHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/civilians/bulk-delete", api.Middleware(http.HandlerFunc(civ.BulkDeleteCommunityCiviliansHandler))).Methods("POST")
 	apiV2.Handle("/community/{communityId}/members", api.Middleware(http.HandlerFunc(c.FetchCommunityMembersHandlerV2))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/member-status-counts", api.Middleware(http.HandlerFunc(c.MemberStatusCountsHandler))).Methods("GET")
 	apiV2.Handle("/community/{communityId}/units", api.Middleware(http.HandlerFunc(c.FetchCommunityUnitsHandlerV2))).Methods("GET")
@@ -490,6 +492,7 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/community/{communityId}/tenCodes/{codeId}", api.Middleware(http.HandlerFunc(c.UpdateTenCodeHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/tenCodes/{codeId}", api.Middleware(http.HandlerFunc(c.DeleteTenCodeHandler))).Methods("DELETE")
 	apiCreate.Handle("/community/{communityId}/tenCodes", api.Middleware(http.HandlerFunc(c.AddTenCodeHandler))).Methods("POST")
+	apiCreate.Handle("/community/{communityId}/members/tenCode/bulk", api.Middleware(http.HandlerFunc(c.BulkSetMemberTenCodeHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/members/{userId}/tenCode", api.Middleware(http.HandlerFunc(c.SetMemberTenCodeHandler))).Methods("PUT")
 	apiCreate.Handle("/community/{communityId}/members/{userId}/department-callsigns", api.Middleware(http.HandlerFunc(c.GetDepartmentCallSignsHandler))).Methods("GET")
 	apiCreate.Handle("/community/{communityId}/members/{userId}/department-callsigns", api.Middleware(http.HandlerFunc(c.SetDepartmentCallSignHandler))).Methods("PUT")

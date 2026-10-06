@@ -649,6 +649,16 @@ createIndexSafe(
   }
 );
 
+// "Recently Shipped": status=released sorted by releasedAt, then updatedAt.
+createIndexSafe(
+  db.featureRequests,
+  { status: 1, releasedAt: -1, updatedAt: -1 },
+  {
+    name: "feature_request_status_released_idx",
+    background: true
+  }
+);
+
 // Compound unique index on votes to prevent duplicates
 createIndexSafe(
   db.featureRequestVotes,
