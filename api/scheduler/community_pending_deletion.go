@@ -13,7 +13,7 @@ import (
 
 const communityHardDeleteLockKey = "community_hard_delete_job"
 
-// processCommunityPendingDeletions runs daily. Sends a 24-hour heads-up email to
+// processCommunityPendingDeletions runs hourly. Sends a 24-hour heads-up email to
 // owners whose communities are about to be hard-deleted, then hard-deletes any
 // community whose ScheduledDeletionAt has elapsed. Idempotent across instances
 // via the shared scheduler lock.
@@ -160,9 +160,12 @@ func (s *Scheduler) sendPendingDeletionReminderEmail(ctx context.Context, c mode
 		scheduled = c.Details.ScheduledDeletionAt.Time().UTC()
 	}
 
-	subject := "Final reminder: " + c.Details.Name + " deletes in 24 hours"
-	htmlContent := templates.RenderCommunityPendingDeletionReminderEmail(displayName, c.Details.Name, scheduled)
-	plainText := "Your community " + c.Details.Name + " is scheduled for permanent deletion in less than 24 hours. Contact support if you need it restored."
+	// Say how long is actually left, not a fixed "24 hours": a reminder can go
+	// out late (the job was down, or the community was scheduled close in).
+	timeLeft := templates.DeletionTimeLeft(scheduled.Sub(time.Now().UTC()))
+	subject := "Final reminder: " + c.Details.Name + " deletes " + timeLeft
+	htmlContent := templates.RenderCommunityPendingDeletionReminderEmail(displayName, c.Details.Name, scheduled, timeLeft)
+	plainText := "Your community " + c.Details.Name + " is scheduled for permanent deletion " + timeLeft + ". Contact support if you need it restored."
 
 	if err := s.sendEmail(email, displayName, subject, htmlContent, plainText); err != nil {
 		zap.S().Errorw("community pending-deletion: reminder email failed",

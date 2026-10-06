@@ -2,13 +2,30 @@ package templates
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
+// DeletionTimeLeft phrases the time until a hard-delete for the reminder's
+// subject and heading: "in 24 hours", "in 1 hour", "in under an hour".
+// Rounded to the nearest hour, so 23h40m reads as 24 hours.
+func DeletionTimeLeft(d time.Duration) string {
+	hours := int(math.Round(d.Hours()))
+	switch {
+	case d <= 0 || hours < 1:
+		return "in under an hour"
+	case hours == 1:
+		return "in 1 hour"
+	default:
+		return fmt.Sprintf("in %d hours", hours)
+	}
+}
+
 // RenderCommunityPendingDeletionReminderEmail builds the HTML for the
-// 24-hour-before-hard-delete reminder. Owner cannot self-restore; the email
-// directs them to contact support if they need the community back.
-func RenderCommunityPendingDeletionReminderEmail(displayName, communityName string, scheduledDeletionAt time.Time) string {
+// final reminder before a hard-delete. timeLeft comes from DeletionTimeLeft.
+// Owner cannot self-restore; the email directs them to contact support if
+// they need the community back.
+func RenderCommunityPendingDeletionReminderEmail(displayName, communityName string, scheduledDeletionAt time.Time, timeLeft string) string {
 	if displayName == "" {
 		displayName = "there"
 	}
@@ -39,7 +56,7 @@ func RenderCommunityPendingDeletionReminderEmail(displayName, communityName stri
 <body>
   <div class="container">
     <div class="header">
-      <h1>Last chance: %s deletes in 24 hours</h1>
+      <h1>Last chance: %s deletes %s</h1>
     </div>
     <div class="content">
       <h2>Hi %s,</h2>
@@ -57,5 +74,5 @@ func RenderCommunityPendingDeletionReminderEmail(displayName, communityName stri
     </div>
   </div>
 </body>
-</html>`, communityName, displayName, communityName, scheduled)
+</html>`, communityName, timeLeft, displayName, communityName, scheduled)
 }
