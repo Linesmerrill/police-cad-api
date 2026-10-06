@@ -34,6 +34,7 @@ type Civilian struct {
 	IDB    databases.InboxItemDatabase            // Economy inbox; nil-safe (hooks no-op when nil).
 	SDB    databases.ClockSessionDatabase         // Clock sessions; nil-safe (delete falls back to plain remove).
 	ACDB   databases.UserActiveCivilianDatabase   // Active-civilian pick; nil-safe.
+	ALDB   databases.AuditLogDatabase             // Community audit log; nil-safe (bulk delete skips auditing when nil).
 }
 
 // CivilianHandler returns all civilians
@@ -513,6 +514,22 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
+	if err := c.deleteCivilian(ctx, cID); err != nil {
+		config.ErrorStatus("failed to delete civilian", http.StatusInternalServerError, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Civilian deleted successfully",
+	})
+}
+
+// deleteCivilian removes a civilian and cleans up what points at it: active
+// clock-in sessions are ended first and user_active_civilians rows are cleared
+// after. Shared by the single delete endpoint and the community bulk delete so
+// both run the exact same cascade. It does no authorization.
+func (c Civilian) deleteCivilian(ctx context.Context, cID primitive.ObjectID) error {
 	// End any active clock-in sessions before deleting. Best-effort: a
 	// failure here logs and continues so a transient economy outage can't
 	// block a destructive operation the user explicitly requested.
@@ -527,10 +544,8 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	err = c.DB.DeleteOne(ctx, bson.M{"_id": cID})
-	if err != nil {
-		config.ErrorStatus("failed to delete civilian", http.StatusInternalServerError, w, err)
-		return
+	if err := c.DB.DeleteOne(ctx, bson.M{"_id": cID}); err != nil {
+		return err
 	}
 
 	// Cascade: clear any user_active_civilians rows pointing at this
@@ -547,10 +562,7 @@ func (c Civilian) DeleteCivilianHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Civilian deleted successfully",
-	})
+	return nil
 }
 
 // AddCriminalHistoryHandler adds a new criminal history item to a civilian
