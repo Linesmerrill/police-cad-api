@@ -111,7 +111,9 @@ func loadBulkCommunity(w http.ResponseWriter, r *http.Request, find func(*http.R
 		}
 		return nil, cID, communityID
 	}
-	return community, cID, communityID
+	// Hand back the canonical (lowercase) hex, which is how the id is stored on
+	// users and civilians.
+	return community, cID, cID.Hex()
 }
 
 func writeBulkResponse(w http.ResponseWriter, resp *bulkActionResponse) {
@@ -213,7 +215,7 @@ func (u User) bulkRemoveOneMember(r *http.Request, userID, actorID, communityID 
 		return "not a member of this community", ""
 	}
 
-	if reason, err := u.removeUserFromCommunity(ctx, uID, userID, communityID, cID, community); err != nil {
+	if reason, err := u.removeUserFromCommunity(ctx, uID, cID, community); err != nil {
 		zap.S().Warnw("bulk member remove: failed", "userId", userID, "communityId", communityID, "error", err)
 		return reason, ""
 	}

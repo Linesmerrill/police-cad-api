@@ -2540,7 +2540,7 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if reason, err := u.removeUserFromCommunity(ctx, uID, userID, requestBody.CommunityID, cID, community); err != nil {
+	if reason, err := u.removeUserFromCommunity(ctx, uID, cID, community); err != nil {
 		config.ErrorStatus(reason, http.StatusInternalServerError, w, err)
 		return
 	}
@@ -2565,7 +2565,14 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 // It does no checking. Callers must already have confirmed the user is in the
 // community, is not its owner, and that the caller is allowed to remove them.
 // On failure it returns a short reason for the client alongside the error.
-func (u User) removeUserFromCommunity(ctx context.Context, uID primitive.ObjectID, userID, communityID string, cID primitive.ObjectID, community *models.Community) (string, error) {
+//
+// The ids written into the queries are re-derived from the parsed ObjectIDs
+// rather than taken from the request, so nothing the caller sent reaches a
+// query as-is.
+func (u User) removeUserFromCommunity(ctx context.Context, uID, cID primitive.ObjectID, community *models.Community) (string, error) {
+	userID := uID.Hex()
+	communityID := cID.Hex()
+
 	// Update the user's communities array to remove the specified community
 	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}
 	if _, err := u.DB.UpdateOne(ctx, bson.M{"_id": uID}, userUpdate); err != nil {
