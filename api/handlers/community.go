@@ -1176,6 +1176,26 @@ func (c Community) UpdateCommunityFieldHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// "Allow civilians to delete their own records" decides what players may
+	// do to their own characters, so unlike most keys on this catch-all it is
+	// gated: owner, administrator, or "manage community settings" (the same
+	// people who see General Settings).
+	if gated, vErr := validateAllowCivilianRecordDeletionPatch(req); vErr != nil {
+		config.ErrorStatus(vErr.Error(), http.StatusBadRequest, w, nil)
+		return
+	} else if gated {
+		actx, acancel := api.WithQueryTimeout(r.Context())
+		current, findErr := c.DB.FindOne(actx, bson.M{"_id": objID})
+		acancel()
+		if findErr != nil || current == nil {
+			config.InfoStatus("community not found", http.StatusNotFound, w, findErr)
+			return
+		}
+		if !authorizeCommunityAction(w, r, current, "manage community settings") {
+			return
+		}
+	}
+
 	// A delisted community cannot be flipped public until the delisting ends.
 	if _, setsVisibility := req["visibility"]; setsVisibility {
 		vctx, vcancel := api.WithQueryTimeout(r.Context())
@@ -3898,7 +3918,16 @@ func (c Community) UpdateDepartmentDetailsHandler(w http.ResponseWriter, r *http
 			update["community.departments.$."+key] = s
 
 		// Bool fields
-		case "approvalRequired", "restrictCivilianRecordDeletion", "economyEnabled":
+		// Deprecated: record deletion moved to the community-level
+		// allowCivilianRecordDeletion. Older mobile builds still send this
+		// key, so it is validated and dropped rather than rejected.
+		case "restrictCivilianRecordDeletion":
+			if _, ok := value.(bool); !ok {
+				config.ErrorStatus(fmt.Sprintf("invalid %s: expected boolean", key), http.StatusBadRequest, w, nil)
+				return
+			}
+
+		case "approvalRequired", "economyEnabled":
 			b, ok := value.(bool)
 			if !ok {
 				config.ErrorStatus(fmt.Sprintf("invalid %s: expected boolean", key), http.StatusBadRequest, w, nil)

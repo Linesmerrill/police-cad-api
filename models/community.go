@@ -110,6 +110,14 @@ type CommunityDetails struct {
 	FirearmCreationLimitsEnabled  bool                    `json:"firearmCreationLimitsEnabled" bson:"firearmCreationLimitsEnabled"`
 	FirearmCreationLimit          int                     `json:"firearmCreationLimit" bson:"firearmCreationLimit"`
 	CivilianApprovalSystemEnabled bool                    `json:"civilianApprovalSystemEnabled" bson:"civilianApprovalSystemEnabled"`
+	// AllowCivilianRecordDeletion lets a player delete criminal history
+	// (citations, warnings) and arrest reports on characters they own. A
+	// pointer so a community that never set it (nil) reads as allowed. When
+	// explicitly false, the character's owner cannot delete those records
+	// unless they are the community owner or hold "administrator" or
+	// "manage records". Nobody else's access is affected. Read it through
+	// CivilianRecordDeletionAllowed.
+	AllowCivilianRecordDeletion *bool `json:"allowCivilianRecordDeletion,omitempty" bson:"allowCivilianRecordDeletion,omitempty"`
 	ActivePanicAlerts             []PanicAlert            `json:"activePanicAlerts" bson:"activePanicAlerts"`
 	CustomToneGroups              []CustomToneGroup       `json:"customToneGroups" bson:"customToneGroups"`
 	CustomToneSounds              []CustomToneSound       `json:"customToneSounds" bson:"customToneSounds"`
@@ -355,12 +363,11 @@ type Department struct {
 	Template         Template           `json:"template" bson:"template"`                       // Legacy embedded template (for backward compatibility)
 	TemplateRef      *TemplateReference `json:"templateRef" bson:"templateRef"`                 // New template reference system
 	ToneSound        string             `json:"toneSound,omitempty" bson:"toneSound,omitempty"` // "leo", "fd", "ems", or "" (uses template default)
-	// RestrictCivilianRecordDeletion gates civilian-initiated deletion of records
-	// (citations, written warnings, arrest reports) issued by this department.
-	// When true, only community owner / "administrator" / "manage records" can delete.
-	// Stored as a pointer so we can distinguish "explicitly false" (allow) from
-	// "missing on a legacy department" (also treated as allow, preserves prior behavior).
-	// New departments are created with this set to true.
+	// RestrictCivilianRecordDeletion is DEPRECATED and no longer enforced.
+	// Record deletion is now governed by the community-level
+	// CommunityDetails.AllowCivilianRecordDeletion. The field stays so existing
+	// documents keep decoding and older mobile builds that still PATCH it get a
+	// 200; nothing reads it and new departments no longer set it.
 	RestrictCivilianRecordDeletion *bool `json:"restrictCivilianRecordDeletion,omitempty" bson:"restrictCivilianRecordDeletion,omitempty"`
 	// Economy fields
 	EconomyEnabled           bool               `json:"economyEnabled" bson:"economyEnabled"`
