@@ -132,9 +132,13 @@ func (s *Scheduler) Start() {
 		}
 	}
 
-	// Community soft-delete sweep: reminders + hard-deletes for elapsed grace periods
+	// Community soft-delete sweep: reminders + hard-deletes for elapsed grace periods.
+	// Hourly, so the final reminder lands 23-24h before the deadline and the
+	// hard-delete follows the deadline within the hour. A daily run sent the
+	// "24 hours" reminder anywhere from 24h to minutes before, and deleted up
+	// to a day late.
 	if s.CDB != nil && s.DBHelper != nil {
-		const communityPendingSchedule = "0 3 * * *"
+		const communityPendingSchedule = "0 * * * *"
 		if _, err := s.cron.AddFunc(communityPendingSchedule, s.processCommunityPendingDeletions); err != nil {
 			zap.S().Errorw("failed to register community pending-deletion job", "error", err)
 		} else {
