@@ -154,6 +154,10 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 				sort = bson.D{{Key: "upvoteCount", Value: -1}, {Key: "createdAt", Value: -1}}
 			case "newest":
 				sort = bson.D{{Key: "createdAt", Value: -1}}
+			case "released":
+				// Most recently shipped first. Requests released before
+				// releasedAt existed have none and fall back to updatedAt.
+				sort = bson.D{{Key: "releasedAt", Value: -1}, {Key: "updatedAt", Value: -1}}
 			default:
 				sort = bson.D{{Key: "createdAt", Value: -1}}
 			}
@@ -279,6 +283,7 @@ func (h FeatureRequestHandler) ListFeatureRequestsHandler(w http.ResponseWriter,
 			Comments:     []models.FeatureCommentResponse{},
 			CreatedAt:    req.CreatedAt,
 			UpdatedAt:    req.UpdatedAt,
+			ReleasedAt:   req.ReleasedAt,
 		}
 	}
 
@@ -571,6 +576,7 @@ func (h FeatureRequestHandler) GetFeatureRequestHandler(w http.ResponseWriter, r
 		Comments:     comments,
 		CreatedAt:    fr.CreatedAt,
 		UpdatedAt:    fr.UpdatedAt,
+		ReleasedAt:   fr.ReleasedAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1171,13 +1177,13 @@ func (h FeatureRequestHandler) UpdateStatusHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	update := bson.M{
-		"$set": bson.M{
-			"status":    req.Status,
-			"updatedAt": primitive.NewDateTimeFromTime(time.Now()),
-		},
+	existing, err := h.DB.FindOne(ctx, bson.M{"_id": frID})
+	if err != nil {
+		config.InfoStatus("Feature request not found", http.StatusNotFound, w, err)
+		return
 	}
 
+	update := statusUpdate(existing, req.Status, time.Now())
 	err = h.DB.UpdateOne(ctx, bson.M{"_id": frID}, update)
 	if err != nil {
 		config.ErrorStatus("Failed to update status", http.StatusInternalServerError, w, err)
@@ -1191,6 +1197,24 @@ func (h FeatureRequestHandler) UpdateStatusHandler(w http.ResponseWriter, r *htt
 		"message": "Status updated successfully",
 		"status":  req.Status,
 	})
+}
+
+// statusUpdate builds the update for a status change. releasedAt is stamped
+// when a request becomes released (kept if it already was, so re-saving the
+// same status doesn't move it in Recently Shipped) and cleared when it leaves
+// released.
+func statusUpdate(existing *models.FeatureRequest, status string, now time.Time) bson.M {
+	nowDT := primitive.NewDateTimeFromTime(now)
+	set := bson.M{"status": status, "updatedAt": nowDT}
+	update := bson.M{"$set": set}
+	if status == "released" {
+		if existing == nil || existing.Status != "released" || existing.ReleasedAt == nil {
+			set["releasedAt"] = nowDT
+		}
+	} else {
+		update["$unset"] = bson.M{"releasedAt": ""}
+	}
+	return update
 }
 
 // MergeHandler merges a source feature request into a target (admin only)

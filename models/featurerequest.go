@@ -19,6 +19,10 @@ type FeatureRequest struct {
 	Comments     []FeatureComment   `json:"comments" bson:"comments"`
 	CreatedAt    primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt    primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	// ReleasedAt is when the status last became "released"; cleared if it
+	// moves off released. Drives "Recently Shipped". Unset on requests
+	// released before this field existed.
+	ReleasedAt *primitive.DateTime `json:"releasedAt,omitempty" bson:"releasedAt,omitempty"`
 }
 
 // FeatureComment holds the structure for a comment on a feature request
@@ -89,6 +93,7 @@ type FeatureRequestResponse struct {
 	Comments     []FeatureCommentResponse `json:"comments"`
 	CreatedAt    primitive.DateTime       `json:"createdAt"`
 	UpdatedAt    primitive.DateTime       `json:"updatedAt"`
+	ReleasedAt   *primitive.DateTime      `json:"releasedAt,omitempty"`
 }
 
 // FeatureCommentResponse holds the structure for comment responses with populated user data
