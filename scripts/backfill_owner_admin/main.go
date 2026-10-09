@@ -520,8 +520,12 @@ func processCommunity(ctx context.Context, communities, users *mongo.Collection,
 		}
 	}
 	if len(set) > 0 || len(update) > 0 {
-		set["community.updatedAt"] = primitive.NewDateTimeFromTime(time.Now())
-		update["$set"] = set
+		// updatedAt is deliberately left alone: it is read as an activity
+		// signal, and a maintenance pass over ~150k dormant communities must
+		// not make them all look recently active.
+		if len(set) > 0 {
+			update["$set"] = set
+		}
 		var opts []*options.UpdateOptions
 		if updateOpts != nil {
 			opts = append(opts, updateOpts)
