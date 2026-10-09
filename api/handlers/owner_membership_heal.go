@@ -27,7 +27,7 @@ import (
 
 // healOwnerMembership makes a community's owner an approved member of it when
 // they are not one already. It reports whether it changed anything.
-func healOwnerMembership(ctx context.Context, udb databases.UserDatabase, community *models.Community) bool {
+func healOwnerMembership(ctx context.Context, udb databases.UserDatabase, cdb databases.CommunityDatabase, community *models.Community) bool {
 	if udb == nil || community == nil {
 		return false
 	}
@@ -44,5 +44,5 @@ func healOwnerMembership(ctx context.Context, udb databases.UserDatabase, commun
 		// locked-out owner.
 		return false
 	}
-	return ensureCommunityMembership(ctx, udb, ownerID, community.ID.Hex(), &owner)
+	return ensureCommunityMembership(ctx, udb, cdb, ownerID, community.ID.Hex(), &owner)
 }

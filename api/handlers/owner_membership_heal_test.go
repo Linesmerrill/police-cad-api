@@ -46,7 +46,7 @@ func TestHealOwnerMembership_AddsAMissingOwner(t *testing.T) {
 		Run(func(a mock.Arguments) { updates = append(updates, a.Get(2).(bson.M)) }).
 		Return(nil, nil)
 
-	assert.True(t, healOwnerMembership(context.Background(), udb, community))
+	assert.True(t, healOwnerMembership(context.Background(), udb, nil, community))
 
 	added := updates[len(updates)-1]["$addToSet"].(bson.M)["user.communities"].(models.UserCommunity)
 	assert.Equal(t, community.ID.Hex(), added.CommunityID)
@@ -62,7 +62,7 @@ func TestHealOwnerMembership_LeavesAHealthyOwnerAlone(t *testing.T) {
 	}}
 
 	udb := ownerLookup(owner, true)
-	assert.False(t, healOwnerMembership(context.Background(), udb, community))
+	assert.False(t, healOwnerMembership(context.Background(), udb, nil, community))
 	udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -81,7 +81,7 @@ func TestHealOwnerMembership_PromotesAPendingOwner(t *testing.T) {
 		Run(func(a mock.Arguments) { updates = append(updates, a.Get(2).(bson.M)) }).
 		Return(nil, nil)
 
-	assert.True(t, healOwnerMembership(context.Background(), udb, community))
+	assert.True(t, healOwnerMembership(context.Background(), udb, nil, community))
 	assert.Equal(t, []bson.M{{"$set": bson.M{"user.communities.$.status": "approved"}}}, updates)
 }
 
@@ -89,16 +89,16 @@ func TestHealOwnerMembership_PromotesAPendingOwner(t *testing.T) {
 func TestHealOwnerMembership_IgnoresOrphans(t *testing.T) {
 	// The owner's account has been deleted.
 	udb := ownerLookup(models.User{}, false)
-	assert.False(t, healOwnerMembership(context.Background(), udb, communityOwnedBy(primitive.NewObjectID().Hex())))
+	assert.False(t, healOwnerMembership(context.Background(), udb, nil, communityOwnedBy(primitive.NewObjectID().Hex())))
 	udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 
 	// No owner, or one that isn't an id: no lookup at all.
 	for _, bad := range []string{"", "not-an-id"} {
 		empty := &mocks.UserDatabase{}
-		assert.False(t, healOwnerMembership(context.Background(), empty, communityOwnedBy(bad)))
+		assert.False(t, healOwnerMembership(context.Background(), empty, nil, communityOwnedBy(bad)))
 		empty.AssertNotCalled(t, "FindOne", mock.Anything, mock.Anything)
 	}
 
-	assert.False(t, healOwnerMembership(context.Background(), nil, communityOwnedBy(primitive.NewObjectID().Hex())))
-	assert.False(t, healOwnerMembership(context.Background(), &mocks.UserDatabase{}, nil))
+	assert.False(t, healOwnerMembership(context.Background(), nil, nil, communityOwnedBy(primitive.NewObjectID().Hex())))
+	assert.False(t, healOwnerMembership(context.Background(), &mocks.UserDatabase{}, nil, nil))
 }
