@@ -239,3 +239,26 @@ func TestBanUserFromCommunity_RefusesAnUnidentifiedCaller(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
+
+// An admin with manage bans could ban the owner from their own community,
+// leaving some with nobody in charge. The owner is refused like a removal is.
+func TestBanUserFromCommunity_RefusesBanningTheOwner(t *testing.T) {
+	community := communityOwnedBy(t, pickerPendingUser) // the ban target owns it
+	community.Details.Roles = []models.Role{{
+		ID:          primitive.NewObjectID(),
+		Name:        "Admins",
+		Members:     []string{pickerApprovedUser},
+		Permissions: []models.Permission{{Name: "administrator", Enabled: true}},
+	}}
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOne", mock.Anything, mock.Anything).Return(community, nil)
+	udb := &mocks.UserDatabase{}
+	u := handlers.User{DB: udb, CDB: cdb}
+
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(u.BanUserFromCommunityHandler).ServeHTTP(rr, banRequest(t, pickerApprovedUser))
+
+	assert.Equal(t, http.StatusConflict, rr.Code)
+	cdb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+	udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+}
