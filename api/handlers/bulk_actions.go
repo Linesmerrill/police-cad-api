@@ -215,7 +215,7 @@ func (u User) bulkRemoveOneMember(r *http.Request, userID, actorID, communityID 
 		return "not a member of this community", ""
 	}
 
-	if reason, err := u.removeUserFromCommunity(ctx, uID, cID, community); err != nil {
+	if reason, err := u.removeUserFromCommunity(ctx, uID, cID, community, &user); err != nil {
 		zap.S().Warnw("bulk member remove: failed", "userId", userID, "communityId", communityID, "error", err)
 		return reason, ""
 	}

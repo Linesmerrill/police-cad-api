@@ -5,6 +5,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/databases"
@@ -27,11 +28,17 @@ import (
 //   - any existing entry wins, whatever its status. A pending request, a
 //     decline or a ban in the current system is a newer decision than V1;
 //   - someone on the community's ban list stays out;
+//   - someone who left or was kicked stays out. Leaving removes the entry
+//     but used to leave activeCommunity behind, so every sign-in re-added
+//     them: players "kept getting added" to a community they had left, and
+//     kicked players walked back in. The audit log is the record of that
+//     decision, and it covers everyone who left before the pointer was
+//     cleared on leave;
 //   - a community that has been deleted, or is pending deletion, is skipped.
 
 // healV1Membership adds a V1 member's approved membership of their
 // activeCommunity when they have none. It reports whether it changed anything.
-func healV1Membership(ctx context.Context, udb databases.UserDatabase, cdb databases.CommunityDatabase, user *models.User) bool {
+func healV1Membership(ctx context.Context, udb databases.UserDatabase, cdb databases.CommunityDatabase, aldb databases.AuditLogDatabase, user *models.User) bool {
 	if udb == nil || cdb == nil || user == nil {
 		return false
 	}
@@ -59,15 +66,39 @@ func healV1Membership(ctx context.Context, udb databases.UserDatabase, cdb datab
 			return false
 		}
 	}
+	if leftOrKicked(ctx, aldb, communityOID, user.ID) {
+		return false
+	}
 	return ensureCommunityMembership(ctx, udb, userOID, communityID, user)
+}
+
+// leftOrKicked reports whether the audit log records the user leaving or being
+// kicked from the community. When the log can't be read it answers yes: a
+// missed heal is recoverable (they request to join), re-adding someone who
+// left or was removed is not.
+func leftOrKicked(ctx context.Context, aldb databases.AuditLogDatabase, communityID primitive.ObjectID, userID string) bool {
+	if aldb == nil {
+		return false
+	}
+	n, err := aldb.CountDocuments(ctx, bson.M{
+		"communityId": communityID,
+		"targetId":    userID,
+		"action":      bson.M{"$in": []string{"member.left", "member.kicked"}},
+	}, options.Count().SetLimit(1))
+	if err != nil {
+		zap.S().Warnw("v1 heal: could not read audit log, skipping heal",
+			"user_id", userID, "community_id", communityID.Hex(), "error", err)
+		return true
+	}
+	return n > 0
 }
 
 // NewV1MemberHealer returns the hook the login path runs after a successful
 // sign-in. It lives here rather than in the api package, which cannot reach
 // the community collection. Failures are logged and never block a login.
-func NewV1MemberHealer(udb databases.UserDatabase, cdb databases.CommunityDatabase) func(context.Context, *models.User) {
+func NewV1MemberHealer(udb databases.UserDatabase, cdb databases.CommunityDatabase, aldb databases.AuditLogDatabase) func(context.Context, *models.User) {
 	return func(ctx context.Context, user *models.User) {
-		if healV1Membership(ctx, udb, cdb, user) {
+		if healV1Membership(ctx, udb, cdb, aldb, user) {
 			zap.S().Infow("healed V1 membership",
 				"user_id", user.ID, "community_id", user.Details.ActiveCommunity)
 		}
