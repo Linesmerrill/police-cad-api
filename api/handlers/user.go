@@ -2688,6 +2688,14 @@ func (u User) BanUserFromCommunityHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The owner can't be banned from their own community, the same as they
+	// can't be removed from it: it left communities with nobody in charge.
+	if userID == community.Details.OwnerID {
+		config.ErrorStatus("You can't ban the community owner. Ownership has to be transferred first.",
+			http.StatusConflict, w, fmt.Errorf("refused ban of owner %s from community %s", userID, requestBody.CommunityID))
+		return
+	}
+
 	// Fetch user to determine prior community status — we only decrement
 	// membersCount if this user was previously "approved" (counted).
 	var bannedUser models.User

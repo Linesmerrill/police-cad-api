@@ -14,9 +14,7 @@ package main
 // For every community not pending deletion whose ownerID is the ObjectId of an
 // existing user, this:
 //   a. makes the owner an approved member: adds a missing user.communities
-//      entry, or promotes a pending/declined/banned one in place. An owner
-//      banned from their own community is also pulled off community.banList
-//      and reported in its own bucket;
+//      entry, or promotes a pending/declined one in place;
 //   b. gives the owner admin when no role grants it (models.OwnerHasAdmin):
 //      adds them to the existing Head Admin role (models.IsHeadAdminRole) or
 //      pushes models.BuildHeadAdminRole(owner);
@@ -24,7 +22,9 @@ package main
 //
 // Communities whose ownerID is not an ObjectId, or whose owner account no
 // longer exists, are reported only and never changed: those need a human
-// decision about who should own them.
+// decision about who should own them. So are communities whose owner is
+// banned from them: a ban is a deliberate decision, and the report says
+// whether another admin still runs the community.
 //
 // It walks communities in _id order in batches, sleeping between batches so it
 // does not load production, and prints the last _id it finished so an
@@ -442,8 +442,12 @@ func processCommunity(ctx context.Context, communities, users *mongo.Collection,
 	}
 	needsMembership := status != "approved"
 	if status == "banned" || inBanList {
-		rep.add(bucketOwnerBanned, fmt.Sprintf("%s  entry=%s  banList=%v", label, statusOrNone(status), inBanList))
-	} else if needsMembership {
+		// Leave it as it is. Unbanning would undo a decision someone made;
+		// the report lists these for a person to check another admin remains.
+		rep.add(bucketOwnerBanned, fmt.Sprintf("%s  entry=%s  banList=%v  (left unchanged)", label, statusOrNone(status), inBanList))
+		return false, true
+	}
+	if needsMembership {
 		rep.add(bucketMissingMembership, fmt.Sprintf("%s  entry=%s", label, statusOrNone(status)))
 	}
 
@@ -475,7 +479,7 @@ func processCommunity(ctx context.Context, communities, users *mongo.Collection,
 		rep.add(bucketCountCorrected, fmt.Sprintf("%s  %d -> %d", label, stored, expected))
 	}
 
-	if !needsMembership && !inBanList && !needsAdmin && !needsCount {
+	if !needsMembership && !needsAdmin && !needsCount {
 		return false, true
 	}
 	if !apply {
@@ -495,9 +499,6 @@ func processCommunity(ctx context.Context, communities, users *mongo.Collection,
 	var updateOpts *options.UpdateOptions
 	if needsCount {
 		set["community.membersCount"] = expected
-	}
-	if inBanList {
-		update["$pull"] = bson.M{"community.banList": ownerHex}
 	}
 	if needsAdmin {
 		switch {
