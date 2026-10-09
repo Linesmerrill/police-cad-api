@@ -69,7 +69,7 @@ func healV1Membership(ctx context.Context, udb databases.UserDatabase, cdb datab
 	if leftOrKicked(ctx, aldb, communityOID, user.ID) {
 		return false
 	}
-	return ensureCommunityMembership(ctx, udb, userOID, communityID, user)
+	return ensureCommunityMembership(ctx, udb, cdb, userOID, communityID, user)
 }
 
 // leftOrKicked reports whether the audit log records the user leaving or being

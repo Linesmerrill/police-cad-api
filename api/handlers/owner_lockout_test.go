@@ -129,7 +129,7 @@ func TestEnsureCommunityMembership(t *testing.T) {
 		user := &models.User{Details: models.UserDetails{
 			Communities: []models.UserCommunity{{CommunityID: communityID, Status: "approved"}},
 		}}
-		changed := ensureCommunityMembership(context.Background(), mockUserDB, uID, communityID, user)
+		changed := ensureCommunityMembership(context.Background(), mockUserDB, nil, uID, communityID, user)
 		assert.False(t, changed)
 		mockUserDB.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 	})
@@ -145,7 +145,7 @@ func TestEnsureCommunityMembership(t *testing.T) {
 		user := &models.User{Details: models.UserDetails{
 			Communities: []models.UserCommunity{{CommunityID: communityID, Status: "pending"}},
 		}}
-		changed := ensureCommunityMembership(context.Background(), mockUserDB, uID, communityID, user)
+		changed := ensureCommunityMembership(context.Background(), mockUserDB, nil, uID, communityID, user)
 
 		assert.True(t, changed)
 		assert.Len(t, updates, 1, "one write, not a push alongside the existing row")
@@ -165,7 +165,7 @@ func TestEnsureCommunityMembership(t *testing.T) {
 		user := &models.User{Details: models.UserDetails{
 			Communities: []models.UserCommunity{{CommunityID: primitive.NewObjectID().Hex(), Status: "approved"}},
 		}}
-		changed := ensureCommunityMembership(context.Background(), mockUserDB, uID, communityID, user)
+		changed := ensureCommunityMembership(context.Background(), mockUserDB, nil, uID, communityID, user)
 
 		assert.True(t, changed)
 		// Init-if-null, then the push.
@@ -178,8 +178,8 @@ func TestEnsureCommunityMembership(t *testing.T) {
 
 	t.Run("nil user is a no-op", func(t *testing.T) {
 		mockUserDB := &mocks.UserDatabase{}
-		assert.False(t, ensureCommunityMembership(context.Background(), mockUserDB, uID, communityID, nil))
-		assert.False(t, ensureCommunityMembership(context.Background(), nil, uID, communityID, &models.User{}))
+		assert.False(t, ensureCommunityMembership(context.Background(), mockUserDB, nil, uID, communityID, nil))
+		assert.False(t, ensureCommunityMembership(context.Background(), nil, nil, uID, communityID, &models.User{}))
 	})
 }
 

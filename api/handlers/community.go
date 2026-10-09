@@ -303,7 +303,7 @@ func (c Community) CommunityHandler(w http.ResponseWriter, r *http.Request) {
 	// Pre-2025 communities never gave their owner a user.communities entry, so
 	// every surface offered them "Request to Join". Runs before the live member
 	// count below so the count includes them. See owner_membership_heal.go.
-	if healOwnerMembership(ctx, c.UDB, dbResp) {
+	if healOwnerMembership(ctx, c.UDB, c.DB, dbResp) {
 		zap.S().Infow("healed owner membership", "community_id", commID, "owner_id", dbResp.Details.OwnerID)
 	}
 
@@ -1575,6 +1575,13 @@ func (c Community) DeleteRoleByIDHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Deleting the role the owner holds admin through would orphan the
+	// community. See owner_admin_guard.go.
+	if stripsOwnerAdmin(community, rolesWithout(community.Details.Roles, rID)) {
+		writeOwnerMustKeepAdmin(w, cID)
+		return
+	}
+
 	// Update the community to pull the role by ID
 	filter := bson.M{"_id": cID}
 	update := bson.M{"$pull": bson.M{"community.roles": bson.M{"_id": rID}}}
@@ -1737,6 +1744,16 @@ func (c Community) UpdateRolePermissionsHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
+
+	// Disabling administrator on the role the owner holds it through would
+	// orphan the community. See owner_admin_guard.go.
+	after := rolesWith(community.Details.Roles, rID, func(role *models.Role) {
+		role.Permissions = requestBody.Permissions
+	})
+	if stripsOwnerAdmin(community, after) {
+		writeOwnerMustKeepAdmin(w, cID)
 		return
 	}
 
@@ -2681,6 +2698,22 @@ func (c Community) DeleteRoleMemberHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !authorizeCommunityAction(w, r, community, "manage roles") {
+		return
+	}
+
+	// Removing the owner from the role they hold admin through would orphan
+	// the community. See owner_admin_guard.go.
+	after := rolesWith(community.Details.Roles, rID, func(role *models.Role) {
+		kept := role.Members[:0]
+		for _, m := range role.Members {
+			if m != memberID {
+				kept = append(kept, m)
+			}
+		}
+		role.Members = kept
+	})
+	if stripsOwnerAdmin(community, after) {
+		writeOwnerMustKeepAdmin(w, cID)
 		return
 	}
 
@@ -6052,7 +6085,6 @@ func (c Community) FetchBannedUsersHandlerV2(w http.ResponseWriter, r *http.Requ
 	w.Write(responseBytes)
 }
 
-// TransferCommunityOwnershipHandler handles the transfer of community ownership
 // ensureCommunityMembership makes user an approved member of communityID,
 // promoting an existing non-approved entry rather than adding a second one.
 //
@@ -6060,7 +6092,25 @@ func (c Community) FetchBannedUsersHandlerV2(w http.ResponseWriter, r *http.Requ
 // members map (see the note on Community.Details.Members), so this is the write
 // that actually makes someone a member. Returns whether anything changed, which
 // is useful for audit; callers that treat this as best-effort can ignore it.
-func ensureCommunityMembership(ctx context.Context, udb databases.UserDatabase, userID primitive.ObjectID, communityID string, user *models.User) bool {
+//
+// community.membersCount is the number of approved members, so whenever this
+// creates or promotes an approved entry it also bumps the stored count. Every
+// caller (owner heal, V1 heal, ownership transfer) goes through here, which
+// keeps that bookkeeping in one place. cdb may be nil to skip the count.
+func ensureCommunityMembership(ctx context.Context, udb databases.UserDatabase, cdb databases.CommunityDatabase, userID primitive.ObjectID, communityID string, user *models.User) bool {
+	if !approveCommunityMembership(ctx, udb, userID, communityID, user) {
+		return false
+	}
+	incrementMembersCount(ctx, cdb, communityID)
+	return true
+}
+
+// approveCommunityMembership is the user-side write behind
+// ensureCommunityMembership. It reports whether an approved entry was actually
+// created or promoted: the filters only match while the entry is still missing
+// or unapproved, so two requests racing to heal the same user cannot both
+// report a change (and so cannot both bump membersCount).
+func approveCommunityMembership(ctx context.Context, udb databases.UserDatabase, userID primitive.ObjectID, communityID string, user *models.User) bool {
 	if udb == nil || user == nil {
 		return false
 	}
@@ -6074,10 +6124,13 @@ func ensureCommunityMembership(ctx context.Context, udb databases.UserDatabase, 
 		// Present but pending/declined/blocked: promote it in place. Pushing a
 		// second entry would leave two rows for one community, and whichever the
 		// membership scan hits first decides access.
-		_, err := udb.UpdateOne(ctx,
-			bson.M{"_id": userID, "user.communities.communityId": communityID},
+		res, err := udb.UpdateOne(ctx,
+			bson.M{"_id": userID, "user.communities": bson.M{"$elemMatch": bson.M{
+				"communityId": communityID,
+				"status":      bson.M{"$ne": "approved"},
+			}}},
 			bson.M{"$set": bson.M{"user.communities.$.status": "approved"}})
-		return err == nil
+		return err == nil && (res == nil || res.ModifiedCount > 0)
 	}
 
 	// No entry at all. Initialize the array first when it is missing or null, the
@@ -6086,16 +6139,34 @@ func ensureCommunityMembership(ctx context.Context, udb databases.UserDatabase, 
 	_, _ = udb.UpdateOne(ctx,
 		bson.M{"_id": userID, "user.communities": nil},
 		bson.M{"$set": bson.M{"user.communities": bson.A{}}})
-	_, err := udb.UpdateOne(ctx,
-		bson.M{"_id": userID},
+	res, err := udb.UpdateOne(ctx,
+		bson.M{"_id": userID, "user.communities.communityId": bson.M{"$ne": communityID}},
 		bson.M{"$addToSet": bson.M{"user.communities": models.UserCommunity{
 			ID:          primitive.NewObjectID().Hex(),
 			CommunityID: communityID,
 			Status:      "approved",
 		}}})
-	return err == nil
+	return err == nil && (res == nil || res.ModifiedCount > 0)
 }
 
+// incrementMembersCount adds one approved member to the stored
+// community.membersCount. Best-effort: read paths recompute the count live, so
+// a failed bump only leaves the stored value briefly stale.
+func incrementMembersCount(ctx context.Context, cdb databases.CommunityDatabase, communityID string) {
+	if cdb == nil {
+		return
+	}
+	cID, err := primitive.ObjectIDFromHex(communityID)
+	if err != nil {
+		return
+	}
+	if err := cdb.UpdateOne(ctx, bson.M{"_id": cID}, bson.M{"$inc": bson.M{"community.membersCount": 1}}); err != nil {
+		zap.S().Warnw("failed to increment membersCount", "community_id", communityID, "error", err)
+	}
+}
+
+// TransferCommunityOwnershipHandler hands a community to a new owner, who also
+// receives Head Admin and an approved membership.
 func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *http.Request) {
 	// Get community ID from URL parameters
 	communityID := mux.Vars(r)["communityId"]
@@ -6215,6 +6286,15 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 		}
 
 		update["$set"].(bson.M)["community.roles"] = newRoles
+
+		// The owner must be an approved member, so they cannot also be on the
+		// ban list. Only pulled when present: $pull on a null banList errors.
+		for _, banned := range community.Details.BanList {
+			if banned == transferRequest.NewOwnerID {
+				update["$pull"] = bson.M{"community.banList": transferRequest.NewOwnerID}
+				break
+			}
+		}
 	}
 
 	// Apply the update
@@ -6239,7 +6319,7 @@ func (c Community) TransferCommunityOwnershipHandler(w http.ResponseWriter, r *h
 	//
 	// Best-effort: ownership has already moved and the caller is not left in a
 	// half-transferred state if the membership write fails.
-	ensureCommunityMembership(context.Background(), c.UDB, newOwnerID, communityID, &newOwner)
+	ensureCommunityMembership(context.Background(), c.UDB, c.DB, newOwnerID, communityID, &newOwner)
 
 	// Return success response
 	response := map[string]interface{}{

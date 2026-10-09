@@ -23,6 +23,7 @@ func v1Member(communityID string, entries ...models.UserCommunity) *models.User 
 func communityLookup(c *models.Community, err error) *mocks.CommunityDatabase {
 	cdb := &mocks.CommunityDatabase{}
 	cdb.On("FindOne", mock.Anything, mock.Anything).Return(c, err)
+	cdb.On("UpdateOne", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	return cdb
 }
 
