@@ -812,3 +812,54 @@ func TestUser_RemoveCommunityFromUserHandler_UserNotInRoles(t *testing.T) {
 	mockCommunityDB.AssertExpectations(t)
 	mockUserResult.AssertExpectations(t)
 }
+
+// A V1 player whose entry was never approved leaves the community their
+// activeCommunity and lastAccessedCommunity point at. The count isn't touched
+// (it counts approved members only; this drove counts negative), and both
+// pointers are blanked so the sign-in heal can't put them back.
+func TestUser_RemoveCommunityFromUserHandler_ClearsPointersAndSparesCount(t *testing.T) {
+	userID := "507f1f77bcf86cd799439011"
+	communityID := "507f1f77bcf86cd799439012"
+	userObjectID, _ := primitive.ObjectIDFromHex(userID)
+	communityObjectID, _ := primitive.ObjectIDFromHex(communityID)
+
+	body, _ := json.Marshal(map[string]string{"communityId": communityID})
+	req, _ := http.NewRequest("DELETE", "/api/v1/user/"+userID+"/remove-community", strings.NewReader(string(body)))
+	req = mux.SetURLVars(req, map[string]string{"userId": userID})
+
+	mockUser := &models.User{ID: userID, Details: models.UserDetails{
+		ActiveCommunity:       communityID,
+		LastAccessedCommunity: models.LastAccessedCommunity{CommunityID: communityID},
+		Communities:           []models.UserCommunity{{ID: "c1", CommunityID: communityID, Status: "pending"}},
+	}}
+	mockUserResult := &mocks.SingleResultHelper{}
+	mockUserResult.On("Decode", mock.Anything).Run(func(args mock.Arguments) {
+		*args.Get(0).(*models.User) = *mockUser
+	}).Return(nil)
+
+	mockUserDB := &mocks.UserDatabase{}
+	mockUserDB.On("FindOne", mock.Anything, bson.M{"_id": userObjectID}).Return(mockUserResult)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID},
+		bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}).
+		Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+	mockUserDB.On("UpdateOne", mock.Anything, bson.M{"_id": userObjectID},
+		bson.M{"$set": bson.M{"user.activeCommunity": "", "user.lastAccessedCommunity.communityID": ""}}).
+		Return(&mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil)
+
+	mockCommunityDB := &mocks.CommunityDatabase{}
+	mockCommunityDB.On("FindOne", mock.Anything, bson.M{"_id": communityObjectID}).
+		Return(&models.Community{ID: communityObjectID}, nil)
+
+	mockAuditLogDB := &mocks.AuditLogDatabase{}
+	mockAuditLogDB.On("InsertOne", mock.Anything, mock.Anything).Return(&mocks.InsertOneResultHelper{}, nil)
+
+	u := handlers.User{DB: mockUserDB, CDB: mockCommunityDB, ALDB: mockAuditLogDB}
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(u.RemoveCommunityFromUserHandler).ServeHTTP(rr, req)
+	time.Sleep(50 * time.Millisecond)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	mockUserDB.AssertExpectations(t)
+	mockCommunityDB.AssertNotCalled(t, "UpdateOne", mock.Anything, bson.M{"_id": communityObjectID},
+		bson.M{"$inc": bson.M{"community.membersCount": -1}})
+}

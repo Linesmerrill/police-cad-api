@@ -2540,7 +2540,7 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if reason, err := u.removeUserFromCommunity(ctx, uID, cID, community); err != nil {
+	if reason, err := u.removeUserFromCommunity(ctx, uID, cID, community, &user); err != nil {
 		config.ErrorStatus(reason, http.StatusInternalServerError, w, err)
 		return
 	}
@@ -2564,14 +2564,29 @@ func (u User) RemoveCommunityFromUserHandler(w http.ResponseWriter, r *http.Requ
 //
 // It does no checking. Callers must already have confirmed the user is in the
 // community, is not its owner, and that the caller is allowed to remove them.
+// user is the target as loaded by the caller; it decides whether membersCount
+// drops and which of the user's community pointers are cleared.
 // On failure it returns a short reason for the client alongside the error.
 //
 // The ids written into the queries are re-derived from the parsed ObjectIDs
 // rather than taken from the request, so nothing the caller sent reaches a
 // query as-is.
-func (u User) removeUserFromCommunity(ctx context.Context, uID, cID primitive.ObjectID, community *models.Community) (string, error) {
+func (u User) removeUserFromCommunity(ctx context.Context, uID, cID primitive.ObjectID, community *models.Community, user *models.User) (string, error) {
 	userID := uID.Hex()
 	communityID := cID.Hex()
+
+	// membersCount counts approved members only (see BanUserFromCommunity), so
+	// only an approved member leaving lowers it. Decrementing for a pending or
+	// stale entry drove counts negative.
+	wasApproved := false
+	if user != nil {
+		for _, uc := range user.Details.Communities {
+			if uc.CommunityID == communityID && uc.Status == "approved" {
+				wasApproved = true
+				break
+			}
+		}
+	}
 
 	// Update the user's communities array to remove the specified community
 	userUpdate := bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": communityID}}}
@@ -2579,10 +2594,31 @@ func (u User) removeUserFromCommunity(ctx context.Context, uID, cID primitive.Ob
 		return "failed to remove community from user's communities", err
 	}
 
-	// Find the community by community ID and decrement the membersCount
-	communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": -1}}
-	if err := u.CDB.UpdateOne(ctx, bson.M{"_id": cID}, communityUpdate); err != nil {
-		return "failed to decrement community membersCount", err
+	if wasApproved {
+		communityUpdate := bson.M{"$inc": bson.M{"community.membersCount": -1}}
+		if err := u.CDB.UpdateOne(ctx, bson.M{"_id": cID}, communityUpdate); err != nil {
+			return "failed to decrement community membersCount", err
+		}
+	}
+
+	// Blank the pointers that would bring the community back (blanked rather
+	// than removed, since older clients read these fields directly). The V1 heal
+	// (healV1Membership) re-adds activeCommunity as an approved membership on
+	// the next sign-in, which undid every leave and every kick; and
+	// lastAccessedCommunity reopens it in the apps as if it were still theirs.
+	if user != nil {
+		pointers := bson.M{}
+		if user.Details.ActiveCommunity == communityID {
+			pointers["user.activeCommunity"] = ""
+		}
+		if user.Details.LastAccessedCommunity.CommunityID == communityID {
+			pointers["user.lastAccessedCommunity.communityID"] = ""
+		}
+		if len(pointers) > 0 {
+			if _, err := u.DB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{"$set": pointers}); err != nil {
+				return "failed to clear the user's community pointers", err
+			}
+		}
 	}
 
 	// Iterate through the roles and remove the user ID from the members array

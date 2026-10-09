@@ -37,7 +37,7 @@ func (a *App) New() *mux.Router {
 	// setup go-guardian for middleware
 	m := api.MiddlewareDB{
 		DB:         databases.NewUserDatabase(a.dbHelper),
-		AfterLogin: NewV1MemberHealer(databases.NewUserDatabase(a.dbHelper), databases.NewCommunityDatabase(a.dbHelper)),
+		AfterLogin: NewV1MemberHealer(databases.NewUserDatabase(a.dbHelper), databases.NewCommunityDatabase(a.dbHelper), databases.NewAuditLogDatabase(a.dbHelper)),
 	}
 	m.SetupGoGuardian(a.dbHelper)
 

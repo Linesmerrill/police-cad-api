@@ -962,6 +962,14 @@ createIndexSafe(
   { name: "audit_logs_community_created_idx", background: true }
 );
 
+// The V1 sign-in heal checks whether a player left or was kicked from their
+// old community before re-adding them (healV1Membership / leftOrKicked).
+createIndexSafe(
+  db.audit_logs,
+  { communityId: 1, targetId: 1, action: 1 },
+  { name: "audit_logs_community_target_action_idx", background: true }
+);
+
 // Medical reports queried by community + reporting EMS.
 createIndexSafe(
   db.medicalreports,

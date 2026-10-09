@@ -43,7 +43,7 @@ func TestHealV1Membership_BringsAV1MemberBack(t *testing.T) {
 	udb, updates := recordingUserDB()
 
 	changed := healV1Membership(context.Background(), udb,
-		communityLookup(&models.Community{ID: cid}, nil), user)
+		communityLookup(&models.Community{ID: cid}, nil), nil, user)
 
 	assert.True(t, changed)
 	added := (*updates)[len(*updates)-1]["$addToSet"].(bson.M)["user.communities"].(models.UserCommunity)
@@ -60,7 +60,8 @@ func TestHealV1Membership_NeverOverridesALaterDecision(t *testing.T) {
 		cdb := &mocks.CommunityDatabase{}
 		user := v1Member(cid, models.UserCommunity{CommunityID: cid, Status: status})
 
-		assert.False(t, healV1Membership(context.Background(), udb, cdb, user), status)
+		assert.False(t, healV1Membership(context.Background(), udb,
+			cdb, nil, user), status)
 		cdb.AssertNotCalled(t, "FindOne", mock.Anything, mock.Anything)
 		udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 	}
@@ -72,7 +73,8 @@ func TestHealV1Membership_RespectsTheBanList(t *testing.T) {
 	udb := &mocks.UserDatabase{}
 	community := &models.Community{ID: cid, Details: models.CommunityDetails{BanList: []string{user.ID}}}
 
-	assert.False(t, healV1Membership(context.Background(), udb, communityLookup(community, nil), user))
+	assert.False(t, healV1Membership(context.Background(), udb,
+		communityLookup(community, nil), nil, user))
 	udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -82,7 +84,7 @@ func TestHealV1Membership_SkipsACommunityThatIsGone(t *testing.T) {
 	udb := &mocks.UserDatabase{}
 
 	assert.False(t, healV1Membership(context.Background(), udb,
-		communityLookup(nil, errors.New("mongo: no documents in result")), user))
+		communityLookup(nil, errors.New("mongo: no documents in result")), nil, user))
 	udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -92,9 +94,56 @@ func TestHealV1Membership_CostsNothingWithoutAV1Community(t *testing.T) {
 	for _, ac := range []string{"", "not-an-id"} {
 		udb := &mocks.UserDatabase{}
 		cdb := &mocks.CommunityDatabase{}
-		assert.False(t, healV1Membership(context.Background(), udb, cdb, v1Member(ac)))
+		assert.False(t, healV1Membership(context.Background(), udb,
+			cdb, nil, v1Member(ac)))
 		cdb.AssertNotCalled(t, "FindOne", mock.Anything, mock.Anything)
 	}
-	assert.False(t, healV1Membership(context.Background(), nil, &mocks.CommunityDatabase{}, v1Member(primitive.NewObjectID().Hex())))
-	assert.False(t, healV1Membership(context.Background(), &mocks.UserDatabase{}, &mocks.CommunityDatabase{}, nil))
+	assert.False(t, healV1Membership(context.Background(), nil,
+		&mocks.CommunityDatabase{}, nil, v1Member(primitive.NewObjectID().Hex())))
+	assert.False(t, healV1Membership(context.Background(), &mocks.UserDatabase{},
+		&mocks.CommunityDatabase{}, nil, nil))
+}
+
+// Leaving removed the entry but kept activeCommunity, so every sign-in put the
+// player back: one reporter left the same community eight times in a week,
+// and kicked players walked back in. A recorded leave or kick ends the heal.
+func TestHealV1Membership_RespectsALeaveOrKick(t *testing.T) {
+	cid := primitive.NewObjectID()
+	user := v1Member(cid.Hex())
+	udb := &mocks.UserDatabase{}
+	aldb := &mocks.AuditLogDatabase{}
+	var filter bson.M
+	aldb.On("CountDocuments", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(a mock.Arguments) { filter = a.Get(1).(bson.M) }).
+		Return(int64(1), nil)
+
+	assert.False(t, healV1Membership(context.Background(), udb,
+		communityLookup(&models.Community{ID: cid}, nil), aldb, user))
+	udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+	assert.Equal(t, cid, filter["communityId"])
+	assert.Equal(t, user.ID, filter["targetId"])
+}
+
+func TestHealV1Membership_HealsWhenNoLeaveIsRecorded(t *testing.T) {
+	cid := primitive.NewObjectID()
+	user := v1Member(cid.Hex())
+	udb, _ := recordingUserDB()
+	aldb := &mocks.AuditLogDatabase{}
+	aldb.On("CountDocuments", mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil)
+
+	assert.True(t, healV1Membership(context.Background(), udb,
+		communityLookup(&models.Community{ID: cid}, nil), aldb, user))
+}
+
+// If the audit log can't be read, don't guess in favour of re-adding someone.
+func TestHealV1Membership_SkipsWhenTheAuditLogFails(t *testing.T) {
+	cid := primitive.NewObjectID()
+	user := v1Member(cid.Hex())
+	udb := &mocks.UserDatabase{}
+	aldb := &mocks.AuditLogDatabase{}
+	aldb.On("CountDocuments", mock.Anything, mock.Anything, mock.Anything).Return(int64(0), errors.New("timeout"))
+
+	assert.False(t, healV1Membership(context.Background(), udb,
+		communityLookup(&models.Community{ID: cid}, nil), aldb, user))
+	udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 }
