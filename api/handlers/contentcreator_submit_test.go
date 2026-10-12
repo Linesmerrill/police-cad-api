@@ -19,6 +19,9 @@ func TestFollowerBarSatisfiable(t *testing.T) {
 	t.Run("a measured platform submits without a claimed count", func(t *testing.T) {
 		assert.True(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("youtube", 0)}))
 		assert.True(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("twitch", 0)}))
+		// TikTok joined them when its counts became trusted: the number we read
+		// decides it during screening, so a typed one is not a gate here.
+		assert.True(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("tiktok", 0)}))
 	})
 
 	t.Run("a measured platform is not pre-judged on a low claim either", func(t *testing.T) {
@@ -28,14 +31,14 @@ func TestFollowerBarSatisfiable(t *testing.T) {
 	})
 
 	t.Run("platforms we cannot read must clear the bar themselves", func(t *testing.T) {
-		assert.False(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("tiktok", 499)}))
+		assert.False(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("other", 499)}))
 		assert.False(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("other", 0)}))
-		assert.True(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("tiktok", models.MinFollowers)}))
+		assert.True(t, followerBarSatisfiable([]models.ContentCreatorPlatform{p("other", models.MinFollowers)}))
 	})
 
 	t.Run("one measured platform carries the whole application", func(t *testing.T) {
 		assert.True(t, followerBarSatisfiable([]models.ContentCreatorPlatform{
-			p("tiktok", 3), p("youtube", 0),
+			p("other", 3), p("youtube", 0),
 		}))
 	})
 

@@ -305,7 +305,7 @@ func (s *Scheduler) processGracePeriods() {
 
 // processExpiredCreator handles a creator whose grace period has expired
 func (s *Scheduler) processExpiredCreator(ctx context.Context, creator models.ContentCreator) {
-	// Check if they've recovered (maxFollowers >= 500)
+	// Check if they've recovered (maxFollowers >= models.MinFollowers)
 	maxFollowers := 0
 	for _, p := range creator.Platforms {
 		if p.FollowerCount > maxFollowers {
@@ -315,7 +315,7 @@ func (s *Scheduler) processExpiredCreator(ctx context.Context, creator models.Co
 
 	now := primitive.NewDateTimeFromTime(time.Now())
 
-	if maxFollowers >= 500 {
+	if maxFollowers >= models.MinFollowers {
 		// They recovered! Clear grace period and restore to active
 		update := bson.M{
 			"$set": bson.M{
@@ -348,7 +348,7 @@ func (s *Scheduler) processExpiredCreator(ctx context.Context, creator models.Co
 	}
 
 	// They didn't recover - remove them
-	s.removeCreator(ctx, creator, "Follower count remained below 500 for 30 days")
+	s.removeCreator(ctx, creator, fmt.Sprintf("Follower count remained below %d for 30 days", models.MinFollowers))
 }
 
 // removeCreator removes a creator from the program
@@ -509,8 +509,8 @@ func (s *Scheduler) checkAllCreators() {
 			}
 		}
 
-		// If below 500, start grace period
-		if maxFollowers < 500 {
+		// Below the program minimum: start the grace period.
+		if maxFollowers < models.MinFollowers {
 			s.startGracePeriod(ctx, creator, maxFollowers)
 			lowFollowerCount++
 		}
@@ -527,6 +527,9 @@ func (s *Scheduler) checkAllCreators() {
 func (s *Scheduler) startGracePeriod(ctx context.Context, creator models.ContentCreator, maxFollowers int) {
 	now := primitive.NewDateTimeFromTime(time.Now())
 	gracePeriodEnd := primitive.NewDateTimeFromTime(time.Now().Add(30 * 24 * time.Hour))
+	warning := fmt.Sprintf(
+		"Your highest follower count is below our minimum requirement of %d. You have 30 days to increase your followers or your creator account will be removed.",
+		models.MinFollowers)
 
 	update := bson.M{
 		"$set": bson.M{
@@ -534,7 +537,7 @@ func (s *Scheduler) startGracePeriod(ctx context.Context, creator models.Content
 			"gracePeriodStartedAt": now,
 			"gracePeriodEndsAt":    gracePeriodEnd,
 			"warningReason":        "low_followers",
-			"warningMessage":       "Your highest follower count is below our minimum requirement of 500. You have 30 days to increase your followers or your creator account will be removed.",
+			"warningMessage":       warning,
 			"warnedAt":             now,
 			"updatedAt":            now,
 		},
@@ -548,7 +551,7 @@ func (s *Scheduler) startGracePeriod(ctx context.Context, creator models.Content
 
 	// Send warning email
 	if creator.UserID != nil {
-		go s.sendLowFollowerWarningEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers, 500, 30)
+		go s.sendLowFollowerWarningEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers, models.MinFollowers, 30)
 	}
 
 	zap.S().Infow("Started grace period for creator",
@@ -621,7 +624,7 @@ func (s *Scheduler) sendReminderEmail(ctx context.Context, creator models.Conten
 	}
 
 	subject := "Final Reminder: Creator Account Removal Tomorrow - Lines Police CAD"
-	htmlContent := templates.RenderGracePeriodReminderEmail(creator.DisplayName, maxFollowers, 500)
+	htmlContent := templates.RenderGracePeriodReminderEmail(creator.DisplayName, maxFollowers, models.MinFollowers)
 	plainText := "This is your final reminder. Your creator account will be removed tomorrow due to low follower count."
 
 	if err := s.sendEmail(email, creator.DisplayName, subject, htmlContent, plainText); err != nil {

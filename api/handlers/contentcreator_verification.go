@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -124,6 +125,9 @@ func (cc ContentCreator) StartChannelVerificationHandler(w http.ResponseWriter, 
 		return
 	}
 
+	// errors.Is below rather than ==: the fetchers wrap their sentinels on some
+	// paths, and a wrapped ErrManualOnly read as "automatable" would show the
+	// applicant a Check button that can never succeed.
 	_, fetchErr := platforms.For(platform.Type)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -132,7 +136,7 @@ func (cc ContentCreator) StartChannelVerificationHandler(w http.ResponseWriter, 
 		"expiresAt":   expires.Time(),
 		"platform":    platform.Type,
 		"handle":      platform.Handle,
-		"manualOnly":  fetchErr == platforms.ErrManualOnly,
+		"manualOnly":  errors.Is(fetchErr, platforms.ErrManualOnly),
 		"instruction": channelInstruction(platform.Type),
 	})
 }
@@ -180,7 +184,7 @@ func channelInstruction(platformType string) string {
 	case "twitch":
 		return "Add this code anywhere in your Twitch About panel / bio (Settings, Channel, About), save, then click Check. You can remove it once verified."
 	case "tiktok":
-		return "Add this code anywhere in your TikTok bio and leave it there. TikTok has no public API, so a member of our team confirms it by eye during review."
+		return "Add this code anywhere in your TikTok bio and leave it there while we check."
 	default:
 		return "Add this code to your channel or profile bio and leave it there. A member of our team confirms it during review."
 	}
@@ -236,7 +240,7 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 	}})
 
 	fetcher, err := platforms.For(platform.Type)
-	if err == platforms.ErrManualOnly {
+	if errors.Is(err, platforms.ErrManualOnly) {
 		// Not a failure: the code stays pending until a human confirms it.
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -256,7 +260,18 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 	// tell a wrong handle from an unsaved description, and that ambiguity is
 	// what turns into a support ping.
 	if fetchErr != nil {
-		if fetchErr == platforms.ErrChannelNotFound {
+		// The platform refusing to serve US is not a verification failure and
+		// must not be recorded as one. Said plainly and with the platform
+		// named, because the applicant can do nothing about it and the generic
+		// "temporarily unavailable" below sent people hunting for a mistake in
+		// their own bio. Same wording as the creator resync path, so the two
+		// never disagree about what happened.
+		if errors.Is(fetchErr, platforms.ErrPlatformBlocked) {
+			config.InfoStatus(platformBlockedMessage(platform.Type), http.StatusServiceUnavailable, w, nil)
+			return
+		}
+
+		if errors.Is(fetchErr, platforms.ErrChannelNotFound) {
 			_ = cc.AppDB.UpdateOne(ctx, bson.M{"_id": app.ID}, bson.M{"$set": bson.M{
 				prefix + "verificationStatus": models.PlatformFailed,
 				prefix + "verificationError":  "channel not found",
@@ -279,7 +294,7 @@ func (cc ContentCreator) CheckChannelVerificationHandler(w http.ResponseWriter, 
 		// Anything else is our side: no API key, exhausted quota, network. Never
 		// recorded against the applicant, and phrased so they do not go hunting
 		// for a mistake they did not make.
-		if strings.Contains(fetchErr.Error(), platforms.ErrNotConfigured.Error()) {
+		if errors.Is(fetchErr, platforms.ErrNotConfigured) {
 			zap.S().Errorw("channel verification unavailable: platform not configured",
 				"platform", platform.Type, "error", fetchErr)
 		}

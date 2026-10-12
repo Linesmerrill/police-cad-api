@@ -87,16 +87,24 @@ func TestForReturnsManualOnlyWhereNoAPIExists(t *testing.T) {
 		}
 	}
 
-	// TikTok has a fetcher now: it reads the public profile page, which needs no
-	// key. It is still not Measurable, because that page can be refused at any
-	// time and the applicant's own number has to remain the fallback. If those
-	// two ever agree again, an applicant on a blocked pass ends up with neither
-	// a measurement nor a claim.
+	// TikTok reads the public profile page, which needs no key.
 	if f, err := For("tiktok"); err != nil || f == nil {
 		t.Errorf("For(\"tiktok\") = %v, %v; want a fetcher", f, err)
 	}
-	if Measurable("tiktok") {
-		t.Error("Measurable(\"tiktok\") = true; a page that can be blocked is not something we rely on")
+}
+
+// A count we read ourselves is the only kind the 500 minimum can be judged on,
+// so every platform we can read has to be Measurable and "other" must not be.
+func TestMeasurableCoversEveryPlatformWeRead(t *testing.T) {
+	for _, p := range []string{"youtube", "twitch", "tiktok", "TikTok", " tiktok "} {
+		if !Measurable(p) {
+			t.Errorf("Measurable(%q) = false; a count we read must count toward the minimum", p)
+		}
+	}
+	for _, p := range []string{"other", "", "myspace"} {
+		if Measurable(p) {
+			t.Errorf("Measurable(%q) = true; nothing reads it, so the number is self-reported", p)
+		}
 	}
 }
 

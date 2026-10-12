@@ -953,6 +953,13 @@ func (a *App) New() *mux.Router {
 	// Capped at a few lifetime transfers; admins can raise the cap below.
 	apiCreate.Handle("/content-creators/me/community-promotion/transfer", http.HandlerFunc(contentCreator.TransferCommunityPromotionHandler)).Methods("POST")
 	apiCreate.Handle("/content-creators/me/sync", http.HandlerFunc(contentCreator.SyncFollowersHandler)).Methods("POST")
+	// Platform maintenance for an approved creator: re-read one platform's
+	// follower count, or prove a handle that has changed. The live handle keeps
+	// working until the new one is verified, so these never take a creator's
+	// profile offline. See contentcreator_resync.go.
+	apiCreate.Handle("/content-creators/me/platforms/{index}/resync", http.HandlerFunc(contentCreator.ResyncPlatformHandler)).Methods("POST")
+	apiCreate.Handle("/content-creators/me/platforms/{index}/reverify-start", http.HandlerFunc(contentCreator.ReverifyStartHandler)).Methods("POST")
+	apiCreate.Handle("/content-creators/me/platforms/{index}/reverify-check", http.HandlerFunc(contentCreator.ReverifyCheckHandler)).Methods("POST")
 
 	// Public content creator route with slug param (must be after /me routes)
 	apiCreate.Handle("/content-creators/{slug}", http.HandlerFunc(contentCreator.GetContentCreatorBySlugHandler)).Methods("GET")
@@ -975,6 +982,10 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-start", http.HandlerFunc(contentCreator.StartChannelVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/content-creator-applications/me/platforms/{index}/verify-check", http.HandlerFunc(contentCreator.CheckChannelVerificationHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creator-applications/{id}/platforms/{index}/verify", http.HandlerFunc(contentCreator.AdminVerifyPlatformHandler)).Methods("POST")
+	// The same manual fallback for an APPROVED creator, which is where a
+	// blocked platform leaves a handle change stuck waiting for a code we
+	// cannot read.
+	apiCreate.Handle("/admin/content-creators/{id}/platforms/{index}/verify", http.HandlerFunc(contentCreator.AdminVerifyCreatorPlatformHandler)).Methods("POST")
 	// Manual pass/fail of any individual automated check, for platforms with no
 	// public API or when a reviewer knows something the checks cannot see.
 	apiCreate.Handle("/admin/content-creator-applications/{id}/checks/override", http.HandlerFunc(contentCreator.AdminOverrideCheckHandler)).Methods("POST")

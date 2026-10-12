@@ -71,24 +71,28 @@ func For(platformType string) (Fetcher, error) {
 	}
 }
 
-// Measurable reports whether we can RELY on reading this platform's follower
-// count. Where we can, the applicant is not asked for a number at all — so a
+// Measurable reports whether we can RELY on a follower count WE read from this
+// platform. Where we can, the applicant is not asked for a number at all — so a
 // zero from one of these is the absence of a question, not a claim of zero, and
 // must never be validated as though the applicant typed it.
 //
-// Deliberately NOT derived from For(). TikTok has a fetcher and we use it, but
-// it reads a public web page that can serve a captcha or refuse a datacenter IP
-// at any moment. If having a fetcher made TikTok measurable, we would stop
-// asking those applicants for a number, and on the passes where TikTok blocks
-// us we would have no figure at all: not a measurement and not a claim, leaving
-// a reviewer nothing to judge. Listing the platforms we actually trust keeps the
-// applicant's own number as the fallback that graceful degradation needs.
+// TikTok is listed because the figure the profile page gives us has held up
+// against live responses: when the read succeeds the number is real, and a
+// number we read is what the 500 minimum is meant to be judged on. What TikTok
+// still cannot promise is that a read succeeds at all — a datacenter IP earns a
+// captcha or a refusal often enough that the fetcher reports ErrPlatformBlocked
+// distinctly. That is a question about availability, which every caller already
+// answers by falling back to the manual path, and not a question about whether
+// the number can be trusted once we have it.
+//
+// Deliberately NOT derived from For(): "other" has no fetcher and a platform
+// could gain one that returns a figure we would not stake a revocation on.
 //
 // Independent of credentials on purpose: a missing API key is an outage, and an
 // outage must not change what an applicant is allowed to submit.
 func Measurable(platformType string) bool {
 	switch strings.ToLower(strings.TrimSpace(platformType)) {
-	case "youtube", "twitch":
+	case "youtube", "twitch", "tiktok":
 		return true
 	default:
 		return false

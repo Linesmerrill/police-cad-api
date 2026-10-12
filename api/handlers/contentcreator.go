@@ -114,6 +114,11 @@ type ContentCreator struct {
 	// AuditDB records manual admin intervention in application screening, so an
 	// override always has a trail showing who made it and why.
 	AuditDB databases.AdminAuditDatabase
+	// fetcherFor resolves a platform type to something that reads channels.
+	// Unexported and nil in production, where platformFetcher() falls back to
+	// platforms.For; tests set it to serve canned channel responses so the
+	// handlers can be exercised without reaching YouTube or TikTok.
+	fetcherFor channelFetcher
 }
 
 // getUserIDFromRequest extracts the user ID from the X-User-ID header (set by Express proxy)
@@ -805,7 +810,7 @@ func (cc ContentCreator) GetContentCreatorsHandler(w http.ResponseWriter, r *htt
 			Bio:             c.Bio,
 			ThemeColor:      c.ThemeColor,
 			PrimaryPlatform: c.PrimaryPlatform,
-			Platforms:       c.Platforms,
+			Platforms:       models.PublicPlatforms(c.Platforms),
 			Featured:        c.Featured,
 			JoinedAt:        c.JoinedAt,
 		}
@@ -865,7 +870,7 @@ func (cc ContentCreator) GetContentCreatorBySlugHandler(w http.ResponseWriter, r
 		Bio:             creator.Bio,
 		ThemeColor:      creator.ThemeColor,
 		PrimaryPlatform: creator.PrimaryPlatform,
-		Platforms:       creator.Platforms,
+		Platforms:       models.PublicPlatforms(creator.Platforms),
 		Featured:        creator.Featured,
 		JoinedAt:        creator.JoinedAt,
 	}
@@ -1236,6 +1241,11 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 			GracePeriodStartedAt: creator.GracePeriodStartedAt,
 			GracePeriodEndsAt:    creator.GracePeriodEndsAt,
 			LastSyncedAt:         creator.LastSyncedAt,
+			// So the dashboard can keep saying a count we read is below the
+			// minimum after a reload, instead of only in the response to the
+			// resync that found it.
+			FollowerReviewFlaggedAt: creator.FollowerReviewFlaggedAt,
+			FollowerReviewReason:    creator.FollowerReviewReason,
 		}
 
 		response := models.ContentCreatorMeResponse{
@@ -1458,6 +1468,98 @@ func (cc ContentCreator) RequestRemovalHandler(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// platformKey identifies a platform entry by the pair that actually names a
+// channel. Both sides are normalized the same way, so a stored handle written
+// before NormalizeHandle existed ("@daypixie", or a full profile URL) still
+// matches the plain handle the dashboard submits for it. Case-insensitive:
+// these platforms do not distinguish case, so neither can matching.
+func platformKey(platformType, handle string) string {
+	t := strings.ToLower(strings.TrimSpace(platformType))
+	return t + "\x00" + strings.ToLower(platforms.NormalizeHandle(t, handle))
+}
+
+// sanitizeOwnPlatforms turns the platform array a creator submitted into one
+// that is safe to store, and reports a message to refuse the request with when
+// it cannot.
+//
+// This endpoint used to write req.Platforms straight through, which meant any
+// logged-in creator could PUT their own verificationStatus, verifiedByAdmin,
+// verifiedBy, verifiedAt and followerCount. Those four fields are the entire
+// basis for "this channel is yours and it clears the follower minimum", and the
+// program grants a top-tier subscription on the strength of them. The website
+// proxies this body verbatim, so the hole was reachable from any browser.
+//
+// What a creator may still do here is everything the profile editor is for:
+// adding a platform and removing one. What they may not do is assert anything
+// about a platform's standing.
+//   - An entry matching one we already store is carried over VERBATIM. Nothing
+//     in the request can change a stored platform, including its url: a handle
+//     or url change has to be proved, which is what the re-verify flow is for.
+//   - An entry we do not recognise is created as a new platform, unverified,
+//     with no followers and no admin tick, and has to go through the code flow
+//     like any other.
+//   - Dropping an entry still removes that platform, as it did before.
+//
+// The one refusal: a request that would drop a VERIFIED platform while adding
+// an unrecognised one of the same type is almost certainly someone editing a
+// handle in the profile form. Silently accepting it would throw away a
+// verification and a real follower count and leave a creator one scheduler pass
+// from a low-follower grace period, so it is refused with a pointer to the flow
+// that does this properly.
+func sanitizeOwnPlatforms(stored, submitted []models.ContentCreatorPlatform) ([]models.ContentCreatorPlatform, string) {
+	byKey := make(map[string]models.ContentCreatorPlatform, len(stored))
+	for _, p := range stored {
+		byKey[platformKey(p.Type, p.Handle)] = p
+	}
+
+	out := make([]models.ContentCreatorPlatform, 0, len(submitted))
+	kept := make(map[string]bool, len(submitted))
+	addedByType := map[string]bool{}
+
+	for _, p := range submitted {
+		platformType := strings.ToLower(strings.TrimSpace(p.Type))
+		handle := platforms.NormalizeHandle(platformType, p.Handle)
+		key := platformKey(p.Type, p.Handle)
+
+		if kept[key] {
+			// The same platform listed twice. Keeping it once is what was
+			// meant; adding a second, unverified copy of it is not.
+			continue
+		}
+		if existing, ok := byKey[key]; ok {
+			out = append(out, existing)
+			kept[key] = true
+			continue
+		}
+		if handle == "" && strings.TrimSpace(p.URL) == "" {
+			continue
+		}
+		kept[key] = true
+
+		addedByType[platformType] = true
+		out = append(out, models.ContentCreatorPlatform{
+			Type:               platformType,
+			URL:                strings.TrimSpace(p.URL),
+			Handle:             handle,
+			FollowerCount:      0,
+			VerifiedByAdmin:    false,
+			VerificationStatus: models.PlatformUnverified,
+		})
+	}
+
+	for _, p := range stored {
+		if kept[platformKey(p.Type, p.Handle)] || !p.IsVerified() {
+			continue
+		}
+		if addedByType[strings.ToLower(strings.TrimSpace(p.Type))] {
+			return nil, "To change the handle on a verified platform, use Change handle on that platform. " +
+				"Your current handle keeps working until the new one is verified."
+		}
+	}
+
+	return out, ""
+}
+
 // UpdateMyProfileHandler allows a creator to update their profile
 // PUT /api/v1/content-creators/me
 func (cc ContentCreator) UpdateMyProfileHandler(w http.ResponseWriter, r *http.Request) {
@@ -1518,8 +1620,13 @@ func (cc ContentCreator) UpdateMyProfileHandler(w http.ResponseWriter, r *http.R
 	if req.ProfileImage != "" {
 		updateFields["profileImage"] = req.ProfileImage
 	}
-	if req.Platforms != nil && len(req.Platforms) > 0 {
-		updateFields["platforms"] = req.Platforms
+	if len(req.Platforms) > 0 {
+		sanitized, reject := sanitizeOwnPlatforms(creator.Platforms, req.Platforms)
+		if reject != "" {
+			config.InfoStatus(reject, http.StatusBadRequest, w, nil)
+			return
+		}
+		updateFields["platforms"] = sanitized
 	}
 
 	update := bson.M{"$set": updateFields}
@@ -1761,8 +1868,18 @@ func (cc ContentCreator) ApplyCommunityPromotionHandler(w http.ResponseWriter, r
 	})
 }
 
-// SyncFollowersHandler allows creators to manually sync their follower counts
+// SyncFollowersHandler refreshes a creator's follower counts.
 // POST /api/v1/content-creators/me/sync
+//
+// This used to take the numbers FROM THE REQUEST BODY. A creator pressed Sync,
+// typed what they liked, and the figure the 500 minimum is judged on became
+// whatever they typed — on the one endpoint that can also clear a low-follower
+// grace period. Now every platform we can read is read, and a body count is
+// honoured only where nothing reads it.
+//
+// The 24h limit and the grace-period rules below are untouched on purpose:
+// this makes the numbers real, it does not change when a grace period starts
+// or ends.
 func (cc ContentCreator) SyncFollowersHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -1806,32 +1923,72 @@ func (cc ContentCreator) SyncFollowersHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Validate platforms match existing platforms
-	existingPlatforms := make(map[string]int) // platform type -> index
-	for i, p := range creator.Platforms {
-		existingPlatforms[p.Type] = i
+	// A body count is a claim, not a measurement, so it is only ever used for a
+	// platform nothing reads.
+	reported := make(map[string]int, len(req.Platforms))
+	for _, entry := range req.Platforms {
+		reported[strings.ToLower(strings.TrimSpace(entry.Type))] = entry.FollowerCount
 	}
 
-	// Update follower counts for existing platforms
 	updatedPlatforms := make([]models.ContentCreatorPlatform, len(creator.Platforms))
 	copy(updatedPlatforms, creator.Platforms)
 
-	var maxFollowers int
-	var totalFollowers int
+	syncedAt := primitive.NewDateTimeFromTime(time.Now())
+	deadline := time.Now().Add(creatorSyncFetchBudget)
+	anyTrustedRead := false
 
-	for _, syncPlatform := range req.Platforms {
-		if idx, exists := existingPlatforms[syncPlatform.Type]; exists {
-			updatedPlatforms[idx].FollowerCount = syncPlatform.FollowerCount
+	for i, p := range updatedPlatforms {
+		fetcher, ferr := cc.platformFetcher()(p.Type)
+		if ferr != nil || fetcher == nil {
+			// Nothing reads this platform, so the creator's own number is the
+			// only one there will ever be.
+			if count, ok := reported[strings.ToLower(strings.TrimSpace(p.Type))]; ok {
+				updatedPlatforms[i].FollowerCount = count
+			}
+			continue
+		}
+		if time.Now().After(deadline) {
+			// Out of budget. The stored count stands; the periodic sweep and
+			// the per-platform resync both pick this up later.
+			zap.S().Infow("follower sync ran out of time before reading every platform",
+				"creatorId", creator.ID.Hex(), "platform", p.Type)
+			continue
+		}
+
+		fetchCtx, cancelFetch := context.WithTimeout(r.Context(), creatorFetchBudget)
+		info, err := fetcher.Fetch(fetchCtx, p.Handle)
+		cancelFetch()
+		if err != nil {
+			// Blocked, a handle that no longer resolves, or an outage of ours.
+			// Keep the stored count: a read we could not make is not evidence
+			// that an audience went away, and the body count must never become
+			// the fallback for a platform we CAN read -- that is the hole this
+			// closes. The creator is told nothing changed for that platform.
+			zap.S().Infow("follower sync could not read a platform",
+				"creatorId", creator.ID.Hex(), "platform", p.Type, "error", err)
+			continue
+		}
+
+		updatedPlatforms[i].FollowerCount = info.FollowerCount
+		updatedPlatforms[i].LastSyncedAt = &syncedAt
+		if platforms.Measurable(p.Type) {
+			anyTrustedRead = true
 		}
 	}
 
-	// Calculate max and total followers
+	var maxFollowers int
+	var totalFollowers int
 	for _, p := range updatedPlatforms {
 		totalFollowers += p.FollowerCount
 		if p.FollowerCount > maxFollowers {
 			maxFollowers = p.FollowerCount
 		}
 	}
+
+	// The reads above may have spent the context the creator was loaded on, so
+	// the writes get a fresh one.
+	writeCtx, cancelWrite := api.WithQueryTimeout(r.Context())
+	defer cancelWrite()
 
 	now := primitive.NewDateTimeFromTime(time.Now())
 
@@ -1842,11 +1999,13 @@ func (cc ContentCreator) SyncFollowersHandler(w http.ResponseWriter, r *http.Req
 		Platforms:        updatedPlatforms,
 		TotalFollowers:   totalFollowers,
 		MaxFollowers:     maxFollowers,
-		Source:           "manual",
-		RecordedAt:       now,
-		RecordedBy:       &userObjID,
+		// "api" the moment any figure came from a read of ours, so the history
+		// says which numbers were measured and which were typed.
+		Source:     followerSnapshotSource(anyTrustedRead),
+		RecordedAt: now,
+		RecordedBy: &userObjID,
 	}
-	_, err = cc.SnapDB.InsertOne(ctx, snapshot)
+	_, err = cc.SnapDB.InsertOne(writeCtx, snapshot)
 	if err != nil {
 		zap.S().Warnw("failed to create follower snapshot", "error", err, "creatorId", creator.ID.Hex())
 		// Don't fail the request if snapshot creation fails
@@ -1860,9 +2019,18 @@ func (cc ContentCreator) SyncFollowersHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// Check if below threshold and handle grace period
-	followerThreshold := 500
+	followerThreshold := models.MinFollowers
 	statusChanged := false
 	var responseMessage string
+
+	// A count we read ourselves below the bar raises the review flag for the
+	// admin console, and one at or above it clears the flag. Separate from the
+	// grace period on purpose: the flag is a prompt for a human to look, the
+	// grace period is the clock that ends in removal, and only the rules below
+	// move that clock.
+	if anyTrustedRead {
+		setFollowerReviewFlag(updateFields, creator, maxFollowers, now)
+	}
 
 	if maxFollowers < followerThreshold {
 		// Below threshold
@@ -1878,7 +2046,7 @@ func (cc ContentCreator) SyncFollowersHandler(w http.ResponseWriter, r *http.Req
 			responseMessage = fmt.Sprintf("Warning: Your follower count (%d) is below the minimum requirement of %d. You have 30 days to resolve this.", maxFollowers, followerThreshold)
 
 			// Send low follower warning email
-			go cc.sendLowFollowerWarningEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers, followerThreshold, 30)
+			go cc.sendLowFollowerWarningEmail(writeCtx, *creator.UserID, creator.DisplayName, maxFollowers, followerThreshold, 30)
 		} else {
 			responseMessage = fmt.Sprintf("Followers updated. Note: Your follower count (%d) is still below the minimum requirement of %d.", maxFollowers, followerThreshold)
 		}
@@ -1899,14 +2067,14 @@ func (cc ContentCreator) SyncFollowersHandler(w http.ResponseWriter, r *http.Req
 			responseMessage = "Congratulations! Your follower count is now above the minimum requirement. Your account is in good standing."
 
 			// Send recovery email
-			go cc.sendGracePeriodRecoveryEmail(ctx, *creator.UserID, creator.DisplayName, maxFollowers)
+			go cc.sendGracePeriodRecoveryEmail(writeCtx, *creator.UserID, creator.DisplayName, maxFollowers)
 		} else {
 			responseMessage = "Followers updated successfully."
 		}
 	}
 
 	// Apply update
-	err = cc.CCDB.UpdateOne(ctx, bson.M{"_id": creator.ID}, bson.M{"$set": updateFields})
+	err = cc.CCDB.UpdateOne(writeCtx, bson.M{"_id": creator.ID}, bson.M{"$set": updateFields})
 	if err != nil {
 		config.ErrorStatus("failed to update follower counts", http.StatusInternalServerError, w, err)
 		return
@@ -3267,7 +3435,7 @@ func (cc ContentCreator) AdminTriggerSyncAllHandler(w http.ResponseWriter, r *ht
 	processedCount := 0
 	lowFollowerCount := 0
 	recoveredCount := 0
-	followerThreshold := 500
+	followerThreshold := models.MinFollowers
 
 	for _, creator := range creators {
 		// Calculate max followers

@@ -1114,5 +1114,15 @@ createIndexSafe(
   { name: "cc_entitlements_creator_target_active_idx", background: true }
 );
 
+// Every creator-facing content creator endpoint resolves the caller's own
+// creator document by this pair: the profile update, the follower sync, and the
+// per-platform resync and re-verify handlers. It is the hot path on the creator
+// dashboard and was an unindexed collection scan.
+createIndexSafe(
+  db.content_creators,
+  { userId: 1, status: 1 },
+  { name: "cc_creators_user_status_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
