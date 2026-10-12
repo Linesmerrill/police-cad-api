@@ -219,6 +219,43 @@ func (_m *CommunityDatabase) FindOne(ctx context.Context, filter interface{}) (*
 	return r0, r1
 }
 
+// FindOneAndUpdate provides a mock function with given fields: ctx, filter, update, opts
+func (_m *CommunityDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) (*models.Community, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, filter, update)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindOneAndUpdate")
+	}
+
+	var r0 *models.Community
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) (*models.Community, error)); ok {
+		return rf(ctx, filter, update, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) *models.Community); ok {
+		r0 = rf(ctx, filter, update, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.Community)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, interface{}, interface{}, ...*options.FindOneAndUpdateOptions) error); ok {
+		r1 = rf(ctx, filter, update, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // FindOneIncludingPending provides a mock function with given fields: ctx, filter
 func (_m *CommunityDatabase) FindOneIncludingPending(ctx context.Context, filter interface{}) (*models.Community, error) {
 	ret := _m.Called(ctx, filter)

@@ -168,6 +168,11 @@ type ContentCreatorEntitlementDatabase interface {
 	UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 	CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error)
+	// FindOneAndUpdate matches and updates in one round trip, returning
+	// mongo.ErrNoDocuments when nothing matched. Callers that must claim an
+	// entitlement exactly once (the community-promotion transfer) rely on that:
+	// two concurrent requests race on this single write and only one wins.
+	FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) (*models.ContentCreatorEntitlement, error)
 }
 
 type contentCreatorEntitlementDatabase struct {
@@ -219,6 +224,15 @@ func (c *contentCreatorEntitlementDatabase) DeleteOne(ctx context.Context, filte
 
 func (c *contentCreatorEntitlementDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	return c.db.Collection(contentCreatorEntitlementCollectionName).CountDocuments(ctx, filter, opts...)
+}
+
+func (c *contentCreatorEntitlementDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) (*models.ContentCreatorEntitlement, error) {
+	entitlement := &models.ContentCreatorEntitlement{}
+	err := c.db.Collection(contentCreatorEntitlementCollectionName).FindOneAndUpdate(ctx, filter, update, opts...).Decode(entitlement)
+	if err != nil {
+		return nil, err
+	}
+	return entitlement, nil
 }
 
 // --- Content Creator Follower Snapshot Database ---

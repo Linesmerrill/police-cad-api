@@ -40,6 +40,13 @@ type CommunityDatabase interface {
 	FindIncludingPending(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MongoCursor, error)
 	InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error
+	// FindOneAndUpdate is the write to use when the caller must know whether a
+	// GUARDED update actually matched — UpdateOne discards that. It returns
+	// mongo.ErrNoDocuments when nothing matched, and with
+	// ReturnDocument(Before) it also hands back the document as it was, which
+	// is what makes a compensating restore possible. Like UpdateOne, and unlike
+	// FindOne, it does not exclude communities pending deletion.
+	FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) (*models.Community, error)
 	DeleteOne(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) error
 	Aggregate(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error)
 	AggregateIncludingPending(ctx context.Context, pipeline mongo.Pipeline, opts ...*options.AggregateOptions) (*MongoCursor, error)
@@ -86,6 +93,15 @@ func (c *communityDatabase) FindIncludingPending(ctx context.Context, filter int
 func (c *communityDatabase) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) error {
 	_, err := c.db.Collection(collectionName).UpdateOne(ctx, filter, update, opts...)
 	return err
+}
+
+func (c *communityDatabase) FindOneAndUpdate(ctx context.Context, filter interface{}, update interface{}, opts ...*options.FindOneAndUpdateOptions) (*models.Community, error) {
+	community := &models.Community{}
+	err := c.db.Collection(collectionName).FindOneAndUpdate(ctx, filter, update, opts...).Decode(community)
+	if err != nil {
+		return nil, err
+	}
+	return community, nil
 }
 
 func (c *communityDatabase) InsertOne(ctx context.Context, community models.Community, opts ...*options.InsertOneOptions) (InsertOneResultHelper, error) {

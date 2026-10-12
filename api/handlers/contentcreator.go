@@ -1216,7 +1216,7 @@ func (cc ContentCreator) GetMyApplicationHandler(w http.ResponseWriter, r *http.
 
 	if creator != nil {
 		// User has a creator profile (active, warned, or removed), return their profile with entitlements
-		entitlements := cc.getCreatorEntitlements(ctx, creator.ID, userObjID)
+		entitlements := cc.getCreatorEntitlements(ctx, creator, userObjID)
 
 		creatorResponse := models.ContentCreatorPrivateResponse{
 			ID:                   creator.ID,
@@ -2606,11 +2606,31 @@ func (cc ContentCreator) AdminGetCreatorsHandler(w http.ResponseWriter, r *http.
 
 	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
 
+	// The transfer counters live on the creator document but are not serialized
+	// by it (they must not appear on public creator profiles), so the admin
+	// console gets them through this wrapper, with the limit resolved and the
+	// remainder computed rather than left for the client to work out.
+	type creatorWithTransfers struct {
+		models.ContentCreator
+		TransfersUsed      int `json:"transfersUsed"`
+		TransferLimit      int `json:"transferLimit"`
+		TransfersRemaining int `json:"transfersRemaining"`
+	}
+	creatorRows := make([]creatorWithTransfers, 0, len(creators))
+	for _, c := range creators {
+		creatorRows = append(creatorRows, creatorWithTransfers{
+			ContentCreator:     c,
+			TransfersUsed:      c.TransfersUsed,
+			TransferLimit:      c.EffectiveTransferLimit(),
+			TransfersRemaining: c.RemainingTransfers(),
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":  true,
-		"creators": creators,
+		"creators": creatorRows,
 		"pagination": models.ContentCreatorPagination{
 			CurrentPage: page,
 			TotalPages:  totalPages,
@@ -2972,13 +2992,20 @@ func (cc ContentCreator) AdminGrantEntitlementHandler(w http.ResponseWriter, r *
 
 // --- Helper Functions ---
 
-func (cc ContentCreator) getCreatorEntitlements(ctx context.Context, creatorID primitive.ObjectID, userID primitive.ObjectID) models.EntitlementsSummary {
+func (cc ContentCreator) getCreatorEntitlements(ctx context.Context, creator *models.ContentCreator, userID primitive.ObjectID) models.EntitlementsSummary {
+	creatorID := creator.ID
 	summary := models.EntitlementsSummary{
 		PersonalPlan:         false,
 		PersonalPlanFallback: false,
 		CommunityPlan: models.CommunityPlanSummary{
 			Active: false,
 		},
+		// The dashboard needs these to decide whether to offer the transfer
+		// action at all, so they travel with the entitlement summary rather
+		// than as a separate call.
+		TransfersUsed:      creator.TransfersUsed,
+		TransfersRemaining: creator.RemainingTransfers(),
+		TransferLimit:      creator.EffectiveTransferLimit(),
 	}
 
 	// Fetch user's current subscription plan
