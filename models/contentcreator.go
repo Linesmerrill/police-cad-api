@@ -183,6 +183,15 @@ type ContentCreator struct {
 	GracePeriodEndsAt     *primitive.DateTime `json:"gracePeriodEndsAt,omitempty" bson:"gracePeriodEndsAt,omitempty"`
 	GracePeriodNotifiedAt *primitive.DateTime `json:"gracePeriodNotifiedAt,omitempty" bson:"gracePeriodNotifiedAt,omitempty"` // For reminder email tracking
 	LastSyncedAt          *primitive.DateTime `json:"lastSyncedAt,omitempty" bson:"lastSyncedAt,omitempty"`
+	// Below-minimum review flag. A count WE read that lands under MinFollowers
+	// is a fact worth a human look, but it is not grounds to revoke on its own:
+	// a platform can serve us a wrong number, and a creator can have a second
+	// channel that still qualifies. So a trusted read below the bar raises this
+	// flag for the admin console and a later trusted read at or above it clears
+	// the flag again. Nothing here ever starts a grace period or removes
+	// anybody; that stays with the scheduler and the sync handler.
+	FollowerReviewFlaggedAt *primitive.DateTime `json:"followerReviewFlaggedAt,omitempty" bson:"followerReviewFlaggedAt,omitempty"`
+	FollowerReviewReason    string              `json:"followerReviewReason,omitempty" bson:"followerReviewReason,omitempty"`
 	// Lifetime allowance for moving the free community promotion from one owned
 	// community to another. Both are absent on every document written before the
 	// feature existed, so a missing used count reads as 0 and a missing limit
@@ -233,6 +242,18 @@ type ContentCreatorPlatform struct {
 	// figure read from the platform.
 	FollowerCount   int  `json:"followerCount" bson:"followerCount"`
 	VerifiedByAdmin bool `json:"verifiedByAdmin" bson:"verifiedByAdmin"`
+	// LastSyncedAt is when we last READ this platform and wrote the count above.
+	// Per platform rather than per creator: one creator can hold a YouTube
+	// channel we read every time and a TikTok that has been blocking us for a
+	// week, and a single creator-level timestamp cannot tell those apart.
+	LastSyncedAt *primitive.DateTime `json:"lastSyncedAt,omitempty" bson:"lastSyncedAt,omitempty"`
+
+	// PendingHandle and PendingURL hold a handle the creator has asked to move
+	// to but has not yet proved they own. The live Handle keeps working until
+	// the code is found, so a creator who renames their channel is never left
+	// with a profile pointing at nothing and a verification they cannot redo.
+	PendingHandle string `json:"pendingHandle,omitempty" bson:"pendingHandle,omitempty"`
+	PendingURL    string `json:"pendingUrl,omitempty" bson:"pendingUrl,omitempty"`
 
 	// Channel ownership verification. The applicant puts VerificationCode in
 	// their channel description, we read the public channel and look for it.
@@ -319,6 +340,33 @@ const (
 // predating this system are not retroactively blocked.
 func (p ContentCreatorPlatform) IsVerified() bool {
 	return p.VerificationStatus == PlatformVerified || p.VerifiedByAdmin
+}
+
+// PublicPlatforms strips the verification machinery from a platform list bound
+// for a public page. The creator profile serializes these entries directly, and
+// a live verification code or a handle somebody is in the middle of moving to
+// has no business on a page anybody can load: a code is the proof of ownership
+// for as long as it is live, and a pending handle is a rename nobody has
+// announced yet.
+//
+// What stays is what a profile actually renders: the platform, its link and
+// handle, the follower count, and whether it is verified.
+func PublicPlatforms(ps []ContentCreatorPlatform) []ContentCreatorPlatform {
+	out := make([]ContentCreatorPlatform, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, ContentCreatorPlatform{
+			Type:               p.Type,
+			URL:                p.URL,
+			Handle:             p.Handle,
+			FollowerCount:      p.FollowerCount,
+			VerifiedByAdmin:    p.VerifiedByAdmin,
+			VerificationStatus: p.VerificationStatus,
+			VerifiedAt:         p.VerifiedAt,
+			VerificationMethod: p.VerificationMethod,
+			LastSyncedAt:       p.LastSyncedAt,
+		})
+	}
+	return out
 }
 
 // ContentCreatorEntitlement represents a plan entitlement granted to a creator
@@ -515,6 +563,11 @@ type ContentCreatorPrivateResponse struct {
 	GracePeriodStartedAt *primitive.DateTime      `json:"gracePeriodStartedAt,omitempty"`
 	GracePeriodEndsAt    *primitive.DateTime      `json:"gracePeriodEndsAt,omitempty"`
 	LastSyncedAt         *primitive.DateTime      `json:"lastSyncedAt,omitempty"`
+	// The creator's own dashboard says so plainly when a count we read is below
+	// the minimum, so the message survives a page reload rather than living
+	// only in the response to the resync that found it.
+	FollowerReviewFlaggedAt *primitive.DateTime `json:"followerReviewFlaggedAt,omitempty"`
+	FollowerReviewReason    string              `json:"followerReviewReason,omitempty"`
 }
 
 // EntitlementsSummary summarizes a creator's entitlements

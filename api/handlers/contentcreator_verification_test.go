@@ -116,8 +116,11 @@ func TestChannelInstructionNamesTheRightField(t *testing.T) {
 	// diagnose, so each platform gets its own wording.
 	assert.Contains(t, strings.ToLower(channelInstruction("youtube")), "description")
 	assert.Contains(t, strings.ToLower(channelInstruction("twitch")), "about")
-	// TikTok cannot be automated; the copy must say a human checks it rather
-	// than implying the Check button will do something.
-	assert.Contains(t, strings.ToLower(channelInstruction("tiktok")), "team")
+	// TikTok is read automatically now. The old copy promised "a member of our
+	// team confirms it by eye during review", which told people the Check
+	// button would not do anything and that approval was waiting on a human.
+	tiktok := channelInstruction("tiktok")
+	assert.Contains(t, strings.ToLower(tiktok), "tiktok bio")
+	assert.NotContains(t, strings.ToLower(tiktok), "team")
 	assert.NotEmpty(t, channelInstruction("other"))
 }
