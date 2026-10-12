@@ -183,8 +183,44 @@ type ContentCreator struct {
 	GracePeriodEndsAt     *primitive.DateTime `json:"gracePeriodEndsAt,omitempty" bson:"gracePeriodEndsAt,omitempty"`
 	GracePeriodNotifiedAt *primitive.DateTime `json:"gracePeriodNotifiedAt,omitempty" bson:"gracePeriodNotifiedAt,omitempty"` // For reminder email tracking
 	LastSyncedAt          *primitive.DateTime `json:"lastSyncedAt,omitempty" bson:"lastSyncedAt,omitempty"`
-	CreatedAt             primitive.DateTime  `json:"createdAt" bson:"createdAt"`
-	UpdatedAt             primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
+	// Lifetime allowance for moving the free community promotion from one owned
+	// community to another. Both are absent on every document written before the
+	// feature existed, so a missing used count reads as 0 and a missing limit
+	// reads as DefaultCreatorTransferLimit — no migration, and omitempty keeps
+	// zero values out of newly inserted documents too.
+	//
+	// json is "-" on purpose: these appear on the creator's own dashboard and in
+	// the admin console through explicit response types, never on the public
+	// creator profile that serializes this struct directly.
+	TransfersUsed int                `json:"-" bson:"transfersUsed,omitempty"`
+	TransferLimit int                `json:"-" bson:"transferLimit,omitempty"`
+	CreatedAt     primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+}
+
+// DefaultCreatorTransferLimit is how many lifetime community-promotion
+// transfers a creator gets without an admin granting more. It is also the value
+// a document with no transferLimit field is treated as having, so it must match
+// the default used in the $ifNull guard on the atomic consume.
+const DefaultCreatorTransferLimit = 3
+
+// EffectiveTransferLimit is the creator's real limit, resolving an absent or
+// zero stored value to the default.
+func (c ContentCreator) EffectiveTransferLimit() int {
+	if c.TransferLimit <= 0 {
+		return DefaultCreatorTransferLimit
+	}
+	return c.TransferLimit
+}
+
+// RemainingTransfers is how many transfers the creator can still make, floored
+// at 0 so a limit that was lowered below the used count never reads negative.
+func (c ContentCreator) RemainingTransfers() int {
+	remaining := c.EffectiveTransferLimit() - c.TransfersUsed
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // ContentCreatorPlatform represents a social media platform connection
@@ -375,6 +411,20 @@ type GrantEntitlementRequest struct {
 	Plan       string `json:"plan" validate:"required,oneof=base"`
 }
 
+// TransferCommunityPromotionRequest is the request body for moving the free
+// community promotion to another community the creator owns.
+type TransferCommunityPromotionRequest struct {
+	CommunityID string `json:"communityId" validate:"required"`
+}
+
+// GrantCreatorTransfersRequest is the request body for an admin raising a
+// creator's lifetime transfer limit. Additional is capped so a slip of the
+// keyboard cannot hand out an unbounded allowance.
+type GrantCreatorTransfersRequest struct {
+	Additional int    `json:"additional" validate:"required,min=1,max=10"`
+	Reason     string `json:"reason" validate:"omitempty,max=500"`
+}
+
 // SyncFollowersRequest is the request body for syncing follower counts
 type SyncFollowersRequest struct {
 	Platforms []SyncPlatformEntry `json:"platforms" validate:"required,min=1,max=5"`
@@ -473,6 +523,11 @@ type EntitlementsSummary struct {
 	PersonalPlanFallback bool                 `json:"personalPlanFallback"`      // true if user has higher plan, entitlement acts as fallback
 	CurrentUserPlan      string               `json:"currentUserPlan,omitempty"` // user's current subscription plan
 	CommunityPlan        CommunityPlanSummary `json:"communityPlan"`
+	// Lifetime community-promotion transfer allowance, so the creator's own
+	// dashboard can say how many moves are left before offering the action.
+	TransfersUsed      int `json:"transfersUsed"`
+	TransfersRemaining int `json:"transfersRemaining"`
+	TransferLimit      int `json:"transferLimit"`
 }
 
 // CommunityPlanSummary summarizes community plan entitlement

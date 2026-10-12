@@ -949,6 +949,9 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/content-creators/me/removal-request", http.HandlerFunc(contentCreator.RequestRemovalHandler)).Methods("POST")
 	apiCreate.Handle("/content-creators/me/owned-communities", http.HandlerFunc(contentCreator.GetOwnedCommunitiesHandler)).Methods("GET")
 	apiCreate.Handle("/content-creators/me/community-promotion", http.HandlerFunc(contentCreator.ApplyCommunityPromotionHandler)).Methods("POST")
+	// Moves an already-applied community promotion to another owned community.
+	// Capped at a few lifetime transfers; admins can raise the cap below.
+	apiCreate.Handle("/content-creators/me/community-promotion/transfer", http.HandlerFunc(contentCreator.TransferCommunityPromotionHandler)).Methods("POST")
 	apiCreate.Handle("/content-creators/me/sync", http.HandlerFunc(contentCreator.SyncFollowersHandler)).Methods("POST")
 
 	// Public content creator route with slug param (must be after /me routes)
@@ -986,6 +989,8 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/content-creators/{id}/warn", http.HandlerFunc(contentCreator.AdminWarnCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/remove", http.HandlerFunc(contentCreator.AdminRemoveCreatorHandler)).Methods("POST")
 	apiCreate.Handle("/admin/content-creators/{id}/entitlements", http.HandlerFunc(contentCreator.AdminGrantEntitlementHandler)).Methods("POST")
+	// Raises the creator's lifetime community-promotion transfer allowance.
+	apiCreate.Handle("/admin/content-creators/{id}/transfers", http.HandlerFunc(contentCreator.AdminGrantCreatorTransfersHandler)).Methods("POST")
 
 	// Initialize and store the content creator scheduler
 	a.Scheduler = scheduler.NewScheduler(

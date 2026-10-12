@@ -1102,5 +1102,17 @@ createIndexSafe(
   { name: "bank_transactions_merchant_tag_idx", background: true }
 );
 
+// The content creator program looks up a creator's live entitlements on every
+// dashboard load, and the community-promotion transfer claims the active one
+// with a guarded FindOneAndUpdate on exactly this key. NOT unique: the
+// one-active-community-entitlement rule is enforced by that atomic claim, and a
+// unique index would also have to account for every revoked historical row, so
+// it could fail to build on existing data.
+createIndexSafe(
+  db.content_creator_entitlements,
+  { contentCreatorId: 1, targetType: 1, active: 1 },
+  { name: "cc_entitlements_creator_target_active_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
