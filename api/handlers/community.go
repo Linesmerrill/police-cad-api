@@ -2192,13 +2192,35 @@ func (u User) UnbanUserFromCommunityHandler(w http.ResponseWriter, r *http.Reque
 	w.Write([]byte(`{"message": "User unbanned from community successfully"}`))
 }
 
+// addInviteCodeRequest is the body of a create-invite-code request.
+//
+// createdBy and userId are accepted and ignored: the creator is the
+// authenticated actor, not whoever the body names. Released mobile builds and
+// the website still send them, so they must not be an error. remainingUses and
+// createdAt are likewise ignored; the server derives both.
+type addInviteCodeRequest struct {
+	Code      string     `json:"code"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+	MaxUses   int        `json:"maxUses"`
+}
+
 // AddInviteCodeHandler adds a new invite code to the community's inviteCodes array
 func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	communityID := vars["communityId"]
 
-	// Decode the request body directly into InviteCode
-	var inviteCode models.InviteCode
+	// Only someone who can manage members may mint a code, so the community and
+	// the caller's standing in it are settled before anything is written.
+	community, communityObjID := c.loadCommunityForInviteCode(w, r, communityID)
+	if community == nil {
+		return
+	}
+	actorID, ok := authorizeInviteCodeAction(w, r, community)
+	if !ok {
+		return
+	}
+
+	var inviteCode addInviteCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&inviteCode); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
 		return
@@ -2237,7 +2259,7 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		ExpiresAt:     expiresAt,
 		MaxUses:       inviteCode.MaxUses,
 		RemainingUses: remainingUses,
-		CreatedBy:     inviteCode.CreatedBy,
+		CreatedBy:     actorID,
 		CreatedAt:     time.Now(),
 	}
 
@@ -2247,12 +2269,6 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Update the community with the inviteCodeID
-	communityObjID, err := primitive.ObjectIDFromHex(communityID)
-	if err != nil {
-		config.ErrorStatus("Invalid community ID", http.StatusBadRequest, w, err)
-		return
-	}
 	if err := c.DB.UpdateOne(
 		context.Background(),
 		bson.M{"_id": communityObjID},
@@ -2263,7 +2279,6 @@ func (c Community) AddInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Audit log
-	actorID := resolveActorFromRequest(r)
 	logAudit(c.ALDB, communityObjID, "invite.created", "invite", actorID, resolveActorName(c.UDB, actorID), inviteCodeID, inviteCodeDoc.Code, nil)
 
 	// Respond with minimal data for security
@@ -2288,20 +2303,21 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 	// var invite models.InviteCode
 	invite, err := c.IDB.FindOne(ctx, bson.M{"code": inviteCode})
 	if err != nil {
-		config.ErrorStatus("Invite code not found", http.StatusNotFound, w, err)
+		// A mistyped or revoked code is an everyday outcome, not a fault.
+		config.InfoStatus("Invite code not found", http.StatusNotFound, w, err)
 		return
 	}
 
-	// Check expiration
-	currentTime := time.Now() // 12:40 PM MST, June 07, 2025
-	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(currentTime) {
-		config.ErrorStatus("Invite code has expired", http.StatusBadRequest, w, nil)
+	// A preview has to agree with what joining will actually do, so both the
+	// expiry and the remaining uses are judged by the same rules the join query
+	// applies (see inviteCodeHasUsesLeft for the two generations of counter).
+	currentTime := time.Now()
+	if inviteCodeExpired(invite, currentTime) {
+		config.InfoStatus("Invite code has expired", http.StatusBadRequest, w, nil)
 		return
 	}
-
-	// Check remaining uses, allow -1 for infinite
-	if invite.RemainingUses < -1 {
-		config.ErrorStatus("Invite code has no remaining uses", http.StatusBadRequest, w, nil)
+	if !inviteCodeHasUsesLeft(invite) {
+		config.InfoStatus("Invite code has no remaining uses", http.StatusBadRequest, w, nil)
 		return
 	}
 
@@ -2324,23 +2340,63 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Prepare response, exclude expiresAt and remainingUses
+	// What the invite page needs to introduce the community and to say, on its
+	// own, whether the link is still good.
 	response := map[string]interface{}{
-		"communityName": community.Details.Name, // Adjust to community.Community.Name if nested
+		"communityName": community.Details.Name,
+		"remainingUses": inviteCodeRemainingUses(invite),
+		"expiresAt":     invite.ExpiresAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
+// joinCommunityRequest is the body of a join request.
+//
+// UserID is accepted for compatibility but is never the deciding answer to who
+// is joining: a request only joins the account it can prove it is. It is read
+// solely on the server-to-server path, where the website backend fills it in
+// from the logged-in session and signs the request with the shared secret.
+type joinCommunityRequest struct {
+	InviteCode string `json:"inviteCode"`
+	UserID     string `json:"userId"`
+}
+
+// resolveJoinActor returns the account a join request may join.
+//
+// A code is redeemed for yourself, so the id has to come from something the
+// caller cannot choose: the bearer token the middleware verified (the mobile
+// app), or, failing that, the id supplied by a caller that also presents the
+// server-to-server secret. Only the website backend holds that secret and it
+// takes the id from the logged-in session, so a browser cannot name someone
+// else. Without either, there is nobody to join.
+func resolveJoinActor(r *http.Request, bodyUserID string) string {
+	if id := api.GetAuthenticatedUserIDFromContext(r.Context()); id != "" {
+		return id
+	}
+	if hasValidGatewaySecret(r) {
+		if id := strings.TrimSpace(r.URL.Query().Get("userId")); id != "" {
+			return id
+		}
+		return strings.TrimSpace(bodyUserID)
+	}
+	return ""
+}
+
 // JoinCommunityHandler processes a join request using an invite code
 func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		InviteCode string `json:"inviteCode"`
-		UserID     string `json:"userId"`
-	}
+	var req joinCommunityRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		config.ErrorStatus("Invalid request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Settle who is joining before an invite code is touched, so a caller we
+	// cannot identify never spends one of its uses.
+	actorID := resolveJoinActor(r, req.UserID)
+	if actorID == "" {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no authenticated user"))
 		return
 	}
 
@@ -2420,7 +2476,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Convert IDs to ObjectID
-	userObjID, err := primitive.ObjectIDFromHex(req.UserID)
+	userObjID, err := primitive.ObjectIDFromHex(actorID)
 	if err != nil {
 		config.ErrorStatus("Invalid user ID", http.StatusBadRequest, w, err)
 		return
@@ -2473,6 +2529,13 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	user := *userRes.user
 	community := *communityRes.community
 
+	// A ban is a ban however the user arrives. Checking it here covers both the
+	// first-time join and the return of someone who already has a membership
+	// row, so an invite code is never a way back in.
+	if rejectIfBanned(w, r, &community, actorID, "joining a community") {
+		return
+	}
+
 	// Step 2 & 3: Check existing community status
 	var existingCommunity *models.UserCommunity
 	for i := range user.Details.Communities {
@@ -2507,41 +2570,36 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	} else {
-		// Step 4: Insert new entry if not banned
-		if !contains(community.Details.BanList, req.UserID) {
-			newCommunityEntry := bson.M{
-				"_id":         primitive.NewObjectID().Hex(),
-				"communityId": invite.CommunityID,
-				"status":      "approved",
-			}
+		// Step 4: Insert a new entry. Banned users were already turned away above.
+		newCommunityEntry := bson.M{
+			"_id":         primitive.NewObjectID().Hex(),
+			"communityId": invite.CommunityID,
+			"status":      "approved",
+		}
 
-			// Atomically ensure communities array is initialized (no-op if already an array).
-			_, _ = c.UDB.UpdateOne(ctx, bson.M{"_id": userObjID, "user.communities": nil}, bson.M{"$set": bson.M{"user.communities": bson.A{}}})
+		// Atomically ensure communities array is initialized (no-op if already an array).
+		_, _ = c.UDB.UpdateOne(ctx, bson.M{"_id": userObjID, "user.communities": nil}, bson.M{"$set": bson.M{"user.communities": bson.A{}}})
 
-			// Atomically append the new community entry.
-			update = bson.M{
-				"$push": bson.M{"user.communities": newCommunityEntry},
-			}
-			_, err = c.UDB.UpdateOne(
-				ctx,
-				bson.M{"_id": userObjID},
-				update,
-			)
-			if err != nil {
-				config.ErrorStatus("Failed to update user", http.StatusInternalServerError, w, err)
-				return
-			}
-		} else {
-			config.ErrorStatus("User is banned from this community", http.StatusForbidden, w, nil)
+		// Atomically append the new community entry.
+		update = bson.M{
+			"$push": bson.M{"user.communities": newCommunityEntry},
+		}
+		_, err = c.UDB.UpdateOne(
+			ctx,
+			bson.M{"_id": userObjID},
+			update,
+		)
+		if err != nil {
+			config.ErrorStatus("Failed to update user", http.StatusInternalServerError, w, err)
 			return
 		}
 	}
 
 	// Step 5: Increment membersCount in two cases:
-	//   1. New entry (not on banList).
+	//   1. New entry.
 	//   2. Existing entry transitioned from a non-approved, non-banned status
 	//      to "approved" via the update at Step 3 above.
-	isNewEntry := existingCommunity == nil && !contains(community.Details.BanList, req.UserID)
+	isNewEntry := existingCommunity == nil
 	becameApproved := existingCommunity != nil &&
 		existingCommunity.Status != "approved" &&
 		existingCommunity.Status != "banned"
@@ -2557,7 +2615,7 @@ func (c Community) JoinCommunityHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Audit log
-	logAudit(c.ALDB, communityObjID, "member.joined", "member", req.UserID, resolveActorName(c.UDB, req.UserID), req.UserID, "", nil)
+	logAudit(c.ALDB, communityObjID, "member.joined", "member", actorID, resolveActorName(c.UDB, actorID), actorID, "", nil)
 
 	// Respond with success
 	w.Header().Set("Content-Type", "application/json")
@@ -7092,6 +7150,16 @@ func (c Community) UpdateDepartmentComponentsHandler(w http.ResponseWriter, r *h
 func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
 
+	// The outstanding codes are the keys to the community, so only someone who
+	// can manage members may read them.
+	community, _ := c.loadCommunityForInviteCode(w, r, communityID)
+	if community == nil {
+		return
+	}
+	if _, ok := authorizeInviteCodeAction(w, r, community); !ok {
+		return
+	}
+
 	// Parse pagination parameters
 	page, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil || page < 1 {
@@ -7148,10 +7216,11 @@ func (c Community) GetCommunityInviteCodesHandlerV2(w http.ResponseWriter, r *ht
 				var user models.User
 				err = c.UDB.FindOne(context.Background(), bson.M{"_id": userObjID}).Decode(&user)
 				if err == nil {
+					// Who made the code, by name. An address is not part of
+					// that answer, so it stays out of the response.
 					createdByUser = map[string]interface{}{
 						"id":       user.ID,
 						"username": user.Details.Username,
-						"email":    user.Details.Email,
 					}
 				}
 			}
@@ -7208,10 +7277,19 @@ func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// First, get the invite code to find the community ID
+	// The code says which community it belongs to, and that community says who
+	// is allowed to revoke it: only someone who can manage its members.
 	inviteCode, err := c.IDB.FindOne(context.Background(), bson.M{"_id": objID})
 	if err != nil {
-		config.ErrorStatus("invite code not found", http.StatusNotFound, w, err)
+		config.InfoStatus("invite code not found", http.StatusNotFound, w, err)
+		return
+	}
+	community, communityObjID := c.loadCommunityForInviteCode(w, r, inviteCode.CommunityID)
+	if community == nil {
+		return
+	}
+	actorID, ok := authorizeInviteCodeAction(w, r, community)
+	if !ok {
 		return
 	}
 
@@ -7223,20 +7301,14 @@ func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Remove the invite code ID from the community's inviteCodeIds array
-	communityObjID, err := primitive.ObjectIDFromHex(inviteCode.CommunityID)
-	if err == nil {
-		c.DB.UpdateOne(
-			context.Background(),
-			bson.M{"_id": communityObjID},
-			bson.M{"$pull": bson.M{"community.inviteCodeIds": inviteCodeID}},
-		)
-	}
+	c.DB.UpdateOne(
+		context.Background(),
+		bson.M{"_id": communityObjID},
+		bson.M{"$pull": bson.M{"community.inviteCodeIds": inviteCodeID}},
+	)
 
 	// Audit log
-	actorID := resolveActorFromRequest(r)
-	if err == nil {
-		logAudit(c.ALDB, communityObjID, "invite.deleted", "invite", actorID, resolveActorName(c.UDB, actorID), inviteCodeID, inviteCode.Code, nil)
-	}
+	logAudit(c.ALDB, communityObjID, "invite.deleted", "invite", actorID, resolveActorName(c.UDB, actorID), inviteCodeID, inviteCode.Code, nil)
 
 	// Return success response
 	response := map[string]interface{}{
@@ -7251,6 +7323,16 @@ func (c Community) DeleteInviteCodeHandler(w http.ResponseWriter, r *http.Reques
 // DeleteExpiredInviteCodesHandler bulk deletes all expired invite codes for a community
 func (c Community) DeleteExpiredInviteCodesHandler(w http.ResponseWriter, r *http.Request) {
 	communityID := mux.Vars(r)["communityId"]
+
+	// Clearing out codes is managing who can get in, so the caller needs to be
+	// someone who can manage members.
+	community, communityObjID := c.loadCommunityForInviteCode(w, r, communityID)
+	if community == nil {
+		return
+	}
+	if _, ok := authorizeInviteCodeAction(w, r, community); !ok {
+		return
+	}
 
 	// Find all expired invite codes for this community
 	now := time.Now()
@@ -7291,14 +7373,11 @@ func (c Community) DeleteExpiredInviteCodesHandler(w http.ResponseWriter, r *htt
 	}
 
 	// Remove the expired invite code IDs from the community's inviteCodeIds array
-	communityObjID, err := primitive.ObjectIDFromHex(communityID)
-	if err == nil {
-		c.DB.UpdateOne(
-			context.Background(),
-			bson.M{"_id": communityObjID},
-			bson.M{"$pull": bson.M{"community.inviteCodeIds": bson.M{"$in": expiredCodeIDs}}},
-		)
-	}
+	c.DB.UpdateOne(
+		context.Background(),
+		bson.M{"_id": communityObjID},
+		bson.M{"$pull": bson.M{"community.inviteCodeIds": bson.M{"$in": expiredCodeIDs}}},
+	)
 
 	// Return success response
 	response := map[string]interface{}{

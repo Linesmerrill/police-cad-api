@@ -63,7 +63,7 @@ func (a *App) New() *mux.Router {
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper), ACDB: acDB, ALDB: alDB}
 	v := Vehicle{DB: databases.NewVehicleDatabase(a.dbHelper)}
 	f := Firearm{DB: databases.NewFirearmDatabase(a.dbHelper)}
-	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper)}
+	ic := InviteCode{DB: databases.NewInviteCodeDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
 	l := License{DB: databases.NewLicenseDatabase(a.dbHelper)}
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
 
