@@ -635,6 +635,43 @@ func TestGetInviteCode_PreviewsACodeWithUsesLeft(t *testing.T) {
 	}
 }
 
+// The invite page introduces the community and decides for itself whether the
+// link is still good, so the preview keeps carrying those three answers.
+func TestGetInviteCode_CarriesWhatTheInvitePageShows(t *testing.T) {
+	cID := primitive.NewObjectID()
+	expiry := time.Now().Add(24 * time.Hour)
+	code := inviteCodeDoc(cID.Hex(), "GOOD1", 5, 2, 3, &expiry)
+
+	idb := &mocks.InviteCodeDatabase{}
+	idb.On("FindOne", mock.Anything, mock.Anything).Return(&code, nil)
+	cdb := &mocks.CommunityDatabase{}
+	cdb.On("FindOneIncludingPending", mock.Anything, mock.Anything).
+		Return(&models.Community{ID: cID, Details: models.CommunityDetails{Name: "Lakeside RP"}}, nil)
+	c := Community{DB: cdb, IDB: idb, UDB: &mocks.UserDatabase{}, ALDB: auditMock()}
+
+	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/v1/community/invite/GOOD1", nil),
+		map[string]string{"invite_code": "GOOD1"})
+	rr := httptest.NewRecorder()
+	c.GetInviteCodeHandler(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, "Lakeside RP", body["communityName"])
+	assert.Equal(t, float64(2), body["remainingUses"])
+	assert.NotEmpty(t, body["expiresAt"])
+}
+
+// An older code counts its uses upwards, so the count it reports has to agree
+// with whether joining would be allowed: never zero while a use is left.
+func TestInviteCodeRemainingUses(t *testing.T) {
+	assert.Equal(t, -1, inviteCodeRemainingUses(&models.InviteCode{RemainingUses: -1}))
+	assert.Equal(t, -1, inviteCodeRemainingUses(&models.InviteCode{MaxUses: 0}), "older unlimited code")
+	assert.Equal(t, 2, inviteCodeRemainingUses(&models.InviteCode{MaxUses: 5, RemainingUses: 2}))
+	assert.Equal(t, 2, inviteCodeRemainingUses(&models.InviteCode{MaxUses: 3, Uses: 1}), "older counted code")
+	assert.Equal(t, 0, inviteCodeRemainingUses(&models.InviteCode{MaxUses: 3, Uses: 3}))
+}
+
 func TestInviteCodeHasUsesLeft(t *testing.T) {
 	assert.False(t, inviteCodeHasUsesLeft(nil))
 	assert.True(t, inviteCodeHasUsesLeft(&models.InviteCode{RemainingUses: -1}))
@@ -867,6 +904,13 @@ func TestJoinCommunity_SuppliedUserIDNeedsGatewaySecret(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	f.udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
 
+	bare := joinRequest(t, "", map[string]interface{}{"inviteCode": "LAKESIDE1"})
+	bare.URL.RawQuery = "userId=" + joiner
+	rr = httptest.NewRecorder()
+	f.handler.JoinCommunityHandler(rr, bare)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	f.udb.AssertNotCalled(t, "UpdateOne", mock.Anything, mock.Anything, mock.Anything)
+
 	signed := joinRequest(t, "", map[string]interface{}{
 		"inviteCode": "LAKESIDE1",
 		"userId":     joiner,
@@ -875,4 +919,11 @@ func TestJoinCommunity_SuppliedUserIDNeedsGatewaySecret(t *testing.T) {
 	rr = httptest.NewRecorder()
 	f.handler.JoinCommunityHandler(rr, signed)
 	assert.Equal(t, http.StatusOK, rr.Code)
+
+	query := joinRequest(t, "", map[string]interface{}{"inviteCode": "LAKESIDE1"})
+	query.URL.RawQuery = "userId=" + joiner
+	query.Header.Set(apiGatewayHeader, "s3cret")
+	rr = httptest.NewRecorder()
+	f.handler.JoinCommunityHandler(rr, query)
+	assert.Equal(t, http.StatusOK, rr.Code, "the website sends the session id as ?userId=")
 }

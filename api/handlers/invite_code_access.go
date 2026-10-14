@@ -91,3 +91,25 @@ func inviteCodeHasUsesLeft(invite *models.InviteCode) bool {
 	}
 	return invite.Uses < invite.MaxUses
 }
+
+// inviteCodeRemainingUses is how many redemptions an invite code has left, with
+// -1 meaning unlimited.
+//
+// It reads both generations of counter the same way inviteCodeHasUsesLeft does,
+// so a code the join query would accept never reports zero left.
+func inviteCodeRemainingUses(invite *models.InviteCode) int {
+	if invite == nil {
+		return 0
+	}
+	if invite.RemainingUses == -1 || invite.MaxUses == 0 {
+		return -1
+	}
+	if invite.RemainingUses > 0 {
+		return invite.RemainingUses
+	}
+	// An older code counted upwards in uses instead of downwards.
+	if left := invite.MaxUses - invite.Uses; left > 0 {
+		return left
+	}
+	return 0
+}

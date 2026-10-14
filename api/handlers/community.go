@@ -2340,9 +2340,12 @@ func (c Community) GetInviteCodeHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Prepare response, exclude expiresAt and remainingUses
+	// What the invite page needs to introduce the community and to say, on its
+	// own, whether the link is still good.
 	response := map[string]interface{}{
-		"communityName": community.Details.Name, // Adjust to community.Community.Name if nested
+		"communityName": community.Details.Name,
+		"remainingUses": inviteCodeRemainingUses(invite),
+		"expiresAt":     invite.ExpiresAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
