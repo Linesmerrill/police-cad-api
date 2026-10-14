@@ -661,8 +661,7 @@ func TestInviteCodeByCode_TellsAJoinerOnlyWhatTheyNeed(t *testing.T) {
 	cdb.On("FindOne", mock.Anything, bson.M{"_id": cID}).
 		Return(&models.Community{ID: cID, Details: models.CommunityDetails{Name: "Lakeside RP"}}, nil)
 
-	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/v1/invite/LAKESIDE1", nil),
-		map[string]string{"invite_code": "LAKESIDE1"})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/invite?code=LAKESIDE1", nil)
 	rr := httptest.NewRecorder()
 	InviteCode{DB: idb, CDB: cdb}.InviteCodeByCodeHandler(rr, req)
 
@@ -687,8 +686,7 @@ func TestInviteCodeByCode_SaysWhenACodeIsSpent(t *testing.T) {
 	cdb.On("FindOne", mock.Anything, mock.Anything).
 		Return(&models.Community{ID: cID, Details: models.CommunityDetails{Name: "Lakeside RP"}}, nil)
 
-	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/v1/invite/SPENT1", nil),
-		map[string]string{"invite_code": "SPENT1"})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/invite?code=SPENT1", nil)
 	rr := httptest.NewRecorder()
 	InviteCode{DB: idb, CDB: cdb}.InviteCodeByCodeHandler(rr, req)
 
