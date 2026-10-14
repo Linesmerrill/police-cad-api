@@ -195,6 +195,17 @@ func (a *App) New() *mux.Router {
 	r.HandleFunc("/health", healthCheckHandler)
 	r.HandleFunc("/health/scheduler", a.schedulerHealthHandler).Methods("GET")
 
+	// Discord bot liveness. Registered here, beside the other health routes
+	// and before the versioned subrouters, so both endpoints sit outside
+	// api.Middleware and outside the user-agent gateway: an external uptime
+	// monitor must be able to poll the status endpoint with no credentials,
+	// and the bot must be able to post a heartbeat without a user session.
+	// The write endpoint authenticates itself with a dedicated secret instead
+	// (see bothealth.go).
+	botHealthHandler := BotHealth{DB: databases.NewBotHealthDatabase(a.dbHelper)}
+	r.HandleFunc("/health/discord-bot", botHealthHandler.StatusHandler).Methods("GET")
+	r.HandleFunc("/health/discord-bot/heartbeat", botHealthHandler.HeartbeatHandler).Methods("POST")
+
 	apiCreate := r.PathPrefix("/api/v1").Subrouter()
 	apiV2 := r.PathPrefix("/api/v2").Subrouter()
 
@@ -1017,6 +1028,7 @@ func (a *App) New() *mux.Router {
 		economy.CivDB,
 		databases.NewCourtCaseDatabase(a.dbHelper),
 		databases.NewArrestReportDatabase(a.dbHelper),
+		databases.NewBotHealthDatabase(a.dbHelper),
 	)
 
 	// Re-screen creator applications every 4 hours: resolve each channel, look

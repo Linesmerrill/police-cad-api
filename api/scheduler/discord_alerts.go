@@ -22,6 +22,12 @@ import (
 
 const (
 	cronAlertWebhookEnv   = "DISCORD_CRON_ERROR_WEBHOOK_URL"
+	// websiteAlertsWebhookEnv is the staff "alerts-website" channel, already
+	// used by the RP promotion flag in the handlers package. Platform status
+	// alerts (e.g. the Discord bot going quiet) go here rather than to the
+	// cron-error channel: they are not a job failing, they are something
+	// customers can feel.
+	websiteAlertsWebhookEnv = "DISCORD_ALERTS_WEBSITE_WEBHOOK_URL"
 	cronAlertDedupWindow  = 60 * time.Second
 	// Warnings are informational, so they dedup for far longer: a run of
 	// applications during an outage should not become thirty messages.
@@ -75,6 +81,7 @@ func truncForDiscord(s string, n int) string {
 // applications while TikTok is blocking us should leave one message, not thirty.
 func SendWarningAlert(instanceID, source string, detail error, fields map[string]string) {
 	postDiscordAlert(discordAlertOptions{
+		webhookEnv: cronAlertWebhookEnv,
 		instanceID: instanceID,
 		name:       source,
 		detail:     detail,
@@ -98,6 +105,7 @@ func SendWarningAlert(instanceID, source string, detail error, fields map[string
 // string if not relevant.
 func SendCronAlert(instanceID, jobName string, err error, fields map[string]string) {
 	postDiscordAlert(discordAlertOptions{
+		webhookEnv: cronAlertWebhookEnv,
 		instanceID: instanceID,
 		name:       jobName,
 		detail:     err,
@@ -109,8 +117,13 @@ func SendCronAlert(instanceID, jobName string, err error, fields map[string]stri
 	})
 }
 
-// discordAlertOptions is one alert, whatever its severity.
+// discordAlertOptions is one alert, whatever its severity or destination.
 type discordAlertOptions struct {
+	// webhookEnv names the environment variable holding the destination
+	// webhook. Required: alerts choose their channel, and an alert with no
+	// channel is a bug worth hearing about rather than silently misrouting to
+	// whichever channel happens to be the default.
+	webhookEnv string
 	instanceID string
 	name       string
 	detail     error
@@ -119,16 +132,38 @@ type discordAlertOptions struct {
 	color      int
 	nameLabel  string
 	dedup      time.Duration
+
+	// titleOverride and descriptionOverride let a status alert (something is
+	// down, something recovered) write plain prose instead of the
+	// failure-shaped "<title> · <error>" headline and code-block body. Both
+	// empty means the failure shape, which is what SendCronAlert and
+	// SendWarningAlert use.
+	titleOverride       string
+	descriptionOverride string
 }
 
 func postDiscordAlert(o discordAlertOptions) {
-	webhook := os.Getenv(cronAlertWebhookEnv)
-	if webhook == "" || o.detail == nil {
+	if o.webhookEnv == "" {
+		zap.S().Warnw("discord alert: no webhook env named", "title", o.title, "name", o.name)
+		return
+	}
+	webhook := os.Getenv(o.webhookEnv)
+	if webhook == "" {
+		return
+	}
+	// A failure-shaped alert is meaningless without its error. A status alert
+	// brings its own copy and needs none.
+	if o.detail == nil && o.titleOverride == "" {
 		return
 	}
 	instanceID, jobName, err, fields := o.instanceID, o.name, o.detail, o.fields
 
-	sig := o.title + "|" + jobName + "|" + err.Error()
+	detailText := ""
+	if err != nil {
+		detailText = err.Error()
+	}
+
+	sig := o.title + "|" + jobName + "|" + detailText
 	now := time.Now()
 
 	cronAlertMu.Lock()
@@ -170,9 +205,18 @@ func postDiscordAlert(o discordAlertOptions) {
 		})
 	}
 
+	title := fmt.Sprintf("⚠️ %s · %s", o.title, truncForDiscord(detailText, 200))
+	if o.titleOverride != "" {
+		title = truncForDiscord(o.titleOverride, 240)
+	}
+	description := fmt.Sprintf("```\n%s\n```", truncForDiscord(detailText, 1800))
+	if o.descriptionOverride != "" {
+		description = truncForDiscord(o.descriptionOverride, 1800)
+	}
+
 	embed := discordEmbed{
-		Title:       fmt.Sprintf("⚠️ %s · %s", o.title, truncForDiscord(err.Error(), 200)),
-		Description: fmt.Sprintf("```\n%s\n```", truncForDiscord(err.Error(), 1800)),
+		Title:       title,
+		Description: description,
 		Color:       o.color,
 		Timestamp:   now.UTC().Format(time.RFC3339),
 		Footer:      &discordFooter{Text: "police-cad-api · " + env + " · " + dyno},

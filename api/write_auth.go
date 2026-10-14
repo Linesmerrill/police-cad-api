@@ -35,6 +35,12 @@ var publicWritePaths = map[string]bool{
 	"/api/v1/user/forgot-password/request-code": true, // forgot password: request 6-digit code
 	"/api/v1/user/forgot-password/verify-code":  true, // forgot password: check code before advancing
 	"/api/v1/user/forgot-password/reset":        true, // forgot password: submit code + new password
+	// The Discord bot's heartbeat. Not a user action and not from a browser,
+	// so neither a bearer token nor our Origin applies. It authenticates
+	// itself in the handler against BOT_HEARTBEAT_TOKEN with a constant-time
+	// compare, and refuses the write outright when that secret is unset, so
+	// exempting it here does not make it unauthenticated.
+	"/health/discord-bot/heartbeat": true,
 }
 
 // writeAllowedOrigins are our own web origins. Browser-initiated writes from the

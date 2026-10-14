@@ -35,6 +35,8 @@ type Scheduler struct {
 	// Courts: filing citations and arrests nobody answered.
 	CourtDB databases.CourtCaseDatabase
 	ARDB    databases.ArrestReportDatabase
+	// Discord bot liveness: the heartbeat document and its alert state.
+	BotHealthDB databases.BotHealthDatabase
 	instanceID string
 
 	// Per-job run stats for /health/scheduler. Multiple jobs may run in
@@ -57,6 +59,7 @@ func NewScheduler(
 	civDB databases.CivilianDatabase,
 	courtDB databases.CourtCaseDatabase,
 	arDB databases.ArrestReportDatabase,
+	botHealthDB databases.BotHealthDatabase,
 ) *Scheduler {
 	// Generate a unique instance ID for this pod
 	instanceID := os.Getenv("DYNO") // Heroku sets this to "web.1", "web.2", etc.
@@ -65,21 +68,22 @@ func NewScheduler(
 	}
 
 	return &Scheduler{
-		cron:       cron.New(cron.WithLocation(time.UTC)),
-		CCDB:       ccDB,
-		SnapDB:     snapDB,
-		EntDB:      entDB,
-		UDB:        uDB,
-		CDB:        cDB,
-		LockDB:     lockDB,
-		DBHelper:   dbHelper,
-		SessionDB:  sessionDB,
-		InboxDB:    inboxDB,
-		CivDB:      civDB,
-		CourtDB:    courtDB,
-		ARDB:       arDB,
-		instanceID: instanceID,
-		jobStats:   map[string]*JobStat{},
+		cron:        cron.New(cron.WithLocation(time.UTC)),
+		CCDB:        ccDB,
+		SnapDB:      snapDB,
+		EntDB:       entDB,
+		UDB:         uDB,
+		CDB:         cDB,
+		LockDB:      lockDB,
+		DBHelper:    dbHelper,
+		SessionDB:   sessionDB,
+		InboxDB:     inboxDB,
+		CivDB:       civDB,
+		CourtDB:     courtDB,
+		ARDB:        arDB,
+		BotHealthDB: botHealthDB,
+		instanceID:  instanceID,
+		jobStats:    map[string]*JobStat{},
 	}
 }
 
@@ -143,6 +147,19 @@ func (s *Scheduler) Start() {
 			zap.S().Errorw("failed to register community pending-deletion job", "error", err)
 		} else {
 			s.registerJob("processCommunityPendingDeletions", communityPendingSchedule)
+		}
+	}
+
+	// Discord bot liveness. Every minute, because the whole point is noticing
+	// an outage in minutes rather than when a support ticket arrives. RunLocked
+	// so that on a multi-dyno deploy only one instance does the work.
+	if s.BotHealthDB != nil && s.LockDB != nil {
+		if _, err := s.cron.AddFunc(botHealthSchedule, func() {
+			s.RunLocked(botHealthJobName, botHealthLockKey, botHealthJobTTL, s.checkDiscordBotHealth)
+		}); err != nil {
+			zap.S().Errorw("failed to register discord bot health check", "error", err)
+		} else {
+			s.registerJob(botHealthJobName, botHealthSchedule)
 		}
 	}
 
