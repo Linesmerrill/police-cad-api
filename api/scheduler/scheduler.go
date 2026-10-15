@@ -163,6 +163,20 @@ func (s *Scheduler) Start() {
 		}
 	}
 
+	// Status page: GitHub throttles the status repo's own 5-minute schedule down
+	// to a handful of runs a day, so the checks are asked for from here. Only
+	// registers when a dispatch token is set, so local dev and preview apps
+	// never touch the real status page.
+	if statusDispatchConfigured() && s.LockDB != nil {
+		if _, err := s.cron.AddFunc(statusDispatchSchedule, func() {
+			s.RunLocked(statusDispatchJobName, statusDispatchLockKey, statusDispatchJobTTL, s.dispatchStatusPageWorkflows)
+		}); err != nil {
+			zap.S().Errorw("failed to register status page dispatch", "error", err)
+		} else {
+			s.registerJob(statusDispatchJobName, statusDispatchSchedule)
+		}
+	}
+
 	s.cron.Start()
 	zap.S().Info("Content creator scheduler started")
 }
