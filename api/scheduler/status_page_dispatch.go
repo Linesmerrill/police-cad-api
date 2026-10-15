@@ -24,7 +24,7 @@ import (
 // explicitly and the page tracks reality.
 //
 // Two workflows matter. uptime.yml performs the checks and commits the result,
-// and site.yml rebuilds the published page. Running the page build on a timer
+// and status-page.yml rebuilds the published page. Running the page build on a timer
 // would deploy it dozens of times a day over nothing, so it is dispatched only
 // when a check actually changed the repository, with a floor between rebuilds.
 //
@@ -48,7 +48,9 @@ const (
 	statusDispatchDefaultRef  = "master"
 
 	statusUptimeWorkflow = "uptime.yml"
-	statusSiteWorkflow   = "site.yml"
+	// statusSiteWorkflow is the status repo's own page build, which replaced
+	// Upptime's generated site.yml when the page was redesigned.
+	statusSiteWorkflow = "status-page.yml"
 
 	// statusSiteRebuildFloor is the shortest gap between two page rebuilds.
 	// A flapping service could otherwise change the repository on every check.
