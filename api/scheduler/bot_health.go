@@ -89,6 +89,7 @@ func (s *Scheduler) checkDiscordBotHealth(ctx context.Context) error {
 		}
 		zap.S().Warnw("discord bot appears to be down", "lastHeartbeat", lastHeartbeat.Format(time.RFC3339))
 		sendBotDownAlert(s.instanceID, health, lastHeartbeat, now)
+		reportBotIncidentOpened(ctx, s.instanceID, lastHeartbeat, now)
 		return nil
 	}
 
@@ -104,7 +105,52 @@ func (s *Scheduler) checkDiscordBotHealth(ctx context.Context) error {
 	}
 	zap.S().Infow("discord bot is heartbeating again", "downFor", downFor.String())
 	sendBotRecoveryAlert(s.instanceID, health, lastHeartbeat, downFor)
+	reportBotIncidentResolved(ctx, s.instanceID, downFor)
 	return nil
+}
+
+// botStatusSlug is the Discord bot's slug on the status page, and its label in
+// the status repository.
+const botStatusSlug = "discord-bot"
+
+// reportBotIncidentOpened puts the outage on the public status page.
+//
+// The staff alert has already been sent by the time this runs, so a failure
+// here loses the public incident, not the warning. It is reported as a cron
+// failure and nothing more: the transition is already claimed, so retrying it
+// would need a second transition, and announcing the outage twice to chase a
+// GitHub hiccup is worse than one missing incident.
+func reportBotIncidentOpened(ctx context.Context, instanceID string, lastHeartbeat, now time.Time) {
+	if !statusIncidentConfigured() {
+		return
+	}
+	silentFor := humanizeBotDuration(now.Sub(lastHeartbeat))
+	body := "The Discord bot has stopped reporting in, so slash commands and community autocomplete in Discord are not responding. " +
+		"The website and the mobile app are not affected.\n\n" +
+		"Last heartbeat: " + lastHeartbeat.Format("2006-01-02 15:04 UTC") + ", about " + silentFor + " ago.\n\n" +
+		"We are looking into it and will update this incident when the bot is back."
+
+	if _, err := OpenStatusIncident(ctx, botStatusSlug, "Discord bot is not responding", body); err != nil {
+		zap.S().Errorw("failed to open the status page incident for the bot", "error", err)
+		SendCronAlert(instanceID, botHealthJobName, err, map[string]string{"phase": "status_incident_open"})
+	}
+}
+
+// reportBotIncidentResolved closes the public incident, with how long it ran.
+func reportBotIncidentResolved(ctx context.Context, instanceID string, downFor time.Duration) {
+	if !statusIncidentConfigured() {
+		return
+	}
+	body := "Resolved: the Discord bot is reporting in again"
+	if downFor > 0 {
+		body += " after " + humanizeBotDuration(downFor)
+	}
+	body += ". Slash commands and autocomplete are working normally."
+
+	if err := ResolveStatusIncident(ctx, botStatusSlug, body); err != nil {
+		zap.S().Errorw("failed to resolve the status page incident for the bot", "error", err)
+		SendCronAlert(instanceID, botHealthJobName, err, map[string]string{"phase": "status_incident_resolve"})
+	}
 }
 
 // botOutageDuration is how long the bot was actually silent: from the last
