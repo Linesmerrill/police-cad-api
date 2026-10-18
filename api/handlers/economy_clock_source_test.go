@@ -219,3 +219,18 @@ func TestClockOutCapsDiscordShiftAtMaxSession(t *testing.T) {
 func TestClockOutCapsWebShiftAtLastHeartbeat(t *testing.T) {
 	assert.Equal(t, int64(60), clockOut(t, "", 45*time.Minute))
 }
+
+func TestGetLastClosedSessionValidatesUserID(t *testing.T) {
+	h := Economy{SDB: &fakeClockSessions{}}
+
+	rec := httptest.NewRecorder()
+	h.GetLastClosedSessionHandler(rec, httptest.NewRequest(http.MethodGet,
+		`/api/v2/economy/session/last-closed?userId={"$ne":""}`, nil))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	rec = httptest.NewRecorder()
+	h.GetLastClosedSessionHandler(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v2/economy/session/last-closed?userId="+clockTestUser, nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "null", rec.Body.String())
+}

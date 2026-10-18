@@ -684,15 +684,18 @@ func (e Economy) GetLastClosedSessionHandler(w http.ResponseWriter, r *http.Requ
 	if userID == "" {
 		userID = r.URL.Query().Get("userId")
 	}
-	if userID == "" {
-		config.ErrorStatus("userId required", http.StatusBadRequest, w, nil)
+	// User ids are ObjectID hex. Parse and re-serialize so only a canonical
+	// id, never raw request text, reaches the query.
+	userOID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.InfoStatus("valid userId required", http.StatusBadRequest, w, nil)
 		return
 	}
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
 	filter := bson.M{
-		"userId": userID,
+		"userId": userOID.Hex(),
 		"status": bson.M{"$in": []string{"ended", "expired", "abandoned"}},
 	}
 	opts := options.FindOne().SetSort(bson.D{{Key: "endedAt", Value: -1}})
