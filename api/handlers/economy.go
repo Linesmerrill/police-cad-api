@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -132,7 +133,7 @@ func findUserMembership(dept *models.Department, userID string) (rankID string, 
 
 
 // paySession computes earnings to credit from session.LastPayoutAt (or StartedAt) up to `now`,
-// capped at the session's MaxSession window. Updates the session document and the civilian balance.
+// capped by ClockSession.PayableUntil. Updates the session document and the civilian balance.
 // Safe to call repeatedly (idempotent on the time window).
 func (e Economy) paySession(ctx context.Context, sess *models.ClockSession, now time.Time, terminalStatus string) (int64, time.Time, error) {
 	startCursor := sess.LastPayoutAt
@@ -141,19 +142,9 @@ func (e Economy) paySession(ctx context.Context, sess *models.ClockSession, now 
 	}
 	startT := startCursor.Time()
 
-	// Hard-cap to the session window from StartedAt.
-	maxEnd := sess.StartedAt.Time().Add(time.Duration(sess.MaxSessionMinutes) * time.Minute)
-	endT := now
-	if endT.After(maxEnd) {
-		endT = maxEnd
-	}
-	// Also cap to the last heartbeat + grace — no pay for time after AFK timeout.
-	if sess.LastHeartbeatAt != 0 {
-		hbCap := sess.LastHeartbeatAt.Time().Add(time.Duration(sess.AfkGraceSeconds) * time.Second)
-		if endT.After(hbCap) {
-			endT = hbCap
-		}
-	}
+	// Capped to the max session window, and for AFK-tracked sessions to the
+	// last heartbeat + grace — no pay for time after an AFK timeout.
+	endT := sess.PayableUntil(now)
 
 	if !endT.After(startT) {
 		// Nothing to pay this tick.
@@ -342,6 +333,50 @@ type clockInRequest struct {
 	CommunityID  string `json:"communityId"`
 	DepartmentID string `json:"departmentId"`
 	CivilianID   string `json:"civilianId,omitempty"`
+	// Source names the client starting the shift. Only "discord" is meaningful
+	// (see models.ClockSourceDiscord); website and mobile send nothing.
+	Source string `json:"source,omitempty"`
+}
+
+// resolveClockSource returns the session source to record for a clock-in.
+// "discord" exempts the shift from the AFK timeout, so it is only believed
+// from a caller holding the server-to-server secret (the bot). Anyone else
+// asking for it gets an ordinary AFK-tracked shift.
+func resolveClockSource(r *http.Request, requested string) string {
+	if requested != models.ClockSourceDiscord {
+		return ""
+	}
+	if !HasValidGatewaySecret(r) {
+		zap.S().Warnw("clock-in requested discord source without gateway secret; treating as AFK-tracked",
+			"userAgent", r.UserAgent())
+		return ""
+	}
+	return models.ClockSourceDiscord
+}
+
+// validateClockInCivilian checks that the civilian a shift is being started
+// for exists and belongs to the user. Returns a client-facing message and
+// status when it does not, or ("", 0) when the clock-in may proceed.
+func (e Economy) validateClockInCivilian(ctx context.Context, civilianID, userID string) (string, int) {
+	if civilianID == "" {
+		return "", 0
+	}
+	civOID, err := primitive.ObjectIDFromHex(civilianID)
+	if err != nil {
+		return "invalid civilianId", http.StatusBadRequest
+	}
+	civ, err := e.CivDB.FindOne(ctx, bson.M{"_id": civOID})
+	if errors.Is(err, mongo.ErrNoDocuments) || (err == nil && civ == nil) {
+		return "civilian not found; it may have been deleted. Pick another civilian to clock in", http.StatusNotFound
+	}
+	if err != nil {
+		zap.S().Errorw("failed to look up civilian for clock-in", "civilianId", civilianID, "error", err)
+		return "failed to look up civilian", http.StatusInternalServerError
+	}
+	if civ.Details.UserID != userID {
+		return "that civilian does not belong to you", http.StatusForbidden
+	}
+	return "", 0
 }
 
 // ClockInHandler starts a clock session for a user against a department.
@@ -410,6 +445,10 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("user is not a member of this department", http.StatusForbidden, w, nil)
 		return
 	}
+	if msg, status := e.validateClockInCivilian(ctx, req.CivilianID, userID); status != 0 {
+		config.InfoStatus(msg, status, w, nil)
+		return
+	}
 	// Resolve pay from the member's rank, falling back to the department's
 	// default rank when they hold no assignment — which is the normal state for
 	// a public department, where nobody has a members[] entry to carry one.
@@ -446,6 +485,7 @@ func (e Economy) ClockInHandler(w http.ResponseWriter, r *http.Request) {
 		LastPayoutAt:      nowDT,
 		MaxSessionMinutes: maxSession,
 		AfkGraceSeconds:   afkGrace,
+		Source:            resolveClockSource(r, req.Source),
 		CreatedAt:         nowDT,
 		UpdatedAt:         nowDT,
 	}
@@ -622,6 +662,46 @@ func (e Economy) GetActiveSessionHandler(w http.ResponseWriter, r *http.Request)
 	sess, err := e.SDB.FindOne(ctx, filter)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("null"))
+			return
+		}
+		config.ErrorStatus("failed to find session", http.StatusInternalServerError, w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(sess)
+}
+
+// GetLastClosedSessionHandler returns the user's most recently closed session
+// (ended, expired or abandoned), or null when they have none. Lets a client
+// that finds no active shift explain why — e.g. the bot's /clock-out telling a
+// user their shift was closed by the AFK sweep and what it paid.
+//
+//	GET /api/v2/economy/session/last-closed?userId=X
+func (e Economy) GetLastClosedSessionHandler(w http.ResponseWriter, r *http.Request) {
+	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	if userID == "" {
+		userID = r.URL.Query().Get("userId")
+	}
+	// User ids are ObjectID hex. Parse and re-serialize so only a canonical
+	// id, never raw request text, reaches the query.
+	userOID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		config.InfoStatus("valid userId required", http.StatusBadRequest, w, nil)
+		return
+	}
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{
+		"userId": userOID.Hex(),
+		"status": bson.M{"$in": []string{"ended", "expired", "abandoned"}},
+	}
+	opts := options.FindOne().SetSort(bson.D{{Key: "endedAt", Value: -1}})
+	sess, err := e.SDB.FindOne(ctx, filter, opts)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("null"))
 			return

@@ -707,6 +707,13 @@ createIndexSafe(
   { name: "clock_sessions_community_status_idx", background: true }
 );
 
+// GET /api/v2/economy/session/last-closed — a user's newest closed shift.
+createIndexSafe(
+  db.clock_sessions,
+  { userId: 1, endedAt: -1 },
+  { name: "clock_sessions_user_ended_idx", background: true }
+);
+
 // Partial unique: only one active session per civilian.
 createIndexSafe(
   db.clock_sessions,
