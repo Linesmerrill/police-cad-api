@@ -6,11 +6,18 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// ClockSourceDiscord marks a session started from the Discord bot's /clock-in.
-// The bot has no page that stays open to send heartbeats, so these sessions are
-// exempt from the AFK timeout and run until /clock-out or the max session
-// window. Sessions with no source (website, mobile) keep the AFK rules.
-const ClockSourceDiscord = "discord"
+// Clock session sources. A shift's source decides whether it is held to the
+// AFK heartbeat timeout. Only the website can keep a client open and
+// heart-beating for the whole shift, so only website shifts (no source) are.
+// Discord has no client at all, and a phone suspends the app when it is
+// backgrounded or locked, so those shifts run until clock-out or the max
+// session window instead.
+const (
+	// ClockSourceDiscord marks a shift started from the bot's /clock-in.
+	ClockSourceDiscord = "discord"
+	// ClockSourceMobile marks a shift started from the mobile app.
+	ClockSourceMobile = "mobile"
+)
 
 // ClockSession represents a single clock-in/clock-out shift for a civilian at a department.
 // One civilian may only have one Status="active" session at a time (enforced by partial unique index).
@@ -39,15 +46,15 @@ type ClockSession struct {
 	BalanceAfter int64 `json:"balanceAfter,omitempty" bson:"balanceAfter,omitempty"`
 	MaxSessionMinutes int               `json:"maxSessionMinutes" bson:"maxSessionMinutes"` // snapshot at clock-in
 	AfkGraceSeconds  int                `json:"afkGraceSeconds" bson:"afkGraceSeconds"`     // snapshot at clock-in
-	Source           string             `json:"source,omitempty" bson:"source,omitempty"`   // "" (website/mobile) | ClockSourceDiscord
+	Source           string             `json:"source,omitempty" bson:"source,omitempty"`   // "" (website) | ClockSourceDiscord | ClockSourceMobile
 	CreatedAt        primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt        primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
 
 // TracksAfk reports whether the session is subject to the AFK heartbeat
-// timeout. Only clients that send heartbeats can be held to it.
+// timeout. Only clients that can heartbeat for the whole shift are held to it.
 func (s *ClockSession) TracksAfk() bool {
-	return s.Source != ClockSourceDiscord
+	return s.Source != ClockSourceDiscord && s.Source != ClockSourceMobile
 }
 
 // PayableUntil returns the latest instant the session can be paid through,

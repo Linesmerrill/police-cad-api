@@ -16,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/databases/mocks"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -80,6 +81,13 @@ func clockInCommunity(deptID primitive.ObjectID) *models.Community {
 // with the given civilian lookup result, and returns the recorder and store.
 func clockIn(t *testing.T, body map[string]string, gatewayKey string, civ *models.Civilian, civErr error) (*httptest.ResponseRecorder, *fakeClockSessions) {
 	t.Helper()
+	return clockInAs(t, body, gatewayKey, "", civ, civErr)
+}
+
+// clockInAs is clockIn with an optional bearer-token user, as the middleware
+// sets it for a request signed in through /auth/token (the mobile app).
+func clockInAs(t *testing.T, body map[string]string, gatewayKey, bearerUser string, civ *models.Civilian, civErr error) (*httptest.ResponseRecorder, *fakeClockSessions) {
+	t.Helper()
 	deptID := primitive.NewObjectID()
 	community := clockInCommunity(deptID)
 	body["communityId"] = community.ID.Hex()
@@ -95,6 +103,9 @@ func clockIn(t *testing.T, body map[string]string, gatewayKey string, civ *model
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/economy/clock-in?userId="+clockTestUser, bytes.NewReader(raw))
 	if gatewayKey != "" {
 		req.Header.Set(apiGatewayHeader, gatewayKey)
+	}
+	if bearerUser != "" {
+		req = req.WithContext(api.WithAuthenticatedUserID(req.Context(), bearerUser))
 	}
 	rec := httptest.NewRecorder()
 	Economy{SDB: sdb, CivDB: civDB, CommDB: commDB}.ClockInHandler(rec, req)
@@ -137,6 +148,56 @@ func TestClockInWithoutSourceIsAfkTracked(t *testing.T) {
 	civ := ownedCivilian(clockTestUser)
 	rec, sdb := clockIn(t, map[string]string{"civilianId": civ.ID.Hex()}, "", civ, nil)
 
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	if assert.Len(t, sdb.inserted, 1) {
+		assert.Equal(t, "", sdb.inserted[0].Source)
+	}
+}
+
+func TestClockInFromTheAppIsAMobileShift(t *testing.T) {
+	t.Setenv(apiGatewayKeyEnv, "s3cret")
+	civ := ownedCivilian(clockTestUser)
+
+	for name, body := range map[string]map[string]string{
+		// Builds already in the stores send no source; the token is enough.
+		"released build, no source": {"civilianId": civ.ID.Hex()},
+		"new build, source mobile":  {"civilianId": civ.ID.Hex(), "source": "mobile"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec, sdb := clockInAs(t, body, "", clockTestUser, civ, nil)
+			assert.Equal(t, http.StatusCreated, rec.Code)
+			if assert.Len(t, sdb.inserted, 1) {
+				assert.Equal(t, models.ClockSourceMobile, sdb.inserted[0].Source)
+				assert.False(t, sdb.inserted[0].TracksAfk())
+			}
+		})
+	}
+}
+
+func TestClockInClaimingMobileWithoutATokenIsAWebsiteShift(t *testing.T) {
+	civ := ownedCivilian(clockTestUser)
+	rec, sdb := clockIn(t, map[string]string{"civilianId": civ.ID.Hex(), "source": "mobile"}, "", civ, nil)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	if assert.Len(t, sdb.inserted, 1) {
+		assert.Equal(t, "", sdb.inserted[0].Source)
+		assert.True(t, sdb.inserted[0].TracksAfk())
+	}
+}
+
+func TestClockInFromAServerWithATokenIsNeverMobile(t *testing.T) {
+	t.Setenv(apiGatewayKeyEnv, "s3cret")
+	civ := ownedCivilian(clockTestUser)
+
+	// The bot carries a bearer token and the gateway secret: discord, not mobile.
+	rec, sdb := clockInAs(t, map[string]string{"civilianId": civ.ID.Hex(), "source": "discord"}, "s3cret", clockTestUser, civ, nil)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	if assert.Len(t, sdb.inserted, 1) {
+		assert.Equal(t, models.ClockSourceDiscord, sdb.inserted[0].Source)
+	}
+
+	// A server caller that names no source keeps the website rules.
+	rec, sdb = clockInAs(t, map[string]string{"civilianId": civ.ID.Hex()}, "s3cret", clockTestUser, civ, nil)
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	if assert.Len(t, sdb.inserted, 1) {
 		assert.Equal(t, "", sdb.inserted[0].Source)
@@ -214,6 +275,15 @@ func TestClockOutPaysDiscordShiftToClockOutTime(t *testing.T) {
 
 func TestClockOutCapsDiscordShiftAtMaxSession(t *testing.T) {
 	assert.Equal(t, int64(120*60), clockOut(t, models.ClockSourceDiscord, 5*time.Hour))
+}
+
+func TestClockOutPaysBackgroundedMobileShiftToClockOutTime(t *testing.T) {
+	// No heartbeat since clock-in: the app was backgrounded the whole time.
+	assert.InDelta(t, 45*60, clockOut(t, models.ClockSourceMobile, 45*time.Minute), 1)
+}
+
+func TestClockOutCapsMobileShiftAtMaxSession(t *testing.T) {
+	assert.Equal(t, int64(120*60), clockOut(t, models.ClockSourceMobile, 5*time.Hour))
 }
 
 func TestClockOutCapsWebShiftAtLastHeartbeat(t *testing.T) {
