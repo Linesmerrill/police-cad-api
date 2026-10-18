@@ -13,7 +13,7 @@ import (
 )
 
 // staleSessionSweep finds active clock sessions that have exceeded their max session window
-// or missed their AFK heartbeat grace, finalizes payroll, and marks them expired.
+// or (for AFK-tracked sessions) missed their heartbeat grace, finalizes payroll, and closes them.
 func (s *Scheduler) staleSessionSweep() {
 	const jobName = "staleSessionSweep"
 	s.recordStart(jobName)
@@ -46,14 +46,9 @@ func (s *Scheduler) staleSessionSweep() {
 	swept := 0
 	for i := range sessions {
 		sess := &sessions[i]
-		maxEnd := sess.StartedAt.Time().Add(time.Duration(sess.MaxSessionMinutes) * time.Minute)
-		afkCutoff := sess.LastHeartbeatAt.Time().Add(time.Duration(sess.AfkGraceSeconds) * time.Second)
-		if now.Before(maxEnd) && now.Before(afkCutoff) {
+		terminal := sess.SweepStatus(now)
+		if terminal == "" {
 			continue
-		}
-		terminal := "expired"
-		if now.Before(maxEnd) && !now.Before(afkCutoff) {
-			terminal = "abandoned"
 		}
 		s.payAndCloseSession(ctx, sess, now, terminal)
 		swept++
@@ -72,17 +67,7 @@ func (s *Scheduler) payAndCloseSession(ctx context.Context, sess *models.ClockSe
 		startCursor = sess.StartedAt
 	}
 	startT := startCursor.Time()
-	maxEnd := sess.StartedAt.Time().Add(time.Duration(sess.MaxSessionMinutes) * time.Minute)
-	endT := now
-	if endT.After(maxEnd) {
-		endT = maxEnd
-	}
-	if sess.LastHeartbeatAt != 0 {
-		hbCap := sess.LastHeartbeatAt.Time().Add(time.Duration(sess.AfkGraceSeconds) * time.Second)
-		if endT.After(hbCap) {
-			endT = hbCap
-		}
-	}
+	endT := sess.PayableUntil(now)
 
 	nowDT := primitive.NewDateTimeFromTime(now)
 	var credit int64
