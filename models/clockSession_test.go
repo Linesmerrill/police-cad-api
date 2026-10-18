@@ -26,8 +26,10 @@ func sessionFixture(source string, start time.Time) ClockSession {
 func TestClockSessionTracksAfk(t *testing.T) {
 	web := sessionFixture("", time.Now())
 	discord := sessionFixture(ClockSourceDiscord, time.Now())
+	mobile := sessionFixture(ClockSourceMobile, time.Now())
 	assert.True(t, web.TracksAfk())
 	assert.False(t, discord.TracksAfk())
+	assert.False(t, mobile.TracksAfk())
 }
 
 func TestClockSessionSweepStatus(t *testing.T) {
@@ -41,6 +43,13 @@ func TestClockSessionSweepStatus(t *testing.T) {
 
 	t.Run("discord shift expires at the max session window", func(t *testing.T) {
 		s := sessionFixture(ClockSourceDiscord, start)
+		assert.Equal(t, "expired", s.SweepStatus(start.Add(120*time.Minute)))
+	})
+
+	t.Run("mobile shift survives the app being backgrounded", func(t *testing.T) {
+		s := sessionFixture(ClockSourceMobile, start)
+		assert.Equal(t, "", s.SweepStatus(start.Add(61*time.Second)))
+		assert.Equal(t, "", s.SweepStatus(start.Add(119*time.Minute)))
 		assert.Equal(t, "expired", s.SweepStatus(start.Add(120*time.Minute)))
 	})
 
@@ -73,6 +82,13 @@ func TestClockSessionPayableUntil(t *testing.T) {
 
 	t.Run("discord shift is capped at the max session", func(t *testing.T) {
 		s := sessionFixture(ClockSourceDiscord, start)
+		assert.WithinDuration(t, start.Add(120*time.Minute), s.PayableUntil(start.Add(5*time.Hour)), 0)
+	})
+
+	t.Run("mobile shift is paid to clock-out, capped at max session", func(t *testing.T) {
+		s := sessionFixture(ClockSourceMobile, start)
+		out := start.Add(45 * time.Minute)
+		assert.WithinDuration(t, out, s.PayableUntil(out), 0)
 		assert.WithinDuration(t, start.Add(120*time.Minute), s.PayableUntil(start.Add(5*time.Hour)), 0)
 	})
 

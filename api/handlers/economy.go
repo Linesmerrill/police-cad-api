@@ -333,25 +333,39 @@ type clockInRequest struct {
 	CommunityID  string `json:"communityId"`
 	DepartmentID string `json:"departmentId"`
 	CivilianID   string `json:"civilianId,omitempty"`
-	// Source names the client starting the shift. Only "discord" is meaningful
-	// (see models.ClockSourceDiscord); website and mobile send nothing.
+	// Source names the client starting the shift: "discord" from the bot,
+	// "mobile" from the app. Only a hint; resolveClockSource decides.
 	Source string `json:"source,omitempty"`
 }
 
 // resolveClockSource returns the session source to record for a clock-in.
-// "discord" exempts the shift from the AFK timeout, so it is only believed
-// from a caller holding the server-to-server secret (the bot). Anyone else
-// asking for it gets an ordinary AFK-tracked shift.
+// Both non-website sources exempt the shift from the AFK timeout, so each is
+// decided by a credential the caller holds, never by the body alone:
+//
+//   - "discord" needs the server-to-server secret, which only our own servers
+//     (the bot, the website backend) hold.
+//   - A caller signed in with a bearer token, without that secret, is the
+//     mobile app: it is the only client that logs in through /auth/token (the
+//     website sends ?userId= and no token). Because this reads nothing from
+//     the body, app builds already in the stores, which send no source, are
+//     covered too.
+//
+// Anything else is an ordinary website shift that keeps the AFK rules.
 func resolveClockSource(r *http.Request, requested string) string {
-	if requested != models.ClockSourceDiscord {
-		return ""
-	}
-	if !HasValidGatewaySecret(r) {
-		zap.S().Warnw("clock-in requested discord source without gateway secret; treating as AFK-tracked",
+	trustedServer := HasValidGatewaySecret(r)
+	if requested == models.ClockSourceDiscord {
+		if trustedServer {
+			return models.ClockSourceDiscord
+		}
+		zap.S().Warnw("clock-in requested discord source without gateway secret",
 			"userAgent", r.UserAgent())
-		return ""
 	}
-	return models.ClockSourceDiscord
+	// Server-to-server callers (the bot, the website backend) are never the
+	// app, whatever bearer token they carry.
+	if !trustedServer && api.GetAuthenticatedUserIDFromContext(r.Context()) != "" {
+		return models.ClockSourceMobile
+	}
+	return ""
 }
 
 // validateClockInCivilian checks that the civilian a shift is being started

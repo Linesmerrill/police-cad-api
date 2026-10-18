@@ -111,3 +111,21 @@ func TestStaleSessionSweep_DiscordShiftExpiresAtMaxSessionAndIsPaidToIt(t *testi
 	assert.Equal(t, "expired", update["$set"].(bson.M)["status"])
 	assert.Equal(t, int64(120*60), update["$inc"].(bson.M)["earnings"])
 }
+
+func TestStaleSessionSweep_BackgroundedMobileShiftNotSweptForAfk(t *testing.T) {
+	sess := sweepSession(models.ClockSourceMobile, time.Now().Add(-10*time.Minute))
+	sdb := runSweep(t, sess)
+	assert.Empty(t, sdb.updates, "a mobile shift with the app backgrounded must stay active")
+}
+
+func TestStaleSessionSweep_MobileShiftExpiresAtMaxSessionAndIsPaidToIt(t *testing.T) {
+	sess := sweepSession(models.ClockSourceMobile, time.Now().Add(-3*time.Hour))
+	sdb := runSweep(t, sess)
+
+	update, ok := sdb.updates[sess.ID]
+	if !assert.True(t, ok, "mobile shift past max session must be swept") {
+		return
+	}
+	assert.Equal(t, "expired", update["$set"].(bson.M)["status"])
+	assert.Equal(t, int64(120*60), update["$inc"].(bson.M)["earnings"])
+}
