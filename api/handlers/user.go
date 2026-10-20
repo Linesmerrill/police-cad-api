@@ -46,6 +46,7 @@ type User struct {
 	SEDB  databases.SubscriptionEventDatabase
 	ACDB  databases.UserActiveCivilianDatabase // active-civilian-per-community pick, shared with the Discord bot
 	SDB   databases.ClockSessionDatabase       // clock sessions; used to keep the active-civ pin aligned with the running shift
+	CivDB databases.CivilianDatabase           // civilians; the active-civ pick must be the caller's own civilian in that community
 }
 
 // UserHandler returns a user given a userID
@@ -430,12 +431,32 @@ func (u User) SetActiveCivilianHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("userId, communityId, civilianId are required", http.StatusBadRequest, w, nil)
 		return
 	}
-	if u.ACDB == nil {
+	// A signed-in caller can only set their own pick.
+	if authID := api.GetAuthenticatedUserIDFromContext(r.Context()); authID != "" && authID != req.UserID {
+		config.InfoStatus("you can only change your own active civilian", http.StatusForbidden, w, nil)
+		return
+	}
+	civOID, err := primitive.ObjectIDFromHex(req.CivilianID)
+	if err != nil {
+		config.InfoStatus("invalid civilianId", http.StatusBadRequest, w, err)
+		return
+	}
+	if u.ACDB == nil || u.CivDB == nil {
 		config.ErrorStatus("active-civilian store not configured", http.StatusInternalServerError, w, nil)
 		return
 	}
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	civ, err := u.CivDB.FindOne(ctx, bson.M{"_id": civOID})
+	if err != nil || civ == nil {
+		config.InfoStatus("civilian not found", http.StatusNotFound, w, err)
+		return
+	}
+	if !ownsCivilianInCommunity(civ, req.UserID, req.CommunityID) {
+		config.InfoStatus("that civilian isn't yours in this community", http.StatusForbidden, w, nil)
+		return
+	}
 
 	// Coupling rule: the active civilian must match whichever civilian is
 	// currently on the clock for this user (if any). Downstream UI (wallet
@@ -460,7 +481,7 @@ func (u User) SetActiveCivilianHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
-	err := u.ACDB.UpdateOne(ctx,
+	err = u.ACDB.UpdateOne(ctx,
 		bson.M{"userId": req.UserID, "communityId": req.CommunityID},
 		bson.M{"$set": bson.M{
 			"userId":      req.UserID,

@@ -57,7 +57,7 @@ func (a *App) New() *mux.Router {
 		}
 	}()
 	sessionDB := databases.NewClockSessionDatabase(a.dbHelper)
-	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB}
+	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB, CivDB: databases.NewCivilianDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB, OffDB: databases.NewRpPromoOffenseDatabase(a.dbHelper)}
 	civ := Civilian{DB: databases.NewCivilianDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper), IDB: databases.NewInboxItemDatabase(a.dbHelper), SDB: databases.NewClockSessionDatabase(a.dbHelper), ACDB: acDB, ALDB: alDB}

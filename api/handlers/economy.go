@@ -1008,20 +1008,21 @@ func (e Economy) GetInboxItemHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("invalid item id", http.StatusBadRequest, w, err)
 		return
 	}
-	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	userID := resolveActorFromRequest(r)
 	if userID == "" {
-		userID = r.URL.Query().Get("userId")
+		config.InfoStatus("sign in again to view this item", http.StatusUnauthorized, w, nil)
+		return
 	}
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
 	item, err := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
-	if err != nil {
-		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+	if err != nil || item == nil {
+		config.InfoStatus("inbox item not found", http.StatusNotFound, w, err)
 		return
 	}
-	if userID != "" && item.UserID != "" && item.UserID != userID {
-		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, nil)
+	if item.UserID != userID {
+		config.InfoStatus("inbox item not found", http.StatusNotFound, w, nil)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -1036,20 +1037,26 @@ func (e Economy) GetWalletHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("invalid civilianId", http.StatusBadRequest, w, err)
 		return
 	}
+	actorID := resolveActorFromRequest(r)
+	if actorID == "" {
+		config.InfoStatus("sign in again to view this wallet", http.StatusUnauthorized, w, nil)
+		return
+	}
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
 	civ, err := e.CivDB.FindOne(ctx, bson.M{"_id": cID})
-	if err != nil {
-		config.ErrorStatus("civilian not found", http.StatusNotFound, w, err)
+	if err != nil || civ == nil {
+		config.InfoStatus("civilian not found", http.StatusNotFound, w, err)
 		return
 	}
-	if civ.Details.ActiveCommunityID != "" {
-		if commID, perr := primitive.ObjectIDFromHex(civ.Details.ActiveCommunityID); perr == nil {
-			if community, cerr := e.CommDB.FindOne(ctx, bson.M{"_id": commID}); cerr == nil {
-				e.ensureBalanceInitialized(ctx, civ, community)
-			}
-		}
+	community := e.civilianCommunity(ctx, civ)
+	if !canViewCivilianEconomy(civ, community, actorID) {
+		config.InfoStatus("you can only view your own civilian's wallet", http.StatusForbidden, w, nil)
+		return
+	}
+	if community != nil {
+		e.ensureBalanceInitialized(ctx, civ, community)
 	}
 
 	recent, _ := e.IDB.Find(ctx, bson.M{"civilianId": civilianID}, options.Find().SetSort(bson.M{"createdAt": -1}).SetLimit(10))
@@ -1062,7 +1069,13 @@ func (e Economy) GetWalletHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ListInboxHandler returns paginated inbox items for ?userId= or ?civilianId=.
+// ListInboxHandler returns paginated inbox items for one civilian
+// (?civilianId=) or for all of the caller's civilians (?userId=), optionally
+// narrowed by ?communityId= and ?status=.
+//
+// With ?civilianId=, ?userId= identifies the caller and is not a filter, so a
+// community manager can read a member's civilian. Without it, ?userId= must be
+// the caller.
 func (e Economy) ListInboxHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
@@ -1073,12 +1086,44 @@ func (e Economy) ListInboxHandler(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
-	filter := bson.M{}
-	if uid := q.Get("userId"); uid != "" {
-		filter["userId"] = uid
+	cid := q.Get("civilianId")
+	uid := q.Get("userId")
+	if cid == "" && uid == "" {
+		config.InfoStatus("civilianId or userId required", http.StatusBadRequest, w, nil)
+		return
 	}
-	if cid := q.Get("civilianId"); cid != "" {
+	actorID := resolveActorFromRequest(r)
+	if actorID == "" {
+		config.InfoStatus("sign in again to view this inbox", http.StatusUnauthorized, w, nil)
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	filter := bson.M{}
+	if cid != "" {
+		civOID, err := primitive.ObjectIDFromHex(cid)
+		if err != nil {
+			config.InfoStatus("invalid civilianId", http.StatusBadRequest, w, err)
+			return
+		}
+		civ, err := e.CivDB.FindOne(ctx, bson.M{"_id": civOID})
+		if err != nil || civ == nil {
+			config.InfoStatus("civilian not found", http.StatusNotFound, w, err)
+			return
+		}
+		if !canViewCivilianEconomy(civ, e.civilianCommunity(ctx, civ), actorID) {
+			config.InfoStatus("you can only view your own civilian's inbox", http.StatusForbidden, w, nil)
+			return
+		}
 		filter["civilianId"] = cid
+	} else {
+		if uid != actorID {
+			config.InfoStatus("you can only view your own inbox", http.StatusForbidden, w, nil)
+			return
+		}
+		filter["userId"] = uid
 	}
 	if status := q.Get("status"); status != "" {
 		filter["status"] = status
@@ -1086,13 +1131,6 @@ func (e Economy) ListInboxHandler(w http.ResponseWriter, r *http.Request) {
 	if commID := q.Get("communityId"); commID != "" {
 		filter["communityId"] = commID
 	}
-	if len(filter) == 0 {
-		config.ErrorStatus("at least one filter (userId|civilianId|communityId) required", http.StatusBadRequest, w, nil)
-		return
-	}
-
-	ctx, cancel := api.WithQueryTimeout(r.Context())
-	defer cancel()
 
 	totalCount, _ := e.IDB.CountDocuments(ctx, filter)
 	skip := int64((page - 1) * limit)
@@ -1178,25 +1216,27 @@ func (e Economy) PayInboxItemHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("invalid item id", http.StatusBadRequest, w, err)
 		return
 	}
-	userID := api.GetAuthenticatedUserIDFromContext(r.Context())
+	userID := resolveActorFromRequest(r)
 	if userID == "" {
-		userID = r.URL.Query().Get("userId")
+		config.InfoStatus("sign in again to pay this item", http.StatusUnauthorized, w, nil)
+		return
 	}
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
 	item, err := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
-	if err != nil {
-		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+	if err != nil || item == nil {
+		config.InfoStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	// Ownership first, so someone else's item is never echoed back, paid or not.
+	if item.UserID != userID {
+		config.InfoStatus("forbidden", http.StatusForbidden, w, nil)
 		return
 	}
 	if item.Status == "paid" {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(item)
-		return
-	}
-	if item.UserID != userID {
-		config.ErrorStatus("forbidden", http.StatusForbidden, w, nil)
 		return
 	}
 
@@ -1310,8 +1350,8 @@ func (e Economy) DismissInboxItemHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ContestInboxItemHandler lets a civilian (or the authenticated user owning
-// the inbox item) contest a pending fine. Status moves to "contested", the
+// ContestInboxItemHandler lets the user who owns the inbox item contest a
+// pending fine. Status moves to "contested", the
 // original due date is preserved, and the active due date is extended by
 // community.economy.contestExtensionDays (default 30).
 func (e Economy) ContestInboxItemHandler(w http.ResponseWriter, r *http.Request) {
@@ -1329,11 +1369,21 @@ func (e Economy) ContestInboxItemHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	userID := resolveActorFromRequest(r)
+	if userID == "" {
+		config.InfoStatus("sign in again to contest this fine", http.StatusUnauthorized, w, nil)
+		return
+	}
+
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 	item, err := e.IDB.FindOne(ctx, bson.M{"_id": itemID})
 	if err != nil || item == nil {
-		config.ErrorStatus("inbox item not found", http.StatusNotFound, w, err)
+		config.InfoStatus("inbox item not found", http.StatusNotFound, w, err)
+		return
+	}
+	if item.UserID != userID {
+		config.InfoStatus("forbidden", http.StatusForbidden, w, nil)
 		return
 	}
 	if item.Status != "pending" && item.Status != "delinquent" {
