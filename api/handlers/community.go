@@ -1850,6 +1850,10 @@ func (c Community) DeleteCommunityByIDHandler(w http.ResponseWriter, r *http.Req
 			"scheduledDeletionAt": scheduled.Format(time.RFC3339),
 		})
 
+	// A deleted community has nothing left to advertise, so its live server
+	// promotions come down with it. Best effort: never blocks the deletion.
+	c.removeLiveRpPromotions(ctx, existing, "system", rpPromoRemovedForDeletion)
+
 	resp := map[string]interface{}{
 		"message":             "Community scheduled for deletion",
 		"scheduledDeletionAt": scheduled.Format(time.RFC3339),
