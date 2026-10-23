@@ -365,6 +365,10 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/reports/{reportId}/remove-content", http.HandlerFunc(reportAdmin.AdminRemoveReportedContentHandler)).Methods("POST")
 	apiCreate.Handle("/admin/reports/{reportId}", http.HandlerFunc(reportAdmin.AdminGetReportHandler)).Methods("GET")
 	apiCreate.Handle("/admin/reports", http.HandlerFunc(reportAdmin.AdminListReportsHandler)).Methods("GET")
+	// Read-only look at a community's public presentation, for judging
+	// "they copied my community" reports. {id}, not {communityId}: the
+	// pending-deletion gate would 410 a community already being deleted.
+	apiCreate.Handle("/admin/community-preview/{id}", http.HandlerFunc(reportAdmin.AdminCommunityPreviewHandler)).Methods("GET")
 	apiCreate.Handle("/admin/offenses/{offenseId}/reverse", http.HandlerFunc(reportAdmin.AdminReverseOffenseHandler)).Methods("POST")
 
 	// Admin community management routes
