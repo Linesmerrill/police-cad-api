@@ -250,11 +250,190 @@ func rpPromoNormalizeInvite(s string) string {
 	return v
 }
 
-// alertIfRpPromoFlagged checks whether a just-posted promotion is a possible
-// cross-community duplicate (same invite under another community, or same name
-// under another community owned by the same person) and, if so, posts a single
-// review nudge to the staff alerts channel. Best-effort; runs in its own
-// goroutine with a detached context.
+// The duplicate rule, shared by the moderation console and the post-time
+// Discord alert so the two never disagree.
+//
+// What we are looking for is one person advertising the same server twice
+// inside the posting cooldown, usually by spreading it over two communities so
+// neither one trips the per-community cooldown. That makes the window part of
+// the definition: the same invite reappearing weeks later is a community
+// legitimately re-promoting, which the cooldown already allows, and flagging it
+// only buries the real cases.
+//
+// Both sides apply the same three conditions. The posts must be LIVE (a removed
+// post is evidence, not a live duplicate), they must come from DIFFERENT
+// communities (one community re-promoting on its own schedule is fine), and
+// they must fall within rpPromotionCooldown() of each other.
+
+// rpPromoDupCandidate is one live promotion in the running for a duplicate set,
+// reduced to what the rule needs.
+type rpPromoDupCandidate struct {
+	Row         int    // index of the promotion this came from
+	CommunityID string // sets need 2+ distinct communities
+	PostedAt    time.Time
+}
+
+// rpPromoDupGroup is the duplicate set a promotion was placed in.
+type rpPromoDupGroup struct {
+	ID             string
+	CommunityCount int
+}
+
+// rpPromoDupGroups finds the duplicate sets among promotions that share a key
+// (a normalized invite, or a normalized name plus owner), returning them by
+// row index. Rows that are in no set are absent.
+//
+// Posts chain: each one joins the set while it is within the window of the
+// previous post, so three posts an hour apart are one set. That is deliberate.
+// Someone drip-feeding the same server every few hours is doing exactly what
+// the cooldown forbids, and splitting them into pairs would show staff the same
+// incident several times. A gap wider than the window ends the set, and the
+// next post starts a new one.
+//
+// A set is only reported when it spans 2+ distinct communities, which is the
+// signal that a cooldown is being worked around rather than respected.
+func rpPromoDupGroups(byKey map[string][]rpPromoDupCandidate, prefix string, window time.Duration) map[int]rpPromoDupGroup {
+	out := map[int]rpPromoDupGroup{}
+	for key, candidates := range byKey {
+		sorted := append([]rpPromoDupCandidate(nil), candidates...)
+		sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].PostedAt.Before(sorted[j].PostedAt) })
+
+		setIndex := 0
+		flush := func(chain []rpPromoDupCandidate) {
+			communities := map[string]bool{}
+			for _, c := range chain {
+				communities[c.CommunityID] = true
+			}
+			id := fmt.Sprintf("%s%s#%d", prefix, key, setIndex)
+			setIndex++
+			if len(communities) < 2 {
+				return
+			}
+			for _, c := range chain {
+				out[c.Row] = rpPromoDupGroup{ID: id, CommunityCount: len(communities)}
+			}
+		}
+
+		var chain []rpPromoDupCandidate
+		for _, c := range sorted {
+			if len(chain) > 0 && c.PostedAt.Sub(chain[len(chain)-1].PostedAt) > window {
+				flush(chain)
+				chain = nil
+			}
+			chain = append(chain, c)
+		}
+		flush(chain)
+	}
+	return out
+}
+
+// rpPromoDuplicateSets groups promotions into duplicate sets, returning for
+// each row index the set its invite put it in and the set its name+owner put it
+// in. A row in neither is absent from both maps.
+//
+// Invite is owner-agnostic: the same Discord invite under two communities is
+// literally the same server, whoever owns it. Name is scoped per OWNER
+// (key = name + ownerID), because generic names like "San Andreas State
+// Roleplay" collide across unrelated communities constantly, so a name match
+// only signals evasion when the SAME owner is behind both communities.
+//
+// Removed posts and internal test accounts are never candidates. That is what
+// makes a set stop being flagged once staff remove the offending posts: the set
+// drops below two live members and disappears, rather than lingering in the
+// console after it has been actioned.
+func rpPromoDuplicateSets(rows []rpPromoAggRow, ownerIgnored func(ownerID string) bool, window time.Duration) (invite, name map[int]rpPromoDupGroup) {
+	inviteCandidates := map[string][]rpPromoDupCandidate{} // invite -> live posts
+	nameCandidates := map[string][]rpPromoDupCandidate{}   // name+ownerID -> live posts
+	for i, row := range rows {
+		if row.Post.RemovedAt != nil || ownerIgnored(row.OwnerID) {
+			continue
+		}
+		candidate := rpPromoDupCandidate{
+			Row:         i,
+			CommunityID: row.CommunityID.Hex(),
+			PostedAt:    row.Post.PostedAt.Time(),
+		}
+		if inv := rpPromoNormalizeInvite(row.Post.Data.InviteURL); inv != "" {
+			inviteCandidates[inv] = append(inviteCandidates[inv], candidate)
+		}
+		if nm := rpPromoNormalizeName(row.Post.Data.ServerName); nm != "" {
+			nameCandidates[nm+"\x00"+row.OwnerID] = append(nameCandidates[nm+"\x00"+row.OwnerID], candidate)
+		}
+	}
+	return rpPromoDupGroups(inviteCandidates, "inv:", window),
+		rpPromoDupGroups(nameCandidates, "name:", window)
+}
+
+// rpPromoRecentDuplicateMatch decides whether a promotion just posted under
+// communityID duplicates a live promotion under some other community, within
+// the window ending at the moment it was posted.
+//
+// It is the alert's half of the rule above, applied to the communities the
+// query returned rather than to a whole history. Invites are compared
+// normalized on both sides, the same way the console compares them, so a post
+// that lights up the alert is one staff will also find flagged in the console.
+//
+// Invite first, because the same invite under two communities is literally the
+// same Discord server whoever owns it. Name second and only for the same owner:
+// names like "San Andreas State Roleplay" collide between unrelated communities
+// constantly, so a name match only means something when one person is behind
+// both. Returns the kind of match and the other communities' names; an empty
+// kind means no duplicate.
+func rpPromoRecentDuplicateMatch(
+	communityID, ownerID string,
+	data models.RpPromotionData,
+	others []models.Community,
+	postedAt time.Time,
+	window time.Duration,
+) (matchKind string, matchedNames []string) {
+	cutoff := postedAt.Add(-window)
+	invite := rpPromoNormalizeInvite(data.InviteURL)
+	name := rpPromoNormalizeName(data.ServerName)
+
+	for _, other := range others {
+		if other.ID.Hex() == communityID || other.Details.RpPromotion == nil {
+			continue
+		}
+		sameOwner := other.Details.OwnerID != "" && other.Details.OwnerID == ownerID
+		kind := ""
+		for _, post := range other.Details.RpPromotion.History {
+			if post.RemovedAt != nil {
+				continue
+			}
+			if at := post.PostedAt.Time(); at.Before(cutoff) || at.After(postedAt) {
+				continue
+			}
+			if invite != "" && rpPromoNormalizeInvite(post.Data.InviteURL) == invite {
+				kind = "same invite"
+				break
+			}
+			if kind == "" && sameOwner && name != "" && rpPromoNormalizeName(post.Data.ServerName) == name {
+				kind = "same name"
+			}
+		}
+		if kind == "" {
+			continue
+		}
+		// An invite match is the stronger signal, so one promotes the whole
+		// alert even if an earlier community only matched on name.
+		if matchKind == "" || (kind == "same invite" && matchKind == "same name") {
+			matchKind = kind
+		}
+		matchedNames = append(matchedNames, other.Details.Name)
+	}
+	return matchKind, matchedNames
+}
+
+// alertIfRpPromoFlagged checks whether a just-posted promotion duplicates a
+// live promotion under another community inside the posting cooldown and, if
+// so, posts a single review nudge to the staff alerts channel.
+//
+// Only recent live posts count, by rpPromoRecentDuplicateMatch's rule, so the
+// alert fires on the thing we actually want to catch: the same server going up
+// twice inside the window that the per-community cooldown was meant to prevent.
+// A community re-promoting weeks later is not a duplicate and raises nothing.
+//
+// Best-effort; runs in its own goroutine with a detached context.
 func (c Community) alertIfRpPromoFlagged(communityID, communityName, ownerID string, data models.RpPromotionData) {
 	ownerName := resolveActorName(c.UDB, ownerID)
 	if rpPromoIsIgnoredOwner(ownerName) {
@@ -264,56 +443,35 @@ func (c Community) alertIfRpPromoFlagged(communityID, communityName, ownerID str
 	if err != nil {
 		return
 	}
+	if rpPromoNormalizeInvite(data.InviteURL) == "" && rpPromoNormalizeName(data.ServerName) == "" {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
-	matchKind := ""
-	matched := []string{}
-
-	// Same invite under a DIFFERENT community = literally the same server.
-	if strings.TrimSpace(data.InviteURL) != "" {
-		if other, oErr := c.DB.FindOneIncludingPending(ctx, bson.M{
-			"_id":                                       bson.M{"$ne": objID},
-			"community.rpPromotion.history.data.inviteUrl": data.InviteURL,
-		}); oErr == nil && other != nil {
-			matchKind = "same invite"
-			matched = append(matched, other.Details.Name)
-		}
+	// Narrow to communities that have a live post inside the window, then let
+	// the shared matcher compare normalized invites and names. The invite can't
+	// be matched in the query itself, because the stored URLs vary in scheme
+	// and host form and only normalization makes them comparable.
+	now := time.Now()
+	window := rpPromotionCooldown()
+	cur, err := c.DB.FindIncludingPending(ctx, bson.M{
+		"_id": bson.M{"$ne": objID},
+		"community.rpPromotion.history": bson.M{"$elemMatch": bson.M{
+			"postedAt":  bson.M{"$gte": primitive.NewDateTimeFromTime(now.Add(-window))},
+			"removedAt": nil,
+		}},
+	})
+	if err != nil {
+		return
+	}
+	var others []models.Community
+	if err := cur.All(ctx, &others); err != nil {
+		return
 	}
 
-	// Same normalized name under another community owned by the same person.
-	if matchKind == "" {
-		nm := rpPromoNormalizeName(data.ServerName)
-		if nm != "" {
-			cur, fErr := c.DB.FindIncludingPending(ctx, bson.M{
-				"_id":                            bson.M{"$ne": objID},
-				"community.ownerID":              ownerID,
-				"community.rpPromotion.history.0": bson.M{"$exists": true},
-			})
-			if fErr == nil {
-				var comms []models.Community
-				if cur.All(ctx, &comms) == nil {
-					for _, oc := range comms {
-						if oc.Details.RpPromotion == nil {
-							continue
-						}
-						for _, h := range oc.Details.RpPromotion.History {
-							if rpPromoNormalizeName(h.Data.ServerName) == nm {
-								matchKind = "same name"
-								matched = append(matched, oc.Details.Name)
-								break
-							}
-						}
-						if matchKind != "" {
-							break
-						}
-					}
-				}
-			}
-		}
-	}
-
+	matchKind, matched := rpPromoRecentDuplicateMatch(communityID, ownerID, data, others, now, window)
 	if matchKind == "" {
 		return
 	}
@@ -366,8 +524,10 @@ type adminRpPromoItem struct {
 	CommunityBanned bool   `json:"communityBanned"`
 
 	// Duplicate grouping. A promo is only flagged when its invite or normalized
-	// server name is shared across 2+ DISTINCT communities — a single community
-	// re-promoting on different days (respecting the cooldown) is legitimate and
+	// server name is shared across 2+ DISTINCT communities by posts made within
+	// rpPromotionCooldown() of each other — the rule being enforced is "don't
+	// post the same server twice inside the cooldown", so the same invite
+	// reappearing weeks later is a community legitimately re-promoting and is
 	// never flagged. Members of the same set share DupGroupID so the UI can
 	// group/pair them under one header.
 	DupGroupID        string `json:"dupGroupId,omitempty"`        // stable key, e.g. "inv:<url>" or "name:<norm>"
@@ -425,60 +585,18 @@ func (c Community) computeRpPromoItems(ctx context.Context) ([]adminRpPromoItem,
 		return v
 	}
 
-	// First pass: tally the set of DISTINCT communities behind each invite and
-	// each name. Only cross-community reuse is suspicious — one community
-	// re-promoting on different days (respecting the cooldown) is fine.
-	//
-	// Invite is owner-agnostic: the same Discord invite under two communities is
-	// literally the same server, whoever owns it. Name is scoped per OWNER
-	// (key = name + ownerID): generic names like "San Andreas State Roleplay"
-	// collide across unrelated communities constantly, so a name match only
-	// signals evasion when the SAME owner is behind both communities. Internal
-	// test accounts are skipped entirely so they never produce flags.
-	//
-	// Removed posts are excluded from the tally: a "duplicate" is two or more
-	// LIVE posts sharing an invite/name. Once staff remove the offending posts
-	// (or remove-with-ban), the set drops below two live members and stops being
-	// flagged — so a set never lingers in "possible duplicates" after it's been
-	// actioned. This mirrors the sidebar badge, which also counts live members.
-	inviteCommunities := map[string]map[string]bool{} // invite -> set of communityIds
-	nameCommunities := map[string]map[string]bool{}   // name+ownerID -> set of communityIds
-	for _, row := range rows {
-		if rpPromoIsIgnoredOwner(resolveName(row.OwnerID)) || row.Post.RemovedAt != nil {
-			continue
-		}
-		cid := row.CommunityID.Hex()
-		if inv := rpPromoNormalizeInvite(row.Post.Data.InviteURL); inv != "" {
-			if inviteCommunities[inv] == nil {
-				inviteCommunities[inv] = map[string]bool{}
-			}
-			inviteCommunities[inv][cid] = true
-		}
-		if nm := rpPromoNormalizeName(row.Post.Data.ServerName); nm != "" {
-			key := nm + "\x00" + row.OwnerID
-			if nameCommunities[key] == nil {
-				nameCommunities[key] = map[string]bool{}
-			}
-			nameCommunities[key][cid] = true
-		}
-	}
+	inviteGroups, nameGroups := rpPromoDuplicateSets(rows, func(ownerID string) bool {
+		return rpPromoIsIgnoredOwner(resolveName(ownerID))
+	}, rpPromotionCooldown())
 
-	// Second pass: build items, assigning each a duplicate group when its invite
-	// or name is shared across communities (invite preferred, name fallback).
+	// Second pass: build items, assigning each the duplicate set its invite or
+	// name put it in (invite preferred, name fallback).
 	items := make([]adminRpPromoItem, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
 		p := row.Post
 		ownerName := resolveName(row.OwnerID)
-		ignored := rpPromoIsIgnoredOwner(ownerName)
-		inv := rpPromoNormalizeInvite(p.Data.InviteURL)
-		nm := rpPromoNormalizeName(p.Data.ServerName)
-		nameKey := ""
-		if nm != "" {
-			nameKey = nm + "\x00" + row.OwnerID
-		}
-		removed := p.RemovedAt != nil
-		dupInvite := !ignored && !removed && inv != "" && len(inviteCommunities[inv]) > 1
-		dupName := !ignored && !removed && nameKey != "" && len(nameCommunities[nameKey]) > 1
+		inviteGroup, dupInvite := inviteGroups[i]
+		nameGroup, dupName := nameGroups[i]
 
 		postedByName := p.PostedByName
 		if postedByName == "" {
@@ -506,16 +624,16 @@ func (c Community) computeRpPromoItems(ctx context.Context) ([]adminRpPromoItem,
 		}
 		switch {
 		case dupInvite:
-			it.DupGroupID = "inv:" + inv
+			it.DupGroupID = inviteGroup.ID
 			it.DupGroupType = "invite"
 			it.DupGroupValue = p.Data.InviteURL
-			it.DupCommunityCount = len(inviteCommunities[inv])
+			it.DupCommunityCount = inviteGroup.CommunityCount
 			it.DupAlsoName = dupName
 		case dupName:
-			it.DupGroupID = "name:" + nameKey
+			it.DupGroupID = nameGroup.ID
 			it.DupGroupType = "name"
 			it.DupGroupValue = p.Data.ServerName
-			it.DupCommunityCount = len(nameCommunities[nameKey])
+			it.DupCommunityCount = nameGroup.CommunityCount
 		}
 		items = append(items, it)
 	}
@@ -642,7 +760,9 @@ func (c Community) AdminRpPromoFlaggedCountHandler(w http.ResponseWriter, r *htt
 
 	// Count only sets that still have 2+ LIVE (not removed) members — once an
 	// admin removes the duplicate posts, the set stops counting and the badge
-	// clears, so it reflects what still needs review.
+	// clears, so it reflects what still needs review. Sets themselves already
+	// only span posts made within the cooldown window of each other, so the
+	// badge never counts a community that simply re-promoted weeks later.
 	liveByGroup := map[string]int{}
 	for _, it := range items {
 		if it.DupGroupID != "" && !it.Removed {
