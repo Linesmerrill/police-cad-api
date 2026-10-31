@@ -84,8 +84,73 @@ type UserDetails struct {
 	// dashboard quick action (keyed by a stable action slug). Powers the "Most
 	// used" row; stored on the user doc so it follows the user across devices.
 	QuickActionUsage         map[string]int        `json:"quickActionUsage,omitempty" bson:"quickActionUsage,omitempty"`
+	// Discord has been written by the website's Mongoose model for years but
+	// was never declared here, so Go reads of a user dropped it. Declared now
+	// because the Developer API's claim flow matches a provisioned Discord
+	// identity against it. Read-only from Go: the website owns these writes.
+	Discord          *DiscordIdentity `json:"discord,omitempty" bson:"discord,omitempty"`
+	DiscordConnected bool             `json:"discordConnected" bson:"discordConnected"`
+
+	// The Developer API provisioning fields. See docs/DEVELOPER_API.md.
+	//
+	// DeveloperProvisioned marks an account a third-party integration created
+	// on a player's behalf. Claimed says whether the player has since proved
+	// they own it: nil means an ordinary account (everything that existed
+	// before this feature), false means provisioned and not yet claimed, and
+	// such an account must never be able to log in.
+	DeveloperProvisioned     bool                `json:"developerProvisioned,omitempty" bson:"developerProvisioned,omitempty"`
+	Claimed                  *bool               `json:"claimed,omitempty" bson:"claimed,omitempty"`
+	ProvisionedByKeyID       string              `json:"provisionedByKeyId,omitempty" bson:"provisionedByKeyId,omitempty"`
+	ProvisionedByDeveloperID string              `json:"provisionedByDeveloperId,omitempty" bson:"provisionedByDeveloperId,omitempty"`
+	ProvisionedAt            *primitive.DateTime `json:"provisionedAt,omitempty" bson:"provisionedAt,omitempty"`
+	ClaimedAt                *primitive.DateTime `json:"claimedAt,omitempty" bson:"claimedAt,omitempty"`
+	// GameIdentities is a convenience copy for the account page. The
+	// player_identities collection is authoritative, because it carries the
+	// unique index that makes a player upsert idempotent.
+	GameIdentities []GameIdentity `json:"gameIdentities,omitempty" bson:"gameIdentities,omitempty"`
+
 	CreatedAt                interface{}           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt                interface{}           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// DiscordIdentity is the linked Discord account the website records.
+type DiscordIdentity struct {
+	ID            string `json:"id" bson:"id"`
+	Username      string `json:"username" bson:"username"`
+	Discriminator string `json:"discriminator,omitempty" bson:"discriminator,omitempty"`
+}
+
+// GameIdentity is one game identifier attached to an account.
+type GameIdentity struct {
+	Provider   string             `json:"provider" bson:"provider"`
+	Identifier string             `json:"identifier" bson:"identifier"`
+	AddedAt    primitive.DateTime `json:"addedAt" bson:"addedAt"`
+}
+
+// IsClaimed reports whether a player owns this account.
+//
+// Nil reads as claimed, which is the only safe default: every account that
+// existed before the Developer API has no Claimed field, and treating those as
+// unclaimed would lock out the entire user base. Only an account explicitly
+// marked false — one a developer key created and nobody has taken ownership of
+// — is unclaimed.
+func (u UserDetails) IsClaimed() bool {
+	return u.Claimed == nil || *u.Claimed
+}
+
+// IsClaimed reports whether a player owns this account.
+func (u User) IsClaimed() bool {
+	return u.Details.IsClaimed()
+}
+
+// CanAuthenticate reports whether this account may be signed into at all.
+//
+// An unclaimed provisioned account cannot. It holds no email and no password
+// hash, so no login path could succeed anyway, but this is checked explicitly
+// as well: the account exists, a developer knows its id, and one future code
+// path that sets an email would otherwise quietly turn it into a way in.
+func (u User) CanAuthenticate() bool {
+	return u.IsClaimed()
 }
 
 // Note holds the structure for a note

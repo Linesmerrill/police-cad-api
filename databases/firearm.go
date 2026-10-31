@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -13,6 +14,11 @@ const firearmName = "firearms"
 
 // FirearmDatabase contains the methods to use with the firearm database
 type FirearmDatabase interface {
+	// UpdateMany re-points many records at once. Added for the Developer API's
+	// claim flow, which moves every record a provisioned account holds onto the
+	// player's real account in one write per collection rather than one per
+	// record.
+	UpdateMany(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	FindOne(ctx context.Context, filter interface{}, opts ...*options.FindOneOptions) (*models.Firearm, error)
 	Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.Firearm, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
@@ -72,4 +78,8 @@ func (c *firearmDatabase) UpdateOne(ctx context.Context, filter interface{}, upd
 
 func (c *firearmDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	return c.db.Collection(firearmName).CountDocuments(ctx, filter, opts...)
+}
+
+func (f *firearmDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return f.db.Collection(firearmName).UpdateMany(ctx, filter, update, opts...)
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/linesmerrill/police-cad-api/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -13,6 +14,11 @@ const vehicleName = "vehicles"
 
 // VehicleDatabase contains the methods to use with the vehicle database
 type VehicleDatabase interface {
+	// UpdateMany re-points many records at once. Added for the Developer API's
+	// claim flow, which moves every record a provisioned account holds onto the
+	// player's real account in one write per collection rather than one per
+	// record.
+	UpdateMany(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Vehicle, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Vehicle, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
@@ -80,4 +86,8 @@ func (c *vehicleDatabase) UpdateOne(ctx context.Context, filter interface{}, upd
 
 func (c *vehicleDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	return c.db.Collection(vehicleName).CountDocuments(ctx, filter, opts...)
+}
+
+func (v *vehicleDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return v.db.Collection(vehicleName).UpdateMany(ctx, filter, update, opts...)
 }
