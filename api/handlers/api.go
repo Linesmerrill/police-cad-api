@@ -57,6 +57,18 @@ func (a *App) New() *mux.Router {
 		}
 	}()
 	sessionDB := databases.NewClockSessionDatabase(a.dbHelper)
+	devAPI := DeveloperAPI{
+		AccountDB:   databases.NewDeveloperAccountDatabase(a.dbHelper),
+		KeyDB:       databases.NewDeveloperAPIKeyDatabase(a.dbHelper),
+		GrantDB:     databases.NewDeveloperGrantDatabase(a.dbHelper),
+		UsageDB:     databases.NewDeveloperUsageDatabase(a.dbHelper),
+		RateDB:      databases.NewDeveloperRateDatabase(a.dbHelper),
+		IdentityDB:  databases.NewPlayerIdentityDatabase(a.dbHelper),
+		ClaimCodeDB: databases.NewDeveloperClaimCodeDatabase(a.dbHelper),
+		CDB:         databases.NewCommunityDatabase(a.dbHelper),
+		UDB:         databases.NewUserDatabase(a.dbHelper),
+		ALDB:        alDB,
+	}
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB, CivDB: databases.NewCivilianDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB, OffDB: databases.NewRpPromoOffenseDatabase(a.dbHelper)}
@@ -216,6 +228,46 @@ func (a *App) New() *mux.Router {
 	pendingGate := CommunityPendingGate(databases.NewCommunityDatabase(a.dbHelper))
 	apiCreate.Use(pendingGate)
 	apiV2.Use(pendingGate)
+
+	// The Developer API: third-party keys, on their own subrouter with their
+	// own authentication. See docs/DEVELOPER_API.md.
+	//
+	// A separate subrouter rather than routes on apiCreate, so the middleware
+	// below is the only way in and cannot be bypassed by a route someone adds
+	// to the wrong router. It deliberately does NOT use api.Middleware: a
+	// website or mobile credential must not authenticate here, and a developer
+	// key must not authenticate there.
+	//
+	// The pending-deletion gate is not attached either. It keys off a
+	// communityId route variable and 410s, while the developer surface answers
+	// a deleted community with its own 403 from ResolveCommunity, which says
+	// something a third-party integration can act on.
+	devRouter := r.PathPrefix("/api/v1/dev").Subrouter()
+	devRouter.Use(devAPI.RequireDeveloperAPIKey)
+
+	// No scope needed: a key with the wrong scopes still has to be able to
+	// find out what it does hold.
+	devRouter.Handle("/whoami", http.HandlerFunc(devAPI.DevWhoamiHandler)).Methods("GET")
+	devRouter.Handle("/communities", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevListCommunitiesHandler)).Methods("GET")
+
+	// Developer API management, on the ordinary authenticated surface. A
+	// developer key cannot reach these, so a key can never mint another key,
+	// widen its own scopes, or approve itself into a community.
+	apiCreate.Handle("/developer/account", http.HandlerFunc(devAPI.GetDeveloperAccountHandler)).Methods("GET")
+	apiCreate.Handle("/developer/account/enable", http.HandlerFunc(devAPI.EnableDeveloperAccountHandler)).Methods("POST")
+	apiCreate.Handle("/developer/account/disable", http.HandlerFunc(devAPI.DisableDeveloperAccountHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys", http.HandlerFunc(devAPI.ListDeveloperKeysHandler)).Methods("GET")
+	apiCreate.Handle("/developer/keys", http.HandlerFunc(devAPI.CreateDeveloperKeyHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys/{keyId}", http.HandlerFunc(devAPI.RevokeDeveloperKeyHandler)).Methods("DELETE")
+	apiCreate.Handle("/developer/keys/{keyId}/rotate", http.HandlerFunc(devAPI.RotateDeveloperKeyHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys/{keyId}/usage", http.HandlerFunc(devAPI.GetDeveloperKeyUsageHandler)).Methods("GET")
+
+	// The community owner's side. Route variable is {communityId}, so the
+	// pending-deletion gate applies: an owner mid-deletion has no business
+	// approving new key access.
+	apiCreate.Handle("/developer/community/{communityId}/keys", http.HandlerFunc(devAPI.ListCommunityDeveloperKeysHandler)).Methods("GET")
+	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/approve", http.HandlerFunc(devAPI.ApproveCommunityDeveloperKeyHandler)).Methods("POST")
+	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/revoke", http.HandlerFunc(devAPI.RevokeCommunityDeveloperKeyHandler)).Methods("POST")
 
 	// Metrics handler (must be after apiV2 is defined)
 	metricsHandler := MetricsHandler{}

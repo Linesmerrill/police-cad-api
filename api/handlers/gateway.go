@@ -90,6 +90,7 @@ func ApiKeyGateway(next http.Handler) http.Handler {
 			return
 		}
 
+
 		// 1. Shared secret (website backend, and any future first-party client).
 		if provided := r.Header.Get(apiGatewayHeader); provided != "" {
 			if subtle.ConstantTimeCompare([]byte(provided), []byte(key)) == 1 {
@@ -99,6 +100,28 @@ func ApiKeyGateway(next http.Handler) http.Handler {
 			// A wrong key is a hard reject — don't fall through to the lenient
 			// browser/mobile heuristics.
 			gatewayForbidden(w)
+			return
+		}
+
+		// The Developer API authenticates itself, and has to be let past the
+		// User-Agent heuristic below: a third-party integration is exactly the
+		// kind of caller that heuristic exists to refuse, and a FiveM mod may
+		// well present curl's user agent.
+		//
+		// Deliberately placed AFTER the shared-secret check, so a request that
+		// presents a *wrong* first-party secret is still a hard reject here
+		// rather than being handed on. Presenting no secret is an ordinary
+		// third-party call; presenting the wrong one is not, and this gate's
+		// existing answer to that should not get weaker because of a new
+		// surface.
+		//
+		// Safe only because RequireDeveloperAPIKey then applies a strictly
+		// higher bar than this gate — a valid unrevoked key, an active
+		// developer account, an active grant for the community in the path, and
+		// the scope the route needs — and because nothing but the developer
+		// routes is registered under that prefix.
+		if IsDeveloperAPIPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
 			return
 		}
 
