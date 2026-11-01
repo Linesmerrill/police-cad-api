@@ -213,6 +213,30 @@ type DevAPIContext struct {
 	// Usage is the key's counters after this request was recorded, so a handler
 	// can enforce a provisioning cap without a second read.
 	Usage models.DeveloperAPIUsage
+	// Entitlement is the tier in force and why — the developer's own
+	// subscription, or a website Premium Plus plan that includes it.
+	Entitlement models.DeveloperEntitlement
+}
+
+// ownerOf reads the LPC account a key belongs to.
+//
+// Returns nil on any failure, which resolves to the Free tier rather than an
+// error: this decides throughput, not access, and a key that works at the free
+// rate is a better outcome than a key that stops working because one read
+// failed.
+func (d DeveloperAPI) ownerOf(ctx context.Context, userID string) *models.User {
+	if d.UDB == nil {
+		return nil
+	}
+	_, oid, err := devSafeObjectID(userID)
+	if err != nil {
+		return nil
+	}
+	var owner models.User
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(oid)}).Decode(&owner); err != nil {
+		return nil
+	}
+	return &owner
 }
 
 // DevContextFrom returns the authenticated developer context, if the request
@@ -318,7 +342,14 @@ func (d DeveloperAPI) RequireDeveloperAPIKey(next http.Handler) http.Handler {
 			return
 		}
 
-		limits := models.LimitsForPlan(account.EffectivePlan())
+		// The tier is the owner's website plan. That costs one indexed lookup
+		// per request, on top of the key read this middleware already does on
+		// every request. Worth it: the alternative is denormalizing the tier
+		// onto the developer account and keeping it fresh from a subscription
+		// webhook, which would hand a lapsed subscriber raised limits until
+		// something remembered to refresh it.
+		entitlement := models.DeveloperPlanFor(d.ownerOf(ctx, key.UserID))
+		limits := models.LimitsForPlan(entitlement.Plan)
 
 		// The global valve first: when the whole surface is saturated, there is
 		// no point charging an individual key's budget for a request we are

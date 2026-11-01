@@ -47,7 +47,7 @@ func (d DeveloperAPI) DevWhoamiHandler(w http.ResponseWriter, r *http.Request) {
 			"scopes":        dc.Key.Scopes,
 			"createdAt":     dc.Key.CreatedAt.Time().UTC().Format(time.RFC3339),
 		},
-		"plan":        dc.Account.EffectivePlan(),
+		"plan":        dc.Entitlement.Plan,
 		"limits":      dc.Limits,
 		"communities": communities,
 		"usage": map[string]interface{}{

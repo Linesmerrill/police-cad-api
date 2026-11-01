@@ -962,13 +962,45 @@ components:
 
     Limits:
       type: object
+      description: >
+        The allowances for a tier. The tier is the user's website subscription
+        plan - free, base, premium, premium_plus - and there is no separate
+        Developer API subscription. These govern rate only: how fast requests
+        may come, how fast rows may be provisioned, and how many keys one
+        developer may hold. How many communities a developer may own is not
+        here: it comes from the same plan's CommunityCap. See
+        CommunityAllowance. An inactive or unrecognised plan resolves to free.
       properties:
         requestsPerMinute: { type: integer }
         requestsPerDay: { type: integer }
         keysPerDeveloper: { type: integer }
         accountsPerKeyDay: { type: integer }
-        communitiesPerKeyDay: { type: integer }
-        communitiesPerKey: { type: integer }
+        communitiesPerKeyDay:
+          type: integer
+          description: Communities this key may create per day. A pace, not a total.
+
+    CommunityAllowance:
+      type: object
+      description: >
+        How many communities this person may own, from their website plan. A
+        community created with a key counts exactly like one created by hand on
+        the website, and the same cap refuses the one that would go over.
+      properties:
+        plan:
+          type: string
+          description: The website subscription plan the cap comes from.
+          example: premium
+        owned: { type: integer, example: 2 }
+        cap:
+          type: integer
+          description: Ignore when unlimited is true.
+          example: 10
+        unlimited:
+          type: boolean
+          description: True on plans with no cap, where cap carries a sentinel.
+        source:
+          type: string
+          enum: [website_plan]
 
     CommunitySummary:
       type: object

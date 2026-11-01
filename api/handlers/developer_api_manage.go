@@ -30,9 +30,19 @@ import (
 // developer key cannot reach them, which is the point: a key can never mint
 // another key, widen its own scopes, or approve itself into a community.
 
-// developerTermsVersion is the Developer Terms a developer accepted. Bumping it
-// is how we would require re-acceptance after a material change.
-const developerTermsVersion = "2026-10-31"
+// developerTermsVersion is the Developer Terms a developer accepted.
+//
+// Bumping it is how re-acceptance is required after a material change. Raised
+// for the "Developers and the Developer API" section added to the website
+// Terms, which is the first time the rules a developer is agreeing to are
+// written out rather than implied.
+//
+// Deliberately a prompt and not a gate. Stale terms mark an account as needing
+// re-acceptance on the developer page; they do not stop its keys working. A
+// live FiveM server losing dispatch because its owner has not read a new
+// paragraph would be a worse outcome than a late acceptance, and the paid tier
+// is where a hard gate would belong if one is ever wanted.
+const developerTermsVersion = "2026-11-01"
 
 // maxDeveloperKeyNameLen keeps a key's label to something a dashboard can show.
 const maxDeveloperKeyNameLen = 60
@@ -58,10 +68,42 @@ type developerAccountResponse struct {
 	Limits   models.DeveloperLimits   `json:"limits"`
 	Scopes   []models.DeveloperScope  `json:"availableScopes"`
 	KeyCount int                      `json:"keyCount"`
-	// UpgradeAvailable is false until the Stripe product exists. The website
-	// hides the upgrade path rather than offering a button that cannot work.
-	UpgradeAvailable bool   `json:"upgradeAvailable"`
-	TermsVersion     string `json:"termsVersion"`
+	// Which tier is in force and why. There is no developer subscription: the
+	// tier is the website plan, so the page's job is to show the plans and a
+	// way to upgrade, not a second checkout.
+	Entitlement  models.DeveloperEntitlement `json:"entitlement"`
+	TermsVersion string                      `json:"termsVersion"`
+	// What this developer last accepted, and whether that is behind the current
+	// version. The page prompts on these; nothing is blocked by them.
+	AcceptedTermsVersion  string `json:"acceptedTermsVersion,omitempty"`
+	TermsReacceptRequired bool   `json:"termsReacceptRequired"`
+
+	// How many communities this person may own, and how many they already do.
+	//
+	// This comes from their website plan, and it is returned here so the page
+	// can say so in as many words. The two allowances are easy to confuse, and
+	// a developer who hits the community limit should be told to look at their
+	// subscription rather than at their request rate.
+	Communities developerCommunityAllowance `json:"communities"`
+
+	// The published comparison, from the same values the middleware enforces
+	// and the same tier list /pricing renders, so the page cannot drift from
+	// either reality or the prices people are actually charged.
+	Tiers          []models.DeveloperTier          `json:"tiers"`
+	CommunityPlans []models.CommunityPlanAllowance `json:"communityPlans"`
+	WebsiteTiers   []SubscriptionTier              `json:"websiteTiers"`
+	UpgradeURL     string                          `json:"upgradeUrl"`
+}
+
+// developerCommunityAllowance is the website plan's community allowance.
+type developerCommunityAllowance struct {
+	Plan      string `json:"plan"`
+	Owned     int    `json:"owned"`
+	Cap       int    `json:"cap"`
+	Unlimited bool   `json:"unlimited"`
+	// Source names where the number comes from, so the page does not have to
+	// hardcode the explanation.
+	Source string `json:"source"`
 }
 
 // GetDeveloperAccountHandler returns the signed-in user's developer account, or
@@ -78,11 +120,16 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 	defer cancel()
 
 	resp := developerAccountResponse{
-		Limits:           models.LimitsForPlan(models.DeveloperPlanFree),
-		Scopes:           models.DeveloperScopes(),
-		UpgradeAvailable: developerPaidTierAvailable(),
-		TermsVersion:     developerTermsVersion,
+		Scopes:         models.DeveloperScopes(),
+		TermsVersion:   developerTermsVersion,
+		Communities:    d.communityAllowance(ctx, actorID),
+		Entitlement:    models.DeveloperPlanFor(d.ownerOf(ctx, actorID)),
+		Tiers:          models.DeveloperTiers(),
+		CommunityPlans: models.CommunityPlanAllowances(),
+		WebsiteTiers:   SubscriptionTiers(),
+		UpgradeURL:     envOr("PREMIUM_PLUS_URL", "/community-pricing"),
 	}
+	resp.Limits = models.LimitsForPlan(resp.Entitlement.Plan)
 
 	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
 	if err != nil || account == nil {
@@ -97,16 +144,60 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 
 	resp.Enabled = true
 	resp.Account = account
-	resp.Limits = models.LimitsForPlan(account.EffectivePlan())
+	resp.Limits = models.LimitsForPlan(resp.Entitlement.Plan)
 	resp.KeyCount = int(count)
+	resp.AcceptedTermsVersion = account.TermsVersion
+	// An account from before this field existed has no version, which counts as
+	// behind: those developers accepted terms that did not yet say any of this.
+	resp.TermsReacceptRequired = strings.TrimSpace(account.TermsVersion) != developerTermsVersion
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// developerPaidTierAvailable reports whether there is a Stripe price to send
-// someone to. Until Merrill creates the product, every developer is on Free and
-// the upgrade path stays hidden.
-func developerPaidTierAvailable() bool {
-	return strings.TrimSpace(os.Getenv("STRIPE_DEV_API_PRO_MONTHLY_PRICE_ID")) != ""
+// communityAllowance reads the person's website plan and how many communities
+// they own.
+//
+// Returned whether or not they have a developer account, because the developer
+// page shows it either way: the number is a fact about their LPC plan, not
+// about their API access.
+//
+// A failure here is not worth failing the page for, so it answers with a zero
+// cap and the plan it managed to read rather than an error. The page renders a
+// blank allowance; provisioning still enforces the real cap from the same
+// source.
+func (d DeveloperAPI) communityAllowance(ctx context.Context, actorID string) developerCommunityAllowance {
+	allowance := developerCommunityAllowance{Source: "website_plan"}
+
+	_, oid, err := devSafeObjectID(actorID)
+	if err != nil {
+		return allowance
+	}
+	var owner models.User
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(oid)}).Decode(&owner); err != nil {
+		return allowance
+	}
+
+	allowance.Plan = models.PlanFromUser(&owner)
+	cap := models.CommunityCap(allowance.Plan)
+	allowance.Cap = cap
+	allowance.Unlimited = cap >= models.CommunityCapUnlimited
+
+	owned, err := d.CDB.CountDocuments(ctx, bson.M{"community.ownerID": devEq(actorID)})
+	if err == nil {
+		allowance.Owned = int(owned)
+	}
+	return allowance
+}
+
+// envOr reads a config value with a fallback.
+//
+// The defaults are the approved prices, so the page is correct on a deployment
+// that has not set them yet rather than blank. An override exists because a
+// price should be changeable without a deploy.
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
 }
 
 type enableDeveloperAccountRequest struct {
@@ -179,8 +270,6 @@ func (d DeveloperAPI) EnableDeveloperAccountHandler(w http.ResponseWriter, r *ht
 	account := models.DeveloperAccount{
 		ID:              primitive.NewObjectID(),
 		UserID:          actorID,
-		Plan:            models.DeveloperPlanFree,
-		PlanActive:      false,
 		AppName:         strings.TrimSpace(req.AppName),
 		AppURL:          strings.TrimSpace(req.AppURL),
 		TermsAcceptedAt: &now,
@@ -351,7 +440,7 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	limits := models.LimitsForPlan(account.EffectivePlan())
+	limits := models.LimitsForPlan(models.DeveloperPlanFor(d.ownerOf(ctx, account.UserID)).Plan)
 	liveKeys, err := d.KeyDB.CountDocuments(ctx, bson.M{
 		"developerId": account.ID.Hex(),
 		"status":      bson.M{"$ne": models.DeveloperKeyRevoked},
@@ -570,7 +659,7 @@ func (d DeveloperAPI) ListDeveloperKeysHandler(w http.ResponseWriter, r *http.Re
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"keys":   out,
-		"limits": models.LimitsForPlan(account.EffectivePlan()),
+		"limits": models.LimitsForPlan(models.DeveloperPlanFor(d.ownerOf(ctx, account.UserID)).Plan),
 	})
 }
 
@@ -781,7 +870,7 @@ func (d DeveloperAPI) GetDeveloperKeyUsageHandler(w http.ResponseWriter, r *http
 	account, _ := d.AccountDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(key.DeveloperID)})
 	plan := models.DeveloperPlanFree
 	if account != nil {
-		plan = account.EffectivePlan()
+		plan = models.DeveloperPlanFor(d.ownerOf(ctx, account.UserID)).Plan
 	}
 	limits := models.LimitsForPlan(plan)
 
