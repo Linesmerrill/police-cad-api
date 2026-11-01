@@ -220,10 +220,19 @@ func TestDevSafeDay(t *testing.T) {
 	if _, err := devSafeDay("2026-11-01"); err != nil {
 		t.Errorf("a real date should pass: %v", err)
 	}
-	for _, bad := range []string{"", "2026-11", "2026-11-01T00:00:00Z", "$ne", "x2026-11-01", "2026-11-01x", "../2026-11-01"} {
+	for _, bad := range []string{
+		"", "2026-11", "2026-11-01T00:00:00Z", "$ne", "x2026-11-01", "2026-11-01x", "../2026-11-01",
+		// Right shape, not a real date. The pattern alone would pass these.
+		"2026-13-01", "2026-00-10", "2026-02-30", "2026-11-32",
+	} {
 		if _, err := devSafeDay(bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+
+	// The returned value is built from the parsed date, not echoed back.
+	if got, err := devSafeDay("  2026-11-01  "); err != nil || got != "2026-11-01" {
+		t.Errorf("got %q, %v", got, err)
 	}
 }
 
