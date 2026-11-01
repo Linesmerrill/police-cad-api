@@ -433,13 +433,14 @@ func (d DeveloperAPI) DevListReportDraftsHandler(w http.ResponseWriter, r *http.
 		filter["status"] = devEq(status)
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("kind")); raw != "" {
-		if !models.IsValidReportDraftKind(raw) {
+		kind, kErr := devSafeReportKind(raw)
+		if kErr != nil {
 			d.RecordOutcome(r, http.StatusBadRequest)
-			devError(w, http.StatusBadRequest, "invalid_kind",
-				"kind must be one of: "+strings.Join(models.ReportDraftKinds(), ", "), nil)
+			devError(w, http.StatusBadRequest, "invalid_kind", kErr.Error(),
+				map[string]interface{}{"kinds": models.ReportDraftKinds()})
 			return
 		}
-		filter["kind"] = devEq(strings.ToLower(strings.TrimSpace(raw)))
+		filter["kind"] = devEq(kind)
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -1014,6 +1015,27 @@ func boundedStringList(in []string) []string {
 		return nil
 	}
 	return out
+}
+
+// devSafeReportKind validates a kind used to filter a list, and returns our own
+// constant rather than the caller's string.
+//
+// The distinction matters even though the characters are identical. A bool
+// check followed by using the original leaves the caller's value in the query;
+// switching and returning a constant means what reaches the filter is one of
+// exactly three literals this file owns. IsValidReportDraftKind is still right
+// for deciding whether a *written* kind is acceptable — this is for the read
+// path, where the value becomes part of a query.
+func devSafeReportKind(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case models.ReportDraftKindIncident:
+		return models.ReportDraftKindIncident, nil
+	case models.ReportDraftKindArrest:
+		return models.ReportDraftKindArrest, nil
+	case models.ReportDraftKindCitation:
+		return models.ReportDraftKindCitation, nil
+	}
+	return "", fmt.Errorf("kind must be one of: %s", strings.Join(models.ReportDraftKinds(), ", "))
 }
 
 // devSafeReportStatus validates a status used to filter a list.

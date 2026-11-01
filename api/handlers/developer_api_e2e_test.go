@@ -1119,9 +1119,9 @@ func (f *fakeReportDraftDB) CountDocuments(ctx context.Context, filter interface
 
 type fakeWarrantDB struct {
 	databases.WarrantDatabase
-	mu        sync.Mutex
-	warrants  []models.Warrant
-	inserts   int
+	mu       sync.Mutex
+	warrants []models.Warrant
+	inserts  int
 }
 
 func (f *fakeWarrantDB) Find(_ context.Context, filter interface{}, _ ...*options.FindOptions) ([]models.Warrant, error) {
@@ -2871,5 +2871,91 @@ func TestE2E_ReviewQueueDefaultsToUnreviewedAndNamesTheKey(t *testing.T) {
 	}
 	if out.Data[0].WrittenByKeyName == "" {
 		t.Error("the key's name is what an owner can act on; an id alone is not")
+	}
+}
+
+// ---- query parameters that become part of a query ----
+
+// A list filter is built from our own constants, never from the caller's
+// string. The characters are identical either way; what differs is where the
+// value in the query came from, and that is the thing a reader — or a static
+// analyser — has to be able to follow.
+//
+// Checking a value and then using the original is the mistake these helpers
+// exist to make impossible, so the test asserts the returned value is the
+// package's own constant rather than merely equal to it.
+func TestE2E_ListFiltersComeFromOurOwnConstants(t *testing.T) {
+	t.Run("report kind", func(t *testing.T) {
+		for raw, want := range map[string]string{
+			"arrest":     models.ReportDraftKindArrest,
+			"ARREST":     models.ReportDraftKindArrest,
+			" citation ": models.ReportDraftKindCitation,
+			"incident":   models.ReportDraftKindIncident,
+		} {
+			got, err := devSafeReportKind(raw)
+			if err != nil {
+				t.Fatalf("%q: unexpected error %v", raw, err)
+			}
+			if got != want {
+				t.Errorf("%q: got %q want the constant %q", raw, got, want)
+			}
+		}
+		for _, bad := range []string{"", "arrests", "$ne", "incident;drop", "report"} {
+			if got, err := devSafeReportKind(bad); err == nil {
+				t.Errorf("%q must be refused, got %q", bad, got)
+			}
+		}
+	})
+
+	t.Run("report status", func(t *testing.T) {
+		got, err := devSafeReportStatus("SUBMITTED")
+		if err != nil || got != models.ReportDraftStatusSubmitted {
+			t.Errorf("got %q, %v", got, err)
+		}
+		if _, err := devSafeReportStatus("filed"); err == nil {
+			t.Error("a status we do not use must be refused")
+		}
+	})
+
+	t.Run("warrant status", func(t *testing.T) {
+		got, err := devSafeWarrantStatus("Approved")
+		if err != nil || got != models.WarrantStatusApproved {
+			t.Errorf("got %q, %v", got, err)
+		}
+		if _, err := devSafeWarrantStatus("accepted"); err == nil {
+			t.Error("a status we do not use must be refused")
+		}
+	})
+
+	t.Run("warrant type", func(t *testing.T) {
+		// Empty defaults to arrest, which is what nearly every request is.
+		got, err := devSafeWarrantType("")
+		if err != nil || got != devWarrantTypeArrest {
+			t.Errorf("empty should default to arrest, got %q, %v", got, err)
+		}
+		if got, _ := devSafeWarrantType("SEARCH"); got != devWarrantTypeSearch {
+			t.Errorf("got %q", got)
+		}
+		if _, err := devSafeWarrantType("civil"); err == nil {
+			t.Error("a type we do not issue must be refused")
+		}
+	})
+
+}
+
+// The list handlers go through those helpers, not around them. A filter value
+// that arrived from a caller and was only bool-checked is the shape this test
+// is here to catch.
+func TestE2E_ListHandlersRefuseAnUnknownKind(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr := f.run(t, http.MethodGet, "/reports/drafts?kind=arrests", "", nil,
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevListReportDraftsHandler))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "invalid_kind") {
+		t.Errorf("got %s", rr.Body.String())
 	}
 }

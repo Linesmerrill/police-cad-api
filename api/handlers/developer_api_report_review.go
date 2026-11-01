@@ -87,12 +87,12 @@ func (d DeveloperAPI) ListCommunityReportDraftsHandler(w http.ResponseWriter, r 
 		filter["status"] = devEq(safe)
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("kind")); raw != "" {
-		if !models.IsValidReportDraftKind(raw) {
-			config.InfoStatus("invalid kind", http.StatusBadRequest, w,
-				fmt.Errorf("kind must be one of: %s", strings.Join(models.ReportDraftKinds(), ", ")))
+		kind, kErr := devSafeReportKind(raw)
+		if kErr != nil {
+			config.InfoStatus("invalid kind", http.StatusBadRequest, w, kErr)
 			return
 		}
-		filter["kind"] = devEq(strings.ToLower(strings.TrimSpace(raw)))
+		filter["kind"] = devEq(kind)
 	}
 
 	page, limit := devPageParams(r, maxReportDraftPage)

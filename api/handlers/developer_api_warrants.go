@@ -42,8 +42,36 @@ import (
 // devWarrantPageLimit caps a warrant page.
 const devWarrantPageLimit = 100
 
-// devWarrantTypes is what a request may ask for, matching the website's own.
-var devWarrantTypes = []string{"arrest", "search", "bench"}
+// Warrant types a request may ask for, matching the website's own.
+const (
+	devWarrantTypeArrest = "arrest"
+	devWarrantTypeSearch = "search"
+	devWarrantTypeBench  = "bench"
+)
+
+// devWarrantTypes lists them, for the error message that names the valid ones.
+func devWarrantTypes() []string {
+	return []string{devWarrantTypeArrest, devWarrantTypeSearch, devWarrantTypeBench}
+}
+
+// devSafeWarrantType validates a type and returns our own constant.
+//
+// Returning the constant rather than the caller's string, for the same reason
+// the status and kind helpers do: the value is stored and may later be
+// compared against, and a value this file constructed is one a reader can
+// follow. A bool check followed by using the original is not the same thing.
+func devSafeWarrantType(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", devWarrantTypeArrest:
+		// Arrest is the default, because it is what nearly every request is.
+		return devWarrantTypeArrest, nil
+	case devWarrantTypeSearch:
+		return devWarrantTypeSearch, nil
+	case devWarrantTypeBench:
+		return devWarrantTypeBench, nil
+	}
+	return "", fmt.Errorf("warrantType must be one of: %s", strings.Join(devWarrantTypes(), ", "))
+}
 
 type devWarrantRequestBody struct {
 	// ExternalID is the integration's own id for this request, and what makes
@@ -273,15 +301,11 @@ func (d DeveloperAPI) DevRequestWarrantHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	warrantType := strings.ToLower(strings.TrimSpace(req.WarrantType))
-	if warrantType == "" {
-		warrantType = "arrest"
-	}
-	if !containsString(devWarrantTypes, warrantType) {
+	warrantType, err := devSafeWarrantType(req.WarrantType)
+	if err != nil {
 		d.RecordOutcome(r, http.StatusBadRequest)
-		devError(w, http.StatusBadRequest, "invalid_warrant_type",
-			"warrantType must be one of: "+strings.Join(devWarrantTypes, ", "),
-			map[string]interface{}{"warrantTypes": devWarrantTypes})
+		devError(w, http.StatusBadRequest, "invalid_warrant_type", err.Error(),
+			map[string]interface{}{"warrantTypes": devWarrantTypes()})
 		return
 	}
 
