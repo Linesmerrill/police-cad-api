@@ -23,6 +23,14 @@ import (
 // logAudit inserts an audit log entry in a fire-and-forget goroutine.
 // It never blocks the caller or causes the parent request to fail.
 func logAudit(aldb databases.AuditLogDatabase, communityID primitive.ObjectID, action, category, actorID, actorName, targetID, targetName string, details map[string]interface{}) {
+	// A handler constructed without an audit store would otherwise panic in the
+	// goroutine below, and a panic on a goroutine takes the whole process down
+	// rather than failing one request. This function promises never to fail its
+	// caller, so it has to survive being called with no store.
+	if aldb == nil {
+		zap.S().Warnw("audit log skipped: no audit store configured", "action", action)
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

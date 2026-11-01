@@ -63,6 +63,8 @@ func TestProvisioningBodies_AreTypedStructs(t *testing.T) {
 		{"player upsert", `{"provider":"fivem","identifier":{"$ne":""}}`, &devUpsertPlayerRequest{}},
 		{"create community", `{"name":{"$ne":""}}`, &devCreateCommunityRequest{}},
 		{"claim", `{"code":{"$ne":""}}`, &claimRequest{}},
+		{"add member", `{"actingPlayer":{"$ne":""},"player":"fivem:abc123"}`, &devAddMemberRequest{}},
+		{"update member", `{"actingPlayer":"fivem:abc123","departmentId":{"$gt":""}}`, &devUpdateMemberRequest{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,6 +94,48 @@ func TestDevUpsertPlayer_RefusesOperatorShapedIdentifiers(t *testing.T) {
 			}
 			if f.userDB.inserts != 0 {
 				t.Error("a refused identifier must not create an account")
+			}
+		})
+	}
+}
+
+// A membership write names an acting player, so an operator-shaped reference
+// must be refused before any permission is evaluated.
+func TestDevAddMember_RefusesOperatorShapedReferences(t *testing.T) {
+	f := newMemberFixture(t)
+
+	for name, body := range map[string]string{
+		"operator acting player": `{"actingPlayer":"fivem:$ne","player":"fivem:616263"}`,
+		"operator target":        `{"actingPlayer":"fivem:61646d696e","player":"fivem:$where"}`,
+		"no colon":               `{"actingPlayer":"61646d696e","player":"fivem:616263"}`,
+		"operator provider":      `{"actingPlayer":"$ne:61646d696e","player":"fivem:616263"}`,
+		"lpc operator":           `{"actingPlayer":"lpc:$ne","player":"fivem:616263"}`,
+		"oversized":              `{"actingPlayer":"fivem:` + strings.Repeat("a", 200) + `","player":"fivem:616263"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rr := f.addMember(t, body)
+			if rr.Code != http.StatusBadRequest && rr.Code != http.StatusForbidden {
+				t.Errorf("expected a refusal, got %d: %s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// A department or rank id that is not an id is refused rather than written.
+func TestDevUpdateMember_RefusesOperatorShapedIds(t *testing.T) {
+	f := newMemberFixture(t)
+
+	for name, body := range map[string]string{
+		"operator department": `{"actingPlayer":"fivem:61646d696e","departmentId":"$ne"}`,
+		"operator rank":       `{"actingPlayer":"fivem:61646d696e","departmentId":"` + f.deptID.Hex() + `","rankId":"$where"}`,
+		"empty department":    `{"actingPlayer":"fivem:61646d696e","departmentId":""}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rr := f.run(t, http.MethodPatch, "/members/fivem:6d656d626572", body,
+				map[string]string{"playerRef": "fivem:6d656d626572"},
+				f.api.RequireScope(models.ScopeMembersWrite, f.api.DevUpdateMemberHandler))
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 			}
 		})
 	}

@@ -261,6 +261,16 @@ func (a *App) New() *mux.Router {
 	devRouter.Handle("/players/{provider}/{identifier}", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevGetPlayerHandler)).Methods("GET")
 	devRouter.Handle("/players/{provider}/{identifier}/claim-code", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevIssueClaimCodeHandler)).Methods("POST")
 
+	// Membership, driven from inside the game. Every write names an acting
+	// player, and the permission check runs against that player exactly as the
+	// website would run it against a signed-in user, so a key can never grant
+	// more than the player it acts for.
+	devRouter.Handle("/communities/{communityId}/members", devAPI.RequireScope(models.ScopeMembersRead, devAPI.DevListMembersHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/members", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevAddMemberHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/members/{playerRef}", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevUpdateMemberHandler)).Methods("PATCH")
+	devRouter.Handle("/communities/{communityId}/members/{playerRef}", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevRemoveMemberHandler)).Methods("DELETE")
+	devRouter.Handle("/communities/{communityId}/members/{playerRef}/approve", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevApproveMemberHandler)).Methods("POST")
+
 	// Developer API management, on the ordinary authenticated surface. A
 	// developer key cannot reach these, so a key can never mint another key,
 	// widen its own scopes, or approve itself into a community.
