@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -111,16 +112,46 @@ func generateDeveloperKey() (plaintext, hash, displayPrefix, lastFour string, er
 	return plaintext, hash, displayPrefix, lastFour, nil
 }
 
+// devAPIKeyPepperEnv holds the server-side secret that keys the token hash.
+//
+// Required whenever the developer surface is enabled. The surface is off by
+// default, so this costs nothing until it is turned on, and refusing to run
+// without it is better than silently falling back to a weaker hash — a fallback
+// would also mean every key minted before the secret was set stopped
+// validating the moment it appeared.
+const devAPIKeyPepperEnv = "DEV_API_KEY_PEPPER"
+
 // hashDeveloperKey is how a presented key becomes the value we look up.
 //
-// SHA-256, not bcrypt, and that is a considered choice rather than a shortcut.
-// The key is 32 bytes of crypto/rand, so there is no dictionary to attack and
-// no human-chosen pattern to exploit; a slow hash buys nothing. It is verified
-// on every single request, where bcrypt's deliberate cost would become the
-// request budget.
+// HMAC-SHA256, keyed with a server-side secret, rather than bcrypt or a bare
+// digest. Three separate decisions, each worth stating because each one looks
+// wrong from a distance:
+//
+// Not bcrypt/argon2. Those exist to make guessing a LOW-ENTROPY secret
+// expensive. This key is 32 bytes straight from crypto/rand, so there is no
+// dictionary and no human pattern to exploit, and the search space is already
+// beyond reach. What a slow hash would buy is nothing; what it would cost is
+// real, because this runs on every single request and bcrypt's deliberate cost
+// would become the request budget.
+//
+// Not a bare SHA-256 either, which is where this started. A bare digest is
+// invertible-by-lookup for anyone who already holds a candidate key: an
+// attacker with a database dump could confirm "is this key one of yours"
+// offline, and could match a key leaked from somewhere else against the table.
+// Keying the hash with a secret the database does not contain removes that:
+// a dump alone proves nothing and verifies nothing.
+//
+// Deterministic, not salted per row, because this value is looked up by
+// equality on every request. A per-row salt would mean scanning the table.
 func hashDeveloperKey(plaintext string) string {
-	sum := sha256.Sum256([]byte(plaintext))
-	return hex.EncodeToString(sum[:])
+	mac := hmac.New(sha256.New, []byte(os.Getenv(devAPIKeyPepperEnv)))
+	mac.Write([]byte(plaintext))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// developerKeyPepperConfigured reports whether the hashing secret is set.
+func developerKeyPepperConfigured() bool {
+	return strings.TrimSpace(os.Getenv(devAPIKeyPepperEnv)) != ""
 }
 
 // claimCodeAlphabet is Crockford base32: no I, L, O or U, so a code read off a
@@ -229,6 +260,17 @@ func (d DeveloperAPI) RequireDeveloperAPIKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !DeveloperAPIEnabled() {
 			http.NotFound(w, r)
+			return
+		}
+
+		// Enabled but unconfigured is a deployment mistake, not a request
+		// error. Refusing loudly beats hashing every key with an empty secret
+		// and having to re-issue them all later.
+		if !developerKeyPepperConfigured() {
+			zap.S().Errorw("developer api is enabled but has no key pepper configured",
+				"env", devAPIKeyPepperEnv)
+			devError(w, http.StatusServiceUnavailable, "unavailable",
+				"The developer API is not available right now.", nil)
 			return
 		}
 

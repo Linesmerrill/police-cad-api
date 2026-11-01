@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -174,6 +176,7 @@ type devFixture struct {
 func newDevFixture(t *testing.T, scopes ...string) *devFixture {
 	t.Helper()
 	t.Setenv(devAPIEnabledEnv, "true")
+	t.Setenv(devAPIKeyPepperEnv, "test-pepper-not-a-real-secret")
 
 	plaintext, hash, prefix, lastFour, err := generateDeveloperKey()
 	if err != nil {
@@ -237,6 +240,46 @@ func TestDevAPI_DisabledIsNotFound(t *testing.T) {
 	rr := f.serve(t, "Bearer "+f.plaintext, nil)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 when disabled, got %d", rr.Code)
+	}
+}
+
+// Enabled but unconfigured is a deployment mistake. Refusing loudly beats
+// hashing every key with an empty secret and having to re-issue them all later.
+func TestDevAPI_RefusesWithoutAKeyPepper(t *testing.T) {
+	f := newDevFixture(t)
+	t.Setenv(devAPIKeyPepperEnv, "")
+
+	rr := f.serve(t, "Bearer "+f.plaintext, nil)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 with no pepper configured, got %d", rr.Code)
+	}
+}
+
+// The pepper is what stops a database dump from confirming whether a key the
+// attacker already holds is one of ours.
+func TestHashDeveloperKey_DependsOnThePepper(t *testing.T) {
+	const key = "lpc_live_0123456789abcdef"
+
+	t.Setenv(devAPIKeyPepperEnv, "pepper-one")
+	first := hashDeveloperKey(key)
+
+	t.Setenv(devAPIKeyPepperEnv, "pepper-two")
+	second := hashDeveloperKey(key)
+
+	if first == second {
+		t.Fatal("the same key must hash differently under a different pepper")
+	}
+
+	t.Setenv(devAPIKeyPepperEnv, "pepper-one")
+	if hashDeveloperKey(key) != first {
+		t.Error("hashing is deterministic under one pepper, because lookup is by equality")
+	}
+
+	// And it must not be a bare digest of the key, or the pepper is doing
+	// nothing.
+	bare := sha256.Sum256([]byte(key))
+	if first == hex.EncodeToString(bare[:]) {
+		t.Error("the stored hash must not be a plain SHA-256 of the key")
 	}
 }
 
