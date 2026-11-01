@@ -27,6 +27,32 @@ import (
 // responses, must stop the moment it is revoked, must not reach a community
 // nobody granted it, and must not be able to outrun its limits.
 
+// devFilterValue unwraps the explicit equality the handlers now build.
+//
+// The handlers write {"field": {"$eq": v}} rather than {"field": v}, so these
+// fakes have to resolve the condition the way the driver would. Bare values are
+// still accepted, since not every filter is an equality.
+func devFilterValue(condition interface{}) interface{} {
+	if m, ok := condition.(bson.M); ok {
+		if v, found := m["$eq"]; found {
+			return v
+		}
+	}
+	return condition
+}
+
+// devFilterString unwraps a condition expected to be a string equality.
+func devFilterString(condition interface{}) (string, bool) {
+	v, ok := devFilterValue(condition).(string)
+	return v, ok
+}
+
+// devFilterObjectID unwraps a condition expected to be an ObjectID equality.
+func devFilterObjectID(condition interface{}) (primitive.ObjectID, bool) {
+	v, ok := devFilterValue(condition).(primitive.ObjectID)
+	return v, ok
+}
+
 // ---- fakes ----
 //
 // Hand-rolled rather than mockery, matching api/handlers/economy_access_test.go:
@@ -45,13 +71,13 @@ type fakeDevKeyDB struct {
 
 func (f *fakeDevKeyDB) FindOne(_ context.Context, filter interface{}) (*models.DeveloperAPIKey, error) {
 	m, _ := filter.(bson.M)
-	if h, ok := m["keyHash"].(string); ok {
+	if h, ok := devFilterString(m["keyHash"]); ok {
 		if k, found := f.byHash[h]; found {
 			return &k, nil
 		}
 		return nil, mongo.ErrNoDocuments
 	}
-	if oid, ok := m["_id"].(primitive.ObjectID); ok {
+	if oid, ok := devFilterObjectID(m["_id"]); ok {
 		if k, found := f.byID[oid.Hex()]; found {
 			return &k, nil
 		}
@@ -75,7 +101,7 @@ type fakeDevAccountDB struct {
 
 func (f *fakeDevAccountDB) FindOne(_ context.Context, filter interface{}) (*models.DeveloperAccount, error) {
 	m, _ := filter.(bson.M)
-	if oid, ok := m["_id"].(primitive.ObjectID); ok {
+	if oid, ok := devFilterObjectID(m["_id"]); ok {
 		if a, found := f.byID[oid.Hex()]; found {
 			return &a, nil
 		}
@@ -143,18 +169,24 @@ func (f *fakeDevUsageDB) FindOneAndIncrement(_ context.Context, id string, inc b
 type fakeDevGrantDB struct {
 	databases.DeveloperGrantDatabase
 	grants []models.DeveloperCommunityGrant
+	// seenFilters lets a test assert what actually reached the driver.
+	seenFilters []interface{}
 }
 
 func (f *fakeDevGrantDB) FindOne(_ context.Context, filter interface{}) (*models.DeveloperCommunityGrant, error) {
+	f.seenFilters = append(f.seenFilters, filter)
 	m, _ := filter.(bson.M)
+	wantKey, _ := devFilterString(m["keyId"])
+	wantCommunity, _ := devFilterString(m["communityId"])
 	for _, g := range f.grants {
-		if g.KeyID == m["keyId"] && g.CommunityID == m["communityId"] {
-			if want, ok := m["status"].(string); ok && g.Status != want {
-				continue
-			}
-			found := g
-			return &found, nil
+		if g.KeyID != wantKey || g.CommunityID != wantCommunity {
+			continue
 		}
+		if want, ok := devFilterString(m["status"]); ok && g.Status != want {
+			continue
+		}
+		found := g
+		return &found, nil
 	}
 	return nil, mongo.ErrNoDocuments
 }
@@ -693,7 +725,7 @@ type fakeDevCommunityDB struct {
 
 func (f *fakeDevCommunityDB) FindOneIncludingPending(_ context.Context, filter interface{}) (*models.Community, error) {
 	m, _ := filter.(bson.M)
-	if oid, ok := m["_id"].(primitive.ObjectID); ok {
+	if oid, ok := devFilterObjectID(m["_id"]); ok {
 		if c, found := f.communities[oid.Hex()]; found {
 			return &c, nil
 		}
