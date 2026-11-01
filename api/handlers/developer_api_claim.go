@@ -274,9 +274,23 @@ func (d DeveloperAPI) markClaimed(ctx context.Context, shellUserID string, recor
 	_, err := d.UDB.UpdateOne(ctx, bson.M{"_id": devEq(objectIDOrZero(shellUserID))}, bson.M{"$set": bson.M{
 		"user.claimed":   claimedTrue,
 		"user.claimedAt": now,
+		// Whatever this account was created as, there is a person behind it
+		// now. Leaving it marked synthetic would hide a real player from the
+		// roster and the name database their own community reads.
+		"user.developerSynthetic": false,
 	}})
 	if err != nil {
 		return err
+	}
+
+	// The identity row carries the same claim and is what the record-write path
+	// reads, so it is cleared here too rather than left to disagree.
+	if d.IdentityDB != nil {
+		if _, idErr := d.IdentityDB.UpdateMany(ctx, bson.M{"userId": devEq(shellUserID)},
+			bson.M{"$set": bson.M{"synthetic": false, "claimed": claimedTrue, "updatedAt": now}}); idErr != nil {
+			zap.S().Warnw("developer api: could not clear the synthetic flag on claim",
+				"userId", shellUserID, "error", idErr)
+		}
 	}
 
 	// Any other outstanding code for this shell is dead now.

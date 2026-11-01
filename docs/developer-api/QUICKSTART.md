@@ -349,6 +349,125 @@ connected client, which would hand your key to anyone who joins.
 
 ---
 
+## 6. Write a draft report for a person to file
+
+A game server can see what happened. It cannot decide whether what happened was
+an arrest — that has jail time, a fine and a court case behind it, and it
+belongs to a person in the community. So you write a **draft**, and someone with
+the community's permission reads it and files it on the website.
+
+```bash
+curl -sX POST "$BASE/communities/$COMMUNITY/reports/drafts" \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{
+    "externalId": "sixpd-incident-42",
+    "kind": "arrest",
+    "callExternalId": "sixpd-incident-42",
+    "reportingOfficer": "fivem:1a2b3c4d5e6f7a8b",
+    "subject": { "player": "fivem:9f8e7d6c5b4a3210" },
+    "facts": {
+      "occurredAt": "2026-11-01T21:14:00Z",
+      "location": "Route 68 northbound",
+      "summary": "Vehicle failed to stop, pursuit ended at the rail crossing.",
+      "forceUsed": false
+    },
+    "narrative": {
+      "text": "The driver accelerated away from the stop and ...",
+      "generated": true,
+      "generatedBy": "sixpd-llm"
+    },
+    "charges": ["Reckless Driving"]
+  }'
+```
+
+Four things worth knowing before you build against it:
+
+- **Nothing here files a report.** A `201` means the draft is in the queue.
+  `filed` is `false` and stays false until a person acts; poll
+  `GET /communities/$COMMUNITY/reports/drafts/sixpd-incident-42` to find out
+  what they decided, and show your officer the `reviewNotes` if it was
+  rejected.
+- **`reportingOfficer` is what gets checked.** The key's scope decides whether
+  it may propose a draft at all. Whether *this* draft is allowed is decided by
+  that player's access: an approved, unbanned member who is in a department. A
+  key never grants more than the player it reports for.
+- **Facts and narrative stay apart.** `facts` is what your server observed;
+  `narrative` is prose about it. **A narrative with no `generated` field is
+  recorded as generated** — send `"generated": false` only when a person typed
+  the text. There is no way to mark a narrative as evidence, and there will not
+  be.
+- **You name charges; the community prices them.** Send the violation names
+  from the community's own penal code and we fill in the fine and the jail time
+  from it. A name the community does not have is refused, so you cannot invent
+  an amount — and a community that retunes its codes sees new drafts priced the
+  new way without you changing anything.
+
+Retries are safe: the same `externalId` updates the draft rather than adding a
+second one to somebody's queue. Once a person has filed or rejected it, a late
+retry gets `409 draft_already_reviewed` and their decision is left alone.
+
+## 7. Ask for a warrant
+
+```bash
+curl -sX POST "$BASE/communities/$COMMUNITY/warrants/requests" \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{
+    "externalId": "sixpd-warrant-7",
+    "warrantType": "arrest",
+    "requestingOfficer": "fivem:1a2b3c4d5e6f7a8b",
+    "accused": "fivem:9f8e7d6c5b4a3210",
+    "probableCause": "Fled a lawful traffic stop and struck a parked vehicle.",
+    "charges": ["Reckless Driving"]
+  }'
+```
+
+**A request always lands `pending`.** That is deliberately not what the website
+does: a community can set its warrant mode to auto-approve, and most have, so
+an officer clicking the button in the CAD gets an approved warrant at once.
+That is a convenience for a person who is already in the CAD and can see the
+result. A game server fires on a trigger, retries, and nobody is watching — so
+a key gets the pending queue the community already has, a person reviews it
+with the tools they already use, and you read the outcome back.
+
+Poll `GET /communities/$COMMUNITY/warrants?accused=fivem:9f8e…&status=approved`
+to answer "is there a warrant out for this person?" in one request. `approved`
+and `awaitingReview` are spelled out on each warrant so you do not have to
+decide whether `executed` counts.
+
+## 8. Populate a city without burying the players in it
+
+Mark a simulated character once, when you provision it:
+
+```bash
+curl -sX POST "$BASE/players" \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"provider":"fivem","identifier":"npc-0001-hex","username":"Store Clerk","synthetic":true}'
+```
+
+Everything that character owns inherits the mark, so you do not have to repeat
+it on each civilian, vehicle and firearm. Synthetic records are left out of the
+searches and rosters players see — including the website's own name database —
+unless a caller passes `includeSynthetic=true`.
+
+They count against your key's daily provisioning cap, so a runaway loop is
+still bounded. They do not count against a player's own per-community character
+cap: an NPC is nobody's character, and counting it both ways would mean your
+scenery consuming your players' allowances.
+
+When a test run is done, clean up after yourself:
+
+```bash
+curl -sX DELETE "$BASE/communities/$COMMUNITY/synthetic-records" \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"confirm":"'"$COMMUNITY"'","source":"SixPD"}'
+```
+
+`confirm` has to be the community id. This deletes rows, so it will not run
+against an id you did not state — which is what stops a cleanup aimed at your
+test community running against a live one because a config value was stale. It
+only ever touches synthetic records your own key created, in the community in
+the path. When `more` comes back true, call it again.
+
 ## Errors
 
 Every error has a stable `error` code and a message written for a person.
@@ -363,6 +482,11 @@ Every error has a stable `error` code and a message written for a person.
 | 404 | `player_not_found` | upsert the player first |
 | 409 | `already_claimed` | the player owns their account; they sign in normally |
 | 422 | `ten_code_not_found` | get ids from `/ten-codes` rather than hardcoding |
+| 400 | `charge_not_in_penal_code` | read the community's penal code and send the names it lists |
+| 403 | `reporting_officer_has_no_department` | put the officer in a department; they cannot open a report form either |
+| 403 | `template_not_permitted` | the community's form gates exclude that officer |
+| 409 | `draft_already_reviewed` | a person has filed or rejected it. Write a new draft with a new `externalId` |
+| 400 | `confirm_required` | a cleanup needs `confirm` set to the community id |
 | 429 | `rate_limited` | honour `Retry-After` |
 | 429 | `provision_cap_reached` | the daily account or community cap; resets at midnight UTC |
 
@@ -377,6 +501,11 @@ Not a matter of scopes — these are not on the surface at all:
 - assign a role to a member (roles carry permissions; departments and ranks are
   fine)
 - read any community your key is not tied to
+- **file a report.** A draft is a proposal; the verb that turns one into an
+  arrest, citation or incident record is on the website, behind the community's
+  own permission. There is no `reports:file` scope and there will not be one
+- **issue a warrant.** A request lands pending for the community's own
+  reviewer, whatever its approval mode says
 
 ## Getting help
 

@@ -23,6 +23,20 @@ info:
     an email, and never by an LPC user id you did not get from us. A FiveM
     `license:` prefix is optional and case does not matter.
 
+    **Simulated characters.** Mark an NPC with `"synthetic": true` when you
+    provision it, and its records inherit the mark. Synthetic records are left
+    out of the searches and rosters players see unless a caller asks for them
+    with `includeSynthetic=true`, so you can populate a city without burying
+    the real players in it. You can delete your own synthetic records when a
+    test run is done.
+
+    **What this API cannot do.** There is no scope and no endpoint for money,
+    billing, account security, admin, community settings or roles, and there
+    will not be. It also cannot file a report or issue a warrant: a report draft
+    is a proposal for a person to act on, and a warrant request lands pending
+    for the community's own reviewer. Those two are not gaps — a record with
+    legal consequences inside a community is a person's decision.
+
     **Rate limits.** Every response carries `X-RateLimit-*`, and a 429 carries
     `Retry-After`. Use the bulk status endpoint on a tick rather than looping
     over players: one call per tick stays inside the free limit where a loop
@@ -58,6 +72,16 @@ tags:
   - name: BOLOs
   - name: Records
     description: Characters, vehicles, firearms and licenses.
+  - name: Reports
+    description: >-
+      Reviewable drafts. Nothing here files a report: a draft is a proposal for
+      a person with the community's permission to act on.
+  - name: Warrants
+    description: >-
+      Reading warrants, and requesting one. A request always lands pending for
+      the community's own reviewer.
+  - name: Simulated characters
+    description: NPC records, and removing them.
 
 paths:
   /whoami:
@@ -185,6 +209,21 @@ paths:
         into**: it holds no email and no password. That is the mechanism, not an
         omission — an email you send us is an email you control. The player
         takes ownership with a claim code.
+
+        **Simulated characters.** Set `synthetic: true` for an NPC. It is a
+        claim you make, not something we infer — the same key provisions
+        accounts for real players arriving from the game, so "a key created it"
+        says nothing about whether there is a person behind it. A synthetic
+        player, and every record it owns, is left out of the searches and
+        rosters players see unless the caller passes `includeSynthetic=true`.
+        Claiming overrides it: if a person ever signs in and takes the account
+        over, they are a player from then on.
+
+        Synthetic accounts count against this key's daily provisioning cap, so
+        a runaway loop is still bounded, but they do not count against a
+        player's own per-community character cap — an NPC is nobody's
+        character, and counting it both ways would mean your scenery consuming
+        your players' allowances.
       security: [{ developerKey: [players:provision] }]
       requestBody:
         required: true
@@ -203,6 +242,12 @@ paths:
                   type: string
                   maxLength: 32
                   description: A display name only. Never used to find or match an account.
+                synthetic:
+                  type: boolean
+                  default: false
+                  description: >-
+                    This identifier is a simulated character, not a person. See
+                    the description above.
       responses:
         "200":
           description: The player was already known.
@@ -276,11 +321,15 @@ paths:
     get:
       tags: [Members]
       summary: List the roster
+      description: |
+        Simulated characters are left out unless you ask for them. A page of
+        four hundred NPCs with twelve players among them is not a roster.
       security: [{ developerKey: [members:read] }]
       parameters:
         - { $ref: "#/components/parameters/communityId" }
         - { $ref: "#/components/parameters/page" }
         - { $ref: "#/components/parameters/limit" }
+        - { $ref: "#/components/parameters/includeSynthetic" }
       responses:
         "200": { description: The community's members. }
         "403": { $ref: "#/components/responses/CommunityNotGranted" }
@@ -684,6 +733,7 @@ paths:
           required: true
           schema: { type: string }
         - { $ref: "#/components/parameters/limit" }
+        - { $ref: "#/components/parameters/includeSynthetic" }
       responses:
         "200": { description: Matching characters, scoped to this community. }
     post:
@@ -717,6 +767,23 @@ paths:
                 address: { type: string }
                 occupation: { type: string }
                 image: { type: string, format: uri }
+                synthetic:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Mark this as a simulated character's record, which keeps it
+                    out of the searches and rosters players see. Inherited too:
+                    a record whose owner was provisioned as synthetic is
+                    synthetic whether or not you repeat the flag, so mark your
+                    NPCs once at `POST /players`.
+                externalId:
+                  type: string
+                  maxLength: 128
+                  description: >-
+                    Your own handle for what this record stands for. Only
+                    useful on a synthetic record, where it is what makes one
+                    addressable for cleanup later.
+                source: { type: string }
       responses:
         "201": { description: Created. }
         "403": { description: "`player_not_a_member`" }
@@ -733,6 +800,7 @@ paths:
           in: query
           required: true
           schema: { type: string }
+        - { $ref: "#/components/parameters/includeSynthetic" }
       responses:
         "200":
           description: |
@@ -779,6 +847,7 @@ paths:
           in: query
           required: true
           schema: { type: string }
+        - { $ref: "#/components/parameters/includeSynthetic" }
       responses:
         "200": { description: Matching firearms. }
     post:
@@ -826,6 +895,367 @@ paths:
                 notes: { type: string }
       responses:
         "201": { description: Issued. }
+
+  /communities/{communityId}/reports/drafts:
+    post:
+      tags: [Reports]
+      summary: Write a reviewable draft incident, arrest or citation report
+      description: |
+        **This does not file a report.** It writes a draft for a person in the
+        community to read and act on, and there is no endpoint on this API that
+        turns one into a record — the verb that files it lives on the website,
+        behind the community's own permission.
+
+        That is deliberate. An arrest report here produces jail time, a fine
+        and a court case. A game server can observe a scuffle; it cannot know
+        whether that was an arrest, and an integration that could file one
+        would be making a call that belongs to a person. So treat a `201` as
+        "the draft is in the queue", never as "the report exists".
+
+        **Idempotent on `(community, source, externalId)`**, like a dispatch
+        call and for the same reason: a retry must not put a second draft in
+        somebody's queue. Posting the same `externalId` again updates the
+        draft; the response says which happened.
+
+        Once a person has filed or rejected a draft it is frozen. A late retry
+        gets `409 draft_already_reviewed` and their decision is left alone.
+
+        **Structured facts stay apart from the narrative.** `facts` is what the
+        server observed; `narrative` is prose about it. A narrative with no
+        `generated` field is recorded as generated, because the callers of this
+        API are automated by definition — and a narrative can never be labelled
+        as evidence.
+
+        **Charges are priced by the community, not by you.** Send the violation
+        names from the community's own penal code and we fill in the fine and
+        the jail time from it. A name the community does not have is refused.
+
+        **`reportingOfficer` is required and is what gets checked.** The key's
+        scope decides whether it may propose a draft at all; whether this
+        particular draft is allowed is decided by that player's access — an
+        approved, unbanned member who is in a department. If you name a
+        `templateSlug`, the community's own form gates apply to them too.
+      security: [{ developerKey: [reports:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportDraftWrite" }
+      responses:
+        "200":
+          description: "An existing draft was updated (`created` is false)."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft: { $ref: "#/components/schemas/ReportDraft" }
+                  created: { type: boolean }
+        "201":
+          description: "A new draft was written (`created` is true). Nothing was filed."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft: { $ref: "#/components/schemas/ReportDraft" }
+                  created: { type: boolean }
+        "400":
+          description: >-
+            `invalid_external_id`, `invalid_kind`, `reporting_officer_required`,
+            `template_not_found`, `charge_not_in_penal_code`, `invalid_facts`.
+        "403":
+          description: >-
+            `reporting_officer_not_a_member`,
+            `reporting_officer_has_no_department`,
+            `reporting_officer_not_in_department`, `template_not_permitted`,
+            `template_disabled_for_department`, `subject_not_a_member`.
+        "409":
+          description: >-
+            `draft_already_reviewed` — a person has filed or rejected it, so it
+            can no longer be changed. Write a new draft with a new `externalId`
+            if there is more to report.
+    get:
+      tags: [Reports]
+      summary: List the drafts this key wrote
+      description: |
+        Scoped to the calling key, not to the community: you read back your own
+        output, not what the community's officers or another integration have
+        written.
+
+        Pages are 1-based, like every other list in this product.
+      security: [{ developerKey: [reports:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/limit" }
+        - name: status
+          in: query
+          schema: { type: string, enum: [draft, submitted, rejected, withdrawn] }
+        - name: kind
+          in: query
+          schema: { type: string, enum: [incident, arrest, citation] }
+      responses:
+        "200":
+          description: A page of drafts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReportDraft" }
+                  totalCount: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+
+  /communities/{communityId}/reports/drafts/{externalId}:
+    get:
+      tags: [Reports]
+      summary: Read a draft back by your own id
+      description: |
+        How you find out what a person decided. `status`, `reviewNotes`,
+        `filedRecordId` and `filedRecordKind` are all here, so a game server can
+        tell a player "your report was filed" rather than guessing.
+      security: [{ developerKey: [reports:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/externalId" }
+        - name: source
+          in: query
+          schema: { type: string }
+          description: Defaults to the key's name.
+      responses:
+        "200":
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft: { $ref: "#/components/schemas/ReportDraft" }
+        "404": { description: "`draft_not_found`" }
+    delete:
+      tags: [Reports]
+      summary: Withdraw a draft nobody has acted on
+      description: |
+        Withdrawn, not deleted, and only while it is still a draft. A draft you
+        wrote by mistake can be taken out of the queue; a decision a person has
+        made cannot be erased.
+
+        Withdrawing twice returns 200 with `withdrawn` set to false, so a retry
+        after a timeout is not something you have to special-case.
+      security: [{ developerKey: [reports:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/externalId" }
+        - name: source
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Withdrawn, or already withdrawn.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft: { $ref: "#/components/schemas/ReportDraft" }
+                  withdrawn: { type: boolean }
+        "404": { description: "`draft_not_found`" }
+        "409": { description: "`draft_already_reviewed`" }
+
+  /communities/{communityId}/warrants:
+    get:
+      tags: [Warrants]
+      summary: List a community's warrants
+      description: |
+        Filter by `accused` to answer the question a game server actually asks
+        on a stop — "is there a warrant out for this person?" — in one request
+        rather than a scan.
+
+        Pages are 1-based.
+      security: [{ developerKey: [warrants:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/limit" }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, denied, executed, expired, withdrawn]
+        - name: accused
+          in: query
+          schema: { $ref: "#/components/schemas/PlayerRef" }
+          description: A player reference. Resolved the same way as everywhere else.
+      responses:
+        "200":
+          description: A page of warrants.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Warrant" }
+                  totalCount: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+
+  /communities/{communityId}/warrants/requests:
+    post:
+      tags: [Warrants]
+      summary: Request a warrant for the community's reviewer
+      description: |
+        **A request always lands `pending`, whatever the community's approval
+        mode says.**
+
+        That is deliberately not what the website does. A community can set its
+        warrant mode to auto-approve, and most have, so an officer clicking
+        "request warrant" in the CAD gets an approved warrant immediately.
+        Auto-approve is a convenience for a person who is already in the CAD,
+        has already passed the officer check, and is making one decision they
+        can see the result of. A game server is none of those things: it fires
+        on a trigger, it retries, and nobody is watching the moment it happens.
+
+        So the request goes into the pending queue the community already has, a
+        person reviews it with the tools they already use, and you find out by
+        reading it back. Poll `GET /warrants`, or read the warrant by id.
+
+        **Idempotent on `(community, source, externalId)`.** A retry returns the
+        request you already made, at whatever stage it has reached — so a queue
+        replay cannot flood a judge, and a retry after approval hands you the
+        decision rather than raising a second request.
+
+        `probableCause` is required: a reviewer cannot act on a request that
+        does not say what it is for. Charges are priced from the community's own
+        penal code, as for a report draft.
+      security: [{ developerKey: [warrants:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WarrantRequest" }
+      responses:
+        "200":
+          description: >-
+            This request already exists (`created` is false). The warrant is
+            returned at whatever stage it has reached.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  warrant: { $ref: "#/components/schemas/Warrant" }
+                  created: { type: boolean }
+        "201":
+          description: "Requested (`created` is true). Status is `pending`."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  warrant: { $ref: "#/components/schemas/Warrant" }
+                  created: { type: boolean }
+        "400":
+          description: >-
+            `invalid_external_id`, `invalid_warrant_type`,
+            `probable_cause_required`, `accused_required`,
+            `charge_not_in_penal_code`.
+        "403":
+          description: >-
+            `reporting_officer_not_a_member`,
+            `reporting_officer_has_no_department`, `accused_not_a_member`.
+
+  /communities/{communityId}/warrants/{warrantId}:
+    get:
+      tags: [Warrants]
+      summary: Read one warrant
+      description: |
+        The community is part of the lookup, so a warrant id from another
+        community is a 404 rather than a 403 — its existence is never
+        confirmed.
+      security: [{ developerKey: [warrants:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: warrantId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{24}$" }
+      responses:
+        "200":
+          description: The warrant.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  warrant: { $ref: "#/components/schemas/Warrant" }
+        "404": { description: "`warrant_not_found`" }
+
+  /communities/{communityId}/synthetic-records:
+    delete:
+      tags: [Simulated characters]
+      summary: Remove the simulated records this key created
+      description: |
+        For cleaning up after a test run, and it needs nobody's help.
+
+        Three boundaries, and each is the whole safety of the endpoint:
+
+        * **synthetic only** — a record created for a real player is never
+          touched, whichever key made it;
+        * **this key only** — you cannot clean up another integration's output,
+          even in a community you both hold;
+        * **this community only** — scoped by the community in the path.
+
+        `confirm` must be the community id. This endpoint deletes rows, so it
+        will not run against an id the caller did not state — which is what
+        stops a cleanup aimed at a test community running against a live one
+        because a config value was stale.
+
+        Narrow it further with `source` and `externalId`. Batches are bounded;
+        when `more` is true, call again.
+
+        A community owner can also remove everything a key wrote, from the
+        community's settings on the website. That path is for an integration
+        that has stopped answering, so it does not need the key's cooperation.
+      security: [{ developerKey: [players:provision] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  description: The community id, exactly as it appears in the path.
+                source: { type: string }
+                externalId: { type: string, maxLength: 128 }
+      responses:
+        "200":
+          description: What was removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed:
+                    type: object
+                    additionalProperties: { type: integer }
+                    example: { civilians: 97, vehicles: 180 }
+                  total: { type: integer }
+                  more:
+                    type: boolean
+                    description: True when the batch cap was reached. Call again.
+        "400": { description: "`confirm_required`, `invalid_source`, `invalid_external_id`." }
 
 components:
   securitySchemes:
@@ -877,6 +1307,15 @@ components:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    includeSynthetic:
+      name: includeSynthetic
+      in: query
+      schema: { type: boolean, default: false }
+      description: >-
+        Include the simulated characters a Developer API key created. Off by
+        default, so a server that populated a city with NPCs still has a name
+        database its officers can read. Setting it to `true` widens the result
+        to everything; there is no way to ask for NPCs alone.
 
   responses:
     Unauthorized:
@@ -1127,6 +1566,268 @@ components:
           description: Free text, as the game reports it.
           example: Grapeseed
         departmentId: { type: string }
+
+    ReportDraftWrite:
+      type: object
+      required: [externalId, reportingOfficer]
+      properties:
+        externalId:
+          type: string
+          maxLength: 128
+          description: >-
+            Your own id for this incident. Required: it is what makes repeated
+            writes idempotent.
+          example: sixpd-incident-42
+        source:
+          type: string
+          description: Defaults to the key's name. Scopes the externalId space.
+        kind:
+          type: string
+          enum: [incident, arrest, citation]
+          default: incident
+        callExternalId:
+          type: string
+          description: >-
+            Link the draft to a dispatch call by your own id for that call —
+            the id you still have after a restart.
+        callId:
+          type: string
+          description: Our call id, if you kept it. `callExternalId` is usually easier.
+        reportingOfficer:
+          allOf: [{ $ref: "#/components/schemas/PlayerRef" }]
+          description: >-
+            The player who observed this. Required, and it is this player's
+            community access that is checked — never the key's.
+        departmentId:
+          type: string
+          description: >-
+            Optional. Inferred when the officer is in exactly one department.
+            The officer must be a member of whatever you name.
+        templateSlug:
+          type: string
+          description: >-
+            The community's own form this draft answers. Validated against the
+            community's templates, the officer's access to it, and the
+            department's toggle for it. Leave it out if you do not know the
+            community's form layout.
+        subject: { $ref: "#/components/schemas/ReportSubjectWrite" }
+        facts: { $ref: "#/components/schemas/ReportFactsWrite" }
+        narrative: { $ref: "#/components/schemas/ReportNarrativeWrite" }
+        charges:
+          type: array
+          maxItems: 40
+          items: { type: string }
+          description: >-
+            Violation names from the community's own penal code. We fill in the
+            fine and the jail time from it; a name the community does not have
+            is refused, so a key can never invent an amount. Read the penal code
+            from the community endpoint.
+          example: ["Reckless Driving"]
+
+    ReportSubjectWrite:
+      type: object
+      description: >-
+        Who the draft is about. Optional in full: an incident report about an
+        unidentified person is a real thing, and refusing it would push you into
+        inventing a placeholder player.
+      properties:
+        player: { $ref: "#/components/schemas/PlayerRef" }
+        civilianId:
+          type: string
+          description: A character the named player owns. Needs `player`.
+        displayName:
+          type: string
+          description: What the reviewer sees when there is no linked player.
+
+    ReportFactsWrite:
+      type: object
+      description: >-
+        What your server observed. Everything here is something a game can
+        actually know; nothing here is prose about what it meant.
+      properties:
+        occurredAt: { type: string }
+        location: { type: string }
+        summary: { type: string, maxLength: 2000 }
+        vehicles: { type: array, maxItems: 25, items: { type: string } }
+        witnesses: { type: array, maxItems: 25, items: { type: string } }
+        officers: { type: array, maxItems: 25, items: { type: string } }
+        forceUsed: { type: boolean }
+        fields:
+          type: object
+          maxProperties: 60
+          additionalProperties: { type: string, maxLength: 1000 }
+          description: >-
+            The named template's own answers, as flat key/value strings. Strings
+            only: a nested object is refused.
+
+    ReportNarrativeWrite:
+      type: object
+      description: >-
+        Prose about the facts, kept apart from them. There is no way to mark a
+        narrative as evidence, and there will not be: a narrative is an account
+        of events, evidence is a thing that exists, and conflating the two in a
+        system that produces jail time is not a mistake we could take back.
+      properties:
+        text: { type: string, maxLength: 8000 }
+        generated:
+          type: boolean
+          default: true
+          description: >-
+            Whether a model wrote this. **Omitting it means generated**, because
+            the callers of this API are automated by definition and of the two
+            possible mislabels that is the one that makes a reviewer read more
+            carefully. Send `false` only when a person wrote the text.
+        generatedBy:
+          type: string
+          description: What generated it, for example `sixpd-llm`. Ignored when `generated` is false.
+
+    ReportDraft:
+      type: object
+      properties:
+        id: { type: string }
+        externalId: { type: string }
+        source: { type: string }
+        kind: { type: string, enum: [incident, arrest, citation] }
+        status:
+          type: string
+          enum: [draft, submitted, rejected, withdrawn]
+          description: >-
+            A key can only ever produce `draft`. The rest are written when a
+            person acts on it.
+        communityId: { type: string }
+        callId: { type: string }
+        callExternalId: { type: string }
+        templateSlug: { type: string }
+        departmentId: { type: string }
+        subject:
+          type: object
+          properties:
+            playerRef: { type: string }
+            userId: { type: string }
+            civilianId: { type: string }
+            displayName: { type: string }
+            synthetic:
+              type: boolean
+              description: True when the subject is a simulated character.
+        facts: { $ref: "#/components/schemas/ReportFactsWrite" }
+        narrative:
+          type: object
+          properties:
+            text: { type: string }
+            generated: { type: boolean }
+            generatedBy: { type: string }
+        charges:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              category: { type: string }
+              amount: { type: number }
+              jailTime: { type: string }
+        reportingOfficerId: { type: string }
+        reportingOfficerName: { type: string }
+        reviewedByName: { type: string }
+        reviewedAt: { type: string, format: date-time }
+        reviewNotes:
+          type: string
+          description: What the reviewer said. Show this to your officer when a draft is rejected.
+        filedRecordId:
+          type: string
+          description: The record a person filed from this draft, once they have.
+        filedRecordKind: { type: string }
+        filed:
+          type: boolean
+          description: >-
+            Whether a person has turned this into a record. Spelled out rather
+            than left to be inferred from `status`, because the one thing not to
+            conclude from a 201 is that a report exists.
+        reviewLink:
+          type: string
+          description: Opens the draft on the website for whoever may act on it.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    WarrantRequest:
+      type: object
+      required: [externalId, requestingOfficer, probableCause]
+      properties:
+        externalId: { type: string, maxLength: 128, example: sixpd-warrant-7 }
+        source: { type: string, description: Defaults to the key's name. }
+        warrantType:
+          type: string
+          enum: [arrest, search, bench]
+          default: arrest
+        requestingOfficer:
+          allOf: [{ $ref: "#/components/schemas/PlayerRef" }]
+          description: >-
+            The officer asking. Their community access is what is checked; the
+            key's scope only decides whether it may ask at all.
+        departmentId: { type: string }
+        accused:
+          allOf: [{ $ref: "#/components/schemas/PlayerRef" }]
+          description: >-
+            A player reference. Or name them with `accusedFirstName` and
+            `accusedLastName` when the game knows them by name only.
+        accusedFirstName: { type: string }
+        accusedLastName: { type: string }
+        accusedCivilianId:
+          type: string
+          description: >-
+            A character the accused owns. A warrant is against the character
+            the officer dealt with, not the person's login, so this wins over
+            the account's username.
+        probableCause:
+          type: string
+          maxLength: 2000
+          description: >-
+            Required. A reviewer cannot act on a request that does not say what
+            it is for.
+        charges:
+          type: array
+          items: { type: string }
+          description: Violation names from the community's penal code.
+        searchLocation:
+          type: string
+          description: For a search warrant.
+
+    Warrant:
+      type: object
+      properties:
+        id: { type: string }
+        externalId: { type: string }
+        source: { type: string }
+        warrantType: { type: string }
+        status:
+          type: string
+          enum: [pending, approved, denied, executed, expired, withdrawn]
+        accusedId: { type: string }
+        accusedFirstName: { type: string }
+        accusedLastName: { type: string }
+        probableCause: { type: string }
+        charges: { type: array, items: { type: string } }
+        searchLocation: { type: string }
+        requestingOfficerId: { type: string }
+        requestingOfficerName: { type: string }
+        departmentId: { type: string }
+        judgeName: { type: string }
+        judgeNotes:
+          type: string
+          description: >-
+            Why a request was approved or refused. Tell your officer this; it is
+            the only thing that explains a denial.
+        reviewedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        approved:
+          type: boolean
+          description: >-
+            The question you are actually asking. Spelled out so nobody has to
+            decide whether `executed` counts.
+        awaitingReview:
+          type: boolean
+          description: A person has not looked at it yet. Every request starts here.
 
     UnitStatusResult:
       type: object

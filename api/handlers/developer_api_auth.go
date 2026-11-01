@@ -96,6 +96,19 @@ type DeveloperAPI struct {
 	LicDB  databases.LicenseDatabase
 	CallDB databases.CallDatabase
 	BoloDB databases.BoloDatabase
+
+	// Report drafts and warrants.
+	//
+	// ReportDraftDB is the drafts collection and nothing else reads it, which
+	// is what keeps a draft from ever being mistaken for a filed report. The
+	// two form stores are here so a draft can honour a community's own form
+	// template and its per-department toggle; both are optional, and a draft
+	// that names a template is refused rather than accepted unchecked when
+	// they are absent.
+	ReportDraftDB    databases.DeveloperReportDraftDatabase
+	WarrantDB        databases.WarrantDatabase
+	FormTemplateDB   databases.FormTemplateDatabase
+	DeptFormToggleDB databases.DepartmentFormToggleDatabase
 }
 
 // ---- key material ----

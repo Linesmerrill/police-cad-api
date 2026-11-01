@@ -288,6 +288,16 @@ func (c Civilian) CiviliansByNameSearchHandler(w http.ResponseWriter, r *http.Re
 	if activeCommunityID != "" {
 		filter["civilian.activeCommunityID"] = activeCommunityID
 	}
+	// Simulated characters a Developer API integration created are left out
+	// unless the caller asks for them with includeSynthetic=true. A server that
+	// populated a city with NPCs still needs a name database its officers can
+	// read, and four hundred NPCs with twelve players among them is not one.
+	//
+	// "$ne: true" rather than "false", so every character that predates the
+	// field — which is all of them — keeps appearing.
+	if !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("includeSynthetic")), "true") {
+		filter["civilian.source.synthetic"] = bson.M{"$ne": true}
+	}
 
 	// Use request context with timeout for proper trace tracking and timeout handling
 	ctx, cancel := api.WithQueryTimeout(r.Context())
@@ -1077,6 +1087,13 @@ func (c Civilian) CiviliansSearchHandlerV2(w http.ResponseWriter, r *http.Reques
 			},
 			{
 				"civilian.activeCommunityID": req.CommunityID,
+			},
+			{
+				// Simulated characters a Developer API integration created are
+				// left out, for the same reason as in the v1 search: an NPC
+				// population must not bury the real players in a name lookup.
+				// "$ne: true" keeps every character that predates the field.
+				"civilian.source.synthetic": bson.M{"$ne": true},
 			},
 		},
 	}

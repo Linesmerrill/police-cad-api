@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -938,6 +939,1509 @@ func TestE2E_CloseCallTwiceIsNotAnError(t *testing.T) {
 		}
 		if out.Call.Status != "closed" {
 			t.Errorf("attempt %d: status = %q, want closed", attempt, out.Call.Status)
+		}
+	}
+}
+
+// ============================================================================
+// Phase 3: report drafts, warrant requests, simulated characters.
+//
+// Hiceguy's follow-up on #277. Each of these is a surface a third party asked
+// for, and the tests below are mostly about what it cannot do: a key cannot
+// file a report, cannot approve a warrant, cannot act for a player who is not
+// entitled, and cannot reach another community's anything.
+// ============================================================================
+
+// ---- fakes for the phase-3 stores ----
+
+type fakeReportDraftDB struct {
+	databases.DeveloperReportDraftDatabase
+	mu      sync.Mutex
+	drafts  []models.DeveloperReportDraft
+	inserts int
+	deletes int
+}
+
+func (f *fakeReportDraftDB) Find(_ context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.DeveloperReportDraft, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+
+	out := []models.DeveloperReportDraft{}
+	for _, draft := range f.drafts {
+		if v, ok := devFilterString(m["communityId"]); ok && draft.CommunityID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["sourceName"]); ok && draft.SourceName != v {
+			continue
+		}
+		if v, ok := devFilterString(m["externalId"]); ok && draft.ExternalID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["status"]); ok && draft.Status != v {
+			continue
+		}
+		if v, ok := devFilterString(m["kind"]); ok && draft.Kind != v {
+			continue
+		}
+		if v, ok := devFilterString(m["source.keyId"]); ok {
+			if draft.Source == nil || draft.Source.KeyID != v {
+				continue
+			}
+		}
+		if oid, ok := devFilterObjectID(m["_id"]); ok && draft.ID != oid {
+			continue
+		}
+		out = append(out, draft)
+	}
+	return out, nil
+}
+
+func (f *fakeReportDraftDB) InsertOne(_ context.Context, draft models.DeveloperReportDraft) (databases.InsertOneResultHelper, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.drafts = append(f.drafts, draft)
+	f.inserts++
+	return fakeInsertResult{id: draft.ID}, nil
+}
+
+func (f *fakeReportDraftDB) UpdateOne(_ context.Context, filter, update interface{}, _ ...*options.UpdateOptions) (*models.DeveloperReportDraft, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fm, _ := filter.(bson.M)
+	um, _ := update.(bson.M)
+	set, _ := um["$set"].(bson.M)
+
+	oid, ok := devFilterObjectID(fm["_id"])
+	if !ok {
+		return nil, nil
+	}
+	for i := range f.drafts {
+		if f.drafts[i].ID != oid {
+			continue
+		}
+		if v, has := set["status"].(string); has {
+			f.drafts[i].Status = v
+		}
+		if v, has := set["kind"].(string); has {
+			f.drafts[i].Kind = v
+		}
+		if v, has := set["callId"].(string); has {
+			f.drafts[i].CallID = v
+		}
+		if v, has := set["callExternalId"].(string); has {
+			f.drafts[i].CallExternalID = v
+		}
+		if v, has := set["templateSlug"].(string); has {
+			f.drafts[i].TemplateSlug = v
+		}
+		if v, has := set["departmentId"].(string); has {
+			f.drafts[i].DepartmentID = v
+		}
+		if v, has := set["subject"].(models.DeveloperReportSubject); has {
+			f.drafts[i].Subject = v
+		}
+		if v, has := set["facts"].(models.DeveloperReportFacts); has {
+			f.drafts[i].Facts = v
+		}
+		if v, has := set["narrative"].(models.DeveloperReportNarrative); has {
+			f.drafts[i].Narrative = v
+		}
+		if v, has := set["charges"].([]models.ArrestCharge); has {
+			f.drafts[i].Charges = v
+		}
+		if v, has := set["reportingOfficerId"].(string); has {
+			f.drafts[i].ReportingOfficerID = v
+		}
+		if v, has := set["reportingOfficerName"].(string); has {
+			f.drafts[i].ReportingOfficerName = v
+		}
+		found := f.drafts[i]
+		return &found, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeReportDraftDB) DeleteMany(_ context.Context, filter interface{}, _ ...*options.DeleteOptions) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+	kept := f.drafts[:0:0]
+	var removed int64
+	for _, draft := range f.drafts {
+		match := true
+		if v, ok := devFilterString(m["communityId"]); ok && draft.CommunityID != v {
+			match = false
+		}
+		if v, ok := devFilterString(m["status"]); ok && draft.Status != v {
+			match = false
+		}
+		if v, ok := devFilterString(m["source.keyId"]); ok {
+			if draft.Source == nil || draft.Source.KeyID != v {
+				match = false
+			}
+		}
+		if match {
+			removed++
+			continue
+		}
+		kept = append(kept, draft)
+	}
+	f.drafts = kept
+	f.deletes += int(removed)
+	return removed, nil
+}
+
+func (f *fakeReportDraftDB) CountDocuments(ctx context.Context, filter interface{}, _ ...*options.CountOptions) (int64, error) {
+	found, err := f.Find(ctx, filter)
+	return int64(len(found)), err
+}
+
+type fakeWarrantDB struct {
+	databases.WarrantDatabase
+	mu        sync.Mutex
+	warrants  []models.Warrant
+	inserts   int
+}
+
+func (f *fakeWarrantDB) Find(_ context.Context, filter interface{}, _ ...*options.FindOptions) ([]models.Warrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+
+	out := []models.Warrant{}
+	for _, warrant := range f.warrants {
+		d := warrant.Details
+		if v, ok := devFilterString(m["warrant.activeCommunityID"]); ok && d.ActiveCommunityID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["warrant.source"]); ok && d.Source != v {
+			continue
+		}
+		if v, ok := devFilterString(m["warrant.externalId"]); ok && d.ExternalID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["warrant.status"]); ok && d.Status != v {
+			continue
+		}
+		if v, ok := devFilterString(m["warrant.accusedID"]); ok && d.AccusedID != v {
+			continue
+		}
+		out = append(out, warrant)
+	}
+	return out, nil
+}
+
+func (f *fakeWarrantDB) FindOne(ctx context.Context, filter interface{}, _ ...*options.FindOneOptions) (*models.Warrant, error) {
+	f.mu.Lock()
+	m, _ := filter.(bson.M)
+	wantID, hasID := devFilterObjectID(m["_id"])
+	wantCommunity, hasCommunity := devFilterString(m["warrant.activeCommunityID"])
+	warrants := append([]models.Warrant{}, f.warrants...)
+	f.mu.Unlock()
+	_ = ctx
+
+	for _, warrant := range warrants {
+		if hasID && warrant.ID != wantID {
+			continue
+		}
+		if hasCommunity && warrant.Details.ActiveCommunityID != wantCommunity {
+			continue
+		}
+		found := warrant
+		return &found, nil
+	}
+	return nil, mongo.ErrNoDocuments
+}
+
+func (f *fakeWarrantDB) InsertOne(_ context.Context, doc interface{}, _ ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if warrant, ok := doc.(models.Warrant); ok {
+		f.warrants = append(f.warrants, warrant)
+		f.inserts++
+	}
+	return fakeInsertResult{id: primitive.NewObjectID()}, nil
+}
+
+func (f *fakeWarrantDB) CountDocuments(ctx context.Context, filter interface{}, _ ...*options.CountOptions) (int64, error) {
+	found, err := f.Find(ctx, filter)
+	return int64(len(found)), err
+}
+
+type fakeFormTemplateDB struct {
+	databases.FormTemplateDatabase
+	templates []models.FormTemplate
+}
+
+func (f *fakeFormTemplateDB) FindOne(_ context.Context, filter interface{}, _ ...*options.FindOneOptions) (*models.FormTemplate, error) {
+	m, _ := filter.(bson.M)
+	for _, template := range f.templates {
+		if v, ok := devFilterString(m["formTemplate.communityID"]); ok && template.Details.CommunityID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["formTemplate.slug"]); ok && template.Details.Slug != v {
+			continue
+		}
+		found := template
+		return &found, nil
+	}
+	return nil, mongo.ErrNoDocuments
+}
+
+type fakeDeptToggleDB struct {
+	databases.DepartmentFormToggleDatabase
+	toggles []models.DepartmentFormToggle
+}
+
+func (f *fakeDeptToggleDB) Find(_ context.Context, filter interface{}, _ ...*options.FindOptions) ([]models.DepartmentFormToggle, error) {
+	m, _ := filter.(bson.M)
+	out := []models.DepartmentFormToggle{}
+	for _, toggle := range f.toggles {
+		d := toggle.Details
+		if v, ok := devFilterString(m["departmentFormToggle.communityID"]); ok && d.CommunityID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["departmentFormToggle.departmentId"]); ok && d.DepartmentID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["departmentFormToggle.formTemplateSlug"]); ok && d.FormTemplateSlug != v {
+			continue
+		}
+		out = append(out, toggle)
+	}
+	return out, nil
+}
+
+// ---- the phase-3 stack ----
+
+// reportFixture is the e2e fixture with the phase-3 stores, a department the
+// officers actually belong to, and a penal code to charge people under.
+//
+// The department membership matters: writing a report is something an officer
+// in a department does, so a fixture whose community has an empty department
+// would make every one of these tests pass for the wrong reason.
+type reportFixture struct {
+	*e2eFixture
+	draftDB    *fakeReportDraftDB
+	warrantDB  *fakeWarrantDB
+	templateDB *fakeFormTemplateDB
+	toggleDB   *fakeDeptToggleDB
+	// gatedSlug is a form restricted to a rank nobody in the fixture holds.
+	gatedSlug string
+	openSlug  string
+}
+
+func newReportFixture(t *testing.T) *reportFixture {
+	t.Helper()
+	base := newE2EFixture(t)
+
+	// The admin and the plain member are in BCSO; the outsider is in nothing.
+	community := base.community
+	community.Details.Departments[0].Members = []models.MemberStatus{
+		{UserID: base.adminID, Status: "active"},
+		{UserID: base.plainID, Status: "active"},
+	}
+	community.Details.PenalCodes = models.CommunityPenalCode{
+		Categories: []models.PenalCodeCategory{{
+			ID:   "traffic",
+			Name: "Traffic Violations",
+			Violations: []models.PenalCodeViolation{
+				{Name: "Reckless Driving", JailTime: "30 seconds", Fine: 1000},
+				{Name: "Speeding 10-19", JailTime: "N/A", Fine: 150},
+			},
+		}},
+	}
+	base.community = community
+	if err := base.communityDB.seed(community); err != nil {
+		t.Fatalf("re-seeding the community: %v", err)
+	}
+
+	draftDB := &fakeReportDraftDB{}
+	warrantDB := &fakeWarrantDB{}
+
+	// Two forms: one open to everyone, one gated to a rank nobody holds.
+	unreachableRank := primitive.NewObjectID()
+	templateDB := &fakeFormTemplateDB{templates: []models.FormTemplate{
+		{
+			ID: primitive.NewObjectID(),
+			Details: models.FormTemplateDetails{
+				CommunityID: community.ID.Hex(), Slug: "incident", Name: "Incident Report",
+			},
+		},
+		{
+			ID: primitive.NewObjectID(),
+			Details: models.FormTemplateDetails{
+				CommunityID: community.ID.Hex(), Slug: "command-review", Name: "Command Review",
+				RankGates: []models.DepartmentRankGate{{
+					DepartmentID: community.Details.Departments[0].ID.Hex(),
+					EditableByRankRule: &models.RankRule{
+						Mode: "exact", AnchorRankIDs: []string{unreachableRank.Hex()},
+					},
+				}},
+			},
+		},
+	}}
+	toggleDB := &fakeDeptToggleDB{}
+
+	base.api.ReportDraftDB = draftDB
+	base.api.WarrantDB = warrantDB
+	base.api.FormTemplateDB = templateDB
+	base.api.DeptFormToggleDB = toggleDB
+
+	return &reportFixture{
+		e2eFixture: base,
+		draftDB:    draftDB,
+		warrantDB:  warrantDB,
+		templateDB: templateDB,
+		toggleDB:   toggleDB,
+		gatedSlug:  "command-review",
+		openSlug:   "incident",
+	}
+}
+
+type draftEnvelope struct {
+	Draft   devReportDraftView `json:"draft"`
+	Created bool               `json:"created"`
+}
+
+func (f *reportFixture) upsertDraft(t *testing.T, body string) (*httptest.ResponseRecorder, draftEnvelope) {
+	t.Helper()
+	rr := f.run(t, http.MethodPost, "/reports/drafts", body, nil,
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevUpsertReportDraftHandler))
+	var out draftEnvelope
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	return rr, out
+}
+
+type warrantEnvelope struct {
+	Warrant devWarrantView `json:"warrant"`
+	Created bool           `json:"created"`
+}
+
+func (f *reportFixture) requestWarrant(t *testing.T, body string) (*httptest.ResponseRecorder, warrantEnvelope) {
+	t.Helper()
+	rr := f.run(t, http.MethodPost, "/warrants/requests", body, nil,
+		f.api.RequireScope(models.ScopeWarrantsWrite, f.api.DevRequestWarrantHandler))
+	var out warrantEnvelope
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	return rr, out
+}
+
+// ---- report drafts: what they are ----
+
+// A draft is a draft. The response has to say so plainly, because the one
+// conclusion an integration must never draw from a 201 here is that a report
+// now exists in the community.
+func TestE2E_ReportDraftIsNotAFiledReport(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr, out := f.upsertDraft(t, `{
+		"externalId":"sixpd-incident-900","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"subject":{"player":"`+fivemRef("member")+`"},
+		"facts":{"summary":"Pursuit ended on Route 68","location":"Route 68"},
+		"narrative":{"text":"The suspect fled.","generated":true,"generatedBy":"sixpd-llm"},
+		"charges":["Reckless Driving"]
+	}`)
+
+	if rr.Code != http.StatusCreated || !out.Created {
+		t.Fatalf("expected 201 created, got %d created=%v: %s", rr.Code, out.Created, rr.Body.String())
+	}
+	if out.Draft.Status != models.ReportDraftStatusDraft {
+		t.Errorf("a key may only ever produce a draft, got status %q", out.Draft.Status)
+	}
+	if out.Draft.Filed {
+		t.Error("nothing a key calls files a report; filed must be false")
+	}
+	if out.Draft.FiledRecordID != "" {
+		t.Errorf("a new draft cannot point at a filed record, got %q", out.Draft.FiledRecordID)
+	}
+	if out.Draft.ReviewLink == "" {
+		t.Error("a draft needs a link a person can open to review it")
+	}
+}
+
+// Facts and narrative are separate fields and stay separate. A reviewer has to
+// be able to see what was observed apart from what a model wrote about it.
+func TestE2E_ReportDraftKeepsFactsApartFromNarrative(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, out := f.upsertDraft(t, `{
+		"externalId":"sixpd-incident-901","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"facts":{"summary":"Vehicle failed to stop","location":"Route 68","forceUsed":true,
+			"fields":{"weather":"clear","visibility":"good"}},
+		"narrative":{"text":"In my opinion the driver was impaired."}
+	}`)
+
+	if out.Draft.Facts.Summary != "Vehicle failed to stop" {
+		t.Errorf("the structured summary did not survive: %+v", out.Draft.Facts)
+	}
+	if !out.Draft.Facts.ForceUsed {
+		t.Error("forceUsed is a fact and must be recorded as one")
+	}
+	if out.Draft.Facts.Fields["weather"] != "clear" {
+		t.Errorf("template answers belong in facts.fields, got %+v", out.Draft.Facts.Fields)
+	}
+	if strings.Contains(out.Draft.Facts.Summary, "impaired") {
+		t.Error("narrative text must never land in the fact sheet")
+	}
+	if out.Draft.Narrative.Text == "" {
+		t.Error("the narrative was dropped")
+	}
+}
+
+// A narrative with no claim either way is recorded as generated. Of the two
+// possible mislabels, this is the one that makes a reviewer read more
+// carefully rather than less.
+func TestE2E_ReportNarrativeDefaultsToGenerated(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, out := f.upsertDraft(t, `{
+		"externalId":"sixpd-incident-902","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"narrative":{"text":"A vehicle was stopped."}
+	}`)
+
+	if !out.Draft.Narrative.Generated {
+		t.Error("a narrative that did not say must be treated as generated")
+	}
+}
+
+// The integration can say a person wrote it, and that claim is kept.
+func TestE2E_ReportNarrativeCanBeDeclaredHumanWritten(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, out := f.upsertDraft(t, `{
+		"externalId":"sixpd-incident-903","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"narrative":{"text":"I stopped the vehicle.","generated":false}
+	}`)
+
+	if out.Draft.Narrative.Generated {
+		t.Error("an explicit generated:false must be honoured")
+	}
+	if out.Draft.Narrative.GeneratedBy != "" {
+		t.Error("a human-written narrative must not carry a generator name")
+	}
+}
+
+// ---- report drafts: idempotency ----
+
+// The same external id twice is one draft, updated. This is what makes a
+// reconnect and a queue replay safe, and the reason it matters more here than
+// on calls: a duplicate draft is a duplicate thing in a person's queue, and
+// somebody would file both.
+func TestE2E_ReportDraftUpsertIsIdempotent(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr1, first := f.upsertDraft(t, `{
+		"externalId":"sixpd-incident-910","source":"SixPD","kind":"incident",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"facts":{"summary":"First pass"}
+	}`)
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr1.Code, rr1.Body.String())
+	}
+
+	rr2, second := f.upsertDraft(t, `{
+		"externalId":"sixpd-incident-910","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"facts":{"summary":"Second pass"}
+	}`)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on the repeat, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+	if second.Created {
+		t.Error("a repeat must not report creating anything")
+	}
+	if first.Draft.ID != second.Draft.ID {
+		t.Errorf("one external id must be one draft: %s vs %s", first.Draft.ID, second.Draft.ID)
+	}
+	if f.draftDB.inserts != 1 {
+		t.Errorf("expected exactly one draft written, got %d", f.draftDB.inserts)
+	}
+	if second.Draft.Facts.Summary != "Second pass" || second.Draft.Kind != "arrest" {
+		t.Errorf("the repeat should have updated the draft, got %+v", second.Draft)
+	}
+}
+
+// Source scopes the id space, as it does everywhere else on this surface, so a
+// developer's staging and production instances can use the same incident
+// numbers.
+func TestE2E_ReportDraftSourceScopesTheIdSpace(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, first := f.upsertDraft(t, `{"externalId":"incident-1","source":"sixpd-prod",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	_, second := f.upsertDraft(t, `{"externalId":"incident-1","source":"sixpd-dev",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	if first.Draft.ID == second.Draft.ID {
+		t.Error("the same id under two sources must not collide")
+	}
+	if f.draftDB.inserts != 2 {
+		t.Errorf("expected two drafts, got %d", f.draftDB.inserts)
+	}
+}
+
+// Once a person has acted on a draft, a late retry must not overwrite what they
+// decided. That is the one case where idempotency gives way to the human.
+func TestE2E_ReportDraftRefusesToOverwriteAReview(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, created := f.upsertDraft(t, `{"externalId":"incident-920","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`","facts":{"summary":"As observed"}}`)
+
+	// The website files it.
+	f.draftDB.mu.Lock()
+	for i := range f.draftDB.drafts {
+		if f.draftDB.drafts[i].ID.Hex() == created.Draft.ID {
+			f.draftDB.drafts[i].Status = models.ReportDraftStatusSubmitted
+			f.draftDB.drafts[i].FiledRecordID = primitive.NewObjectID().Hex()
+			f.draftDB.drafts[i].FiledRecordKind = "arrestReport"
+		}
+	}
+	f.draftDB.mu.Unlock()
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"incident-920","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`","facts":{"summary":"Rewritten after the fact"}}`)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 once a person has filed it, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "draft_already_reviewed") {
+		t.Errorf("expected draft_already_reviewed, got %s", rr.Body.String())
+	}
+
+	f.draftDB.mu.Lock()
+	defer f.draftDB.mu.Unlock()
+	for _, draft := range f.draftDB.drafts {
+		if draft.ID.Hex() == created.Draft.ID && draft.Facts.Summary != "As observed" {
+			t.Errorf("the filed draft was rewritten: %q", draft.Facts.Summary)
+		}
+	}
+}
+
+// ---- report drafts: who may write one ----
+
+// The key's scope is not the permission. A draft has to be attributed to a
+// player, and that player has to be entitled to write one in this community.
+func TestE2E_ReportDraftNeedsAReportingOfficer(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"incident-930","source":"SixPD","facts":{"summary":"x"}}`)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no reporting officer, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "reporting_officer_required") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+	if f.draftDB.inserts != 0 {
+		t.Error("nothing should have been written")
+	}
+}
+
+// Someone who is not in the community cannot be named as the officer, whatever
+// scopes the key holds.
+func TestE2E_ReportDraftRefusesAnOutsiderAsOfficer(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"incident-931","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("outsider")+`"}`)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for an outsider, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "reporting_officer_not_a_member") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+// A member with no department cannot write a report, because they cannot open
+// a report form in the CAD either.
+func TestE2E_ReportDraftRefusesAMemberWithNoDepartment(t *testing.T) {
+	f := newReportFixture(t)
+
+	// Take the plain member out of BCSO, leaving them an approved member of the
+	// community and nothing else.
+	community := f.community
+	community.Details.Departments[0].Members = []models.MemberStatus{{UserID: f.adminID, Status: "active"}}
+	f.community = community
+	if err := f.communityDB.seed(community); err != nil {
+		t.Fatalf("re-seeding: %v", err)
+	}
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"incident-932","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("member")+`"}`)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 with no department, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "reporting_officer_has_no_department") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+// The community's own form gates apply to the officer, checked with the same
+// helper the website uses. A key never grants more than the player it reports
+// for.
+func TestE2E_ReportDraftHonoursAFormRankGate(t *testing.T) {
+	f := newReportFixture(t)
+
+	t.Run("an ungated form is fine", func(t *testing.T) {
+		rr, out := f.upsertDraft(t, `{"externalId":"incident-940","source":"SixPD",
+			"reportingOfficer":"`+fivemRef("member")+`","templateSlug":"`+f.openSlug+`"}`)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if out.Draft.TemplateSlug != f.openSlug {
+			t.Errorf("the template was not recorded, got %q", out.Draft.TemplateSlug)
+		}
+	})
+
+	t.Run("a rank-gated form the officer cannot use is refused", func(t *testing.T) {
+		rr, _ := f.upsertDraft(t, `{"externalId":"incident-941","source":"SixPD",
+			"reportingOfficer":"`+fivemRef("member")+`","templateSlug":"`+f.gatedSlug+`"}`)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for a gated form, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "template_not_permitted") {
+			t.Errorf("got %s", rr.Body.String())
+		}
+	})
+
+	t.Run("a form this community does not have is refused", func(t *testing.T) {
+		rr, _ := f.upsertDraft(t, `{"externalId":"incident-942","source":"SixPD",
+			"reportingOfficer":"`+fivemRef("admin")+`","templateSlug":"not-a-form"}`)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "template_not_found") {
+			t.Errorf("got %s", rr.Body.String())
+		}
+	})
+}
+
+// A form an admin turned off for a department cannot be used by that
+// department, which is the setting's whole purpose.
+func TestE2E_ReportDraftHonoursADepartmentFormToggle(t *testing.T) {
+	f := newReportFixture(t)
+	f.toggleDB.toggles = []models.DepartmentFormToggle{{
+		ID: primitive.NewObjectID(),
+		Details: models.DepartmentFormToggleDetails{
+			CommunityID:      f.community.ID.Hex(),
+			DepartmentID:     f.deptID.Hex(),
+			FormTemplateSlug: f.openSlug,
+			IsEnabled:        false,
+		},
+	}}
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"incident-950","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("member")+`","departmentId":"`+f.deptID.Hex()+`",
+		"templateSlug":"`+f.openSlug+`"}`)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for a disabled form, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "template_disabled_for_department") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+// ---- report drafts: charges come from the community ----
+
+// A key names a charge; the community prices it. This is what stops an
+// integration inventing a fine or a jail term, and it means a community that
+// retunes its penal code sees new drafts priced the new way.
+func TestE2E_ReportChargesArePricedFromThePenalCode(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, out := f.upsertDraft(t, `{"externalId":"incident-960","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"charges":["Reckless Driving","Speeding 10-19"]}`)
+
+	if len(out.Draft.Charges) != 2 {
+		t.Fatalf("expected two charges, got %+v", out.Draft.Charges)
+	}
+	first := out.Draft.Charges[0]
+	if first.Amount != 1000 {
+		t.Errorf("the fine must come from the community's penal code, got %v", first.Amount)
+	}
+	if first.JailTime != "30 seconds" {
+		t.Errorf("the jail time must come from the penal code, got %q", first.JailTime)
+	}
+	if first.Category != "Traffic Violations" {
+		t.Errorf("the category must come from the penal code, got %q", first.Category)
+	}
+}
+
+// A charge the community does not have is refused rather than recorded with a
+// made-up amount.
+func TestE2E_ReportRefusesAChargeNotInThePenalCode(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"incident-961","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`","charges":["Jaywalking On A Tuesday"]}`)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "charge_not_in_penal_code") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+	if f.draftDB.inserts != 0 {
+		t.Error("nothing should have been written")
+	}
+}
+
+// ---- report drafts: reading back and withdrawing ----
+
+// Reconciliation after a restart: the integration knows its own incident id
+// and nothing else, and needs to find out what a person decided.
+func TestE2E_ReportDraftReadbackByExternalID(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, created := f.upsertDraft(t, `{"externalId":"incident-970","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`","facts":{"summary":"As observed"}}`)
+
+	rr := f.run(t, http.MethodGet, "/reports/drafts/incident-970?source=SixPD", "",
+		map[string]string{"externalId": "incident-970"},
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevGetReportDraftHandler))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var out draftEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if out.Draft.ID != created.Draft.ID {
+		t.Errorf("read back a different draft: %s vs %s", out.Draft.ID, created.Draft.ID)
+	}
+}
+
+// An id that was never written is a 404, not an empty draft.
+func TestE2E_ReportDraftReadbackMissingIsNotFound(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr := f.run(t, http.MethodGet, "/reports/drafts/nope?source=SixPD", "",
+		map[string]string{"externalId": "nope"},
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevGetReportDraftHandler))
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// Withdrawing takes a draft out of the queue, and doing it twice is a no-op
+// rather than an error — a retry after a timeout must not need special-casing.
+func TestE2E_ReportDraftWithdrawIsIdempotent(t *testing.T) {
+	f := newReportFixture(t)
+
+	f.upsertDraft(t, `{"externalId":"incident-980","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	first := f.run(t, http.MethodDelete, "/reports/drafts/incident-980?source=SixPD", "",
+		map[string]string{"externalId": "incident-980"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevWithdrawReportDraftHandler))
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", first.Code, first.Body.String())
+	}
+	var out struct {
+		Draft     devReportDraftView `json:"draft"`
+		Withdrawn bool               `json:"withdrawn"`
+	}
+	_ = json.Unmarshal(first.Body.Bytes(), &out)
+	if !out.Withdrawn || out.Draft.Status != models.ReportDraftStatusWithdrawn {
+		t.Errorf("expected a withdrawn draft, got %+v", out)
+	}
+
+	second := f.run(t, http.MethodDelete, "/reports/drafts/incident-980?source=SixPD", "",
+		map[string]string{"externalId": "incident-980"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevWithdrawReportDraftHandler))
+	if second.Code != http.StatusOK {
+		t.Fatalf("a repeat withdraw must not be an error, got %d: %s", second.Code, second.Body.String())
+	}
+	_ = json.Unmarshal(second.Body.Bytes(), &out)
+	if out.Withdrawn {
+		t.Error("the second withdraw must report withdrawing nothing")
+	}
+}
+
+// A draft a person has filed cannot be withdrawn. Their decision is the record.
+func TestE2E_ReportDraftCannotWithdrawAFiledOne(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, created := f.upsertDraft(t, `{"externalId":"incident-981","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	f.draftDB.mu.Lock()
+	for i := range f.draftDB.drafts {
+		if f.draftDB.drafts[i].ID.Hex() == created.Draft.ID {
+			f.draftDB.drafts[i].Status = models.ReportDraftStatusSubmitted
+		}
+	}
+	f.draftDB.mu.Unlock()
+
+	rr := f.run(t, http.MethodDelete, "/reports/drafts/incident-981?source=SixPD", "",
+		map[string]string{"externalId": "incident-981"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevWithdrawReportDraftHandler))
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// A key's list is its own output, not a window onto the community's reports or
+// another integration's drafts.
+func TestE2E_ReportDraftListIsScopedToTheKey(t *testing.T) {
+	f := newReportFixture(t)
+
+	f.upsertDraft(t, `{"externalId":"mine-1","source":"SixPD","reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	// A draft from a different key, in the same community.
+	f.draftDB.mu.Lock()
+	f.draftDB.drafts = append(f.draftDB.drafts, models.DeveloperReportDraft{
+		ID: primitive.NewObjectID(), CommunityID: f.community.ID.Hex(),
+		Kind: models.ReportDraftKindIncident, Status: models.ReportDraftStatusDraft,
+		SourceName: "SomeoneElse", ExternalID: "theirs-1",
+		Source: &models.RecordSource{Type: models.RecordSourceDeveloperAPI, KeyID: primitive.NewObjectID().Hex()},
+	})
+	f.draftDB.mu.Unlock()
+
+	rr := f.run(t, http.MethodGet, "/reports/drafts", "", nil,
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevListReportDraftsHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Data       []devReportDraftView `json:"data"`
+		TotalCount int64                `json:"totalCount"`
+		Page       int                  `json:"page"`
+		Limit      int                  `json:"limit"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].ExternalID != "mine-1" {
+		t.Errorf("a key must see only its own drafts, got %+v", out.Data)
+	}
+	if out.TotalCount != 1 {
+		t.Errorf("totalCount must match the scoped filter, got %d", out.TotalCount)
+	}
+	// 1-based, like every other list in this product.
+	if out.Page != 1 {
+		t.Errorf("pages are 1-based, got %d", out.Page)
+	}
+}
+
+// ---- report drafts: the boundaries every endpoint shares ----
+
+func TestE2E_ReportDraftsRefuseAnotherCommunity(t *testing.T) {
+	f := newReportFixture(t)
+	other := primitive.NewObjectID()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/dev/communities/"+other.Hex()+"/reports/drafts",
+		strings.NewReader(`{"externalId":"x","reportingOfficer":"`+fivemRef("admin")+`"}`))
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	req = mux.SetURLVars(req, map[string]string{"communityId": other.Hex()})
+	f.api.RequireDeveloperAPIKey(
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevUpsertReportDraftHandler),
+	).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for an ungranted community, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "community_not_granted") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+func TestE2E_ReportDraftsRefuseARevokedKey(t *testing.T) {
+	f := newReportFixture(t)
+	for hash, key := range f.keyDB.byHash {
+		key.Status = models.DeveloperKeyRevoked
+		f.keyDB.byHash[hash] = key
+	}
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"x","reportingOfficer":"`+fivemRef("admin")+`"}`)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("a revoked key must be refused, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// Holding reports:read is not holding reports:write. The scopes are separate
+// so an integration that only reconciles can be issued a key that cannot
+// write.
+func TestE2E_ReportDraftsRefuseAKeyWithoutTheScope(t *testing.T) {
+	f := newReportFixture(t)
+	f.keyDB.byHash = upgradeKeyScopes(f.keyDB.byHash, models.ScopeReportsRead)
+
+	rr, _ := f.upsertDraft(t, `{"externalId":"x","reportingOfficer":"`+fivemRef("admin")+`"}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without reports:write, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "missing_scope") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+// ---- warrants ----
+
+// A request lands pending whatever the community's approval mode says. See
+// developer_api_warrants.go: auto-approve is a convenience for a person making
+// one visible decision, not a behaviour to hand to a trigger that retries.
+func TestE2E_WarrantRequestIsAlwaysPending(t *testing.T) {
+	f := newReportFixture(t)
+
+	// The community is on auto-approve, which is the product default and what
+	// almost every community runs.
+	community := f.community
+	community.Details.WarrantApprovalMode = "auto-approve"
+	f.community = community
+	if err := f.communityDB.seed(community); err != nil {
+		t.Fatalf("re-seeding: %v", err)
+	}
+
+	rr, out := f.requestWarrant(t, `{
+		"externalId":"sixpd-warrant-1","source":"SixPD","warrantType":"arrest",
+		"requestingOfficer":"`+fivemRef("admin")+`",
+		"accused":"`+fivemRef("member")+`",
+		"probableCause":"Fled a lawful traffic stop and struck a parked vehicle.",
+		"charges":["Reckless Driving"]
+	}`)
+
+	if rr.Code != http.StatusCreated || !out.Created {
+		t.Fatalf("expected 201 created, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if out.Warrant.Status != models.WarrantStatusPending {
+		t.Errorf("a key-requested warrant must land pending even on auto-approve, got %q", out.Warrant.Status)
+	}
+	if out.Warrant.Approved {
+		t.Error("nothing a key calls approves a warrant")
+	}
+	if !out.Warrant.AwaitingReview {
+		t.Error("the response must say a person has yet to look at it")
+	}
+	if out.Warrant.JudgeName != "" {
+		t.Errorf("no judge has seen it, so there must be no judge on it, got %q", out.Warrant.JudgeName)
+	}
+}
+
+// The stored warrant records that a script raised it, so a judge reading the
+// history is not left thinking the officer filed it by hand.
+func TestE2E_WarrantRequestRecordsTheIntegration(t *testing.T) {
+	f := newReportFixture(t)
+
+	f.requestWarrant(t, `{"externalId":"sixpd-warrant-2","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("admin")+`","accusedFirstName":"John","accusedLastName":"Doe",
+		"probableCause":"Observed leaving the scene."}`)
+
+	f.warrantDB.mu.Lock()
+	defer f.warrantDB.mu.Unlock()
+	if len(f.warrantDB.warrants) != 1 {
+		t.Fatalf("expected one warrant, got %d", len(f.warrantDB.warrants))
+	}
+	stored := f.warrantDB.warrants[0].Details
+	if stored.CreatedByKeyID != f.keyID.Hex() {
+		t.Errorf("the key that raised it must be recorded, got %q", stored.CreatedByKeyID)
+	}
+	if stored.RecordSource == nil || stored.RecordSource.Type != models.RecordSourceDeveloperAPI {
+		t.Errorf("the record source stamp is missing: %+v", stored.RecordSource)
+	}
+	if len(stored.History) != 1 || stored.History[0].Action != "created" {
+		t.Fatalf("expected one created history entry, got %+v", stored.History)
+	}
+	if !strings.Contains(stored.History[0].Notes, "Developer API") {
+		t.Errorf("the history must say a script raised this, got %q", stored.History[0].Notes)
+	}
+}
+
+// A retried request returns the one already in the queue. A judge must not get
+// five copies because a game server reconnected five times.
+func TestE2E_WarrantRequestIsIdempotent(t *testing.T) {
+	f := newReportFixture(t)
+
+	body := `{"externalId":"sixpd-warrant-3","source":"SixPD",
+		"requestingOfficer":"` + fivemRef("admin") + `","accused":"` + fivemRef("member") + `",
+		"probableCause":"Repeated failure to appear."}`
+
+	rr1, first := f.requestWarrant(t, body)
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr1.Code, rr1.Body.String())
+	}
+	rr2, second := f.requestWarrant(t, body)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on the repeat, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+	if second.Created {
+		t.Error("a repeat must not report creating anything")
+	}
+	if first.Warrant.ID != second.Warrant.ID {
+		t.Errorf("one external id must be one warrant: %s vs %s", first.Warrant.ID, second.Warrant.ID)
+	}
+	if f.warrantDB.inserts != 1 {
+		t.Errorf("expected exactly one warrant written, got %d", f.warrantDB.inserts)
+	}
+}
+
+// A retry after a judge has approved it returns the approved warrant rather
+// than raising a second request.
+func TestE2E_WarrantRetryAfterApprovalReturnsTheDecision(t *testing.T) {
+	f := newReportFixture(t)
+
+	body := `{"externalId":"sixpd-warrant-4","source":"SixPD",
+		"requestingOfficer":"` + fivemRef("admin") + `","accusedFirstName":"Jane","accusedLastName":"Roe",
+		"probableCause":"Burglary in progress."}`
+	f.requestWarrant(t, body)
+
+	f.warrantDB.mu.Lock()
+	f.warrantDB.warrants[0].Details.Status = models.WarrantStatusApproved
+	f.warrantDB.warrants[0].Details.JudgeName = "Judge Carter"
+	f.warrantDB.mu.Unlock()
+
+	rr, out := f.requestWarrant(t, body)
+	if rr.Code != http.StatusOK || out.Created {
+		t.Fatalf("expected 200 and created=false, got %d created=%v", rr.Code, out.Created)
+	}
+	if !out.Warrant.Approved || out.Warrant.AwaitingReview {
+		t.Errorf("the decision must be reported back, got %+v", out.Warrant)
+	}
+	if f.warrantDB.inserts != 1 {
+		t.Errorf("a retry after approval must not raise a second request, got %d", f.warrantDB.inserts)
+	}
+}
+
+// A request with nothing in probableCause cannot be reviewed, so it is refused
+// rather than left in a queue for somebody to delete.
+func TestE2E_WarrantRequestNeedsProbableCause(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr, _ := f.requestWarrant(t, `{"externalId":"sixpd-warrant-5","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("admin")+`","accusedFirstName":"John"}`)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "probable_cause_required") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+	if f.warrantDB.inserts != 0 {
+		t.Error("nothing should have been written")
+	}
+}
+
+// The officer asking has to be entitled to ask, exactly as for a report draft.
+func TestE2E_WarrantRequestRefusesAnOutsider(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr, _ := f.requestWarrant(t, `{"externalId":"sixpd-warrant-6","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("outsider")+`","accusedFirstName":"John",
+		"probableCause":"Something happened."}`)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if f.warrantDB.inserts != 0 {
+		t.Error("nothing should have been written")
+	}
+}
+
+// A request has to name somebody.
+func TestE2E_WarrantRequestNeedsAnAccused(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr, _ := f.requestWarrant(t, `{"externalId":"sixpd-warrant-7","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("admin")+`","probableCause":"Something happened."}`)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "accused_required") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+// "Is there a warrant out for this person" is the question a game server asks
+// on every stop, and it is one request.
+func TestE2E_WarrantLookupByAccusedAndStatus(t *testing.T) {
+	f := newReportFixture(t)
+
+	f.requestWarrant(t, `{"externalId":"w-a","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("admin")+`","accused":"`+fivemRef("member")+`",
+		"probableCause":"One."}`)
+	f.requestWarrant(t, `{"externalId":"w-b","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("admin")+`","accusedFirstName":"Someone","accusedLastName":"Else",
+		"probableCause":"Two."}`)
+
+	rr := f.run(t, http.MethodGet,
+		"/warrants?accused="+fivemRef("member")+"&status=pending", "", nil,
+		f.api.RequireScope(models.ScopeWarrantsRead, f.api.DevListWarrantsHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Data       []devWarrantView `json:"data"`
+		TotalCount int64            `json:"totalCount"`
+		Page       int              `json:"page"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].ExternalID != "w-a" {
+		t.Errorf("expected only the member's warrant, got %+v", out.Data)
+	}
+	if out.Page != 1 {
+		t.Errorf("pages are 1-based, got %d", out.Page)
+	}
+}
+
+// A warrant id from another community is a 404, not a 403 after a read: the
+// community is in the filter, so its existence is never confirmed.
+func TestE2E_WarrantFromAnotherCommunityIsNotFound(t *testing.T) {
+	f := newReportFixture(t)
+
+	foreign := models.Warrant{ID: primitive.NewObjectID()}
+	foreign.Details.ActiveCommunityID = primitive.NewObjectID().Hex()
+	foreign.Details.Status = models.WarrantStatusApproved
+	f.warrantDB.warrants = append(f.warrantDB.warrants, foreign)
+
+	rr := f.run(t, http.MethodGet, "/warrants/"+foreign.ID.Hex(), "",
+		map[string]string{"warrantId": foreign.ID.Hex()},
+		f.api.RequireScope(models.ScopeWarrantsRead, f.api.DevGetWarrantHandler))
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestE2E_WarrantsRefuseAnotherCommunity(t *testing.T) {
+	f := newReportFixture(t)
+	other := primitive.NewObjectID()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/dev/communities/"+other.Hex()+"/warrants", nil)
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	req = mux.SetURLVars(req, map[string]string{"communityId": other.Hex()})
+	f.api.RequireDeveloperAPIKey(
+		f.api.RequireScope(models.ScopeWarrantsRead, f.api.DevListWarrantsHandler),
+	).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestE2E_WarrantsRefuseARevokedKey(t *testing.T) {
+	f := newReportFixture(t)
+	for hash, key := range f.keyDB.byHash {
+		key.Status = models.DeveloperKeyRevoked
+		f.keyDB.byHash[hash] = key
+	}
+
+	rr := f.run(t, http.MethodGet, "/warrants", "", nil,
+		f.api.RequireScope(models.ScopeWarrantsRead, f.api.DevListWarrantsHandler))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("a revoked key must be refused, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// Reading warrants is not requesting one.
+func TestE2E_WarrantRequestRefusesAReadOnlyKey(t *testing.T) {
+	f := newReportFixture(t)
+	f.keyDB.byHash = upgradeKeyScopes(f.keyDB.byHash, models.ScopeWarrantsRead)
+
+	rr, _ := f.requestWarrant(t, `{"externalId":"x","requestingOfficer":"`+fivemRef("admin")+`",
+		"accusedFirstName":"John","probableCause":"Something."}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without warrants:write, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "missing_scope") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+// ---- simulated characters ----
+
+// The synthetic filter has to be "not explicitly synthetic", not "synthetic is
+// false". Every record in production predates the field, so a filter on false
+// would have emptied every search on the day it shipped.
+func TestE2E_SyntheticFilterKeepsRecordsThatPredateTheField(t *testing.T) {
+	filter := applySyntheticScope(bson.M{"civilian.activeCommunityID": devEq("c1")},
+		"civilian.source.synthetic", false)
+
+	cond, ok := filter["civilian.source.synthetic"].(bson.M)
+	if !ok {
+		t.Fatalf("expected a condition on the synthetic field, got %+v", filter)
+	}
+	if ne, has := cond["$ne"]; !has || ne != true {
+		t.Errorf("the filter must be $ne:true so records with no field still match, got %+v", cond)
+	}
+	if _, has := cond["$eq"]; has {
+		t.Error("an equality on false would exclude every record that predates the field")
+	}
+}
+
+// Asking for them turns the filter off entirely rather than inverting it: a
+// caller that wants NPCs wants the people too.
+func TestE2E_SyntheticOptInReturnsEverything(t *testing.T) {
+	filter := applySyntheticScope(bson.M{"civilian.activeCommunityID": devEq("c1")},
+		"civilian.source.synthetic", true)
+
+	if _, has := filter["civilian.source.synthetic"]; has {
+		t.Error("includeSynthetic must widen the result, not narrow it to NPCs")
+	}
+}
+
+// An integration declares an NPC once, at provisioning, and the account and
+// the identity row both carry it.
+func TestE2E_SyntheticPlayerIsDeclaredAtProvisioning(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dev/players",
+		strings.NewReader(`{"provider":"fivem","identifier":"deadbeefcafe01","username":"NPC Vendor","synthetic":true}`))
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	f.api.RequireDeveloperAPIKey(
+		f.api.RequireScope(models.ScopePlayersProvision, f.api.DevUpsertPlayerHandler),
+	).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Player devPlayerResponse `json:"player"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if !out.Player.Synthetic {
+		t.Errorf("the declaration must be reported back, got %+v", out.Player)
+	}
+
+	f.identityDB.mu.Lock()
+	defer f.identityDB.mu.Unlock()
+	found := false
+	for _, row := range f.identityDB.rows {
+		if row.Identifier == "deadbeefcafe01" {
+			found = true
+			if !row.Synthetic {
+				t.Error("the identity row must carry the synthetic flag; the record-write path reads it")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the identity row was not written")
+	}
+}
+
+// Marking an NPC once is enough: its records inherit the flag whether or not
+// the integration repeated it. The alternative is an integration that gets its
+// people right and forgets on one of four record types.
+func TestE2E_SyntheticIsInheritedByRecords(t *testing.T) {
+	f := newReportFixture(t)
+	dc := &DevAPIContext{Key: f.keyDB.byHash[hashDeveloperKey(f.plaintext)]}
+
+	f.identityDB.mu.Lock()
+	f.identityDB.rows = append(f.identityDB.rows, models.PlayerIdentity{
+		ID: primitive.NewObjectID(), Provider: models.PlayerProviderFiveM,
+		Identifier: "npc0001", UserID: primitive.NewObjectID().Hex(),
+		CreatedByKeyID: f.keyID.Hex(), Synthetic: true, Claimed: false,
+	})
+	f.identityDB.mu.Unlock()
+
+	npc := &resolvedPlayer{
+		UserID: "u1", Provider: models.PlayerProviderFiveM, Identifier: "npc0001",
+	}
+	stamp := f.api.recordStamp(context.Background(), dc, npc, false, "SixPD", "npc-car-1")
+	if !stamp.Synthetic {
+		t.Error("a record owned by a synthetic character must be synthetic without being told again")
+	}
+	if stamp.ExternalID != "npc-car-1" || stamp.SourceName != "SixPD" {
+		t.Errorf("the integration's own reference must be kept for cleanup, got %+v", stamp)
+	}
+}
+
+// A claimed account is a person, whatever the row was created as. Leaving it
+// synthetic would hide a real player from their own community's roster.
+func TestE2E_ClaimingAnAccountClearsSynthetic(t *testing.T) {
+	f := newReportFixture(t)
+	dc := &DevAPIContext{Key: f.keyDB.byHash[hashDeveloperKey(f.plaintext)]}
+
+	f.identityDB.mu.Lock()
+	f.identityDB.rows = append(f.identityDB.rows, models.PlayerIdentity{
+		ID: primitive.NewObjectID(), Provider: models.PlayerProviderFiveM,
+		Identifier: "npc0002", UserID: primitive.NewObjectID().Hex(),
+		CreatedByKeyID: f.keyID.Hex(), Synthetic: true,
+		// The person signed in and took it over.
+		Claimed: true,
+	})
+	f.identityDB.mu.Unlock()
+
+	player := &resolvedPlayer{UserID: "u2", Provider: models.PlayerProviderFiveM, Identifier: "npc0002"}
+	if f.api.playerIsSyntheticForKey(context.Background(), dc, player) {
+		t.Error("a claimed account must never be treated as synthetic")
+	}
+}
+
+// One integration must not be able to write records about another's NPCs, so
+// the synthetic exemption is scoped to the key that created the identity.
+func TestE2E_SyntheticExemptionIsScopedToTheKey(t *testing.T) {
+	f := newReportFixture(t)
+	dc := &DevAPIContext{Key: f.keyDB.byHash[hashDeveloperKey(f.plaintext)]}
+
+	f.identityDB.mu.Lock()
+	f.identityDB.rows = append(f.identityDB.rows, models.PlayerIdentity{
+		ID: primitive.NewObjectID(), Provider: models.PlayerProviderFiveM,
+		Identifier: "npc0003", UserID: primitive.NewObjectID().Hex(),
+		// Somebody else's key.
+		CreatedByKeyID: primitive.NewObjectID().Hex(), Synthetic: true,
+	})
+	f.identityDB.mu.Unlock()
+
+	player := &resolvedPlayer{UserID: "u3", Provider: models.PlayerProviderFiveM, Identifier: "npc0003"}
+	if f.api.playerIsSyntheticForKey(context.Background(), dc, player) {
+		t.Error("another key's NPC must not be exempt from this key's membership check")
+	}
+}
+
+// Cleanup will not run without the caller naming the community it is deleting
+// from. A stale config value pointed at the wrong community is exactly the
+// mistake this guards.
+func TestE2E_SyntheticCleanupRequiresConfirmation(t *testing.T) {
+	f := newReportFixture(t)
+
+	rr := f.run(t, http.MethodDelete, "/synthetic-records", `{}`, nil,
+		f.api.RequireScope(models.ScopePlayersProvision, f.api.DevCleanupSyntheticRecordsHandler))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no confirmation, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "confirm_required") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+
+	wrong := f.run(t, http.MethodDelete, "/synthetic-records",
+		`{"confirm":"`+primitive.NewObjectID().Hex()+`"}`, nil,
+		f.api.RequireScope(models.ScopePlayersProvision, f.api.DevCleanupSyntheticRecordsHandler))
+	if wrong.Code != http.StatusBadRequest {
+		t.Fatalf("a confirmation for a different community must be refused, got %d", wrong.Code)
+	}
+}
+
+// With the right confirmation it runs, and the filter it builds is the whole
+// safety of the endpoint: synthetic only, this key only, this community only.
+func TestE2E_SyntheticCleanupIsScopedThreeWays(t *testing.T) {
+	f := newReportFixture(t)
+	civDB := &fakeDeleteCivDB{}
+	f.api.CivDB = civDB
+
+	rr := f.run(t, http.MethodDelete, "/synthetic-records",
+		`{"confirm":"`+f.community.ID.Hex()+`","source":"SixPD"}`, nil,
+		f.api.RequireScope(models.ScopePlayersProvision, f.api.DevCleanupSyntheticRecordsHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if len(civDB.filters) != 1 {
+		t.Fatalf("expected one delete against civilians, got %d", len(civDB.filters))
+	}
+	filter := civDB.filters[0]
+	if v, _ := devFilterString(filter["civilian.activeCommunityID"]); v != f.community.ID.Hex() {
+		t.Errorf("the delete must be scoped to this community, got %+v", filter["civilian.activeCommunityID"])
+	}
+	if v, _ := devFilterString(filter["civilian.source.keyId"]); v != f.keyID.Hex() {
+		t.Errorf("the delete must be scoped to this key, got %+v", filter["civilian.source.keyId"])
+	}
+	cond, ok := filter["civilian.source.synthetic"].(bson.M)
+	if !ok || cond["$eq"] != true {
+		t.Errorf("the delete must only touch synthetic records, got %+v", filter["civilian.source.synthetic"])
+	}
+	if v, _ := devFilterString(filter["civilian.source.sourceName"]); v != "SixPD" {
+		t.Errorf("the source narrowing was dropped, got %+v", filter["civilian.source.sourceName"])
+	}
+}
+
+func TestE2E_SyntheticCleanupRefusesAnotherCommunity(t *testing.T) {
+	f := newReportFixture(t)
+	other := primitive.NewObjectID()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/dev/communities/"+other.Hex()+"/synthetic-records",
+		strings.NewReader(`{"confirm":"`+other.Hex()+`"}`))
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	req = mux.SetURLVars(req, map[string]string{"communityId": other.Hex()})
+	f.api.RequireDeveloperAPIKey(
+		f.api.RequireScope(models.ScopePlayersProvision, f.api.DevCleanupSyntheticRecordsHandler),
+	).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// fakeDeleteCivDB records the filters a delete is issued with, which is what
+// the cleanup tests assert on: the rows are the easy part, the scoping is the
+// part that has to be right.
+type fakeDeleteCivDB struct {
+	databases.CivilianDatabase
+	mu      sync.Mutex
+	filters []bson.M
+}
+
+func (f *fakeDeleteCivDB) DeleteMany(_ context.Context, filter interface{}, _ ...*options.DeleteOptions) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if m, ok := filter.(bson.M); ok {
+		f.filters = append(f.filters, m)
+	}
+	return 0, nil
+}
+
+// ---- the new scopes ----
+
+// A scope the console can offer has to exist in the model's own list, which is
+// the single source of truth the key-creation endpoint validates against.
+func TestE2E_Phase3ScopesAreIssuable(t *testing.T) {
+	for _, scope := range []string{
+		models.ScopeReportsRead, models.ScopeReportsWrite,
+		models.ScopeWarrantsRead, models.ScopeWarrantsWrite,
+	} {
+		if !models.IsValidDeveloperScope(scope) {
+			t.Errorf("%s is used by a route but cannot be issued", scope)
+		}
+		described := false
+		for _, s := range models.DeveloperScopes() {
+			if s.Scope == scope {
+				described = true
+				if strings.TrimSpace(s.Description) == "" {
+					t.Errorf("%s has no description, so the console would render a blank row", scope)
+				}
+			}
+		}
+		if !described {
+			t.Errorf("%s is missing from DeveloperScopes()", scope)
+		}
+	}
+}
+
+// There is no scope that files a report or approves a warrant, and there is not
+// meant to be. This test is the tripwire: adding one makes it fail, which is
+// the point at which somebody should be asked whether they meant to.
+func TestE2E_NoScopeFilesOrApproves(t *testing.T) {
+	forbidden := []string{
+		"reports:file", "reports:submit", "reports:approve",
+		"warrants:approve", "warrants:issue", "warrants:execute",
+		"arrests:write", "citations:file",
+	}
+	for _, scope := range forbidden {
+		if models.IsValidDeveloperScope(scope) {
+			t.Errorf("%s is issuable: a key must never be able to commit a legal record", scope)
 		}
 	}
 }

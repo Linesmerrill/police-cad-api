@@ -48,6 +48,19 @@ type devUpsertPlayerRequest struct {
 	// Username is a display name only. It is never used to find or match an
 	// account, so a mod sending someone else's name cannot reach their data.
 	Username string `json:"username"`
+	// Synthetic declares this identity as a simulated character rather than a
+	// person. It is recorded on the identity row, and every record the
+	// character owns inherits it, so an integration populating a city marks
+	// each NPC once here and nothing it writes later shows up in a player's
+	// name database.
+	//
+	// It is a claim the integration makes, not something we infer: the same
+	// key provisions accounts for real players arriving from the game, so "a
+	// key created it" says nothing about whether there is a person behind it.
+	//
+	// Claiming overrides it. If a person ever signs in and takes the account
+	// over, they are a player from then on whatever the row was created as.
+	Synthetic bool `json:"synthetic"`
 }
 
 type devPlayerResponse struct {
@@ -58,6 +71,7 @@ type devPlayerResponse struct {
 	Username   string `json:"username"`
 	Claimed    bool   `json:"claimed"`
 	Created    bool   `json:"created"`
+	Synthetic  bool   `json:"synthetic,omitempty"`
 }
 
 // DevUpsertPlayerHandler maps a game identifier to an LPC account, creating one
@@ -97,7 +111,7 @@ func (d DeveloperAPI) DevUpsertPlayerHandler(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	player, created, err := d.resolveOrCreatePlayer(ctx, dc, provider, identifier, req.Username)
+	player, created, err := d.resolveOrCreatePlayer(ctx, dc, provider, identifier, req.Username, req.Synthetic)
 	if err != nil {
 		if err == errProvisionCapReached {
 			d.RecordOutcome(r, http.StatusTooManyRequests)
@@ -129,7 +143,7 @@ var errProvisionCapReached = fmt.Errorf("provisioning cap reached")
 // resolveOrCreatePlayer is the idempotent core of player provisioning.
 //
 // Returns the player and whether this call created the account.
-func (d DeveloperAPI) resolveOrCreatePlayer(ctx context.Context, dc *DevAPIContext, provider, identifier, username string) (*devPlayerResponse, bool, error) {
+func (d DeveloperAPI) resolveOrCreatePlayer(ctx context.Context, dc *DevAPIContext, provider, identifier, username string, synthetic bool) (*devPlayerResponse, bool, error) {
 	// Already known: hand back the same account, every time.
 	if existing, err := d.IdentityDB.FindOne(ctx, bson.M{"provider": devEq(provider), "identifier": devEq(identifier)}); err == nil && existing != nil {
 		return d.playerResponse(ctx, *existing, false), false, nil
@@ -156,6 +170,7 @@ func (d DeveloperAPI) resolveOrCreatePlayer(ctx context.Context, dc *DevAPIConte
 		Email:                    "",
 		Password:                 "",
 		DeveloperProvisioned:     true,
+		DeveloperSynthetic:       synthetic,
 		Claimed:                  &claimedFalse,
 		ProvisionedByKeyID:       dc.Key.ID.Hex(),
 		ProvisionedByDeveloperID: dc.Key.DeveloperID,
@@ -195,6 +210,7 @@ func (d DeveloperAPI) resolveOrCreatePlayer(ctx context.Context, dc *DevAPIConte
 		UserID:               userOID.Hex(),
 		CreatedByKeyID:       dc.Key.ID.Hex(),
 		CreatedByDeveloperID: dc.Key.DeveloperID,
+		Synthetic:            synthetic,
 		Claimed:              false,
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -231,6 +247,7 @@ func (d DeveloperAPI) resolveOrCreatePlayer(ctx context.Context, dc *DevAPIConte
 		Username:   details.Username,
 		Claimed:    false,
 		Created:    true,
+		Synthetic:  synthetic,
 	}, true, nil
 }
 
@@ -244,11 +261,17 @@ func (d DeveloperAPI) playerResponse(ctx context.Context, identity models.Player
 		Identifier: identity.Identifier,
 		Claimed:    identity.Claimed,
 		Created:    created,
+		Synthetic:  identity.Synthetic,
 	}
 	var user models.User
 	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(identity.UserID))}).Decode(&user); err == nil {
 		out.Username = user.Details.Username
 		out.Claimed = user.IsClaimed()
+	}
+	// A claimed account is a person, whatever the row was created as, so the
+	// flag is dropped rather than reported against someone who signed in.
+	if out.Claimed {
+		out.Synthetic = false
 	}
 	return out
 }
