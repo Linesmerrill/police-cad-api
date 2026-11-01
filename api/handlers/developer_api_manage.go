@@ -30,9 +30,19 @@ import (
 // developer key cannot reach them, which is the point: a key can never mint
 // another key, widen its own scopes, or approve itself into a community.
 
-// developerTermsVersion is the Developer Terms a developer accepted. Bumping it
-// is how we would require re-acceptance after a material change.
-const developerTermsVersion = "2026-10-31"
+// developerTermsVersion is the Developer Terms a developer accepted.
+//
+// Bumping it is how re-acceptance is required after a material change. Raised
+// for the "Developers and the Developer API" section added to the website
+// Terms, which is the first time the rules a developer is agreeing to are
+// written out rather than implied.
+//
+// Deliberately a prompt and not a gate. Stale terms mark an account as needing
+// re-acceptance on the developer page; they do not stop its keys working. A
+// live FiveM server losing dispatch because its owner has not read a new
+// paragraph would be a worse outcome than a late acceptance, and the paid tier
+// is where a hard gate would belong if one is ever wanted.
+const developerTermsVersion = "2026-11-01"
 
 // maxDeveloperKeyNameLen keeps a key's label to something a dashboard can show.
 const maxDeveloperKeyNameLen = 60
@@ -62,6 +72,29 @@ type developerAccountResponse struct {
 	// hides the upgrade path rather than offering a button that cannot work.
 	UpgradeAvailable bool   `json:"upgradeAvailable"`
 	TermsVersion     string `json:"termsVersion"`
+	// What this developer last accepted, and whether that is behind the current
+	// version. The page prompts on these; nothing is blocked by them.
+	AcceptedTermsVersion  string `json:"acceptedTermsVersion,omitempty"`
+	TermsReacceptRequired bool   `json:"termsReacceptRequired"`
+
+	// How many communities this person may own, and how many they already do.
+	//
+	// This comes from their website plan, not from the developer tier, and it is
+	// returned here so the developer page can say so in as many words. The two
+	// numbers are easy to confuse, and a developer who hits the community limit
+	// should be told to look at their LPC plan rather than at their API tier.
+	Communities developerCommunityAllowance `json:"communities"`
+}
+
+// developerCommunityAllowance is the website plan's community allowance.
+type developerCommunityAllowance struct {
+	Plan      string `json:"plan"`
+	Owned     int    `json:"owned"`
+	Cap       int    `json:"cap"`
+	Unlimited bool   `json:"unlimited"`
+	// Source names where the number comes from, so the page does not have to
+	// hardcode the explanation.
+	Source string `json:"source"`
 }
 
 // GetDeveloperAccountHandler returns the signed-in user's developer account, or
@@ -82,6 +115,7 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 		Scopes:           models.DeveloperScopes(),
 		UpgradeAvailable: developerPaidTierAvailable(),
 		TermsVersion:     developerTermsVersion,
+		Communities:      d.communityAllowance(ctx, actorID),
 	}
 
 	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
@@ -99,7 +133,46 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 	resp.Account = account
 	resp.Limits = models.LimitsForPlan(account.EffectivePlan())
 	resp.KeyCount = int(count)
+	resp.AcceptedTermsVersion = account.TermsVersion
+	// An account from before this field existed has no version, which counts as
+	// behind: those developers accepted terms that did not yet say any of this.
+	resp.TermsReacceptRequired = strings.TrimSpace(account.TermsVersion) != developerTermsVersion
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// communityAllowance reads the person's website plan and how many communities
+// they own.
+//
+// Returned whether or not they have a developer account, because the developer
+// page shows it either way: the number is a fact about their LPC plan, not
+// about their API access.
+//
+// A failure here is not worth failing the page for, so it answers with a zero
+// cap and the plan it managed to read rather than an error. The page renders a
+// blank allowance; provisioning still enforces the real cap from the same
+// source.
+func (d DeveloperAPI) communityAllowance(ctx context.Context, actorID string) developerCommunityAllowance {
+	allowance := developerCommunityAllowance{Source: "website_plan"}
+
+	_, oid, err := devSafeObjectID(actorID)
+	if err != nil {
+		return allowance
+	}
+	var owner models.User
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(oid)}).Decode(&owner); err != nil {
+		return allowance
+	}
+
+	allowance.Plan = models.PlanFromUser(&owner)
+	cap := models.CommunityCap(allowance.Plan)
+	allowance.Cap = cap
+	allowance.Unlimited = cap >= models.CommunityCapUnlimited
+
+	owned, err := d.CDB.CountDocuments(ctx, bson.M{"community.ownerID": devEq(actorID)})
+	if err == nil {
+		allowance.Owned = int(owned)
+	}
+	return allowance
 }
 
 // developerPaidTierAvailable reports whether there is a Stripe price to send

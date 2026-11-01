@@ -47,10 +47,12 @@ built; say the word and I will change any of it.
    is correct across dynos. A Redis add-on would be marginally faster and is a
    drop-in swap later.
 
-6. **Do key-created communities count against the developer's own plan?** I built
-   it as yes: a community a key creates is owned by the developer's LPC account
-   and counts against `models.CommunityCap` exactly like one they made by hand.
-   Confirm that is what you meant.
+6. **Do key-created communities count against the developer's own plan?**
+   **Settled: yes, and that is now the only cap.** A community a key creates is
+   owned by the developer's LPC account and counts against
+   `models.CommunityCap` exactly like one made by hand. The developer tier's own
+   total-communities cap has been removed — see
+   [How many communities a developer may own](#how-many-communities-a-developer-may-own).
 
 7. **Should a mod bypass community limits?** I built it as no: mod-created
    civilians respect the community's civilian approval system and creation
@@ -473,12 +475,41 @@ mod's loop should not be able to make ten thousand accounts.
 
 | | player accounts | communities |
 |---|---|---|
-| **Free** | 25 / day | 2 / day, 3 total |
-| **Pro** | 500 / day | 10 / day, 25 total |
+| **Free** | 25 / day | 2 / day |
+| **Pro** | 500 / day | 10 / day |
+
+These are **pace**, not totals.
 
 ### Keys per developer
 
 Free 2, Pro 10.
+
+### How many communities a developer may own
+
+**Their website plan decides, and nothing here does.**
+
+A developer account is the person's ordinary LPC account with developer mode
+switched on, so the number of communities they may own is the one they already
+have: `models.CommunityCap` — Free 1, Base 5, Premium 10, Premium Plus
+unlimited. A community created with a key counts exactly like one created by
+hand on the website, and the same cap refuses the one that would go over.
+
+There is deliberately no developer-tier total. An earlier version of this had
+one (Free 3, Pro 25), and it was wrong in both directions: it would have
+refused a Premium customer their sixth community because an unrelated tier said
+three, and it would have let a Free user hold three when their plan allows one.
+Two caps over the same number can only ever disagree.
+
+So the two allowances answer different questions, and the developer page says
+which is which:
+
+- **Communities: 2 of 5** — from the website plan. Raised by upgrading the LPC
+  subscription.
+- **API tier: Free** — request rate, provisioning pace, keys per developer.
+  Raised by the developer tier, once the paid one exists.
+
+A refusal names the plan and the cap (`owner_community_limit_reached`), so a
+developer reading a log knows which of the two to go and change.
 
 ### What a client sees
 

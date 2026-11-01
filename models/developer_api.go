@@ -151,13 +151,22 @@ func IsValidDeveloperScope(scope string) bool {
 // much lower, because those calls create rows that are awkward to undo, and a
 // mod looping by mistake should not be able to make ten thousand accounts
 // before anyone notices.
+//
+// Note what is deliberately absent: how many communities a developer may own.
+// A developer account is the person's ordinary LPC account with developer mode
+// switched on, so that number is already decided by their website plan
+// (CommunityCap), and a second cap here would have meant a paying customer
+// being refused their sixth community because a separate, unrelated tier said
+// three. A community made with a key counts exactly like one made by hand.
+//
+// The tier governs rate: how fast requests may come, how fast rows may be
+// provisioned, and how many keys one developer may hold.
 type DeveloperLimits struct {
 	RequestsPerMinute    int `json:"requestsPerMinute"`
 	RequestsPerDay       int `json:"requestsPerDay"`
 	KeysPerDeveloper     int `json:"keysPerDeveloper"`
 	AccountsPerKeyDay    int `json:"accountsPerKeyDay"`
 	CommunitiesPerKeyDay int `json:"communitiesPerKeyDay"`
-	CommunitiesPerKey    int `json:"communitiesPerKey"`
 }
 
 var developerPlanLimits = map[string]DeveloperLimits{
@@ -167,7 +176,6 @@ var developerPlanLimits = map[string]DeveloperLimits{
 		KeysPerDeveloper:     2,
 		AccountsPerKeyDay:    25,
 		CommunitiesPerKeyDay: 2,
-		CommunitiesPerKey:    3,
 	},
 	DeveloperPlanPro: {
 		RequestsPerMinute:    600,
@@ -175,7 +183,6 @@ var developerPlanLimits = map[string]DeveloperLimits{
 		KeysPerDeveloper:     10,
 		AccountsPerKeyDay:    500,
 		CommunitiesPerKeyDay: 10,
-		CommunitiesPerKey:    25,
 	},
 }
 

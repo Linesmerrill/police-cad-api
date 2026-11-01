@@ -76,22 +76,13 @@ func (d DeveloperAPI) DevCreateCommunityHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Total per key.
-	grantCount, err := d.GrantDB.CountDocuments(ctx, bson.M{
-		"keyId":  devEq(dc.Key.ID.Hex()),
-		"source": devEq(models.DeveloperGrantCreatedByKey),
-		"status": bson.M{"$ne": models.DeveloperKeyRevoked},
-	})
-	if err == nil && int(grantCount) >= dc.Limits.CommunitiesPerKey {
-		d.RecordOutcome(r, http.StatusConflict)
-		devError(w, http.StatusConflict, "community_limit_reached",
-			fmt.Sprintf("This key already holds %d communities, which is its limit.", dc.Limits.CommunitiesPerKey),
-			map[string]interface{}{"limit": dc.Limits.CommunitiesPerKey})
-		return
-	}
-
-	// The developer's own LPC plan cap. Read from their user record, never from
-	// anything the key sent.
+	// How many communities the developer may own at all is their website plan's
+	// business and nothing else's. There is deliberately no per-key total here:
+	// a key is a tool its owner uses, so capping it separately would have meant
+	// telling a Premium customer they cannot make their sixth community because
+	// a developer tier said three.
+	//
+	// Read from the owner's user record, never from anything the key sent.
 	ownerID := dc.Key.UserID
 	ownerOID := objectIDOrZero(ownerID)
 	if ownerOID.IsZero() {
