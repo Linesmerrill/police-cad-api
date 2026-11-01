@@ -93,6 +93,11 @@ type developerAccountResponse struct {
 	// API limits actually follow — the user plans page, not community
 	// promotions. Those are two different products, and the wrong one shipped
 	// once already.
+	// False when the API is enabled but not yet configured with its key
+	// pepper. The console shows a "not switched on yet" state on this rather
+	// than offering a Create key button whose result would be a dead key.
+	KeyIssuanceAvailable bool `json:"keyIssuanceAvailable"`
+
 	Tiers          []models.DeveloperTier          `json:"tiers"`
 	CommunityPlans []models.CommunityPlanAllowance `json:"communityPlans"`
 	WebsiteTiers   []SubscriptionTier              `json:"websiteTiers"`
@@ -124,10 +129,12 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 	defer cancel()
 
 	resp := developerAccountResponse{
-		Scopes:         models.DeveloperScopes(),
-		TermsVersion:   developerTermsVersion,
-		Communities:    d.communityAllowance(ctx, actorID),
-		Entitlement:    models.DeveloperPlanFor(d.ownerOf(ctx, actorID)),
+		Scopes:               models.DeveloperScopes(),
+		TermsVersion:         developerTermsVersion,
+		Communities:          d.communityAllowance(ctx, actorID),
+		Entitlement:          models.DeveloperPlanFor(d.ownerOf(ctx, actorID)),
+		KeyIssuanceAvailable: developerKeyPepperConfigured(),
+
 		Tiers:          models.DeveloperTiers(),
 		CommunityPlans: models.CommunityPlanAllowances(),
 		WebsiteTiers:   SubscriptionTiers(),
@@ -197,6 +204,29 @@ func (d DeveloperAPI) communityAllowance(ctx context.Context, actorID string) de
 // The defaults are the approved prices, so the page is correct on a deployment
 // that has not set them yet rather than blank. An override exists because a
 // price should be changeable without a deploy.
+// refuseWhenNotConfigured stops a write when the developer API is enabled but
+// has no key pepper.
+//
+// The request surface already refuses in this state. The management surface did
+// not, so a key could be minted and handed over while every hash it produced
+// was keyed with an empty secret. The moment the pepper is set, that key stops
+// matching and the developer is holding a secret that has never worked and
+// never will, with nothing to tell them why. Minting is the step to refuse.
+//
+// Same status and wording as the request surface, so the two cannot drift.
+func (d DeveloperAPI) refuseWhenNotConfigured(w http.ResponseWriter, action string) bool {
+	if developerKeyPepperConfigured() {
+		return false
+	}
+	zap.S().Errorw("refused a developer key write: the API is enabled but has no key pepper",
+		"env", devAPIKeyPepperEnv, "action", action)
+	config.InfoStatus(
+		"The Developer API is not switched on yet, so keys cannot be created. "+
+			"Nothing is wrong with your account; this is a server setting.",
+		http.StatusServiceUnavailable, w, fmt.Errorf("developer api key pepper not configured"))
+	return true
+}
+
 func envOr(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
@@ -407,6 +437,10 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 	actorID := devActorID(r)
 	if actorID == "" {
 		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no authenticated user"))
+		return
+	}
+
+	if d.refuseWhenNotConfigured(w, "create") {
 		return
 	}
 
@@ -734,6 +768,10 @@ func (d DeveloperAPI) RotateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 	actorID := devActorID(r)
 	if actorID == "" {
 		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no authenticated user"))
+		return
+	}
+
+	if d.refuseWhenNotConfigured(w, "rotate") {
 		return
 	}
 

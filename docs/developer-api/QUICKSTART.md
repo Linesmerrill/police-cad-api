@@ -4,6 +4,13 @@ From nothing to a player holding a character they made in your game, in five
 calls.
 
 - Base URL: `https://api.linespolice-cad.com/api/v1/dev`
+
+> **Base URL.** Defined once, in `models.DeveloperAPIBaseURL`, and overridable
+> with `DEVELOPER_API_PUBLIC_BASE_URL`. Every example here, the OpenAPI
+> `servers` list and the console all read that one value, so the host cannot be
+> right in one place and stale in another — which is exactly how this hostname
+> came to be documented before it had a DNS record.
+
 - Auth: `Authorization: Bearer lpc_live_…` on every request
 - Everything is JSON
 

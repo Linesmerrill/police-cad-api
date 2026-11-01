@@ -35,6 +35,10 @@ info:
 
 servers:
   - url: https://api.linespolice-cad.com/api/v1/dev
+    description: >-
+      Production. Defined once in models.DeveloperAPIBaseURL and overridable
+      with DEVELOPER_API_PUBLIC_BASE_URL, so this list cannot drift from the
+      quickstart or the console.
     description: Production
 
 security:

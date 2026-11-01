@@ -26,7 +26,7 @@ player who has the right to act.
 | Scoping | one key, a set of communities, an explicit scope list |
 | Rotation | `POST /developer/keys/{id}/rotate` — new key issued, communities carried across, old key revoked after, so rotation is not an outage |
 | Revocation | by the developer, or by any community owner withdrawing their own grant. Effective on the **next request**: the key is read from the database every time, with no cache |
-| Quotas | Free 60/min and 10,000/day; Pro 600/min and 250,000/day. Separate, much lower daily caps on creating accounts (25) and communities (2) |
+| Quotas | Per key, and they follow the website subscription — there is no separate developer plan. Four tiers, not two: see [the plan table](https://www.linespolice-cad.com/pricing) and the `tiers` array the account endpoint returns, which is generated from the same values the middleware enforces. Creating player accounts and communities has its own, much lower, daily cap |
 | Headers | `X-RateLimit-Limit`, `-Remaining`, `-Reset`, `-Scope`; `Retry-After` on 429 |
 
 **How it relates to the existing credentials — this is the part worth reading
