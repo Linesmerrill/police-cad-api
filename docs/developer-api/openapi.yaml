@@ -502,6 +502,117 @@ paths:
       responses:
         "201": { description: Raised, and pushed to live dashboards. }
 
+  /communities/{communityId}/dispatch/calls:
+    post:
+      tags: [Calls]
+      summary: Create or update a dispatch call by your own id
+      description: |
+        **Idempotent on `(community, source, externalId)`.** This is the shape a
+        game server needs: it reconnects, replays a queue and retries a
+        timeout, and none of that may put a second call on a dispatch board.
+
+        Posting the same `externalId` twice updates rather than duplicating, and
+        the response says which happened. `source` defaults to the key's name,
+        and can be set explicitly so one developer's dev and production
+        instances keep separate id spaces.
+
+        Fields you leave out on an update are **left alone, not cleared**, so a
+        status update need not resend the location and type.
+
+        Assignment is all-or-nothing: if one unit is not a member the whole
+        write is refused, because a dispatch board that is quietly wrong is
+        worse than one that rejects you.
+      security: [{ developerKey: [calls:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DispatchCallWrite" }
+      responses:
+        "200":
+          description: "An existing call was updated (`created` is false)."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  call: { $ref: "#/components/schemas/DispatchCall" }
+                  created: { type: boolean }
+        "201":
+          description: "A new call was created (`created` is true)."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  call: { $ref: "#/components/schemas/DispatchCall" }
+                  created: { type: boolean }
+        "400": { description: "`invalid_external_id` or `invalid_title`." }
+        "403": { description: "`player_not_a_member` — someone in assignedUnits." }
+
+  /communities/{communityId}/dispatch/calls/{externalId}:
+    get:
+      tags: [Calls]
+      summary: Read a call back by your own id
+      description: |
+        For reconciliation after an outage: a server that restarted knows its
+        own incident ids and nothing else, and needs to find out what we think
+        the state is before it resumes.
+
+        The response carries both ids — yours to match on, ours for the deep
+        link.
+      security: [{ developerKey: [calls:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/externalId" }
+        - name: source
+          in: query
+          schema: { type: string }
+          description: Defaults to the key's name.
+      responses:
+        "200":
+          description: The call.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  call: { $ref: "#/components/schemas/DispatchCall" }
+        "404": { description: "`call_not_found`" }
+
+  /communities/{communityId}/dispatch/calls/{externalId}/close:
+    post:
+      tags: [Calls]
+      summary: Close a call by your own id, with a disposition
+      description: |
+        Closing an already-closed call returns 200 with `closed` set to false
+        rather than an error, so a retry after a timeout is not something you
+        have to special-case.
+      security: [{ developerKey: [calls:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/externalId" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source: { type: string }
+                disposition: { type: string, example: "Arrest made" }
+      responses:
+        "200":
+          description: Closed, or already closed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  call: { $ref: "#/components/schemas/DispatchCall" }
+                  closed: { type: boolean }
+        "404": { description: "`call_not_found`" }
+
   /communities/{communityId}/calls/{callId}/close:
     post:
       tags: [Calls]
@@ -732,6 +843,13 @@ components:
       required: true
       schema: { type: string, pattern: "^[a-f0-9]{24}$" }
       description: A community this key is granted. Get the ids from `GET /communities`.
+    externalId:
+      name: externalId
+      in: path
+      required: true
+      schema: { type: string, maxLength: 128 }
+      description: Your own id for the incident.
+      example: sixpd-incident-42
     playerRef:
       name: playerRef
       in: path
@@ -892,6 +1010,68 @@ components:
             False means the player has not taken ownership yet. They cannot log
             in, and cannot see what you made for them, until they do.
         created: { type: boolean }
+
+    DispatchCallWrite:
+      type: object
+      required: [externalId, title]
+      properties:
+        externalId:
+          type: string
+          maxLength: 128
+          description: Your own id. Required — it is what makes these writes idempotent.
+        source:
+          type: string
+          description: Your integration's name. Defaults to the key's name.
+          example: SixPD
+        title: { type: string }
+        description: { type: string, maxLength: 2000 }
+        location: { type: string, maxLength: 2000 }
+        type:
+          type: string
+          description: Free text, not an enum — communities run their own taxonomies.
+          example: traffic
+        priority: { type: string, example: urgent }
+        caller:
+          allOf: [{ $ref: "#/components/schemas/PlayerRef" }]
+          description: Optional. A callout a script generates has no player behind it.
+        assignedUnits:
+          type: array
+          items: { $ref: "#/components/schemas/PlayerRef" }
+          description: Replaces the assignment outright. All-or-nothing.
+        departments:
+          type: array
+          items: { type: string }
+        disposition:
+          type: string
+          description: Only meaningful on close.
+
+    DispatchCall:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Our id, for the deep link.
+        externalId: { type: string }
+        source: { type: string }
+        title: { type: string }
+        description: { type: string }
+        location: { type: string }
+        type: { type: string }
+        priority: { type: string }
+        status: { type: string, enum: [open, closed] }
+        disposition: { type: string }
+        assignedUnits:
+          type: array
+          items: { type: string }
+        departments:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        link:
+          type: string
+          format: uri
+          description: Opens this call in the CAD, so you can put a URL in a player's chat.
 
     UnitStatusEntry:
       type: object

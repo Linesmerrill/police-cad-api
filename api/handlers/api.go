@@ -290,6 +290,13 @@ func (a *App) New() *mux.Router {
 	devRouter.Handle("/communities/{communityId}/calls", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCreateCallHandler)).Methods("POST")
 	devRouter.Handle("/communities/{communityId}/calls/{callId}/close", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCloseCallHandler)).Methods("POST")
 
+	// Dispatch calls addressed by the integration's own id. This is the shape
+	// a game server needs: it reconnects, replays a queue and retries a
+	// timeout, and none of that may put a second call on a dispatch board.
+	devRouter.Handle("/communities/{communityId}/dispatch/calls", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevUpsertCallHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/dispatch/calls/{externalId}", devAPI.RequireScope(models.ScopeCallsRead, devAPI.DevGetCallByExternalIDHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/dispatch/calls/{externalId}/close", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCloseCallByExternalIDHandler)).Methods("POST")
+
 	devRouter.Handle("/communities/{communityId}/bolos", devAPI.RequireScope(models.ScopeBolosRead, devAPI.DevListBolosHandler)).Methods("GET")
 	devRouter.Handle("/communities/{communityId}/bolos", devAPI.RequireScope(models.ScopeBolosWrite, devAPI.DevCreateBoloHandler)).Methods("POST")
 
