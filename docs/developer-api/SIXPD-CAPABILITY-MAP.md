@@ -338,9 +338,9 @@ community + source + externalId), warrant requests, and attachments
 |---|---|
 | BOLOs read/write | **Available** (create, list) |
 | Warrants | **Available.** Community-scoped lookup, and a request flow that always lands pending for the community's own reviewer, see above for why a key does not get the auto-approve shortcut |
-| Report attachment metadata and links | **Available in this stack**, in the second of its two PRs. A link plus its kind, label, content type and declared size, on a report draft and on a dispatch call: no binary upload, we never fetch the URL, 10 per record, every attach and detach audited, and `kind` is never `evidence` |
+| Report attachment metadata and links | **Available.** A link plus its kind, label, content type and declared size, on a report draft and on a dispatch call: no binary upload, we never fetch the URL, 10 per record, every attach and detach audited, and `kind` is never `evidence` |
 | EMS/fire types and statuses | **Partly available**: departments carry templates including EMS and fire, and ten-codes are per community. Incident/medical forms fall under the reports work |
-| Scoped signed webhooks or streaming | **Available in this stack**, in the second of its two PRs, and this reverses our earlier answer. `GET …/changes?since=<cursor>` makes polling one request instead of a sweep, and signed webhooks deliver the same events: HMAC-SHA256 over a signed timestamp and the body, stable event ids, a published 300-second replay window, a published finite retry schedule, a rotatable signing secret, and per-key endpoint configuration in the console |
+| Scoped signed webhooks or streaming | **Available**, and this reverses our earlier answer. `GET …/changes?since=<cursor>` makes polling one request instead of a sweep, and signed webhooks deliver the same events: HMAC-SHA256 over a signed timestamp and the body, stable event ids, a published 300-second replay window, a published finite retry schedule, a rotatable signing secret, and per-key endpoint configuration in the console |
 | Rank mapping that never grants permissions | **Already guaranteed.** A key **cannot assign roles at all**: sending `roleId` is a 403, because roles carry permissions. Departments and ranks can be set, and both are validated against the community. In-game promotion can move a rank; it can never grant a permission |
 
 ---
