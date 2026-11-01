@@ -524,8 +524,11 @@ func (d DeveloperAPI) DevCloseCallHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	callID := strings.TrimSpace(mux.Vars(r)["callId"])
-	if objectIDOrZero(callID).IsZero() {
+	// The canonical hex from the parsed id. Call ids are stored as strings in
+	// this collection, so the filter takes the re-serialized value rather than
+	// the caller's.
+	callID, _, err := devSafeObjectID(mux.Vars(r)["callId"])
+	if err != nil {
 		d.RecordOutcome(r, http.StatusBadRequest)
 		devError(w, http.StatusBadRequest, "invalid_call", "That call id is not valid.", nil)
 		return
@@ -535,13 +538,13 @@ func (d DeveloperAPI) DevCloseCallHandler(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	// Scoped by community in the filter, so a key cannot close a call in a
-	// community it has no grant for even with a valid call id.
-	// Scoped by community in the filter, and UpdateOne on this store returns
-	// the matched call, so a miss is distinguishable from a write failure.
-	updated, err := d.CallDB.UpdateOne(ctx,
+	// community it has no grant for even with a valid call id. UpdateOne on
+	// this store returns the matched call, so a miss is distinguishable from a
+	// write failure.
+	updated, updErr := d.CallDB.UpdateOne(ctx,
 		bson.M{"_id": devEq(callID), "call.communityID": devEq(cc.Community.ID.Hex())},
 		bson.M{"$set": bson.M{"call.status": false, "call.updatedAt": time.Now()}})
-	if err != nil || updated == nil {
+	if updErr != nil || updated == nil {
 		d.RecordOutcome(r, http.StatusNotFound)
 		devError(w, http.StatusNotFound, "call_not_found", "This community has no call with that id.", nil)
 		return

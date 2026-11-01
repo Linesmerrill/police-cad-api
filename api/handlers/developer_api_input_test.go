@@ -195,6 +195,22 @@ func TestDevBulkSetUnitStatus_RefusesOperatorShapedIds(t *testing.T) {
 	}
 }
 
+// Closing a call is addressed by our own id, so an operator-shaped one is
+// refused before the update runs.
+func TestDevCloseCall_RefusesOperatorShapedCallIds(t *testing.T) {
+	f := newRecordFixture(t)
+	f.keyDB.byHash = upgradeKeyScopes(f.keyDB.byHash, models.ScopeCallsWrite)
+
+	for _, bad := range []string{"$ne", "$where", `{"$ne":""}`, "../../etc/passwd", "", "notanid"} {
+		rr := f.run(t, http.MethodPost, "/calls/"+bad+"/close", "",
+			map[string]string{"callId": bad},
+			f.api.RequireScope(models.ScopeCallsWrite, f.api.DevCloseCallHandler))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for callId %q, got %d: %s", bad, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 // The same for the other body this surface accepts.
 func TestEnableAccountBody_IsATypedStruct(t *testing.T) {
 	for name, payload := range operatorPayloads {
