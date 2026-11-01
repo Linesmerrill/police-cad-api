@@ -88,6 +88,11 @@ type DeveloperAPI struct {
 	CDB         databases.CommunityDatabase
 	UDB         databases.UserDatabase
 	ALDB        databases.AuditLogDatabase
+
+	// Record stores, used by provisioning and by the claim transfer.
+	CivDB databases.CivilianDatabase
+	VehDB databases.VehicleDatabase
+	FirDB databases.FirearmDatabase
 }
 
 // ---- key material ----

@@ -14,6 +14,11 @@ const civilianName = "civilians"
 
 // CivilianDatabase contains the methods to use with the civilian database
 type CivilianDatabase interface {
+	// UpdateMany re-points many records at once. Added for the Developer API's
+	// claim flow, which moves every record a provisioned account holds onto the
+	// player's real account in one write per collection rather than one per
+	// record.
+	UpdateMany(context.Context, interface{}, interface{}, ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	FindOne(context.Context, interface{}, ...*options.FindOneOptions) (*models.Civilian, error)
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Civilian, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
@@ -78,4 +83,8 @@ func (c *civilianDatabase) FindOneAndUpdate(ctx context.Context, filter interfac
 func (c *civilianDatabase) CountDocuments(ctx context.Context, filter interface{}, opts ...*options.CountOptions) (int64, error) {
 	count, err := c.db.Collection(civilianName).CountDocuments(ctx, filter, opts...)
 	return count, err
+}
+
+func (c *civilianDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return c.db.Collection(civilianName).UpdateMany(ctx, filter, update, opts...)
 }

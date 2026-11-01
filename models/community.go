@@ -138,6 +138,10 @@ type CommunityDetails struct {
 	Economy                       EconomySettings         `json:"economy" bson:"economy"`
 	CourtProcessing        CourtProcessingSettings `json:"courtProcessing" bson:"courtProcessing"`
 	RankSettings                  RankSettings            `json:"rankSettings" bson:"rankSettings"`
+	// Source marks a community a Developer API key created, so a misbehaving
+	// key's communities can be found and cleaned up together. Absent on every
+	// community a person made themselves.
+	Source *RecordSource `json:"source,omitempty" bson:"source,omitempty"`
 	// RpPromotion holds the community's last "RP server promotion" Discord post
 	// and the timestamp used to enforce the once-per-cooldown posting gate.
 	// Pointer so legacy communities that never promoted serialize it as absent.

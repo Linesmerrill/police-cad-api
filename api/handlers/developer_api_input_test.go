@@ -53,6 +53,50 @@ func TestRequestBodies_RejectNonStringValues(t *testing.T) {
 	}
 }
 
+// The same for every other body this surface accepts.
+func TestProvisioningBodies_AreTypedStructs(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		into interface{}
+	}{
+		{"player upsert", `{"provider":"fivem","identifier":{"$ne":""}}`, &devUpsertPlayerRequest{}},
+		{"create community", `{"name":{"$ne":""}}`, &devCreateCommunityRequest{}},
+		{"claim", `{"code":{"$ne":""}}`, &claimRequest{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := json.NewDecoder(strings.NewReader(tc.body)).Decode(tc.into); err == nil {
+				t.Fatalf("an operator object decoded into %s", tc.name)
+			}
+		})
+	}
+}
+
+// A player reference shaped like an operator is refused before any lookup.
+func TestDevUpsertPlayer_RefusesOperatorShapedIdentifiers(t *testing.T) {
+	f := newProvisionFixture(t)
+
+	for name, body := range map[string]string{
+		"operator identifier": `{"provider":"fivem","identifier":"$ne"}`,
+		"where":               `{"provider":"fivem","identifier":"$where"}`,
+		"operator provider":   `{"provider":"$ne","identifier":"abc123"}`,
+		"traversal":           `{"provider":"fivem","identifier":"../../etc/passwd"}`,
+		"oversized":           `{"provider":"fivem","identifier":"` + strings.Repeat("a", 200) + `"}`,
+		"wrong shape":         `{"provider":"discord","identifier":"notdigits"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rr, _ := f.upsert(t, body)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+			}
+			if f.userDB.inserts != 0 {
+				t.Error("a refused identifier must not create an account")
+			}
+		})
+	}
+}
+
 // The same for the other body this surface accepts.
 func TestEnableAccountBody_IsATypedStruct(t *testing.T) {
 	for name, payload := range operatorPayloads {

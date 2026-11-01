@@ -290,6 +290,21 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		logins.remember(dbEmailResp.ID, dbEmailResp.Details.Password, password)
 	}
 
+	// Refuse an account a developer integration created that the player has
+	// never claimed.
+	//
+	// Such an account holds no email and no password hash, so neither of the
+	// checks above could have passed and reaching here should be impossible.
+	// It is checked anyway because the cost of being wrong is somebody else's
+	// account: a developer key knows the id of every account it provisioned,
+	// and one future code path that sets an email on one would otherwise turn
+	// it into a way in. See docs/DEVELOPER_API.md.
+	if !dbEmailResp.CanAuthenticate() {
+		zap.S().Warnw("ValidateUser: refused an unclaimed provisioned account",
+			"userID", dbEmailResp.ID)
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
 	// Check if the user is deactivated
 	if dbEmailResp.Details.IsDeactivated {
 		zap.S().Warnw("ValidateUser: account is deactivated",

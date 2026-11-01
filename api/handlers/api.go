@@ -68,6 +68,9 @@ func (a *App) New() *mux.Router {
 		CDB:         databases.NewCommunityDatabase(a.dbHelper),
 		UDB:         databases.NewUserDatabase(a.dbHelper),
 		ALDB:        alDB,
+		CivDB:       databases.NewCivilianDatabase(a.dbHelper),
+		VehDB:       databases.NewVehicleDatabase(a.dbHelper),
+		FirDB:       databases.NewFirearmDatabase(a.dbHelper),
 	}
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB, CivDB: databases.NewCivilianDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
@@ -249,6 +252,14 @@ func (a *App) New() *mux.Router {
 	// find out what it does hold.
 	devRouter.Handle("/whoami", http.HandlerFunc(devAPI.DevWhoamiHandler)).Methods("GET")
 	devRouter.Handle("/communities", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevListCommunitiesHandler)).Methods("GET")
+	devRouter.Handle("/communities", devAPI.RequireScope(models.ScopeCommunitiesProvision, devAPI.DevCreateCommunityHandler)).Methods("POST")
+
+	// Player provisioning. A mod names a player by their game identifier; it
+	// never sends us an LPC user id or an email, because both would be values
+	// the mod controls.
+	devRouter.Handle("/players", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevUpsertPlayerHandler)).Methods("POST")
+	devRouter.Handle("/players/{provider}/{identifier}", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevGetPlayerHandler)).Methods("GET")
+	devRouter.Handle("/players/{provider}/{identifier}/claim-code", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevIssueClaimCodeHandler)).Methods("POST")
 
 	// Developer API management, on the ordinary authenticated surface. A
 	// developer key cannot reach these, so a key can never mint another key,
@@ -261,6 +272,12 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/developer/keys/{keyId}", http.HandlerFunc(devAPI.RevokeDeveloperKeyHandler)).Methods("DELETE")
 	apiCreate.Handle("/developer/keys/{keyId}/rotate", http.HandlerFunc(devAPI.RotateDeveloperKeyHandler)).Methods("POST")
 	apiCreate.Handle("/developer/keys/{keyId}/usage", http.HandlerFunc(devAPI.GetDeveloperKeyUsageHandler)).Methods("GET")
+
+	// Claiming, on the first-party surface only. A developer key cannot reach
+	// these: a developer minting a code and redeeming it themselves is exactly
+	// what must not be possible.
+	apiCreate.Handle("/developer/claim", http.HandlerFunc(devAPI.ClaimProvisionedAccountHandler)).Methods("POST")
+	apiCreate.Handle("/developer/claim/discord", http.HandlerFunc(devAPI.DiscordClaimProvisionedAccountHandler)).Methods("POST")
 
 	// The community owner's side. Route variable is {communityId}, so the
 	// pending-deletion gate applies: an owner mid-deletion has no business
