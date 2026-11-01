@@ -138,6 +138,22 @@ func (s *Scheduler) webhookDueForDelivery(hook models.DeveloperWebhook) bool {
 
 // deliverForWebhook walks one endpoint forward from its cursor.
 func (s *Scheduler) deliverForWebhook(ctx context.Context, hook models.DeveloperWebhook) (int, error) {
+	// The key first, re-read now. The endpoint's own status and the community
+	// grants are not enough: revoking a key stops its requests on the next
+	// call, and it has to stop its deliveries too, or a revoked integration
+	// would carry on being told everything that happens. Same for a suspended
+	// developer, which stops every key they hold at once on the request path.
+	live, err := s.keyIsLive(ctx, hook.KeyID)
+	if err != nil {
+		return 0, err
+	}
+	if !live {
+		// Not an error, and the cursor is deliberately left where it is: if the
+		// key is reinstated the endpoint resumes rather than having silently
+		// skipped everything that happened while it was off.
+		return 0, nil
+	}
+
 	filter := bson.M{}
 	if hook.Cursor != "" {
 		oid, err := primitive.ObjectIDFromHex(hook.Cursor)
@@ -451,6 +467,43 @@ func (s *Scheduler) recordDelivery(ctx context.Context, hook models.DeveloperWeb
 	if _, err := s.WebhookDeliveryDB.InsertOne(ctx, row); err != nil {
 		zap.S().Debugw("could not record a webhook delivery", "error", err)
 	}
+}
+
+// keyIsLive reports whether a key may still act at all.
+//
+// Checked per run rather than cached, exactly as the request path checks it per
+// request, so revocation takes effect on the next delivery attempt rather than
+// whenever something happened to refresh. The two stores are nil-checked
+// because the scheduler can be wired without them, and a missing store means
+// "cannot prove it is live", which stops deliveries rather than allowing them.
+func (s *Scheduler) keyIsLive(ctx context.Context, keyID string) (bool, error) {
+	if s.KeyDB == nil {
+		return false, errors.New("no key store configured")
+	}
+	oid, err := primitive.ObjectIDFromHex(keyID)
+	if err != nil {
+		return false, nil
+	}
+	key, err := s.KeyDB.FindOne(ctx, bson.M{"_id": bson.M{"$eq": oid}})
+	if err != nil || key == nil {
+		// A key that no longer exists delivers nothing.
+		return false, nil
+	}
+	if key.Status != models.DeveloperKeyActive {
+		return false, nil
+	}
+	if s.DevAccountDB == nil {
+		return false, errors.New("no developer account store configured")
+	}
+	accountOID, err := primitive.ObjectIDFromHex(key.DeveloperID)
+	if err != nil {
+		return false, nil
+	}
+	account, err := s.DevAccountDB.FindOne(ctx, bson.M{"_id": bson.M{"$eq": accountOID}})
+	if err != nil || account == nil {
+		return false, nil
+	}
+	return account.Status == models.DeveloperAccountActive, nil
 }
 
 // grantedCommunities lists the communities a key may currently act in.

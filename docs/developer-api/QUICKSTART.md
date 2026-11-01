@@ -490,7 +490,7 @@ Two things to get right:
   call, receive your own `call.closed`, close it again: that is the loop this
   parameter exists to prevent.
 - **Keep the cursor.** Events are kept 7 days. A cursor staler than that means
-  you should re-read current state rather than replay a week — so persist it
+  you should re-read current state rather than replay a week, so persist it
   somewhere that survives a restart, and treat a long outage as a resync rather
   than a catch-up.
 
@@ -501,7 +501,7 @@ one.
 
 Register a webhook in [the console](https://www.linespolice-cad.com/developer).
 You get a signing secret once, and deliveries carry the **same event shape**
-the cursor endpoint returns — so moving from polling to webhooks does not mean
+the cursor endpoint returns, so moving from polling to webhooks does not mean
 rewriting your handler, and you can run both while you migrate because the
 event id is stable and the duplicate is recognisable.
 
@@ -540,7 +540,7 @@ What else arrives with it:
 
 | header | what it is |
 |---|---|
-| `X-LPC-Signature` | `t=<unix>,v1=<hex>` — verify as above |
+| `X-LPC-Signature` | `t=<unix>,v1=<hex>`: verify as above |
 | `X-LPC-Event-Id` | stable across retries, so you can recognise a duplicate |
 | `X-LPC-Event-Type` | the same `type` as in the body |
 | `X-LPC-Delivery-Id` | this attempt |
@@ -565,20 +565,20 @@ A few rules on the endpoint itself, so there are no surprises when you save it:
 - **No credentials in the URL.** The signature is how you authenticate us.
 
 Rotating the secret keeps the endpoint and its subscription, so it is not an
-outage — but the next delivery is signed with the new secret, so update your
+outage, but the next delivery is signed with the new secret, so update your
 receiver first.
 
 ## 11. When something is not working
 
 Every response carries `X-Request-Id`. Send `X-Correlation-Id` with your own id
-and we echo it back and record it beside ours — letters, digits and `. _ : -`,
+and we echo it back and record it beside ours, letters, digits and `. _ : -`,
 up to 128 characters, since it is the one value we hand straight back.
 
 ```bash
 curl -s "$BASE/activity?outcome=denied" -H "Authorization: Bearer $KEY"
 ```
 
-Needs no scope — a key that is being refused has to be able to find out why.
+Needs no scope, a key that is being refused has to be able to find out why.
 Each row says which route, which community, what we answered, and on a
 `missing_scope` refusal **which scope was missing**, which is the thing a bare
 403 in your own logs does not tell you.
@@ -609,7 +609,7 @@ Every error has a stable `error` code and a message written for a person.
 | 400 | `confirm_required` | a cleanup needs `confirm` set to the community id |
 | 400 | `invalid_cursor` | `since` must be a cursor from a previous response |
 | 400 | `invalid_event_type` | read the type list rather than guessing at it |
-| 400 | `invalid_attachment` | an unknown kind, no url, credentials in the url — or `kind: "evidence"`, which does not exist |
+| 400 | `invalid_attachment` | an unknown kind, no url, credentials in the url, or `kind: "evidence"`, which does not exist |
 | 409 | `attachment_limit_reached` | 10 per record |
 | 429 | `rate_limited` | honour `Retry-After` |
 | 429 | `provision_cap_reached` | the daily account or community cap; resets at midnight UTC |

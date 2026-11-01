@@ -1278,6 +1278,8 @@ func (a *App) New() *mux.Router {
 		devAPI.WebhookDeliveryDB,
 		devAPI.EventDB,
 		devAPI.GrantDB,
+		devAPI.KeyDB,
+		devAPI.AccountDB,
 	)
 
 	// Re-screen creator applications every 4 hours: resolve each channel, look

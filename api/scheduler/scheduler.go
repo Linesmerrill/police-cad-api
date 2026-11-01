@@ -46,7 +46,12 @@ type Scheduler struct {
 	WebhookDeliveryDB databases.DeveloperWebhookDeliveryDatabase
 	EventDB           databases.DeveloperEventDatabase
 	GrantDB           databases.DeveloperGrantDatabase
-	instanceID        string
+	// The key and its developer account, re-read before each endpoint's run.
+	// Revoking a key stops its requests on the next call and has to stop its
+	// deliveries too; suspending a developer stops every key they hold.
+	KeyDB        databases.DeveloperAPIKeyDatabase
+	DevAccountDB databases.DeveloperAccountDatabase
+	instanceID   string
 
 	// Per-job run stats for /health/scheduler. Multiple jobs may run in
 	// parallel goroutines, so all access goes through jobStatsMu.
@@ -107,11 +112,15 @@ func (s *Scheduler) WithDeveloperWebhooks(
 	deliveryDB databases.DeveloperWebhookDeliveryDatabase,
 	eventDB databases.DeveloperEventDatabase,
 	grantDB databases.DeveloperGrantDatabase,
+	keyDB databases.DeveloperAPIKeyDatabase,
+	accountDB databases.DeveloperAccountDatabase,
 ) *Scheduler {
 	s.WebhookDB = webhookDB
 	s.WebhookDeliveryDB = deliveryDB
 	s.EventDB = eventDB
 	s.GrantDB = grantDB
+	s.KeyDB = keyDB
+	s.DevAccountDB = accountDB
 	return s
 }
 

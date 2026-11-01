@@ -50,14 +50,14 @@ You are right to insist the key never reaches client Lua. The
 [quickstart](QUICKSTART.md) says to use `set` and not `setr` in `server.cfg`,
 because `setr` replicates a convar to every connected client.
 
-### Per-key audit trail (see also: Per-key activity history, below)
+### Per-key audit trail
 
-**Needs extension (small).** Today: per-key per-day usage counts, including
-refusals by status, on the developer dashboard; and community audit-log entries
-for membership, record and community actions, each tagged with the key id. Every
-report-draft attach and detach is audited, and so is every cleanup. What does
-not exist yet is a queryable per-key feed of *what the key did*; that is the
-next piece of work.
+**Available.** Three layers, each answering a different question.
+
+Per-key per-day usage counts, including refusals by status, on the developer
+dashboard. Community audit-log entries for membership, record and community
+actions, each tagged with the key id. And a queryable per-key feed of what the
+key did, which is what was missing: see **Per-key activity history** below.
 
 ### Sandbox, examples, versioned OpenAPI, error format, rate limits, pagination
 
@@ -67,7 +67,7 @@ next piece of work.
   owned by the developer, private by default. That *is* the isolated test
   tenant, no production data, no shared sandbox to contend over. A separate
   sandbox *host* is a Merrill decision (below).
-- **OpenAPI:** [`openapi.yaml`](openapi.yaml), 29 paths, hand-written so it
+- **OpenAPI:** [`openapi.yaml`](openapi.yaml), 34 paths, hand-written so it
   describes the contract rather than our structs. **Needs extension:** it is a
   file in the repo, not served at a stable versioned URL.
 - **Error format:** stable `error` code plus a human `message`, documented in
@@ -325,10 +325,10 @@ detach is audited.
 
 ### Idempotent writes, predictable errors
 
-**Available** on the same external-id mechanism throughout: players (unique
+**Available** throughout, on the same external-id mechanism: players (unique
 index on the game identifier), dispatch calls, report drafts (unique index on
-community + source + externalId), warrant requests, and attachments (idempotent
-on the URL). A retry never produces a second anything.
+community + source + externalId), warrant requests, and attachments
+(idempotent on the URL). A retry never produces a second anything.
 
 ---
 

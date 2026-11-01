@@ -38,10 +38,10 @@ info:
     legal consequences inside a community is a person's decision.
 
     **Finding out what happened.** Every response carries `X-Request-Id`, and
-    `GET /activity` is this key's own request history — which route, which
+    `GET /activity` is this key's own request history, which route, which
     community, what we answered, and on a refusal which of our error codes we
     used. Quote a request id in a ticket and we can find it. Send
-    `X-Correlation-Id` and we echo it back so your logs line up with ours —
+    `X-Correlation-Id` and we echo it back so your logs line up with ours,
     letters, digits and `. _ : -`, up to 128 characters, since it is the one
     value we reflect; anything else is dropped rather than echoed.
 
@@ -55,7 +55,7 @@ info:
     **Verifying a webhook.** Each delivery carries
     `X-LPC-Signature: t=<unix>,v1=<hex>`. Recompute it as
     `HMAC-SHA256(secret, "<t>." + rawBody)` and compare in constant time, then
-    reject anything whose `t` is more than **300 seconds** old — that last step
+    reject anything whose `t` is more than **300 seconds** old, that last step
     is what stops a captured delivery being replayable. Also sent:
     `X-LPC-Event-Id` (stable, so a retry is recognisable),
     `X-LPC-Event-Type`, `X-LPC-Delivery-Id` and `X-LPC-Attempt`. Answer `2xx`
@@ -1303,7 +1303,7 @@ paths:
         diagnostic would withhold it from exactly the keys that need it.
 
         Every response from this API carries `X-Request-Id`. Quoting one in a
-        support ticket is enough for us to find the row — and if you send
+        support ticket is enough for us to find the row, and if you send
         `X-Correlation-Id`, we echo it back and record it beside ours, so you
         can line your logs up against ours.
 
@@ -1358,14 +1358,14 @@ paths:
       summary: What changed since you last asked
       description: |
         One request instead of a sweep. Without this, finding out whether a call
-        was closed means re-reading every call — on a busy community that is a
+        was closed means re-reading every call, on a busy community that is a
         scan per tick, and it is why polling has a reputation for being
         expensive.
 
         **The cursor is an event id, and the events are the same rows the
         webhooks deliver.** That is deliberate: start on the cursor, move to
         webhooks later without rewriting the handler that consumes an event,
-        and run both while you migrate — a stable event id makes the duplicate
+        and run both while you migrate, a stable event id makes the duplicate
         detectable rather than a problem.
 
         **Call it with no `since` first.** You get no events and a cursor
@@ -1379,7 +1379,7 @@ paths:
         is the difference between a working integration and a loop: close a
         call, receive your own `call.closed`, close it again.
 
-        Events are kept **7 days** — shorter than the activity feed on purpose.
+        Events are kept **7 days**: shorter than the activity feed on purpose.
         A cursor staler than that means you should re-read current state rather
         than replay a week, and `hasMore` tells you when to call again rather
         than making you compute a total.
@@ -1435,7 +1435,7 @@ paths:
         **Metadata and a link. We host no bytes, and there is no upload
         endpoint.** Accepting third-party binaries would mean scanning them,
         storing them, quotas, a takedown path and a legal position on content
-        we host — and none of that is needed for the thing people actually want,
+        we host, and none of that is needed for the thing people actually want,
         which is a reviewer clicking through to the clip your server already
         recorded.
 
@@ -1477,7 +1477,7 @@ paths:
                   added: { type: boolean }
         "400":
           description: >-
-            `invalid_attachment` — an unknown kind, no url, credentials in the
+            `invalid_attachment`: an unknown kind, no url, credentials in the
             url, an out-of-range size, or `kind: "evidence"`.
         "409":
           description: >-
@@ -2119,7 +2119,7 @@ components:
         route:
           type: string
           description: >-
-            The route template, not the path you called — a path carries ids,
+            The route template, not the path you called, a path carries ids,
             and a feed keyed on them would have as many values as there are
             communities.
           example: /communities/{communityId}/dispatch/calls
@@ -2162,7 +2162,7 @@ components:
             - warrant.reviewed
           description: >-
             Named after what happened in the product, not after the endpoint
-            that caused it — the same change can arrive from the website, the
+            that caused it, the same change can arrive from the website, the
             app, the bot or a key, and you care about the change.
         communityId: { type: string }
         resourceId:
@@ -2186,7 +2186,7 @@ components:
           type: object
           additionalProperties: { type: string }
           description: >-
-            A small, flat map of ids and short labels — not the changed
+            A small, flat map of ids and short labels, not the changed
             document. Read the resource itself if you want more.
         at: { type: string, format: date-time }
 
@@ -2207,7 +2207,7 @@ components:
           format: uri
           maxLength: 1024
           description: >-
-            http or https, no credentials in it. We never fetch it — it is a
+            http or https, no credentials in it. We never fetch it, it is a
             link a person clicks.
         contentType: { type: string, maxLength: 120 }
         sizeBytes:

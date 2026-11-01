@@ -3750,6 +3750,20 @@ func TestE2E_ChangesRefusesAJunkCursor(t *testing.T) {
 	}
 }
 
+func TestE2E_ChangesRefuseARevokedKey(t *testing.T) {
+	f := newEventsFixture(t)
+	for hash, key := range f.keyDB.byHash {
+		key.Status = models.DeveloperKeyRevoked
+		f.keyDB.byHash[hash] = key
+	}
+
+	rr := f.run(t, http.MethodGet, "/changes", "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("a revoked key must be refused, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestE2E_ChangesRefuseAnotherCommunity(t *testing.T) {
 	f := newEventsFixture(t)
 	other := primitive.NewObjectID()
