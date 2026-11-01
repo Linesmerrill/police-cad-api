@@ -1235,5 +1235,19 @@ createIndexSafe(
   { name: "dev_claim_codes_ttl_idx", expireAfterSeconds: 0, background: true }
 );
 
+// The lookup that makes every dispatch write idempotent. A game server
+// reconnecting and replaying its queue resolves each incident by its own id,
+// so this runs on every call it sends.
+//
+// Not unique: the fields are absent on every call made through the website,
+// and a unique index over a sparse triple would collide on all of them.
+// Uniqueness is enforced in the handler, which is also where a duplicate turns
+// into an update rather than an error.
+createIndexSafe(
+  db.calls,
+  { "call.communityID": 1, "call.source": 1, "call.externalId": 1 },
+  { name: "calls_community_source_external_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

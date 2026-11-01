@@ -371,6 +371,12 @@ GET    /api/v1/dev/communities/{id}/calls                     calls:read
 POST   /api/v1/dev/communities/{id}/calls                     calls:write
 POST   /api/v1/dev/communities/{id}/calls/{callId}/close       calls:write
 
+# Dispatch calls addressed by the integration's own id, idempotent on
+# (community, source, externalId). This is the shape a game server needs.
+POST   /api/v1/dev/communities/{id}/dispatch/calls                        calls:write
+GET    /api/v1/dev/communities/{id}/dispatch/calls/{externalId}           calls:read
+POST   /api/v1/dev/communities/{id}/dispatch/calls/{externalId}/close     calls:write
+
 GET    /api/v1/dev/communities/{id}/bolos                     bolos:read
 POST   /api/v1/dev/communities/{id}/bolos                     bolos:write
 
@@ -554,6 +560,13 @@ database on everyone else's behalf.
 6. Paid tier when the Stripe product exists.
 
 ---
+
+## Integrations
+
+[`developer-api/SIXPD-CAPABILITY-MAP.md`](developer-api/SIXPD-CAPABILITY-MAP.md)
+answers the SixPD integration request (issue #277) with an
+available / needs-extension / not-supported map, and the four decisions it
+raises for you.
 
 ## Quickstart
 
