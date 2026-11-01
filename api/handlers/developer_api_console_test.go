@@ -78,6 +78,17 @@ func (f *consoleKeyDB) UpdateOne(_ context.Context, filter, update interface{}, 
 	return &mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil
 }
 
+// InsertOne stores a newly minted key. The fixture was built for reading and
+// editing, so creation had nowhere to write and panicked on the embedded
+// interface rather than failing with a message.
+func (f *consoleKeyDB) InsertOne(_ context.Context, key models.DeveloperAPIKey) (databases.InsertOneResultHelper, error) {
+	if f.keys == nil {
+		f.keys = map[string]models.DeveloperAPIKey{}
+	}
+	f.keys[key.ID.Hex()] = key
+	return fakeInsertResult{id: key.ID}, nil
+}
+
 func (f *consoleKeyDB) Find(_ context.Context, _ interface{}, _ ...*options.FindOptions) (*databases.MongoCursor, error) {
 	docs := make([]interface{}, 0, len(f.keys))
 	for _, k := range f.keys {
@@ -218,6 +229,20 @@ func (f *consoleCommunityDB) FindOne(_ context.Context, filter interface{}) (*mo
 		return nil, mongo.ErrNoDocuments
 	}
 	return &c, nil
+}
+
+// CountDocuments backs the community allowance on the account response: how
+// many communities this person already owns.
+func (f *consoleCommunityDB) CountDocuments(_ context.Context, filter interface{}, _ ...*options.CountOptions) (int64, error) {
+	m, _ := filter.(bson.M)
+	owner, _ := devFilterString(m["community.ownerID"])
+	var n int64
+	for _, c := range f.communities {
+		if c.Details.OwnerID == owner {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (f *consoleCommunityDB) FindOneIncludingPending(ctx context.Context, filter interface{}) (*models.Community, error) {
