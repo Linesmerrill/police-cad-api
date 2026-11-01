@@ -159,7 +159,7 @@ func (d DeveloperAPI) DevUpsertCallHandler(w http.ResponseWriter, r *http.Reques
 		}
 		applyOptionalDispatchFields(set, req)
 
-		updated, uErr := d.CallDB.UpdateOne(ctx, bson.M{"_id": existing.ID}, bson.M{"$set": set})
+		updated, uErr := d.CallDB.UpdateOne(ctx, bson.M{"_id": devEq(existing.ID)}, bson.M{"$set": set})
 		if uErr != nil || updated == nil {
 			devError(w, http.StatusInternalServerError, "server_error", "Could not update that call.", nil)
 			return
@@ -312,7 +312,7 @@ func (d DeveloperAPI) DevCloseCallByExternalIDHandler(w http.ResponseWriter, r *
 		set["call.disposition"] = disposition
 	}
 
-	updated, err := d.CallDB.UpdateOne(ctx, bson.M{"_id": call.ID}, bson.M{"$set": set})
+	updated, err := d.CallDB.UpdateOne(ctx, bson.M{"_id": devEq(call.ID)}, bson.M{"$set": set})
 	if err != nil || updated == nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not close that call.", nil)
 		return
@@ -334,19 +334,14 @@ func (d DeveloperAPI) DevCloseCallByExternalIDHandler(w http.ResponseWriter, r *
 // not repeat it on every call, while a developer running two can keep their id
 // spaces apart.
 func normalizeExternalRef(externalID, source, keyName string) (string, string, error) {
-	id := strings.TrimSpace(externalID)
-	if id == "" {
-		return "", "", fmt.Errorf("externalId is required: it is what makes these writes idempotent")
-	}
-	if len(id) > maxExternalIDLen {
-		return "", "", fmt.Errorf("externalId must be %d characters or fewer", maxExternalIDLen)
-	}
-	// Control characters would make an id that cannot be matched back, logged
-	// or displayed.
-	if strings.ContainsFunc(id, func(r rune) bool { return r < 32 || r == 127 }) {
-		return "", "", fmt.Errorf("externalId must not contain control characters")
+	id, err := devSafeExternalID(externalID)
+	if err != nil {
+		return "", "", err
 	}
 
+	// Source scopes the id space. It falls back to the key's name, which we
+	// control the shape of, and then to a constant, so it is only validated
+	// when the caller supplied one.
 	src := strings.TrimSpace(source)
 	if src == "" {
 		src = strings.TrimSpace(keyName)
@@ -357,7 +352,11 @@ func normalizeExternalRef(externalID, source, keyName string) (string, string, e
 	if len(src) > 60 {
 		src = src[:60]
 	}
-	return id, src, nil
+	safeSource, err := devSafeScalar(src, 60, "source")
+	if err != nil {
+		return "", "", err
+	}
+	return id, safeSource, nil
 }
 
 // findCallByExternalRef resolves a call by the caller's own id.
@@ -366,9 +365,9 @@ func normalizeExternalRef(externalID, source, keyName string) (string, string, e
 // two of their communities resolves to the right call in each.
 func (d DeveloperAPI) findCallByExternalRef(ctx context.Context, communityID, source, externalID string) (*models.Call, error) {
 	calls, err := d.CallDB.Find(ctx, bson.M{
-		"call.communityID": communityID,
-		"call.source":      source,
-		"call.externalId":  externalID,
+		"call.communityID": devEq(communityID),
+		"call.source":      devEq(source),
+		"call.externalId":  devEq(externalID),
 	}, options.Find().SetLimit(1))
 	if err != nil {
 		return nil, err

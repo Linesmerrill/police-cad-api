@@ -107,13 +107,13 @@ func (f *fakeCallDB) Find(_ context.Context, filter interface{}, _ ...*options.F
 
 	out := []models.Call{}
 	for _, c := range f.calls {
-		if v, ok := m["call.communityID"].(string); ok && c.Details.CommunityID != v {
+		if v, ok := devFilterString(m["call.communityID"]); ok && c.Details.CommunityID != v {
 			continue
 		}
-		if v, ok := m["call.source"].(string); ok && c.Details.Source != v {
+		if v, ok := devFilterString(m["call.source"]); ok && c.Details.Source != v {
 			continue
 		}
-		if v, ok := m["call.externalId"].(string); ok && c.Details.ExternalID != v {
+		if v, ok := devFilterString(m["call.externalId"]); ok && c.Details.ExternalID != v {
 			continue
 		}
 		out = append(out, c)
@@ -139,7 +139,7 @@ func (f *fakeCallDB) UpdateOne(_ context.Context, filter, update interface{}, _ 
 	set, _ := um["$set"].(bson.M)
 
 	for i := range f.calls {
-		if f.calls[i].ID != fm["_id"] {
+		if wanted, ok := devFilterString(fm["_id"]); !ok || f.calls[i].ID != wanted {
 			continue
 		}
 		if v, ok := set["call.title"].(string); ok {
@@ -279,7 +279,7 @@ func TestDevUpsertCall_RequiresExternalIdAndTitle(t *testing.T) {
 func TestDevUpsertCall_AssignmentIsAllOrNothing(t *testing.T) {
 	f := newDispatchFixture(t)
 
-	rr, _, _ := f.upsert(t, `{"externalId":"i1","title":"Call","assignedUnits":["fivem:member","fivem:outsider"]}`)
+	rr, _, _ := f.upsert(t, `{"externalId":"i1","title":"Call","assignedUnits":["fivem:6d656d626572","fivem:6f75747369646572"]}`)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 when one assigned unit is not a member, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -294,7 +294,7 @@ func TestDevUpsertCall_AssignmentIsAllOrNothing(t *testing.T) {
 func TestDevUpsertCall_AssignsMembers(t *testing.T) {
 	f := newDispatchFixture(t)
 
-	rr, call, _ := f.upsert(t, `{"externalId":"i1","title":"Call","assignedUnits":["fivem:member","fivem:admin","fivem:member"]}`)
+	rr, call, _ := f.upsert(t, `{"externalId":"i1","title":"Call","assignedUnits":["fivem:6d656d626572","fivem:61646d696e","fivem:6d656d626572"]}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -428,7 +428,7 @@ func TestDevDispatch_IsScopedToTheCommunityInThePath(t *testing.T) {
 	defer f.callDB.mu.Unlock()
 	for _, filter := range f.callDB.filters {
 		m, _ := filter.(bson.M)
-		if _, ok := m["call.communityID"]; !ok {
+		if _, ok := devFilterString(m["call.communityID"]); !ok {
 			t.Errorf("every dispatch lookup must be scoped by community, got %v", m)
 		}
 	}

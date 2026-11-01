@@ -70,6 +70,7 @@ func TestProvisioningBodies_AreTypedStructs(t *testing.T) {
 		{"create firearm", `{"player":"fivem:abc123","serialNumber":{"$ne":""}}`, &devCreateFirearmRequest{}},
 		{"create license", `{"player":"fivem:abc123","type":{"$ne":""}}`, &devCreateLicenseRequest{}},
 		{"bulk unit status", `{"units":[{"player":"fivem:abc123","tenCodeId":{"$ne":""}}]}`, &devBulkUnitStatusRequest{}},
+		{"dispatch call", `{"externalId":{"$ne":""},"title":"x"}`, &devCallWriteRequest{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -192,6 +193,32 @@ func TestDevBulkSetUnitStatus_RefusesOperatorShapedIds(t *testing.T) {
 	}
 	if len(out.Units) != 1 || out.Units[0].OK {
 		t.Errorf("expected the entry to be refused, got %+v", out.Units)
+	}
+}
+
+// An external id is the key a dispatch write is addressed by, so an
+// operator-shaped one is refused before any lookup.
+func TestDevUpsertCall_RefusesOperatorShapedExternalIds(t *testing.T) {
+	f := newDispatchFixture(t)
+
+	for name, body := range map[string]string{
+		"operator":        `{"externalId":"$ne","title":"Call"}`,
+		"where":           `{"externalId":"$where","title":"Call"}`,
+		"spaced":          `{"externalId":"has space","title":"Call"}`,
+		"braces":          `{"externalId":"{\"$ne\":\"\"}","title":"Call"}`,
+		"traversal":       `{"externalId":"../../etc/passwd","title":"Call"}`,
+		"oversized":       `{"externalId":"` + strings.Repeat("a", 200) + `","title":"Call"}`,
+		"operator source": `{"externalId":"ok-1","source":"$ne","title":"Call"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rr, _, _ := f.upsert(t, body)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+			}
+			if f.callDB.inserts != 0 {
+				t.Error("a refused external id must not create a call")
+			}
+		})
 	}
 }
 
