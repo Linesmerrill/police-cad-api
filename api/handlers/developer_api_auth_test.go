@@ -126,6 +126,10 @@ func (f *fakeDevRateDB) IncrementAndCount(_ context.Context, id string, _ interf
 	return f.counts[id], nil
 }
 
+func (f *fakeDevKeyDB) CountDocuments(_ context.Context, _ interface{}, _ ...*options.CountOptions) (int64, error) {
+	return int64(len(f.byID)), nil
+}
+
 type fakeDevUsageDB struct {
 	databases.DeveloperUsageDatabase
 	docs map[string]*models.DeveloperAPIUsage
@@ -160,6 +164,10 @@ func (f *fakeDevUsageDB) FindOneAndIncrement(_ context.Context, id string, inc b
 			doc.Rejected401 += n
 		case "rejected403":
 			doc.Rejected403 += n
+		case "accountsCreated":
+			doc.AccountsCreated += n
+		case "communitiesCreated":
+			doc.CommunitiesCreated += n
 		}
 	}
 	copied := *doc
@@ -225,7 +233,7 @@ func newDevFixture(t *testing.T, scopes ...string) *devFixture {
 		Scopes: scopes, Status: models.DeveloperKeyActive, CreatedAt: now, UpdatedAt: now,
 	}
 	account := models.DeveloperAccount{
-		ID: developerID, UserID: key.UserID, Plan: models.DeveloperPlanFree,
+		ID: developerID, UserID: key.UserID,
 		Status: models.DeveloperAccountActive, CreatedAt: now, UpdatedAt: now,
 	}
 

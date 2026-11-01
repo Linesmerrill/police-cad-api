@@ -75,6 +75,13 @@ func (a *App) New() *mux.Router {
 		CallDB:      databases.NewCallDatabase(a.dbHelper),
 		BoloDB:      databases.NewBoloDatabase(a.dbHelper),
 	}
+	social := NewSocialAuth(
+		databases.NewUserDatabase(a.dbHelper),
+		databases.NewAuthIdentityDatabase(a.dbHelper),
+		databases.NewPendingVerificationDatabase(a.dbHelper),
+		databases.NewPlayerIdentityDatabase(a.dbHelper),
+		alDB,
+	)
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB, CivDB: databases.NewCivilianDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB, OffDB: databases.NewRpPromoOffenseDatabase(a.dbHelper)}
@@ -327,6 +334,23 @@ func (a *App) New() *mux.Router {
 	// what must not be possible.
 	apiCreate.Handle("/developer/claim", http.HandlerFunc(devAPI.ClaimProvisionedAccountHandler)).Methods("POST")
 	apiCreate.Handle("/developer/claim/discord", http.HandlerFunc(devAPI.DiscordClaimProvisionedAccountHandler)).Methods("POST")
+
+	// Sign in with Google and Apple.
+	//
+	// On apiCreate rather than its own subrouter, so these sit behind the same
+	// gateway secret as the rest of the management surface. The browser never
+	// reaches them: the website's server-side proxy does, which is also what
+	// establishes the actor on the linking routes.
+	//
+	// Verify is the only one that does not need an actor — proving who you are
+	// is the whole point of it — so it must never read one. It derives the
+	// account from the token and nothing else.
+	apiCreate.Handle("/auth/social/verify", http.HandlerFunc(social.SocialVerifyHandler)).Methods("POST")
+	apiCreate.Handle("/auth/social/methods", http.HandlerFunc(social.SocialMethodsHandler)).Methods("GET")
+	apiCreate.Handle("/auth/social/link", http.HandlerFunc(social.SocialLinkHandler)).Methods("POST")
+	apiCreate.Handle("/auth/social/link/request-code", http.HandlerFunc(social.SocialLinkRequestCodeHandler)).Methods("POST")
+	apiCreate.Handle("/auth/social/link/confirm", http.HandlerFunc(social.SocialLinkConfirmHandler)).Methods("POST")
+	apiCreate.Handle("/auth/social/link/{provider}", http.HandlerFunc(social.SocialUnlinkHandler)).Methods("DELETE")
 
 	// The community owner's side. Route variable is {communityId}, so the
 	// pending-deletion gate applies: an owner mid-deletion has no business

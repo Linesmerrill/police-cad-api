@@ -47,10 +47,12 @@ built; say the word and I will change any of it.
    is correct across dynos. A Redis add-on would be marginally faster and is a
    drop-in swap later.
 
-6. **Do key-created communities count against the developer's own plan?** I built
-   it as yes: a community a key creates is owned by the developer's LPC account
-   and counts against `models.CommunityCap` exactly like one they made by hand.
-   Confirm that is what you meant.
+6. **Do key-created communities count against the developer's own plan?**
+   **Settled: yes, and that is now the only cap.** A community a key creates is
+   owned by the developer's LPC account and counts against
+   `models.CommunityCap` exactly like one made by hand. The developer tier's own
+   total-communities cap has been removed — see
+   [How many communities a developer may own](#how-many-communities-a-developer-may-own).
 
 7. **Should a mod bypass community limits?** I built it as no: mod-created
    civilians respect the community's civilian approval system and creation
@@ -459,26 +461,57 @@ is registered under that prefix, so nothing else can reach it.
 
 The goal is that roughly 80% of developers never hit a wall.
 
-### Request limits, per key
+### The tier is the website plan
 
-| | burst | daily |
-|---|---|---|
-| **Free** | 60 / min | 10,000 / day |
-| **Pro** | 600 / min | 250,000 / day |
+There is no Developer API subscription. A developer account is the person's
+ordinary LPC account with developer mode switched on, so their API allowance
+follows the subscription they already have. No second product, no second
+checkout, no extra Stripe ids.
 
-### Provisioning limits, per key per day
+| website plan | requests / min | requests / day | keys | accounts / key / day | communities / key / day |
+|---|---|---|---|---|---|
+| **Free** | 60 | 10,000 | 2 | 25 | 2 |
+| **Base** | 120 | 25,000 | 3 | 100 | 3 |
+| **Premium** | 300 | 100,000 | 5 | 250 | 5 |
+| **Premium Plus** | 600 | 250,000 | 10 | 500 | 10 |
 
-Deliberately much lower: these create rows that are hard to undo, and a bug in a
-mod's loop should not be able to make ten thousand accounts.
+One table, in `models.developerPlanLimits`, keyed by the same strings as the
+website tiers — so a plan read off a user record is already a valid lookup, and
+the enforcement, the docs and the developer page cannot fall out of step.
 
-| | player accounts | communities |
-|---|---|---|
-| **Free** | 25 / day | 2 / day, 3 total |
-| **Pro** | 500 / day | 10 / day, 25 total |
+The provisioning columns are a **pace**, not a total. They exist because those
+calls create rows that are awkward to undo, and a bug in a mod's loop should not
+be able to make ten thousand accounts before anyone notices.
 
-### Keys per developer
+**An inactive subscription or an unrecognised plan resolves to Free.** Falling
+back rather than up is the only safe direction for a value that arrives from a
+webhook payload, and Free is a working tier, so a lapse costs rate and nothing
+else — never access to an integration mid-session. `models.DeveloperPlanFor`
+reports `lapsed` in that case, so the page can say why rather than silently
+showing Free.
 
-Free 2, Pro 10.
+Prices shown on the developer page come from `handlers.SubscriptionTiers()`, the
+same list `/pricing` renders. That matters more than it sounds: price cohorts
+mean the live Premium Plus price depends on `KICKBACK_PRICE_DROP_LIVE`, so a
+hardcoded figure is not merely stale, it can be wrong for everyone.
+
+### How many communities a developer may own
+
+**Their website plan decides, and nothing in the tier table does.**
+
+`models.CommunityCap` — Free 1, Base 5, Premium 10, Premium Plus unlimited. A
+community created with a key counts exactly like one created by hand, and the
+same cap refuses the one that would go over. A refusal names the plan and the
+cap (`owner_community_limit_reached`).
+
+So the developer page shows two different things and says which is which:
+
+- **Communities: 2 of 10** — how many you may own, from `CommunityCap`.
+- **API tier: Premium** — request rate, provisioning pace, keys, from the table
+  above.
+
+Both move together when the subscription changes, because both read the same
+plan.
 
 ### What a client sees
 
