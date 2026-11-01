@@ -233,7 +233,7 @@ func newDevFixture(t *testing.T, scopes ...string) *devFixture {
 		Scopes: scopes, Status: models.DeveloperKeyActive, CreatedAt: now, UpdatedAt: now,
 	}
 	account := models.DeveloperAccount{
-		ID: developerID, UserID: key.UserID, Plan: models.DeveloperPlanFree,
+		ID: developerID, UserID: key.UserID,
 		Status: models.DeveloperAccountActive, CreatedAt: now, UpdatedAt: now,
 	}
 

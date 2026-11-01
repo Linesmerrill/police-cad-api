@@ -3579,7 +3579,16 @@ type CommunityTier struct {
 // and sets OnSale=true with the old prices in OriginalMonthlyPrice / OriginalAnnualPrice
 // so clients render the SALE badge + strikethrough. Default off — JSON output
 // is byte-identical to today.
-func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request) {
+// SubscriptionTiers is the canonical list of website subscription tiers and
+// their current prices, cheapest first.
+//
+// Extracted from the handler so it is callable: the Developer API surface shows
+// which website plans include Developer API Pro and what they cost, and reading
+// its own copy of those prices would mean the two pages disagreeing the first
+// time one changed. Price cohorts make that worse than usual — the live Premium
+// Plus price depends on KICKBACK_PRICE_DROP_LIVE, so a hardcoded figure is not
+// merely stale, it can be wrong for everyone.
+func SubscriptionTiers() []SubscriptionTier {
 	priceDropLive, _ := strconv.ParseBool(os.Getenv("KICKBACK_PRICE_DROP_LIVE"))
 
 	base := SubscriptionTier{
@@ -3616,7 +3625,7 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 		premiumPlus.OnSale = true
 	}
 
-	tiers := []SubscriptionTier{
+	return []SubscriptionTier{
 		{
 			Name:         "Free",
 			Key:          "free",
@@ -3629,10 +3638,12 @@ func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request
 		premium,
 		premiumPlus,
 	}
+}
 
+func (u User) GetSubscriptionTiersHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"tiers": tiers,
+		"tiers": SubscriptionTiers(),
 	})
 }
 

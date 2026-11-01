@@ -21,8 +21,14 @@ const DeveloperAPIKeyPrefix = "lpc_live_"
 // Developer plans. A plan decides limits and nothing else: it never widens what
 // a key is allowed to reach.
 const (
-	DeveloperPlanFree = "free"
-	DeveloperPlanPro  = "pro"
+	// Developer API tiers are the website subscription plans. There is no
+	// separate developer subscription: the keys here are deliberately the same
+	// strings as the website tiers, so a plan read off a user record is already
+	// a valid lookup and the two can never fall out of step.
+	DeveloperPlanFree        = TierFree
+	DeveloperPlanBase        = TierBase
+	DeveloperPlanPremium     = TierPremium
+	DeveloperPlanPremiumPlus = TierPremiumPlus
 )
 
 // Developer account status. Suspended is a staff action and stops every key the
@@ -177,7 +183,21 @@ var developerPlanLimits = map[string]DeveloperLimits{
 		AccountsPerKeyDay:    25,
 		CommunitiesPerKeyDay: 2,
 	},
-	DeveloperPlanPro: {
+	DeveloperPlanBase: {
+		RequestsPerMinute:    120,
+		RequestsPerDay:       25000,
+		KeysPerDeveloper:     3,
+		AccountsPerKeyDay:    100,
+		CommunitiesPerKeyDay: 3,
+	},
+	DeveloperPlanPremium: {
+		RequestsPerMinute:    300,
+		RequestsPerDay:       100000,
+		KeysPerDeveloper:     5,
+		AccountsPerKeyDay:    250,
+		CommunitiesPerKeyDay: 5,
+	},
+	DeveloperPlanPremiumPlus: {
 		RequestsPerMinute:    600,
 		RequestsPerDay:       250000,
 		KeysPerDeveloper:     10,
@@ -186,20 +206,25 @@ var developerPlanLimits = map[string]DeveloperLimits{
 	},
 }
 
-// DeveloperTier is one developer tier's published allowance.
+// DeveloperTier is one tier's published allowance.
 type DeveloperTier struct {
 	Plan   string          `json:"plan"`
 	Limits DeveloperLimits `json:"limits"`
 }
 
-// DeveloperTiers lists every developer tier and its limits, cheapest first.
+// DeveloperTiers lists every tier and its limits, cheapest first.
 //
-// Exists so the developer page can render the comparison table from the same
-// values the middleware enforces. A page with its own copy of these numbers
-// drifts the first time one is tuned, and the people reading it are the ones
-// who would then write code against the wrong figure.
+// Exists so the developer page renders the comparison from the same values the
+// middleware enforces. A page with its own copy of these numbers drifts the
+// first time one is tuned, and the people reading it are the ones who would
+// then write code against the wrong figure.
 func DeveloperTiers() []DeveloperTier {
-	order := []string{DeveloperPlanFree, DeveloperPlanPro}
+	order := []string{
+		DeveloperPlanFree,
+		DeveloperPlanBase,
+		DeveloperPlanPremium,
+		DeveloperPlanPremiumPlus,
+	}
 	out := make([]DeveloperTier, 0, len(order))
 	for _, plan := range order {
 		out = append(out, DeveloperTier{Plan: plan, Limits: LimitsForPlan(plan)})
@@ -207,6 +232,7 @@ func DeveloperTiers() []DeveloperTier {
 	return out
 }
 
+// DeveloperTiers lists every developer tier and its limits, cheapest first.
 // LimitsForPlan returns a plan's allowance, falling back to Free for anything
 // unrecognised. Falling back down rather than up matters: a plan string we
 // cannot read should cost a developer throughput, never hand them more.
@@ -219,120 +245,68 @@ func LimitsForPlan(plan string) DeveloperLimits {
 
 // DeveloperAccount is one LPC user's developer registration.
 type DeveloperAccount struct {
-	ID                   primitive.ObjectID  `json:"id" bson:"_id"`
-	UserID               string              `json:"userId" bson:"userId"`
-	Plan                 string              `json:"plan" bson:"plan"`
-	PlanActive           bool                `json:"planActive" bson:"planActive"`
-	StripeCustomerID     string              `json:"-" bson:"stripeCustomerId,omitempty"`
-	StripeSubscriptionID string              `json:"-" bson:"stripeSubscriptionId,omitempty"`
-	AppName              string              `json:"appName,omitempty" bson:"appName,omitempty"`
-	AppURL               string              `json:"appUrl,omitempty" bson:"appUrl,omitempty"`
-	TermsAcceptedAt      *primitive.DateTime `json:"termsAcceptedAt,omitempty" bson:"termsAcceptedAt,omitempty"`
-	TermsVersion         string              `json:"termsVersion,omitempty" bson:"termsVersion,omitempty"`
-	Status               string              `json:"status" bson:"status"`
-	SuspendedReason      string              `json:"suspendedReason,omitempty" bson:"suspendedReason,omitempty"`
-	SuspendedBy          string              `json:"-" bson:"suspendedBy,omitempty"`
-	SuspendedAt          *primitive.DateTime `json:"suspendedAt,omitempty" bson:"suspendedAt,omitempty"`
-	CreatedAt            primitive.DateTime  `json:"createdAt" bson:"createdAt"`
-	UpdatedAt            primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
+	ID              primitive.ObjectID  `json:"id" bson:"_id"`
+	UserID          string              `json:"userId" bson:"userId"`
+	AppName         string              `json:"appName,omitempty" bson:"appName,omitempty"`
+	AppURL          string              `json:"appUrl,omitempty" bson:"appUrl,omitempty"`
+	TermsAcceptedAt *primitive.DateTime `json:"termsAcceptedAt,omitempty" bson:"termsAcceptedAt,omitempty"`
+	TermsVersion    string              `json:"termsVersion,omitempty" bson:"termsVersion,omitempty"`
+	Status          string              `json:"status" bson:"status"`
+	SuspendedReason string              `json:"suspendedReason,omitempty" bson:"suspendedReason,omitempty"`
+	SuspendedBy     string              `json:"-" bson:"suspendedBy,omitempty"`
+	SuspendedAt     *primitive.DateTime `json:"suspendedAt,omitempty" bson:"suspendedAt,omitempty"`
+	CreatedAt       primitive.DateTime  `json:"createdAt" bson:"createdAt"`
+	UpdatedAt       primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
 }
 
-// EffectivePlan is the plan the developer's own subscription pays for.
-//
-// A plan that is not active bills as Free, so a lapsed subscription degrades
-// throughput instead of locking a developer out of their own integration
-// mid-session.
-//
-// This is the standalone subscription only. A website Premium Plus plan also
-// grants Pro, and that cannot be seen from here because it lives on the user
-// record — use DeveloperPlanFor, which is the answer every caller actually
-// wants. This method remains because it is what "did they buy the add-on"
-// means, which is a different question from "what are they entitled to".
-func (d DeveloperAccount) EffectivePlan() string {
-	if d.Plan == DeveloperPlanPro && d.PlanActive {
-		return DeveloperPlanPro
-	}
-	return DeveloperPlanFree
-}
-
-// How a developer came to be on their tier.
-const (
-	DeveloperEntitlementNone       = "none"
-	DeveloperEntitlementStandalone = "standalone"
-	DeveloperEntitlementWebsite    = "website_plan"
-)
+// How a developer came to be on their tier. Only one answer remains, kept as a
+// named value so a response field does not carry a bare empty string.
+const DeveloperEntitlementWebsite = "website_plan"
 
 // DeveloperEntitlement is the tier a developer is on, and why.
-//
-// The "why" is not decoration. Premium Plus includes Developer API Pro, so
-// someone can be on Pro without ever having bought it, and someone else can be
-// paying for both. Only a reason distinguishes "upgrade to Pro" from "you
-// already have Pro" from "you are paying twice, here is how to stop".
 type DeveloperEntitlement struct {
 	Plan   string `json:"plan"`
 	Source string `json:"source"`
-	// IncludedWith names the website plan granting Pro, when one does.
-	IncludedWith string `json:"includedWith,omitempty"`
-	// StandaloneActive is whether their own Developer API subscription is live,
-	// regardless of whether it is what is granting their tier.
-	StandaloneActive bool `json:"standaloneActive"`
-	// Redundant is the double-charge case: a live standalone subscription that
-	// the website plan already covers. The page offers to cancel it.
-	Redundant bool `json:"redundant"`
+	// WebsitePlan is the plan read off the user record, before the active check.
+	// Kept so the page can say "your subscription has lapsed" rather than just
+	// showing Free and leaving someone to work out why.
+	WebsitePlan string `json:"websitePlan"`
+	// Lapsed is a paid plan that is not active. The tier falls back to Free and
+	// the page has something specific to say about it.
+	Lapsed bool `json:"lapsed"`
 }
 
-// DeveloperPlanFor resolves the tier to apply, given the developer's own
-// subscription and the website plan on their LPC account.
+// DeveloperPlanFor resolves the Developer API tier from an LPC account.
 //
-// Premium Plus includes Developer API Pro. It is the same person and the same
-// account, so charging them a second subscription for throughput they are
-// already paying for would be indefensible.
+// The website subscription is the only input. There is no separate developer
+// subscription to buy and no second checkout: it is the same person and the
+// same account, so the plan they already pay for is the plan their API access
+// follows.
 //
-// A lapse falls back rather than locking out: Premium Plus ending drops them to
-// their standalone subscription if they have one, and to Free if they do not.
-// Free is a working tier, so a lapse costs rate and nothing else.
-//
-// An unrecognised website plan grants nothing. Falling back rather than up is
-// the only safe direction for a value that arrives from a webhook payload.
-func DeveloperPlanFor(account *DeveloperAccount, websitePlan string) DeveloperEntitlement {
-	standalone := account != nil && account.EffectivePlan() == DeveloperPlanPro
-	includedWith := ""
-	if WebsitePlanIncludesDeveloperPro(websitePlan) {
-		includedWith = TierPremiumPlus
+// An inactive subscription and an unrecognised plan both fall back to Free.
+// Falling back rather than up is the only safe direction for a value that
+// arrives from a webhook payload, and Free is a working tier, so a lapse costs
+// rate and nothing else — never access to an integration mid-session.
+func DeveloperPlanFor(user *User) DeveloperEntitlement {
+	raw := ""
+	if user != nil {
+		raw = strings.ToLower(strings.TrimSpace(user.Details.Subscription.Plan))
 	}
 
-	switch {
-	case includedWith != "":
-		return DeveloperEntitlement{
-			Plan:             DeveloperPlanPro,
-			Source:           DeveloperEntitlementWebsite,
-			IncludedWith:     includedWith,
-			StandaloneActive: standalone,
-			// Paying for both. Worth saying out loud rather than quietly
-			// taking the money.
-			Redundant: standalone,
-		}
-	case standalone:
-		return DeveloperEntitlement{
-			Plan:             DeveloperPlanPro,
-			Source:           DeveloperEntitlementStandalone,
-			StandaloneActive: true,
-		}
-	default:
-		return DeveloperEntitlement{
-			Plan:   DeveloperPlanFree,
-			Source: DeveloperEntitlementNone,
-		}
+	// PlanFromUser is the one place the active check lives, so this cannot
+	// disagree with the community cap about whether a subscription counts.
+	effective := PlanFromUser(user)
+	if _, known := developerPlanLimits[effective]; !known {
+		effective = DeveloperPlanFree
 	}
-}
 
-// WebsitePlanIncludesDeveloperPro reports whether a website plan comes with
-// Developer API Pro.
-//
-// One function so the gate, the page and the billing copy cannot disagree about
-// which plans are included.
-func WebsitePlanIncludesDeveloperPro(websitePlan string) bool {
-	return strings.ToLower(strings.TrimSpace(websitePlan)) == TierPremiumPlus
+	_, paidAndKnown := developerPlanLimits[raw]
+	return DeveloperEntitlement{
+		Plan:        effective,
+		Source:      DeveloperEntitlementWebsite,
+		WebsitePlan: raw,
+		Lapsed:      paidAndKnown && raw != DeveloperPlanFree && effective == DeveloperPlanFree,
+	}
 }
 
 // DeveloperAPIKey is one issued key.

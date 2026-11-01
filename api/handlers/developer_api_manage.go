@@ -68,10 +68,11 @@ type developerAccountResponse struct {
 	Limits   models.DeveloperLimits   `json:"limits"`
 	Scopes   []models.DeveloperScope  `json:"availableScopes"`
 	KeyCount int                      `json:"keyCount"`
-	// UpgradeAvailable is false until the Stripe product exists. The website
-	// hides the upgrade path rather than offering a button that cannot work.
-	UpgradeAvailable bool   `json:"upgradeAvailable"`
-	TermsVersion     string `json:"termsVersion"`
+	// Which tier is in force and why. There is no developer subscription: the
+	// tier is the website plan, so the page's job is to show the plans and a
+	// way to upgrade, not a second checkout.
+	Entitlement  models.DeveloperEntitlement `json:"entitlement"`
+	TermsVersion string                      `json:"termsVersion"`
 	// What this developer last accepted, and whether that is behind the current
 	// version. The page prompts on these; nothing is blocked by them.
 	AcceptedTermsVersion  string `json:"acceptedTermsVersion,omitempty"`
@@ -79,46 +80,19 @@ type developerAccountResponse struct {
 
 	// How many communities this person may own, and how many they already do.
 	//
-	// This comes from their website plan, not from the developer tier, and it is
-	// returned here so the developer page can say so in as many words. The two
-	// numbers are easy to confuse, and a developer who hits the community limit
-	// should be told to look at their LPC plan rather than at their API tier.
+	// This comes from their website plan, and it is returned here so the page
+	// can say so in as many words. The two allowances are easy to confuse, and
+	// a developer who hits the community limit should be told to look at their
+	// subscription rather than at their request rate.
 	Communities developerCommunityAllowance `json:"communities"`
 
-	// The published comparison table, from the same values the middleware
-	// enforces, so the page cannot drift from reality.
+	// The published comparison, from the same values the middleware enforces
+	// and the same tier list /pricing renders, so the page cannot drift from
+	// either reality or the prices people are actually charged.
 	Tiers          []models.DeveloperTier          `json:"tiers"`
 	CommunityPlans []models.CommunityPlanAllowance `json:"communityPlans"`
-	Pricing        developerPricing                `json:"pricing"`
-
-	// Which tier is in force and why. The page needs the reason to tell
-	// "upgrade to Pro" apart from "Premium Plus already covers this" and from
-	// "you are paying for both".
-	Entitlement models.DeveloperEntitlement `json:"entitlement"`
-}
-
-// developerPricing is what to show for the paid tier.
-//
-// The price is one config value rather than copy in a template, because a price
-// written into a page is a price that will be wrong somewhere. Until it is set,
-// PriceSet is false and the page shows a placeholder rather than inventing a
-// number.
-type developerPricing struct {
-	ProMonthly string `json:"proMonthly,omitempty"`
-	ProYearly  string `json:"proYearly,omitempty"`
-	Currency   string `json:"currency,omitempty"`
-	PriceSet   bool   `json:"priceSet"`
-	// Purchasable is whether there is a Stripe price to send someone to.
-	// Separate from PriceSet, because showing a price and being able to take
-	// money are different readinesses and a dead button is worse than none.
-	Purchasable bool `json:"purchasable"`
-
-	// The website plan that includes Pro, and what it costs, so the page can
-	// point someone at the better deal when it is the better deal.
-	IncludedWithPlan    string `json:"includedWithPlan,omitempty"`
-	IncludedWithMonthly string `json:"includedWithMonthly,omitempty"`
-	IncludedWithYearly  string `json:"includedWithYearly,omitempty"`
-	IncludedWithURL     string `json:"includedWithUrl,omitempty"`
+	WebsiteTiers   []SubscriptionTier              `json:"websiteTiers"`
+	UpgradeURL     string                          `json:"upgradeUrl"`
 }
 
 // developerCommunityAllowance is the website plan's community allowance.
@@ -146,15 +120,16 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 	defer cancel()
 
 	resp := developerAccountResponse{
-		Limits:           models.LimitsForPlan(models.DeveloperPlanFree),
-		Scopes:           models.DeveloperScopes(),
-		UpgradeAvailable: developerPaidTierAvailable(),
-		TermsVersion:     developerTermsVersion,
-		Communities:      d.communityAllowance(ctx, actorID),
-		Tiers:            models.DeveloperTiers(),
-		CommunityPlans:   models.CommunityPlanAllowances(),
-		Pricing:          developerPricingConfig(),
+		Scopes:         models.DeveloperScopes(),
+		TermsVersion:   developerTermsVersion,
+		Communities:    d.communityAllowance(ctx, actorID),
+		Entitlement:    models.DeveloperPlanFor(d.ownerOf(ctx, actorID)),
+		Tiers:          models.DeveloperTiers(),
+		CommunityPlans: models.CommunityPlanAllowances(),
+		WebsiteTiers:   SubscriptionTiers(),
+		UpgradeURL:     envOr("PREMIUM_PLUS_URL", "/community-pricing"),
 	}
+	resp.Limits = models.LimitsForPlan(resp.Entitlement.Plan)
 
 	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
 	if err != nil || account == nil {
@@ -169,7 +144,6 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 
 	resp.Enabled = true
 	resp.Account = account
-	resp.Entitlement = models.DeveloperPlanFor(account, resp.Communities.Plan)
 	resp.Limits = models.LimitsForPlan(resp.Entitlement.Plan)
 	resp.KeyCount = int(count)
 	resp.AcceptedTermsVersion = account.TermsVersion
@@ -214,28 +188,6 @@ func (d DeveloperAPI) communityAllowance(ctx context.Context, actorID string) de
 	return allowance
 }
 
-// developerPricingConfig reads the paid tier's price from config.
-//
-// DEV_API_PRO_PRICE is the display string ("9.99"); the Stripe price id is
-// separate and is what makes the tier actually purchasable. Both unset is the
-// current state, and the page is expected to say so plainly.
-func developerPricingConfig() developerPricing {
-	monthly := envOr("DEV_API_PRO_PRICE_MONTHLY", "4.99")
-	yearly := envOr("DEV_API_PRO_PRICE_YEARLY", "49.00")
-	return developerPricing{
-		ProMonthly:  monthly,
-		ProYearly:   yearly,
-		Currency:    envOr("DEV_API_PRO_CURRENCY", "USD"),
-		PriceSet:    monthly != "" || yearly != "",
-		Purchasable: developerPaidTierAvailable(),
-
-		IncludedWithPlan:    models.TierPremiumPlus,
-		IncludedWithMonthly: envOr("PREMIUM_PLUS_PRICE_MONTHLY", "9.99"),
-		IncludedWithYearly:  envOr("PREMIUM_PLUS_PRICE_YEARLY", "99.00"),
-		IncludedWithURL:     envOr("PREMIUM_PLUS_URL", "/community-pricing"),
-	}
-}
-
 // envOr reads a config value with a fallback.
 //
 // The defaults are the approved prices, so the page is correct on a deployment
@@ -246,13 +198,6 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// developerPaidTierAvailable reports whether there is a Stripe price to send
-// someone to. Until Merrill creates the product, every developer is on Free and
-// the upgrade path stays hidden.
-func developerPaidTierAvailable() bool {
-	return strings.TrimSpace(os.Getenv("STRIPE_DEV_API_PRO_MONTHLY_PRICE_ID")) != ""
 }
 
 type enableDeveloperAccountRequest struct {
@@ -325,8 +270,6 @@ func (d DeveloperAPI) EnableDeveloperAccountHandler(w http.ResponseWriter, r *ht
 	account := models.DeveloperAccount{
 		ID:              primitive.NewObjectID(),
 		UserID:          actorID,
-		Plan:            models.DeveloperPlanFree,
-		PlanActive:      false,
 		AppName:         strings.TrimSpace(req.AppName),
 		AppURL:          strings.TrimSpace(req.AppURL),
 		TermsAcceptedAt: &now,
@@ -497,7 +440,7 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	limits := models.LimitsForPlan(account.EffectivePlan())
+	limits := models.LimitsForPlan(models.DeveloperPlanFor(d.ownerOf(ctx, account.UserID)).Plan)
 	liveKeys, err := d.KeyDB.CountDocuments(ctx, bson.M{
 		"developerId": account.ID.Hex(),
 		"status":      bson.M{"$ne": models.DeveloperKeyRevoked},
@@ -716,7 +659,7 @@ func (d DeveloperAPI) ListDeveloperKeysHandler(w http.ResponseWriter, r *http.Re
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"keys":   out,
-		"limits": models.LimitsForPlan(account.EffectivePlan()),
+		"limits": models.LimitsForPlan(models.DeveloperPlanFor(d.ownerOf(ctx, account.UserID)).Plan),
 	})
 }
 
@@ -927,7 +870,7 @@ func (d DeveloperAPI) GetDeveloperKeyUsageHandler(w http.ResponseWriter, r *http
 	account, _ := d.AccountDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(key.DeveloperID)})
 	plan := models.DeveloperPlanFree
 	if account != nil {
-		plan = account.EffectivePlan()
+		plan = models.DeveloperPlanFor(d.ownerOf(ctx, account.UserID)).Plan
 	}
 	limits := models.LimitsForPlan(plan)
 

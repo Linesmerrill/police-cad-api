@@ -461,85 +461,57 @@ is registered under that prefix, so nothing else can reach it.
 
 The goal is that roughly 80% of developers never hit a wall.
 
-### Request limits, per key
+### The tier is the website plan
 
-| | burst | daily |
-|---|---|---|
-| **Free** | 60 / min | 10,000 / day |
-| **Pro** | 600 / min | 250,000 / day |
+There is no Developer API subscription. A developer account is the person's
+ordinary LPC account with developer mode switched on, so their API allowance
+follows the subscription they already have. No second product, no second
+checkout, no extra Stripe ids.
 
-### Provisioning limits, per key per day
+| website plan | requests / min | requests / day | keys | accounts / key / day | communities / key / day |
+|---|---|---|---|---|---|
+| **Free** | 60 | 10,000 | 2 | 25 | 2 |
+| **Base** | 120 | 25,000 | 3 | 100 | 3 |
+| **Premium** | 300 | 100,000 | 5 | 250 | 5 |
+| **Premium Plus** | 600 | 250,000 | 10 | 500 | 10 |
 
-Deliberately much lower: these create rows that are hard to undo, and a bug in a
-mod's loop should not be able to make ten thousand accounts.
+One table, in `models.developerPlanLimits`, keyed by the same strings as the
+website tiers — so a plan read off a user record is already a valid lookup, and
+the enforcement, the docs and the developer page cannot fall out of step.
 
-| | player accounts | communities |
-|---|---|---|
-| **Free** | 25 / day | 2 / day |
-| **Pro** | 500 / day | 10 / day |
+The provisioning columns are a **pace**, not a total. They exist because those
+calls create rows that are awkward to undo, and a bug in a mod's loop should not
+be able to make ten thousand accounts before anyone notices.
 
-These are **pace**, not totals.
+**An inactive subscription or an unrecognised plan resolves to Free.** Falling
+back rather than up is the only safe direction for a value that arrives from a
+webhook payload, and Free is a working tier, so a lapse costs rate and nothing
+else — never access to an integration mid-session. `models.DeveloperPlanFor`
+reports `lapsed` in that case, so the page can say why rather than silently
+showing Free.
 
-### Keys per developer
-
-Free 2, Pro 10.
-
-### Price, and who already has Pro
-
-| | monthly | yearly |
-|---|---|---|
-| **Free** | $0 | $0 |
-| **Pro** | $4.99 | $49.00 |
-
-**Website Premium Plus ($9.99 / month, $99 / year) includes Developer API Pro.**
-It is the same person and the same account, so charging a second subscription
-for throughput they already pay for would be indefensible.
-
-`models.DeveloperPlanFor(account, websitePlan)` is the single resolver, and it
-answers with a reason as well as a tier:
-
-- **Premium Plus active** → Pro, `source: website_plan`. No second subscription.
-- **Standalone Developer API Pro active** → Pro, `source: standalone`.
-- **Both** → Pro, and `redundant: true`. The page says Premium Plus already
-  covers it and offers to cancel the standalone, rather than quietly taking the
-  money twice.
-- **Neither, or an unrecognised plan** → Free. Falling back rather than up is
-  the only safe direction for a value that arrives from a webhook payload.
-
-A lapse falls back rather than locking out: Premium Plus ending drops a
-developer to their standalone subscription if they have one, and to Free if they
-do not. Free is a working tier, so a lapse costs rate and nothing else.
-
-Note that Pro raises the **provisioning pace** as well as the request rate, so a
-Premium Plus developer gets 10 communities a day rather than 2. That is
-intended — it is the whole tier, not just its rate limits.
+Prices shown on the developer page come from `handlers.SubscriptionTiers()`, the
+same list `/pricing` renders. That matters more than it sounds: price cohorts
+mean the live Premium Plus price depends on `KICKBACK_PRICE_DROP_LIVE`, so a
+hardcoded figure is not merely stale, it can be wrong for everyone.
 
 ### How many communities a developer may own
 
-**Their website plan decides, and nothing here does.**
+**Their website plan decides, and nothing in the tier table does.**
 
-A developer account is the person's ordinary LPC account with developer mode
-switched on, so the number of communities they may own is the one they already
-have: `models.CommunityCap` — Free 1, Base 5, Premium 10, Premium Plus
-unlimited. A community created with a key counts exactly like one created by
-hand on the website, and the same cap refuses the one that would go over.
+`models.CommunityCap` — Free 1, Base 5, Premium 10, Premium Plus unlimited. A
+community created with a key counts exactly like one created by hand, and the
+same cap refuses the one that would go over. A refusal names the plan and the
+cap (`owner_community_limit_reached`).
 
-There is deliberately no developer-tier total. An earlier version of this had
-one (Free 3, Pro 25), and it was wrong in both directions: it would have
-refused a Premium customer their sixth community because an unrelated tier said
-three, and it would have let a Free user hold three when their plan allows one.
-Two caps over the same number can only ever disagree.
+So the developer page shows two different things and says which is which:
 
-So the two allowances answer different questions, and the developer page says
-which is which:
+- **Communities: 2 of 10** — how many you may own, from `CommunityCap`.
+- **API tier: Premium** — request rate, provisioning pace, keys, from the table
+  above.
 
-- **Communities: 2 of 5** — from the website plan. Raised by upgrading the LPC
-  subscription.
-- **API tier: Free** — request rate, provisioning pace, keys per developer.
-  Raised by the developer tier, once the paid one exists.
-
-A refusal names the plan and the cap (`owner_community_limit_reached`), so a
-developer reading a log knows which of the two to go and change.
+Both move together when the subscription changes, because both read the same
+plan.
 
 ### What a client sees
 

@@ -963,10 +963,13 @@ components:
     Limits:
       type: object
       description: >
-        The developer tier's allowances. These govern rate only: how fast
-        requests may come, how fast rows may be provisioned, and how many keys
-        one developer may hold. How many communities a developer may own is not
-        here: it comes from their website plan. See CommunityAllowance.
+        The allowances for a tier. The tier is the user's website subscription
+        plan - free, base, premium, premium_plus - and there is no separate
+        Developer API subscription. These govern rate only: how fast requests
+        may come, how fast rows may be provisioned, and how many keys one
+        developer may hold. How many communities a developer may own is not
+        here: it comes from the same plan's CommunityCap. See
+        CommunityAllowance. An inactive or unrecognised plan resolves to free.
       properties:
         requestsPerMinute: { type: integer }
         requestsPerDay: { type: integer }

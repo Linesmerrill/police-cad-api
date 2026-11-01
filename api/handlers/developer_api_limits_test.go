@@ -173,7 +173,7 @@ func errorCode(rr *httptest.ResponseRecorder) string {
 func TestDeveloperLimits_DoNotCapTotalCommunities(t *testing.T) {
 	// The tier describes rate, and nothing else. If a "communities in total"
 	// allowance ever reappears here, it will contradict the website plan.
-	for _, plan := range []string{models.DeveloperPlanFree, models.DeveloperPlanPro} {
+	for _, plan := range []string{models.TierFree, models.TierBase, models.TierPremium, models.TierPremiumPlus} {
 		limits := models.LimitsForPlan(plan)
 		if limits.RequestsPerMinute <= 0 || limits.RequestsPerDay <= 0 {
 			t.Errorf("%s: expected request limits, got %+v", plan, limits)
@@ -197,8 +197,9 @@ func TestDeveloperLimits_DoNotCapTotalCommunities(t *testing.T) {
 }
 
 func TestDevCreateCommunity_PastTheOldTierCapOnAPaidPlan(t *testing.T) {
-	// Premium allows 10. The old Free developer tier allowed 3, which would
-	// have refused the fourth even though the customer had paid for ten.
+	// Premium allows 10 communities. An earlier design also capped the total
+	// per developer tier at 3, which would have refused the fourth even though
+	// the customer had paid for ten. There is one cap now, and this is it.
 	f := newLimitsFixture(t, models.TierPremium, 3)
 
 	for i, name := range []string{"Fourth Community", "Fifth Community"} {
@@ -244,23 +245,21 @@ func TestDevCreateCommunity_UnlimitedPlanIsNotCapped(t *testing.T) {
 }
 
 func TestDevCreateCommunity_DailyPaceStillApplies(t *testing.T) {
-	// Pace is the tier's job and is unaffected: Free is two a day, however many
-	// the website plan allows in total.
+	// Pace and total are different limits, and this is the one the tier owns.
 	//
-	// Premium deliberately, not Premium Plus: Premium Plus includes Developer
-	// API Pro, which raises the pace to ten a day as well as the request rate.
-	// Premium raises the community total to 10 without touching the tier, which
-	// is exactly the separation under test.
-	f := newLimitsFixture(t, models.TierPremium, 0)
+	// Base deliberately: it allows 5 communities in total at 3 a day, so the
+	// pace is what refuses the fourth. On Free the total of 1 would bite first
+	// and the test would pass for the wrong reason.
+	f := newLimitsFixture(t, models.TierBase, 0)
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		if rr := f.create(t, "Community"); rr.Code != http.StatusCreated {
 			t.Fatalf("community %d: expected 201, got %d: %s", i+1, rr.Code, rr.Body.String())
 		}
 	}
-	rr := f.create(t, "Third Today")
+	rr := f.create(t, "Fourth Today")
 	if rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 on the third today, got %d: %s", rr.Code, rr.Body.String())
+		t.Fatalf("expected 429 on the fourth today, got %d: %s", rr.Code, rr.Body.String())
 	}
 	if code := errorCode(rr); code != "provision_cap_reached" {
 		t.Errorf("error code: got %q want provision_cap_reached", code)
@@ -268,6 +267,21 @@ func TestDevCreateCommunity_DailyPaceStillApplies(t *testing.T) {
 }
 
 // ---- what the developer page is told ----
+
+// A higher plan raises the provisioning pace as well as the request rate: the
+// tier is the whole allowance, not just its rate limits.
+func TestDevCreateCommunity_AHigherPlanGetsAHigherPace(t *testing.T) {
+	f := newLimitsFixture(t, models.TierPremiumPlus, 0)
+
+	// Four in a day, which the Free pace of two and the Base pace of three
+	// would both have refused.
+	for i := 0; i < 4; i++ {
+		if rr := f.create(t, "Community"); rr.Code != http.StatusCreated {
+			t.Fatalf("community %d: expected 201 on the Premium Plus pace, got %d: %s",
+				i+1, rr.Code, rr.Body.String())
+		}
+	}
+}
 
 func TestDeveloperAccount_ReportsTheWebsitePlanAllowance(t *testing.T) {
 	f := newLimitsFixture(t, models.TierPremium, 2)
@@ -386,36 +400,6 @@ func TestDeveloperAccount_DoesNotNagOnCurrentTerms(t *testing.T) {
 
 // ---- the published comparison table ----
 
-// The page renders the tier table from this response. If it ever stops matching
-// what the middleware enforces, developers write code against a number we do
-// not honour, so the table and the enforcement come from one function.
-func TestDeveloperAccount_PublishesTheRealTierLimits(t *testing.T) {
-	f := newLimitsFixture(t, models.TierFree, 0)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/account?userId="+f.owner.ID, nil)
-	rr := httptest.NewRecorder()
-	f.api.GetDeveloperAccountHandler(rr, req)
-
-	var out developerAccountResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decoding: %v", err)
-	}
-	if len(out.Tiers) != 2 {
-		t.Fatalf("expected Free and Pro, got %+v", out.Tiers)
-	}
-	for _, tier := range out.Tiers {
-		enforced := models.LimitsForPlan(tier.Plan)
-		if tier.Limits != enforced {
-			t.Errorf("%s: published %+v but the middleware enforces %+v",
-				tier.Plan, tier.Limits, enforced)
-		}
-	}
-	// Cheapest first, so the page can render in order without sorting.
-	if out.Tiers[0].Plan != models.DeveloperPlanFree {
-		t.Errorf("expected Free first, got %q", out.Tiers[0].Plan)
-	}
-}
-
 func TestDeveloperAccount_PublishesTheWebsitePlanCaps(t *testing.T) {
 	f := newLimitsFixture(t, models.TierFree, 0)
 
@@ -445,176 +429,204 @@ func TestDeveloperAccount_PublishesTheWebsitePlanCaps(t *testing.T) {
 	}
 }
 
-// ---- who is entitled to Pro, and why ----
+// ---- which website plan grants which tier ----
 
-// Premium Plus includes Developer API Pro. It is the same person and the same
-// account, so a second subscription for throughput they already pay for would
-// be indefensible.
-func TestDeveloperEntitlement_PremiumPlusGrantsPro(t *testing.T) {
-	account := &models.DeveloperAccount{Plan: models.DeveloperPlanFree}
+// The website subscription is the only input. There is no developer
+// subscription to buy, so this table is the whole of the policy.
+func TestDeveloperEntitlement_EachWebsitePlanMapsToItsLimits(t *testing.T) {
+	for _, tc := range []struct {
+		plan                 string
+		requestsPerMinute    int
+		requestsPerDay       int
+		keysPerDeveloper     int
+		accountsPerKeyDay    int
+		communitiesPerKeyDay int
+	}{
+		{models.TierFree, 60, 10000, 2, 25, 2},
+		{models.TierBase, 120, 25000, 3, 100, 3},
+		{models.TierPremium, 300, 100000, 5, 250, 5},
+		{models.TierPremiumPlus, 600, 250000, 10, 500, 10},
+	} {
+		t.Run(tc.plan, func(t *testing.T) {
+			user := &models.User{}
+			if tc.plan != models.TierFree {
+				user.Details.Subscription.Plan = tc.plan
+				user.Details.Subscription.Active = true
+			}
 
-	got := models.DeveloperPlanFor(account, models.TierPremiumPlus)
-	if got.Plan != models.DeveloperPlanPro {
-		t.Fatalf("expected Pro, got %q", got.Plan)
-	}
-	if got.Source != models.DeveloperEntitlementWebsite {
-		t.Errorf("source: got %q want %q", got.Source, models.DeveloperEntitlementWebsite)
-	}
-	if got.IncludedWith != models.TierPremiumPlus {
-		t.Errorf("includedWith: got %q", got.IncludedWith)
-	}
-	if got.StandaloneActive || got.Redundant {
-		t.Error("they are not paying twice, so nothing should say they are")
-	}
-	// And the limits that follow are the real Pro ones.
-	if models.LimitsForPlan(got.Plan) != models.LimitsForPlan(models.DeveloperPlanPro) {
-		t.Error("a Premium Plus developer must get the actual Pro limits")
+			got := models.DeveloperPlanFor(user)
+			if got.Plan != tc.plan {
+				t.Fatalf("plan: got %q want %q", got.Plan, tc.plan)
+			}
+			if got.Source != models.DeveloperEntitlementWebsite {
+				t.Errorf("source: got %q", got.Source)
+			}
+			if got.Lapsed {
+				t.Error("an active subscription is not lapsed")
+			}
+
+			limits := models.LimitsForPlan(got.Plan)
+			if limits.RequestsPerMinute != tc.requestsPerMinute {
+				t.Errorf("requests/min: got %d want %d", limits.RequestsPerMinute, tc.requestsPerMinute)
+			}
+			if limits.RequestsPerDay != tc.requestsPerDay {
+				t.Errorf("requests/day: got %d want %d", limits.RequestsPerDay, tc.requestsPerDay)
+			}
+			if limits.KeysPerDeveloper != tc.keysPerDeveloper {
+				t.Errorf("keys: got %d want %d", limits.KeysPerDeveloper, tc.keysPerDeveloper)
+			}
+			if limits.AccountsPerKeyDay != tc.accountsPerKeyDay {
+				t.Errorf("accounts/day: got %d want %d", limits.AccountsPerKeyDay, tc.accountsPerKeyDay)
+			}
+			if limits.CommunitiesPerKeyDay != tc.communitiesPerKeyDay {
+				t.Errorf("communities/day: got %d want %d", limits.CommunitiesPerKeyDay, tc.communitiesPerKeyDay)
+			}
+		})
 	}
 }
 
-func TestDeveloperEntitlement_LapsedPremiumPlusFallsBack(t *testing.T) {
-	// Falls back rather than locking out: Free is a working tier, so a lapse
-	// costs rate and nothing else.
-	account := &models.DeveloperAccount{Plan: models.DeveloperPlanFree}
+func TestDeveloperEntitlement_LapseFallsBackToFree(t *testing.T) {
+	// Free is a working tier, so a lapse costs rate and nothing else. It must
+	// never take a developer's integration away mid-session.
+	for _, plan := range []string{models.TierBase, models.TierPremium, models.TierPremiumPlus} {
+		t.Run(plan, func(t *testing.T) {
+			user := &models.User{}
+			user.Details.Subscription.Plan = plan
+			user.Details.Subscription.Active = false
 
-	got := models.DeveloperPlanFor(account, models.TierPremium)
-	if got.Plan != models.DeveloperPlanFree {
-		t.Fatalf("expected a fall back to Free, got %q", got.Plan)
-	}
-	if got.Source != models.DeveloperEntitlementNone {
-		t.Errorf("source: got %q", got.Source)
-	}
-}
-
-func TestDeveloperEntitlement_LapsedPremiumPlusKeepsAStandalonePro(t *testing.T) {
-	// They bought Pro as well. Losing Premium Plus must not take away the
-	// subscription they are still paying for.
-	account := &models.DeveloperAccount{Plan: models.DeveloperPlanPro, PlanActive: true}
-
-	got := models.DeveloperPlanFor(account, models.TierPremium)
-	if got.Plan != models.DeveloperPlanPro {
-		t.Fatalf("expected Pro from the standalone subscription, got %q", got.Plan)
-	}
-	if got.Source != models.DeveloperEntitlementStandalone {
-		t.Errorf("source: got %q want %q", got.Source, models.DeveloperEntitlementStandalone)
-	}
-	if got.Redundant {
-		t.Error("with no Premium Plus the standalone is not redundant")
-	}
-}
-
-func TestDeveloperEntitlement_StandaloneProWorksOnItsOwn(t *testing.T) {
-	account := &models.DeveloperAccount{Plan: models.DeveloperPlanPro, PlanActive: true}
-
-	got := models.DeveloperPlanFor(account, models.TierFree)
-	if got.Plan != models.DeveloperPlanPro || got.Source != models.DeveloperEntitlementStandalone {
-		t.Fatalf("expected standalone Pro, got %+v", got)
-	}
-	if !got.StandaloneActive {
-		t.Error("their own subscription is active and should say so")
-	}
-}
-
-func TestDeveloperEntitlement_FlagsPayingTwice(t *testing.T) {
-	// Premium Plus already covers it. Worth saying out loud rather than quietly
-	// taking the money.
-	account := &models.DeveloperAccount{Plan: models.DeveloperPlanPro, PlanActive: true}
-
-	got := models.DeveloperPlanFor(account, models.TierPremiumPlus)
-	if !got.Redundant {
-		t.Fatal("a standalone subscription under Premium Plus is redundant and must be flagged")
-	}
-	if got.Source != models.DeveloperEntitlementWebsite {
-		t.Errorf("the website plan is what grants it, got source %q", got.Source)
-	}
-	if !got.StandaloneActive {
-		t.Error("the standalone subscription is still live and still cancellable")
+			got := models.DeveloperPlanFor(user)
+			if got.Plan != models.DeveloperPlanFree {
+				t.Fatalf("a lapsed %s must bill as Free, got %q", plan, got.Plan)
+			}
+			// The page needs to say "your subscription lapsed" rather than
+			// silently showing Free and leaving someone to work out why.
+			if !got.Lapsed {
+				t.Error("a lapsed paid plan should be marked lapsed")
+			}
+			if got.WebsitePlan != plan {
+				t.Errorf("the plan they had should still be reported, got %q", got.WebsitePlan)
+			}
+		})
 	}
 }
 
 func TestDeveloperEntitlement_UnknownPlanFallsBackToFree(t *testing.T) {
-	account := &models.DeveloperAccount{Plan: models.DeveloperPlanFree}
+	// Falling back rather than up is the only safe direction for a value that
+	// arrives from a webhook payload.
+	for _, plan := range []string{"", "  ", "platinum", "pro", "premium_plus_plus", "$ne"} {
+		user := &models.User{}
+		user.Details.Subscription.Plan = plan
+		user.Details.Subscription.Active = true
 
-	// A value from a webhook payload we cannot read must never grant anything.
-	for _, plan := range []string{"", "  ", "platinum", "premium_plus_plus", "PREMIUM-PLUS", "$ne"} {
-		got := models.DeveloperPlanFor(account, plan)
+		got := models.DeveloperPlanFor(user)
 		if got.Plan != models.DeveloperPlanFree {
 			t.Errorf("plan %q granted %q; unknown plans must fall back to Free", plan, got.Plan)
 		}
-	}
-	// And the one spelling that does count still counts, whatever the case.
-	if !models.WebsitePlanIncludesDeveloperPro("  Premium_Plus  ") {
-		t.Error("the real plan should resolve regardless of case and padding")
-	}
-}
-
-func TestDeveloperEntitlement_InactiveStandaloneDoesNotGrantPro(t *testing.T) {
-	account := &models.DeveloperAccount{Plan: models.DeveloperPlanPro, PlanActive: false}
-
-	got := models.DeveloperPlanFor(account, models.TierFree)
-	if got.Plan != models.DeveloperPlanFree {
-		t.Fatalf("a lapsed standalone must bill as Free, got %q", got.Plan)
-	}
-	if got.StandaloneActive {
-		t.Error("an inactive subscription is not active")
-	}
-}
-
-func TestDeveloperEntitlement_NilAccountIsFree(t *testing.T) {
-	if got := models.DeveloperPlanFor(nil, models.TierFree); got.Plan != models.DeveloperPlanFree {
-		t.Errorf("no account means Free, got %q", got.Plan)
-	}
-	// Premium Plus still grants Pro before a developer account exists, which is
-	// what the page shows someone deciding whether to turn one on.
-	if got := models.DeveloperPlanFor(nil, models.TierPremiumPlus); got.Plan != models.DeveloperPlanPro {
-		t.Errorf("Premium Plus should grant Pro even with no developer account yet, got %q", got.Plan)
-	}
-}
-func TestDeveloperPricing_UsesTheApprovedPrices(t *testing.T) {
-	t.Setenv("DEV_API_PRO_PRICE_MONTHLY", "")
-	t.Setenv("DEV_API_PRO_PRICE_YEARLY", "")
-	t.Setenv("PREMIUM_PLUS_PRICE_MONTHLY", "")
-	t.Setenv("PREMIUM_PLUS_PRICE_YEARLY", "")
-
-	pricing := developerPricingConfig()
-	if pricing.ProMonthly != "4.99" || pricing.ProYearly != "49.00" {
-		t.Errorf("expected the approved Pro prices, got %+v", pricing)
-	}
-	if pricing.IncludedWithMonthly != "9.99" || pricing.IncludedWithYearly != "99.00" {
-		t.Errorf("expected the Premium Plus prices, got %+v", pricing)
-	}
-	if pricing.IncludedWithPlan != models.TierPremiumPlus {
-		t.Errorf("includedWithPlan: got %q", pricing.IncludedWithPlan)
-	}
-	if pricing.IncludedWithURL == "" {
-		t.Error("the page needs somewhere to send people to buy Premium Plus")
-	}
-	if !pricing.PriceSet {
-		t.Error("the prices are decided, so the page should show them")
-	}
-}
-
-func TestDeveloperPricing_OverridableWithoutADeploy(t *testing.T) {
-	t.Setenv("DEV_API_PRO_PRICE_MONTHLY", "5.99")
-	t.Setenv("DEV_API_PRO_PRICE_YEARLY", "59.00")
-
-	pricing := developerPricingConfig()
-	if pricing.ProMonthly != "5.99" || pricing.ProYearly != "59.00" {
-		t.Errorf("config should win over the default, got %+v", pricing)
-	}
-}
-
-// Premium Plus raises the provisioning pace too, because it grants the whole
-// Pro tier and pace is part of it. Worth pinning: it is a side effect of the
-// entitlement that is easy to not notice.
-func TestDevCreateCommunity_PremiumPlusGetsTheProPace(t *testing.T) {
-	f := newLimitsFixture(t, models.TierPremiumPlus, 0)
-
-	// Three in a day, which the Free pace of two would have refused.
-	for i := 0; i < 3; i++ {
-		if rr := f.create(t, "Community"); rr.Code != http.StatusCreated {
-			t.Fatalf("community %d: expected 201 on the Pro pace, got %d: %s",
-				i+1, rr.Code, rr.Body.String())
+		if got.Lapsed {
+			t.Errorf("plan %q is unknown, not lapsed", plan)
 		}
+	}
+}
+
+func TestDeveloperEntitlement_NilUserIsFree(t *testing.T) {
+	// The middleware passes nil when the owner read fails. That decides
+	// throughput, not access, so it must resolve rather than error.
+	if got := models.DeveloperPlanFor(nil); got.Plan != models.DeveloperPlanFree {
+		t.Errorf("no user means Free, got %q", got.Plan)
+	}
+}
+
+func TestDeveloperEntitlement_PlanCaseAndPaddingResolve(t *testing.T) {
+	user := &models.User{}
+	user.Details.Subscription.Plan = "  Premium_Plus  "
+	user.Details.Subscription.Active = true
+
+	if got := models.DeveloperPlanFor(user); got.Plan != models.TierPremiumPlus {
+		t.Errorf("a padded, mixed-case plan should still resolve, got %q", got.Plan)
+	}
+}
+
+// ---- the published comparison ----
+
+func TestDeveloperTiers_CoverEveryWebsitePlan(t *testing.T) {
+	tiers := models.DeveloperTiers()
+	if len(tiers) != 4 {
+		t.Fatalf("expected one tier per website plan, got %+v", tiers)
+	}
+	want := []string{models.TierFree, models.TierBase, models.TierPremium, models.TierPremiumPlus}
+	for i, tier := range tiers {
+		if tier.Plan != want[i] {
+			t.Errorf("index %d: got %q want %q (cheapest first)", i, tier.Plan, want[i])
+		}
+		if tier.Limits != models.LimitsForPlan(tier.Plan) {
+			t.Errorf("%s: published %+v but %+v is enforced",
+				tier.Plan, tier.Limits, models.LimitsForPlan(tier.Plan))
+		}
+	}
+}
+
+// The page shows prices beside the limits. They come from the same list
+// /pricing renders, because price cohorts mean a hardcoded figure is not merely
+// stale — it can be wrong for everyone.
+func TestDeveloperAccount_PublishesTheSameTiersAsPricing(t *testing.T) {
+	f := newLimitsFixture(t, models.TierPremium, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/account?userId="+f.owner.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.GetDeveloperAccountHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out developerAccountResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	canonical := SubscriptionTiers()
+	if len(out.WebsiteTiers) != len(canonical) {
+		t.Fatalf("expected the canonical tier list, got %d of %d", len(out.WebsiteTiers), len(canonical))
+	}
+	for i := range canonical {
+		if out.WebsiteTiers[i].Key != canonical[i].Key ||
+			out.WebsiteTiers[i].MonthlyPrice != canonical[i].MonthlyPrice ||
+			out.WebsiteTiers[i].AnnualPrice != canonical[i].AnnualPrice {
+			t.Errorf("tier %d drifted from /pricing: %+v vs %+v",
+				i, out.WebsiteTiers[i], canonical[i])
+		}
+	}
+	if out.UpgradeURL == "" {
+		t.Error("the page needs somewhere to send someone to upgrade")
+	}
+	// And this developer's own tier follows their plan.
+	if out.Entitlement.Plan != models.TierPremium {
+		t.Errorf("entitlement: got %q want premium", out.Entitlement.Plan)
+	}
+	if out.Limits != models.LimitsForPlan(models.TierPremium) {
+		t.Error("the limits shown must be the ones enforced for their plan")
+	}
+}
+
+// A price cohort change has to move the developer page too, not just /pricing.
+func TestDeveloperAccount_FollowsThePriceDrop(t *testing.T) {
+	t.Setenv("KICKBACK_PRICE_DROP_LIVE", "true")
+	f := newLimitsFixture(t, models.TierFree, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/account?userId="+f.owner.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.GetDeveloperAccountHandler(rr, req)
+
+	var out developerAccountResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	var plus *SubscriptionTier
+	for i := range out.WebsiteTiers {
+		if out.WebsiteTiers[i].Key == models.TierPremiumPlus {
+			plus = &out.WebsiteTiers[i]
+		}
+	}
+	if plus == nil {
+		t.Fatal("expected a Premium Plus tier")
+	}
+	if !plus.OnSale || plus.MonthlyPrice != 9.99 {
+		t.Errorf("the developer page must follow the live cohort price, got %+v", *plus)
 	}
 }

@@ -218,24 +218,25 @@ type DevAPIContext struct {
 	Entitlement models.DeveloperEntitlement
 }
 
-// websitePlanOf reads the LPC subscription plan on a key's owner.
+// ownerOf reads the LPC account a key belongs to.
 //
-// Returns Free on any failure rather than an error: this decides throughput,
-// not access, and a key that works at the free rate is a better outcome than a
-// key that stops working because one read failed.
-func (d DeveloperAPI) websitePlanOf(ctx context.Context, userID string) string {
+// Returns nil on any failure, which resolves to the Free tier rather than an
+// error: this decides throughput, not access, and a key that works at the free
+// rate is a better outcome than a key that stops working because one read
+// failed.
+func (d DeveloperAPI) ownerOf(ctx context.Context, userID string) *models.User {
 	if d.UDB == nil {
-		return models.TierFree
+		return nil
 	}
 	_, oid, err := devSafeObjectID(userID)
 	if err != nil {
-		return models.TierFree
+		return nil
 	}
 	var owner models.User
 	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(oid)}).Decode(&owner); err != nil {
-		return models.TierFree
+		return nil
 	}
-	return models.PlanFromUser(&owner)
+	return &owner
 }
 
 // DevContextFrom returns the authenticated developer context, if the request
@@ -341,15 +342,13 @@ func (d DeveloperAPI) RequireDeveloperAPIKey(next http.Handler) http.Handler {
 			return
 		}
 
-		// The tier depends on the owner's website plan as well as the
-		// developer's own subscription, because Premium Plus includes Pro.
-		//
-		// That costs one indexed lookup per request, on top of the key read
-		// this middleware already does on every request. Worth it: the
-		// alternative is denormalizing the entitlement onto the account and
-		// keeping it fresh from a Stripe webhook, which would hand a lapsed
-		// subscriber Pro rates until something remembered to refresh it.
-		entitlement := models.DeveloperPlanFor(account, d.websitePlanOf(ctx, key.UserID))
+		// The tier is the owner's website plan. That costs one indexed lookup
+		// per request, on top of the key read this middleware already does on
+		// every request. Worth it: the alternative is denormalizing the tier
+		// onto the developer account and keeping it fresh from a subscription
+		// webhook, which would hand a lapsed subscriber raised limits until
+		// something remembered to refresh it.
+		entitlement := models.DeveloperPlanFor(d.ownerOf(ctx, key.UserID))
 		limits := models.LimitsForPlan(entitlement.Plan)
 
 		// The global valve first: when the whole surface is saturated, there is
