@@ -147,11 +147,26 @@ One per LPC user who turned on a developer account.
 | `revokedBy`, `revokedAt`, `revokeReason` | | |
 | `createdAt`, `updatedAt` | date | |
 
-**Why SHA-256 and not bcrypt.** A key is 32 bytes from `crypto/rand`, not a
-human-chosen password, so there is no dictionary to attack and no value in a
-slow hash. We verify on every request, where bcrypt's cost would become the
-request budget. The industry does the same thing for the same reason. The
-lookup is by `keyHash`, which is indexed and unique.
+**Why HMAC-SHA256, keyed with a server-side secret.** Three decisions, each of
+which looks wrong from a distance:
+
+- **Not bcrypt or argon2.** Those make guessing a *low-entropy* secret
+  expensive. This key is 32 bytes straight from `crypto/rand`, so there is no
+  dictionary and no human pattern, and the search space is already out of
+  reach. A slow hash buys nothing here and costs on every single request, where
+  its deliberate cost would become the request budget.
+- **Not a bare digest either.** A plain SHA-256 is confirmable by anyone who
+  already holds a candidate key: with a database dump they could check "is this
+  key one of yours" offline, and match a key leaked from elsewhere against the
+  table. Keying the hash with a secret the database does not contain removes
+  that — a dump on its own proves nothing and verifies nothing.
+- **Deterministic, not salted per row**, because this value is looked up by
+  equality on every request. A per-row salt would mean scanning the table.
+
+The secret is `DEV_API_KEY_PEPPER`. When the surface is enabled without it, the
+middleware refuses with a 503 and logs why, rather than hashing everything with
+an empty key — a silent fallback would also mean every key minted before the
+secret appeared stopped validating the moment it was set.
 
 ### `developer_community_grants`
 
@@ -529,12 +544,15 @@ database on everyone else's behalf.
    surface. With the flag off, `/api/v1/dev/…` returns 404 and nothing else in
    the product changes. The domain endpoints, provisioning, the claim flow and
    membership follow in the PRs stacked on this one.
-2. Run `scripts/create_indexes.js` for the new collections.
-3. Turn it on on `police-cad-dev`. Your brother gets the first key and the
+2. Set `DEV_API_KEY_PEPPER` to a long random string (`openssl rand -hex 32`).
+   The surface refuses to serve without it. Treat it like `JWT_SECRET`:
+   changing it later invalidates every issued key, so it is set once.
+3. Run `scripts/create_indexes.js` for the new collections.
+4. Turn it on on `police-cad-dev`. Your brother gets the first key and the
    quickstart.
-4. Turn it on in production. Developer accounts are opt-in, and staff can
+5. Turn it on in production. Developer accounts are opt-in, and staff can
    suspend one.
-5. Paid tier when the Stripe product exists.
+6. Paid tier when the Stripe product exists.
 
 ---
 
