@@ -51,10 +51,10 @@ func (d DeveloperAPI) DevWhoamiHandler(w http.ResponseWriter, r *http.Request) {
 		"limits":      dc.Limits,
 		"communities": communities,
 		"usage": map[string]interface{}{
-			"requestsToday":      dc.Usage.Requests,
-			"accountsCreatedToday": dc.Usage.AccountsCreated,
+			"requestsToday":           dc.Usage.Requests,
+			"accountsCreatedToday":    dc.Usage.AccountsCreated,
 			"communitiesCreatedToday": dc.Usage.CommunitiesCreated,
-			"dailyLimitResetsAt": time.Now().UTC().Add(time.Duration(secondsToNextUTCDay()) * time.Second).Format(time.RFC3339),
+			"dailyLimitResetsAt":      time.Now().UTC().Add(time.Duration(secondsToNextUTCDay()) * time.Second).Format(time.RFC3339),
 		},
 	})
 }
@@ -90,12 +90,12 @@ func (d DeveloperAPI) DevListCommunitiesHandler(w http.ResponseWriter, r *http.R
 // has no need for members, roles, codes or settings, and the smallest answer
 // that does the job is the one that leaks least.
 type devCommunitySummary struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	GrantSource       string `json:"grantSource"`
-	GrantStatus       string `json:"grantStatus"`
-	MembersCount      int    `json:"membersCount"`
-	PendingDeletion   bool   `json:"pendingDeletion"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	GrantSource     string `json:"grantSource"`
+	GrantStatus     string `json:"grantStatus"`
+	MembersCount    int    `json:"membersCount"`
+	PendingDeletion bool   `json:"pendingDeletion"`
 }
 
 // grantedCommunitySummaries loads every community this key holds a grant on,

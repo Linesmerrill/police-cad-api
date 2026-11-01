@@ -72,9 +72,11 @@ func (d DeveloperAPI) ResolveCommunity(w http.ResponseWriter, r *http.Request) (
 		return nil, false
 	}
 
-	communityID := mux.Vars(r)["communityId"]
-	oid := objectIDOrZero(communityID)
-	if oid.IsZero() {
+	// The canonical hex from the parsed id, not the caller's string. Checking
+	// the input and then using the original would leave the raw value in the
+	// query; using what the parse produced cannot.
+	communityID, oid, err := devSafeObjectID(mux.Vars(r)["communityId"])
+	if err != nil {
 		devError(w, http.StatusBadRequest, "invalid_community", "That community id is not valid.", nil)
 		return nil, false
 	}
@@ -83,9 +85,9 @@ func (d DeveloperAPI) ResolveCommunity(w http.ResponseWriter, r *http.Request) (
 	defer cancel()
 
 	grant, err := d.GrantDB.FindOne(ctx, bson.M{
-		"keyId":       dc.Key.ID.Hex(),
-		"communityId": communityID,
-		"status":      models.DeveloperKeyActive,
+		"keyId":       devEq(dc.Key.ID.Hex()),
+		"communityId": devEq(communityID),
+		"status":      devEq(models.DeveloperKeyActive),
 	})
 	if err != nil || grant == nil {
 		// One answer for "no such community" and "not granted to you", so a key
@@ -97,7 +99,7 @@ func (d DeveloperAPI) ResolveCommunity(w http.ResponseWriter, r *http.Request) (
 		return nil, false
 	}
 
-	community, err := d.CDB.FindOneIncludingPending(ctx, bson.M{"_id": oid})
+	community, err := d.CDB.FindOneIncludingPending(ctx, bson.M{"_id": devEq(oid)})
 	if err != nil || community == nil {
 		d.RecordOutcome(r, http.StatusForbidden)
 		devError(w, http.StatusForbidden, "community_not_granted",
@@ -123,7 +125,10 @@ func (d DeveloperAPI) ResolveCommunity(w http.ResponseWriter, r *http.Request) (
 
 // ActiveGrantCommunityIDs lists the communities a key may currently act in.
 func (d DeveloperAPI) ActiveGrantCommunityIDs(ctx context.Context, keyID string) ([]string, error) {
-	cur, err := d.GrantDB.Find(ctx, bson.M{"keyId": keyID, "status": models.DeveloperKeyActive})
+	cur, err := d.GrantDB.Find(ctx, bson.M{
+		"keyId":  devEq(keyID),
+		"status": devEq(models.DeveloperKeyActive),
+	})
 	if err != nil {
 		return nil, err
 	}

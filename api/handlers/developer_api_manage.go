@@ -53,11 +53,11 @@ func devActorID(r *http.Request) string {
 // ---- developer account ----
 
 type developerAccountResponse struct {
-	Enabled  bool                      `json:"enabled"`
-	Account  *models.DeveloperAccount  `json:"account,omitempty"`
-	Limits   models.DeveloperLimits    `json:"limits"`
-	Scopes   []models.DeveloperScope   `json:"availableScopes"`
-	KeyCount int                       `json:"keyCount"`
+	Enabled  bool                     `json:"enabled"`
+	Account  *models.DeveloperAccount `json:"account,omitempty"`
+	Limits   models.DeveloperLimits   `json:"limits"`
+	Scopes   []models.DeveloperScope  `json:"availableScopes"`
+	KeyCount int                      `json:"keyCount"`
 	// UpgradeAvailable is false until the Stripe product exists. The website
 	// hides the upgrade path rather than offering a button that cannot work.
 	UpgradeAvailable bool   `json:"upgradeAvailable"`
@@ -84,7 +84,7 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 		TermsVersion:     developerTermsVersion,
 	}
 
-	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": actorID})
+	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
 	if err != nil || account == nil {
 		_ = json.NewEncoder(w).Encode(resp)
 		return
@@ -110,9 +110,9 @@ func developerPaidTierAvailable() bool {
 }
 
 type enableDeveloperAccountRequest struct {
-	AppName      string `json:"appName"`
-	AppURL       string `json:"appUrl"`
-	AcceptTerms  bool   `json:"acceptTerms"`
+	AppName     string `json:"appName"`
+	AppURL      string `json:"appUrl"`
+	AcceptTerms bool   `json:"acceptTerms"`
 }
 
 // EnableDeveloperAccountHandler turns on a developer account for the signed-in
@@ -143,7 +143,7 @@ func (d DeveloperAPI) EnableDeveloperAccountHandler(w http.ResponseWriter, r *ht
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	if existing, err := d.AccountDB.FindOne(ctx, bson.M{"userId": actorID}); err == nil && existing != nil {
+	if existing, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)}); err == nil && existing != nil {
 		// Already a developer. Re-enabling is how someone comes back after
 		// disabling, so this reactivates rather than refusing.
 		now := primitive.NewDateTimeFromTime(time.Now())
@@ -215,7 +215,7 @@ func (d DeveloperAPI) DisableDeveloperAccountHandler(w http.ResponseWriter, r *h
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": actorID})
+	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
 	if err != nil || account == nil {
 		config.InfoStatus("no developer account", http.StatusNotFound, w, fmt.Errorf("not found"))
 		return
@@ -297,7 +297,7 @@ func (d DeveloperAPI) revokeKeysAndGrants(ctx context.Context, keyFilter bson.M,
 // ---- keys ----
 
 type createDeveloperKeyRequest struct {
-	Name string   `json:"name"`
+	Name   string   `json:"name"`
 	Scopes []string `json:"scopes"`
 	// CommunityID binds the key to a community at creation. Optional: a key
 	// that will create its own communities does not need one.
@@ -341,7 +341,7 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": actorID})
+	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
 	if err != nil || account == nil {
 		config.InfoStatus("enable a developer account first", http.StatusForbidden, w, fmt.Errorf("no developer account"))
 		return
@@ -388,14 +388,16 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 	// giving a key write access to it: anyone may *request*, but only an owner,
 	// an administrator, or a member with manage-community rights makes it live.
 	grantStatus := ""
+	boundCommunityID := ""
 	var community *models.Community
 	if req.CommunityID != "" {
-		oid := objectIDOrZero(req.CommunityID)
-		if oid.IsZero() {
-			config.InfoStatus("invalid community id", http.StatusBadRequest, w, fmt.Errorf("bad community id"))
+		canonical, oid, idErr := devSafeObjectID(req.CommunityID)
+		if idErr != nil {
+			config.InfoStatus("invalid community id", http.StatusBadRequest, w, idErr)
 			return
 		}
-		community, err = d.CDB.FindOne(ctx, bson.M{"_id": oid})
+		boundCommunityID = canonical
+		community, err = d.CDB.FindOne(ctx, bson.M{"_id": devEq(oid)})
 		if err != nil || community == nil {
 			config.InfoStatus("community not found", http.StatusNotFound, w, fmt.Errorf("no community"))
 			return
@@ -403,7 +405,7 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 		if userHasCommunityPermission(community, actorID, "manage community settings") {
 			grantStatus = models.DeveloperKeyActive
 		} else {
-			if !isApprovedMemberOfCommunity(ctx, d.UDB, actorID, req.CommunityID) {
+			if !isApprovedMemberOfCommunity(ctx, d.UDB, actorID, boundCommunityID) {
 				config.InfoStatus("you are not a member of that community", http.StatusForbidden, w,
 					fmt.Errorf("not a member"))
 				return
@@ -443,7 +445,7 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 			ID:          primitive.NewObjectID(),
 			KeyID:       key.ID.Hex(),
 			DeveloperID: account.ID.Hex(),
-			CommunityID: req.CommunityID,
+			CommunityID: boundCommunityID,
 			Source:      models.DeveloperGrantOwnerApproved,
 			Status:      grantStatus,
 			RequestedAt: now,
@@ -458,7 +460,7 @@ func (d DeveloperAPI) CreateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 		}
 		grant = &g
 
-		logAudit(d.ALDB, objectIDOrZero(req.CommunityID), "developer_key.created", "developer_api",
+		logAudit(d.ALDB, objectIDOrZero(boundCommunityID), "developer_key.created", "developer_api",
 			actorID, resolveActorName(d.UDB, actorID), key.ID.Hex(), name,
 			map[string]interface{}{"scopes": scopes, "grantStatus": grantStatus})
 	}
@@ -542,7 +544,7 @@ func (d DeveloperAPI) ListDeveloperKeysHandler(w http.ResponseWriter, r *http.Re
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": actorID})
+	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
 	if err != nil || account == nil {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"keys": []interface{}{}})
 		return
@@ -605,10 +607,9 @@ func (d DeveloperAPI) RevokeDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	keyID := mux.Vars(r)["keyId"]
-	oid := objectIDOrZero(keyID)
-	if oid.IsZero() {
-		config.InfoStatus("invalid key id", http.StatusBadRequest, w, fmt.Errorf("bad key id"))
+	keyID, oid, err := devSafeObjectID(mux.Vars(r)["keyId"])
+	if err != nil {
+		config.InfoStatus("invalid key id", http.StatusBadRequest, w, err)
 		return
 	}
 
@@ -617,14 +618,14 @@ func (d DeveloperAPI) RevokeDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 
 	// Scoped by userId as well as _id, so a developer can only revoke their
 	// own keys however the id was obtained.
-	key, err := d.KeyDB.FindOne(ctx, bson.M{"_id": oid, "userId": actorID})
+	key, err := d.KeyDB.FindOne(ctx, bson.M{"_id": devEq(oid), "userId": devEq(actorID)})
 	if err != nil || key == nil {
 		config.InfoStatus("key not found", http.StatusNotFound, w, fmt.Errorf("not found"))
 		return
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
-	d.revokeKeysAndGrants(ctx, bson.M{"_id": oid}, key.DeveloperID, actorID, "revoked by developer", now)
+	d.revokeKeysAndGrants(ctx, bson.M{"_id": devEq(oid)}, key.DeveloperID, actorID, "revoked by developer", now)
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"revoked": true, "keyId": keyID})
 }
@@ -643,17 +644,16 @@ func (d DeveloperAPI) RotateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	keyID := mux.Vars(r)["keyId"]
-	oid := objectIDOrZero(keyID)
-	if oid.IsZero() {
-		config.InfoStatus("invalid key id", http.StatusBadRequest, w, fmt.Errorf("bad key id"))
+	_, oid, err := devSafeObjectID(mux.Vars(r)["keyId"])
+	if err != nil {
+		config.InfoStatus("invalid key id", http.StatusBadRequest, w, err)
 		return
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	old, err := d.KeyDB.FindOne(ctx, bson.M{"_id": oid, "userId": actorID})
+	old, err := d.KeyDB.FindOne(ctx, bson.M{"_id": devEq(oid), "userId": devEq(actorID)})
 	if err != nil || old == nil {
 		config.InfoStatus("key not found", http.StatusNotFound, w, fmt.Errorf("not found"))
 		return
@@ -710,9 +710,9 @@ func (d DeveloperAPI) RotateDeveloperKeyHandler(w http.ResponseWriter, r *http.R
 
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"key":          newKey,
-		"plaintextKey": plaintext,
-		"warning":      "Copy this key now. It is not stored and cannot be shown again.",
+		"key":           newKey,
+		"plaintextKey":  plaintext,
+		"warning":       "Copy this key now. It is not stored and cannot be shown again.",
 		"replacedKeyId": old.ID.Hex(),
 	})
 }
@@ -726,17 +726,16 @@ func (d DeveloperAPI) GetDeveloperKeyUsageHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	keyID := mux.Vars(r)["keyId"]
-	oid := objectIDOrZero(keyID)
-	if oid.IsZero() {
-		config.InfoStatus("invalid key id", http.StatusBadRequest, w, fmt.Errorf("bad key id"))
+	keyID, oid, err := devSafeObjectID(mux.Vars(r)["keyId"])
+	if err != nil {
+		config.InfoStatus("invalid key id", http.StatusBadRequest, w, err)
 		return
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	key, err := d.KeyDB.FindOne(ctx, bson.M{"_id": oid, "userId": actorID})
+	key, err := d.KeyDB.FindOne(ctx, bson.M{"_id": devEq(oid), "userId": devEq(actorID)})
 	if err != nil || key == nil {
 		config.InfoStatus("key not found", http.StatusNotFound, w, fmt.Errorf("not found"))
 		return
@@ -746,15 +745,27 @@ func (d DeveloperAPI) GetDeveloperKeyUsageHandler(w http.ResponseWriter, r *http
 	days := 30
 	from := time.Now().UTC().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
 	to := time.Now().UTC().Format("2006-01-02")
+	// Both bounds are validated to YYYY-MM-DD and the validated value is what
+	// goes into the query, so a range bound is always a date-shaped scalar.
 	if v := strings.TrimSpace(r.URL.Query().Get("from")); v != "" {
-		from = v
+		day, dErr := devSafeDay(v)
+		if dErr != nil {
+			config.InfoStatus("invalid from date", http.StatusBadRequest, w, dErr)
+			return
+		}
+		from = day
 	}
 	if v := strings.TrimSpace(r.URL.Query().Get("to")); v != "" {
-		to = v
+		day, dErr := devSafeDay(v)
+		if dErr != nil {
+			config.InfoStatus("invalid to date", http.StatusBadRequest, w, dErr)
+			return
+		}
+		to = day
 	}
 
 	cur, err := d.UsageDB.Find(ctx, bson.M{
-		"keyId": keyID,
+		"keyId": devEq(keyID),
 		"day":   bson.M{"$gte": from, "$lte": to},
 	}, options.Find().SetSort(bson.D{{Key: "day", Value: 1}}))
 	if err != nil {
@@ -788,11 +799,11 @@ func (d DeveloperAPI) GetDeveloperKeyUsageHandler(w http.ResponseWriter, r *http
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"keyId":            keyID,
-		"plan":             plan,
-		"limits":           limits,
-		"days":             rows,
-		"requestsToday":    today.Requests,
+		"keyId":             keyID,
+		"plan":              plan,
+		"limits":            limits,
+		"days":              rows,
+		"requestsToday":     today.Requests,
 		"requestsThisMonth": monthRequests,
 		"errorsToday": map[string]int{
 			"rateLimited":  today.Rejected429,
@@ -814,17 +825,16 @@ func (d DeveloperAPI) GetDeveloperKeyUsageHandler(w http.ResponseWriter, r *http
 func (d DeveloperAPI) ListCommunityDeveloperKeysHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	communityID := mux.Vars(r)["communityId"]
-	oid := objectIDOrZero(communityID)
-	if oid.IsZero() {
-		config.InfoStatus("invalid community id", http.StatusBadRequest, w, fmt.Errorf("bad community id"))
+	communityID, oid, err := devSafeObjectID(mux.Vars(r)["communityId"])
+	if err != nil {
+		config.InfoStatus("invalid community id", http.StatusBadRequest, w, err)
 		return
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	community, err := d.CDB.FindOne(ctx, bson.M{"_id": oid})
+	community, err := d.CDB.FindOne(ctx, bson.M{"_id": devEq(oid)})
 	if err != nil || community == nil {
 		config.InfoStatus("community not found", http.StatusNotFound, w, fmt.Errorf("not found"))
 		return
@@ -833,7 +843,7 @@ func (d DeveloperAPI) ListCommunityDeveloperKeysHandler(w http.ResponseWriter, r
 		return
 	}
 
-	cur, err := d.GrantDB.Find(ctx, bson.M{"communityId": communityID})
+	cur, err := d.GrantDB.Find(ctx, bson.M{"communityId": devEq(communityID)})
 	if err != nil {
 		config.ErrorStatus("failed to load keys", http.StatusInternalServerError, w, err)
 		return
@@ -875,18 +885,21 @@ func (d DeveloperAPI) RevokeCommunityDeveloperKeyHandler(w http.ResponseWriter, 
 func (d DeveloperAPI) setCommunityGrantStatus(w http.ResponseWriter, r *http.Request, status string) {
 	w.Header().Set("Content-Type", "application/json")
 
-	communityID := mux.Vars(r)["communityId"]
-	keyID := mux.Vars(r)["keyId"]
-	cOID := objectIDOrZero(communityID)
-	if cOID.IsZero() || objectIDOrZero(keyID).IsZero() {
-		config.InfoStatus("invalid id", http.StatusBadRequest, w, fmt.Errorf("bad id"))
+	communityID, cOID, err := devSafeObjectID(mux.Vars(r)["communityId"])
+	if err != nil {
+		config.InfoStatus("invalid community id", http.StatusBadRequest, w, err)
+		return
+	}
+	keyID, _, err := devSafeObjectID(mux.Vars(r)["keyId"])
+	if err != nil {
+		config.InfoStatus("invalid key id", http.StatusBadRequest, w, err)
 		return
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	community, err := d.CDB.FindOne(ctx, bson.M{"_id": cOID})
+	community, err := d.CDB.FindOne(ctx, bson.M{"_id": devEq(cOID)})
 	if err != nil || community == nil {
 		config.InfoStatus("community not found", http.StatusNotFound, w, fmt.Errorf("not found"))
 		return
@@ -910,7 +923,7 @@ func (d DeveloperAPI) setCommunityGrantStatus(w http.ResponseWriter, r *http.Req
 	}
 
 	res, err := d.GrantDB.UpdateOne(ctx,
-		bson.M{"keyId": keyID, "communityId": communityID},
+		bson.M{"keyId": devEq(keyID), "communityId": devEq(communityID)},
 		bson.M{"$set": set})
 	if err != nil {
 		config.ErrorStatus("failed to update key access", http.StatusInternalServerError, w, err)
