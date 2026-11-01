@@ -56,22 +56,18 @@ jobs:
       - name: Build
         run: go build -v ./...
 
-  # test:
-  #   needs: build
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
 
-  #     - name: Set up Go
-  #       uses: actions/setup-go@v4
-  #       with:
-  #         go-version: 1.22
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          # Read from go.mod rather than a pin, so the toolchain the tests run
+          # on is the one the module declares.
+          go-version-file: go.mod
 
-  #     - name: Test and Coverage
-  #       run: go test ./... -coverprofile=coverage.txt -covermode=atomic
-
-  #     - name: Upload coverage report
-  #       uses: codecov/codecov-action@v3
-  #       with:
-  #         files: ./coverage.txt
-  #         flags: unittests
+      - name: Test
+        run: go test ./...

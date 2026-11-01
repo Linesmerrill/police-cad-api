@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.uber.org/zap"
 
 	"github.com/linesmerrill/police-cad-api/api"
 	"github.com/linesmerrill/police-cad-api/models"
@@ -214,6 +216,21 @@ func (d DeveloperAPI) DevBulkSetUnitStatusHandler(w http.ResponseWriter, r *http
 	})
 }
 
+// ensureMembersMap turns a null or missing members field into an empty map.
+//
+// Targeted by the filter rather than read-then-write, so it costs nothing when
+// the map is already there and cannot race with a concurrent write: the filter
+// only matches documents still in the broken state.
+func (d DeveloperAPI) ensureMembersMap(ctx context.Context, communityID primitive.ObjectID) error {
+	return d.CDB.UpdateOne(ctx, bson.M{
+		"_id": devEq(communityID),
+		"$or": []bson.M{
+			{"community.members": bson.M{"$exists": false}},
+			{"community.members": nil},
+		},
+	}, bson.M{"$set": bson.M{"community.members": bson.M{}}})
+}
+
 // applyUnitStatuses validates and writes a batch of status updates.
 //
 // Returns one result per entry and how many landed. A nil result means the
@@ -221,6 +238,19 @@ func (d DeveloperAPI) DevBulkSetUnitStatusHandler(w http.ResponseWriter, r *http
 func (d DeveloperAPI) applyUnitStatuses(w http.ResponseWriter, r *http.Request, dc *DevAPIContext, cc *CommunityContext, entries []devUnitStatusEntry) ([]map[string]interface{}, int) {
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
+
+	// Heal a community whose members map was never initialised.
+	//
+	// Communities a key created before this was fixed hold BSON null here, and
+	// $set on "community.members.<id>.<field>" against null is a Mongo error,
+	// so every status write on them failed. Fixing creation alone would leave
+	// those communities broken for good, and a one-off migration would only
+	// cover the ones that exist today. This repairs on the path that needs it,
+	// once per community, and is a no-op everywhere else.
+	if err := d.ensureMembersMap(ctx, cc.Community.ID); err != nil {
+		zap.S().Warnw("developer api: could not initialise the members map",
+			"community", cc.Community.ID.Hex(), "error", err)
+	}
 
 	results := make([]map[string]interface{}, 0, len(entries))
 	applied := 0

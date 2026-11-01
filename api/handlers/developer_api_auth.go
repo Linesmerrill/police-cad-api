@@ -407,7 +407,11 @@ func (d DeveloperAPI) RequireDeveloperAPIKey(next http.Handler) http.Handler {
 		// down or fail one.
 		d.touchKeyLastUsed(key.ID)
 
-		dc := &DevAPIContext{Key: *key, Account: *account, Limits: limits, Usage: *usage}
+		// The entitlement was computed above to derive the limits and then
+		// dropped, so whoami reported an empty plan beside Premium-level
+		// numbers. Carry it.
+		dc := &DevAPIContext{Key: *key, Account: *account, Limits: limits,
+			Usage: *usage, Entitlement: entitlement}
 		next.ServeHTTP(w, r.WithContext(withDevContext(r.Context(), dc)))
 	})
 }
