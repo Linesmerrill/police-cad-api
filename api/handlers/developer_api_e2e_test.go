@@ -2386,6 +2386,21 @@ func TestE2E_SyntheticCleanupIsScopedThreeWays(t *testing.T) {
 	}
 }
 
+func TestE2E_SyntheticCleanupRefusesARevokedKey(t *testing.T) {
+	f := newReportFixture(t)
+	for hash, key := range f.keyDB.byHash {
+		key.Status = models.DeveloperKeyRevoked
+		f.keyDB.byHash[hash] = key
+	}
+
+	rr := f.run(t, http.MethodDelete, "/synthetic-records",
+		`{"confirm":"`+f.community.ID.Hex()+`"}`, nil,
+		f.api.RequireScope(models.ScopePlayersProvision, f.api.DevCleanupSyntheticRecordsHandler))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("a revoked key must be refused, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestE2E_SyntheticCleanupRefusesAnotherCommunity(t *testing.T) {
 	f := newReportFixture(t)
 	other := primitive.NewObjectID()

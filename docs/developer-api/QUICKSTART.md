@@ -8,7 +8,7 @@ calls.
 > **Base URL.** Defined once, in `models.DeveloperAPIBaseURL`, and overridable
 > with `DEVELOPER_API_PUBLIC_BASE_URL`. Every example here, the OpenAPI
 > `servers` list and the console all read that one value, so the host cannot be
-> right in one place and stale in another — which is exactly how this hostname
+> right in one place and stale in another, which is exactly how this hostname
 > came to be documented before it had a DNS record.
 
 - Auth: `Authorization: Bearer lpc_live_…` on every request
@@ -68,8 +68,8 @@ show up in `whoami`.
 
 ## 2. Upsert a player
 
-Needs `players:provision`. You name players by their **game identifier** — a
-FiveM license or a Discord ID — and never by an LPC user id or an email.
+Needs `players:provision`. You name players by their **game identifier**: a
+FiveM license or a Discord ID, and never by an LPC user id or an email.
 
 ```bash
 curl -X POST https://api.linespolice-cad.com/api/v1/dev/players \
@@ -83,7 +83,7 @@ curl -X POST https://api.linespolice-cad.com/api/v1/dev/players \
 ```
 
 **This is idempotent.** Call it on every connect. The same identifier always
-returns the same account, and calling it twice does not make two players — even
+returns the same account, and calling it twice does not make two players, even
 if two of your servers call it at the same instant.
 
 `license:` and the bare value are the same player, and so are different cases,
@@ -182,7 +182,7 @@ X-RateLimit-Reset: 1762041600
 A 429 adds `Retry-After` in seconds and a body saying which limit you hit.
 
 **Do not loop over your players.** A server ticking once a second with 64
-players is 64 requests a second — 3,840 a minute — which is over even the paid
+players is 64 requests a second, 3,840 a minute, which is over even the paid
 limit. Send one **bulk** call per tick instead:
 
 ```bash
@@ -352,7 +352,7 @@ connected client, which would hand your key to anyone who joins.
 ## 6. Write a draft report for a person to file
 
 A game server can see what happened. It cannot decide whether what happened was
-an arrest — that has jail time, a fine and a court case behind it, and it
+an arrest, that has jail time, a fine and a court case behind it, and it
 belongs to a person in the community. So you write a **draft**, and someone with
 the community's permission reads it and files it on the website.
 
@@ -393,13 +393,13 @@ Four things worth knowing before you build against it:
   key never grants more than the player it reports for.
 - **Facts and narrative stay apart.** `facts` is what your server observed;
   `narrative` is prose about it. **A narrative with no `generated` field is
-  recorded as generated** — send `"generated": false` only when a person typed
+  recorded as generated**: send `"generated": false` only when a person typed
   the text. There is no way to mark a narrative as evidence, and there will not
   be.
 - **You name charges; the community prices them.** Send the violation names
   from the community's own penal code and we fill in the fine and the jail time
   from it. A name the community does not have is refused, so you cannot invent
-  an amount — and a community that retunes its codes sees new drafts priced the
+  an amount, and a community that retunes its codes sees new drafts priced the
   new way without you changing anything.
 
 Retries are safe: the same `externalId` updates the draft rather than adding a
@@ -425,7 +425,7 @@ curl -sX POST "$BASE/communities/$COMMUNITY/warrants/requests" \
 does: a community can set its warrant mode to auto-approve, and most have, so
 an officer clicking the button in the CAD gets an approved warrant at once.
 That is a convenience for a person who is already in the CAD and can see the
-result. A game server fires on a trigger, retries, and nobody is watching — so
+result. A game server fires on a trigger, retries, and nobody is watching, so
 a key gets the pending queue the community already has, a person reviews it
 with the tools they already use, and you read the outcome back.
 
@@ -446,7 +446,7 @@ curl -sX POST "$BASE/players" \
 
 Everything that character owns inherits the mark, so you do not have to repeat
 it on each civilian, vehicle and firearm. Synthetic records are left out of the
-searches and rosters players see — including the website's own name database —
+searches and rosters players see, including the website's own name database,
 unless a caller passes `includeSynthetic=true`.
 
 They count against your key's daily provisioning cap, so a runaway loop is
@@ -463,7 +463,7 @@ curl -sX DELETE "$BASE/communities/$COMMUNITY/synthetic-records" \
 ```
 
 `confirm` has to be the community id. This deletes rows, so it will not run
-against an id you did not state — which is what stops a cleanup aimed at your
+against an id you did not state, which is what stops a cleanup aimed at your
 test community running against a live one because a config value was stale. It
 only ever touches synthetic records your own key created, in the community in
 the path. When `more` comes back true, call it again.
@@ -474,7 +474,7 @@ Every error has a stable `error` code and a message written for a person.
 
 | status | code | what to do |
 |---|---|---|
-| 401 | `invalid_key` | the key is wrong, revoked, or you sent it in the wrong header — it goes in `Authorization: Bearer`, not `X-API-Key` |
+| 401 | `invalid_key` | the key is wrong, revoked, or you sent it in the wrong header, it goes in `Authorization: Bearer`, not `X-API-Key` |
 | 403 | `missing_scope` | the response names the scope; add it to the key |
 | 403 | `community_not_granted` | the key is not approved for that community |
 | 403 | `community_pending_deletion` | the owner deleted it; it is read-only for 30 days |
@@ -492,7 +492,7 @@ Every error has a stable `error` code and a message written for a person.
 
 ## Things a key can never do
 
-Not a matter of scopes — these are not on the surface at all:
+Not a matter of scopes, these are not on the surface at all:
 
 - change a password, an email, or anything else about a claimed account
 - touch money: wallets, balances, transfers, economy payouts
@@ -510,5 +510,5 @@ Not a matter of scopes — these are not on the surface at all:
 ## Getting help
 
 Open a ticket in [our Discord](https://discord.gg/Y9ytW2ZMp4). Include your
-key's **display prefix** (`lpc_live_a1b2c3d4`) — never the key itself — and the
+key's **display prefix** (`lpc_live_a1b2c3d4`), never the key itself, and the
 `error` code you got.

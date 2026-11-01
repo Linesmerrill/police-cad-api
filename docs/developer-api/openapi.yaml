@@ -19,7 +19,7 @@ info:
     gateway secret and a developer key will never satisfy it.
 
     **Player references.** You name a player by their game identifier, as
-    `provider:identifier` — `fivem:1a2b3c4d`, `discord:198573466634`. Never by
+    `provider:identifier`, `fivem:1a2b3c4d`, `discord:198573466634`. Never by
     an email, and never by an LPC user id you did not get from us. A FiveM
     `license:` prefix is optional and case does not matter.
 
@@ -34,7 +34,7 @@ info:
     billing, account security, admin, community settings or roles, and there
     will not be. It also cannot file a report or issue a warrant: a report draft
     is a proposal for a person to act on, and a warrant request lands pending
-    for the community's own reviewer. Those two are not gaps — a record with
+    for the community's own reviewer. Those two are not gaps, a record with
     legal consequences inside a community is a person's decision.
 
     **Rate limits.** Every response carries `X-RateLimit-*`, and a 429 carries
@@ -160,14 +160,14 @@ paths:
                   community: { $ref: "#/components/schemas/CreatedCommunity" }
         "403":
           description: |
-            `owner_community_limit_reached` — the developer's own plan cap.
+            `owner_community_limit_reached`: the developer's own plan cap.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "409":
-          description: "`community_limit_reached` — this key's total."
+          description: "`community_limit_reached`: this key's total."
         "429":
-          description: "`provision_cap_reached` — this key's daily cap."
+          description: "`provision_cap_reached`: this key's daily cap."
 
   /communities/{communityId}/departments:
     get:
@@ -207,11 +207,11 @@ paths:
 
         A player we have not seen gets a new account that **cannot be logged
         into**: it holds no email and no password. That is the mechanism, not an
-        omission — an email you send us is an email you control. The player
+        omission, an email you send us is an email you control. The player
         takes ownership with a claim code.
 
         **Simulated characters.** Set `synthetic: true` for an NPC. It is a
-        claim you make, not something we infer — the same key provisions
+        claim you make, not something we infer, the same key provisions
         accounts for real players arriving from the game, so "a key created it"
         says nothing about whether there is a person behind it. A synthetic
         player, and every record it owns, is left out of the searches and
@@ -221,7 +221,7 @@ paths:
 
         Synthetic accounts count against this key's daily provisioning cap, so
         a runaway loop is still bounded, but they do not count against a
-        player's own per-community character cap — an NPC is nobody's
+        player's own per-community character cap, an NPC is nobody's
         character, and counting it both ways would mean your scenery consuming
         your players' allowances.
       security: [{ developerKey: [players:provision] }]
@@ -266,7 +266,7 @@ paths:
                 properties:
                   player: { $ref: "#/components/schemas/Player" }
         "429":
-          description: "`provision_cap_reached` — the daily account cap. Lookups of players you already know still work."
+          description: "`provision_cap_reached`: the daily account cap. Lookups of players you already know still work."
 
   /players/{provider}/{identifier}:
     get:
@@ -284,7 +284,7 @@ paths:
         "200":
           description: The player.
         "404":
-          description: "`player_not_found` — no player of yours has that identifier."
+          description: "`player_not_found`: no player of yours has that identifier."
 
   /players/{provider}/{identifier}/claim-code:
     post:
@@ -296,7 +296,7 @@ paths:
         their account.
 
         Single use, 30 minutes, and issuing a new one kills any outstanding
-        code — so an older code still visible in a stream VOD stops working.
+        code, so an older code still visible in a stream VOD stops working.
         Only for unclaimed accounts your key created.
       security: [{ developerKey: [players:provision] }]
       parameters:
@@ -315,7 +315,7 @@ paths:
                   url: { type: string, format: uri }
                   instructions: { type: string }
         "404": { description: "`player_not_found`" }
-        "409": { description: "`already_claimed` — the player owns their account; they sign in normally." }
+        "409": { description: "`already_claimed`: the player owns their account; they sign in normally." }
 
   /communities/{communityId}/members:
     get:
@@ -370,7 +370,7 @@ paths:
         "403":
           description: |
             `acting_player_lacks_permission`, `acting_player_not_a_member`,
-            `acting_player_banned`, or `player_banned` — a banned player cannot
+            `acting_player_banned`, or `player_banned`: a banned player cannot
             be re-invited by a key; an admin lifts the ban on the website.
 
   /communities/{communityId}/members/{playerRef}:
@@ -457,7 +457,7 @@ paths:
         even the paid limit. One bulk call per tick is 60 a minute.
 
         **Partial by design.** Each unit reports its own result, so one unknown
-        player does not discard the other sixty-three — a game server cannot
+        player does not discard the other sixty-three, a game server cannot
         usefully retry a whole tick. Up to 100 units per call.
       security: [{ developerKey: [units:write] }]
       parameters: [{ $ref: "#/components/parameters/communityId" }]
@@ -532,7 +532,7 @@ paths:
         a person. When given, it must be a member.
 
         `location` is written into the top of the call's text, because the call
-        model has no location field — a location stored where no surface renders
+        model has no location field, a location stored where no surface renders
         it is one no officer would ever see.
       security: [{ developerKey: [calls:write] }]
       parameters: [{ $ref: "#/components/parameters/communityId" }]
@@ -601,7 +601,7 @@ paths:
                   call: { $ref: "#/components/schemas/DispatchCall" }
                   created: { type: boolean }
         "400": { description: "`invalid_external_id` or `invalid_title`." }
-        "403": { description: "`player_not_a_member` — someone in assignedUnits." }
+        "403": { description: "`player_not_a_member`: someone in assignedUnits." }
 
   /communities/{communityId}/dispatch/calls/{externalId}:
     get:
@@ -612,7 +612,7 @@ paths:
         own incident ids and nothing else, and needs to find out what we think
         the state is before it resumes.
 
-        The response carries both ids — yours to match on, ours for the deep
+        The response carries both ids, yours to match on, ours for the deep
         link.
       security: [{ developerKey: [calls:read] }]
       parameters:
@@ -678,7 +678,7 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: Closed. }
-        "404": { description: "`call_not_found` — including a call in another community." }
+        "404": { description: "`call_not_found`: including a call in another community." }
 
   /communities/{communityId}/bolos:
     get:
@@ -834,7 +834,7 @@ paths:
                 image: { type: string, format: uri }
       responses:
         "201": { description: Registered. }
-        "404": { description: "`civilian_not_found` — one answer for absent, not theirs, and not in this community." }
+        "404": { description: "`civilian_not_found`: one answer for absent, not theirs, and not in this community." }
 
   /communities/{communityId}/firearms:
     get:
@@ -903,7 +903,7 @@ paths:
       description: |
         **This does not file a report.** It writes a draft for a person in the
         community to read and act on, and there is no endpoint on this API that
-        turns one into a record — the verb that files it lives on the website,
+        turns one into a record, the verb that files it lives on the website,
         behind the community's own permission.
 
         That is deliberate. An arrest report here produces jail time, a fine
@@ -923,7 +923,7 @@ paths:
         **Structured facts stay apart from the narrative.** `facts` is what the
         server observed; `narrative` is prose about it. A narrative with no
         `generated` field is recorded as generated, because the callers of this
-        API are automated by definition — and a narrative can never be labelled
+        API are automated by definition, and a narrative can never be labelled
         as evidence.
 
         **Charges are priced by the community, not by you.** Send the violation
@@ -932,7 +932,7 @@ paths:
 
         **`reportingOfficer` is required and is what gets checked.** The key's
         scope decides whether it may propose a draft at all; whether this
-        particular draft is allowed is decided by that player's access — an
+        particular draft is allowed is decided by that player's access, an
         approved, unbanned member who is in a department. If you name a
         `templateSlug`, the community's own form gates apply to them too.
       security: [{ developerKey: [reports:write] }]
@@ -973,7 +973,7 @@ paths:
             `template_disabled_for_department`, `subject_not_a_member`.
         "409":
           description: >-
-            `draft_already_reviewed` — a person has filed or rejected it, so it
+            `draft_already_reviewed`: a person has filed or rejected it, so it
             can no longer be changed. Write a new draft with a new `externalId`
             if there is more to report.
     get:
@@ -1073,7 +1073,7 @@ paths:
       summary: List a community's warrants
       description: |
         Filter by `accused` to answer the question a game server actually asks
-        on a stop — "is there a warrant out for this person?" — in one request
+        on a stop, "is there a warrant out for this person?", in one request
         rather than a scan.
 
         Pages are 1-based.
@@ -1127,7 +1127,7 @@ paths:
         reading it back. Poll `GET /warrants`, or read the warrant by id.
 
         **Idempotent on `(community, source, externalId)`.** A retry returns the
-        request you already made, at whatever stage it has reached — so a queue
+        request you already made, at whatever stage it has reached, so a queue
         replay cannot flood a judge, and a retry after approval hands you the
         decision rather than raising a second request.
 
@@ -1178,7 +1178,7 @@ paths:
       summary: Read one warrant
       description: |
         The community is part of the lookup, so a warrant id from another
-        community is a 404 rather than a 403 — its existence is never
+        community is a 404 rather than a 403, its existence is never
         confirmed.
       security: [{ developerKey: [warrants:read] }]
       parameters:
@@ -1207,14 +1207,14 @@ paths:
 
         Three boundaries, and each is the whole safety of the endpoint:
 
-        * **synthetic only** — a record created for a real player is never
+        * **synthetic only**: a record created for a real player is never
           touched, whichever key made it;
-        * **this key only** — you cannot clean up another integration's output,
+        * **this key only**: you cannot clean up another integration's output,
           even in a community you both hold;
-        * **this community only** — scoped by the community in the path.
+        * **this community only**: scoped by the community in the path.
 
         `confirm` must be the community id. This endpoint deletes rows, so it
-        will not run against an id the caller did not state — which is what
+        will not run against an id the caller did not state, which is what
         stops a cleanup aimed at a test community running against a live one
         because a config value was stale.
 
@@ -1492,7 +1492,7 @@ components:
         externalId:
           type: string
           maxLength: 128
-          description: Your own id. Required — it is what makes these writes idempotent.
+          description: Your own id. Required, it is what makes these writes idempotent.
         source:
           type: string
           description: Your integration's name. Defaults to the key's name.
@@ -1502,7 +1502,7 @@ components:
         location: { type: string, maxLength: 2000 }
         type:
           type: string
-          description: Free text, not an enum — communities run their own taxonomies.
+          description: Free text, not an enum, communities run their own taxonomies.
           example: traffic
         priority: { type: string, example: urgent }
         caller:
@@ -1588,7 +1588,7 @@ components:
         callExternalId:
           type: string
           description: >-
-            Link the draft to a dispatch call by your own id for that call —
+            Link the draft to a dispatch call by your own id for that call,
             the id you still have after a restart.
         callId:
           type: string
@@ -1597,7 +1597,7 @@ components:
           allOf: [{ $ref: "#/components/schemas/PlayerRef" }]
           description: >-
             The player who observed this. Required, and it is this player's
-            community access that is checked — never the key's.
+            community access that is checked, never the key's.
         departmentId:
           type: string
           description: >-
