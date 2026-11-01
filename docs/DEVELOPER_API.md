@@ -484,6 +484,36 @@ These are **pace**, not totals.
 
 Free 2, Pro 10.
 
+### Price, and who already has Pro
+
+| | monthly | yearly |
+|---|---|---|
+| **Free** | $0 | $0 |
+| **Pro** | $4.99 | $49.00 |
+
+**Website Premium Plus ($9.99 / month, $99 / year) includes Developer API Pro.**
+It is the same person and the same account, so charging a second subscription
+for throughput they already pay for would be indefensible.
+
+`models.DeveloperPlanFor(account, websitePlan)` is the single resolver, and it
+answers with a reason as well as a tier:
+
+- **Premium Plus active** → Pro, `source: website_plan`. No second subscription.
+- **Standalone Developer API Pro active** → Pro, `source: standalone`.
+- **Both** → Pro, and `redundant: true`. The page says Premium Plus already
+  covers it and offers to cancel the standalone, rather than quietly taking the
+  money twice.
+- **Neither, or an unrecognised plan** → Free. Falling back rather than up is
+  the only safe direction for a value that arrives from a webhook payload.
+
+A lapse falls back rather than locking out: Premium Plus ending drops a
+developer to their standalone subscription if they have one, and to Free if they
+do not. Free is a working tier, so a lapse costs rate and nothing else.
+
+Note that Pro raises the **provisioning pace** as well as the request rate, so a
+Premium Plus developer gets 10 communities a day rather than 2. That is
+intended — it is the whole tier, not just its rate limits.
+
 ### How many communities a developer may own
 
 **Their website plan decides, and nothing here does.**

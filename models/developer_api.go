@@ -237,14 +237,102 @@ type DeveloperAccount struct {
 	UpdatedAt            primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
 }
 
-// EffectivePlan is the plan to apply right now. A plan that is not active bills
-// as Free, so a lapsed subscription degrades throughput instead of locking a
-// developer out of their own integration mid-session.
+// EffectivePlan is the plan the developer's own subscription pays for.
+//
+// A plan that is not active bills as Free, so a lapsed subscription degrades
+// throughput instead of locking a developer out of their own integration
+// mid-session.
+//
+// This is the standalone subscription only. A website Premium Plus plan also
+// grants Pro, and that cannot be seen from here because it lives on the user
+// record — use DeveloperPlanFor, which is the answer every caller actually
+// wants. This method remains because it is what "did they buy the add-on"
+// means, which is a different question from "what are they entitled to".
 func (d DeveloperAccount) EffectivePlan() string {
 	if d.Plan == DeveloperPlanPro && d.PlanActive {
 		return DeveloperPlanPro
 	}
 	return DeveloperPlanFree
+}
+
+// How a developer came to be on their tier.
+const (
+	DeveloperEntitlementNone       = "none"
+	DeveloperEntitlementStandalone = "standalone"
+	DeveloperEntitlementWebsite    = "website_plan"
+)
+
+// DeveloperEntitlement is the tier a developer is on, and why.
+//
+// The "why" is not decoration. Premium Plus includes Developer API Pro, so
+// someone can be on Pro without ever having bought it, and someone else can be
+// paying for both. Only a reason distinguishes "upgrade to Pro" from "you
+// already have Pro" from "you are paying twice, here is how to stop".
+type DeveloperEntitlement struct {
+	Plan   string `json:"plan"`
+	Source string `json:"source"`
+	// IncludedWith names the website plan granting Pro, when one does.
+	IncludedWith string `json:"includedWith,omitempty"`
+	// StandaloneActive is whether their own Developer API subscription is live,
+	// regardless of whether it is what is granting their tier.
+	StandaloneActive bool `json:"standaloneActive"`
+	// Redundant is the double-charge case: a live standalone subscription that
+	// the website plan already covers. The page offers to cancel it.
+	Redundant bool `json:"redundant"`
+}
+
+// DeveloperPlanFor resolves the tier to apply, given the developer's own
+// subscription and the website plan on their LPC account.
+//
+// Premium Plus includes Developer API Pro. It is the same person and the same
+// account, so charging them a second subscription for throughput they are
+// already paying for would be indefensible.
+//
+// A lapse falls back rather than locking out: Premium Plus ending drops them to
+// their standalone subscription if they have one, and to Free if they do not.
+// Free is a working tier, so a lapse costs rate and nothing else.
+//
+// An unrecognised website plan grants nothing. Falling back rather than up is
+// the only safe direction for a value that arrives from a webhook payload.
+func DeveloperPlanFor(account *DeveloperAccount, websitePlan string) DeveloperEntitlement {
+	standalone := account != nil && account.EffectivePlan() == DeveloperPlanPro
+	includedWith := ""
+	if WebsitePlanIncludesDeveloperPro(websitePlan) {
+		includedWith = TierPremiumPlus
+	}
+
+	switch {
+	case includedWith != "":
+		return DeveloperEntitlement{
+			Plan:             DeveloperPlanPro,
+			Source:           DeveloperEntitlementWebsite,
+			IncludedWith:     includedWith,
+			StandaloneActive: standalone,
+			// Paying for both. Worth saying out loud rather than quietly
+			// taking the money.
+			Redundant: standalone,
+		}
+	case standalone:
+		return DeveloperEntitlement{
+			Plan:             DeveloperPlanPro,
+			Source:           DeveloperEntitlementStandalone,
+			StandaloneActive: true,
+		}
+	default:
+		return DeveloperEntitlement{
+			Plan:   DeveloperPlanFree,
+			Source: DeveloperEntitlementNone,
+		}
+	}
+}
+
+// WebsitePlanIncludesDeveloperPro reports whether a website plan comes with
+// Developer API Pro.
+//
+// One function so the gate, the page and the billing copy cannot disagree about
+// which plans are included.
+func WebsitePlanIncludesDeveloperPro(websitePlan string) bool {
+	return strings.ToLower(strings.TrimSpace(websitePlan)) == TierPremiumPlus
 }
 
 // DeveloperAPIKey is one issued key.

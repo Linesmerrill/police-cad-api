@@ -90,6 +90,11 @@ type developerAccountResponse struct {
 	Tiers          []models.DeveloperTier          `json:"tiers"`
 	CommunityPlans []models.CommunityPlanAllowance `json:"communityPlans"`
 	Pricing        developerPricing                `json:"pricing"`
+
+	// Which tier is in force and why. The page needs the reason to tell
+	// "upgrade to Pro" apart from "Premium Plus already covers this" and from
+	// "you are paying for both".
+	Entitlement models.DeveloperEntitlement `json:"entitlement"`
 }
 
 // developerPricing is what to show for the paid tier.
@@ -99,11 +104,21 @@ type developerAccountResponse struct {
 // PriceSet is false and the page shows a placeholder rather than inventing a
 // number.
 type developerPricing struct {
-	ProPrice    string `json:"proPrice,omitempty"`
-	ProInterval string `json:"proInterval,omitempty"`
-	Currency    string `json:"currency,omitempty"`
-	PriceSet    bool   `json:"priceSet"`
-	Purchasable bool   `json:"purchasable"`
+	ProMonthly string `json:"proMonthly,omitempty"`
+	ProYearly  string `json:"proYearly,omitempty"`
+	Currency   string `json:"currency,omitempty"`
+	PriceSet   bool   `json:"priceSet"`
+	// Purchasable is whether there is a Stripe price to send someone to.
+	// Separate from PriceSet, because showing a price and being able to take
+	// money are different readinesses and a dead button is worse than none.
+	Purchasable bool `json:"purchasable"`
+
+	// The website plan that includes Pro, and what it costs, so the page can
+	// point someone at the better deal when it is the better deal.
+	IncludedWithPlan    string `json:"includedWithPlan,omitempty"`
+	IncludedWithMonthly string `json:"includedWithMonthly,omitempty"`
+	IncludedWithYearly  string `json:"includedWithYearly,omitempty"`
+	IncludedWithURL     string `json:"includedWithUrl,omitempty"`
 }
 
 // developerCommunityAllowance is the website plan's community allowance.
@@ -154,7 +169,8 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 
 	resp.Enabled = true
 	resp.Account = account
-	resp.Limits = models.LimitsForPlan(account.EffectivePlan())
+	resp.Entitlement = models.DeveloperPlanFor(account, resp.Communities.Plan)
+	resp.Limits = models.LimitsForPlan(resp.Entitlement.Plan)
 	resp.KeyCount = int(count)
 	resp.AcceptedTermsVersion = account.TermsVersion
 	// An account from before this field existed has no version, which counts as
@@ -204,22 +220,32 @@ func (d DeveloperAPI) communityAllowance(ctx context.Context, actorID string) de
 // separate and is what makes the tier actually purchasable. Both unset is the
 // current state, and the page is expected to say so plainly.
 func developerPricingConfig() developerPricing {
-	price := strings.TrimSpace(os.Getenv("DEV_API_PRO_PRICE"))
-	interval := strings.TrimSpace(os.Getenv("DEV_API_PRO_INTERVAL"))
-	if interval == "" {
-		interval = "month"
-	}
-	currency := strings.TrimSpace(os.Getenv("DEV_API_PRO_CURRENCY"))
-	if currency == "" {
-		currency = "USD"
-	}
+	monthly := envOr("DEV_API_PRO_PRICE_MONTHLY", "4.99")
+	yearly := envOr("DEV_API_PRO_PRICE_YEARLY", "49.00")
 	return developerPricing{
-		ProPrice:    price,
-		ProInterval: interval,
-		Currency:    currency,
-		PriceSet:    price != "",
+		ProMonthly:  monthly,
+		ProYearly:   yearly,
+		Currency:    envOr("DEV_API_PRO_CURRENCY", "USD"),
+		PriceSet:    monthly != "" || yearly != "",
 		Purchasable: developerPaidTierAvailable(),
+
+		IncludedWithPlan:    models.TierPremiumPlus,
+		IncludedWithMonthly: envOr("PREMIUM_PLUS_PRICE_MONTHLY", "9.99"),
+		IncludedWithYearly:  envOr("PREMIUM_PLUS_PRICE_YEARLY", "99.00"),
+		IncludedWithURL:     envOr("PREMIUM_PLUS_URL", "/community-pricing"),
 	}
+}
+
+// envOr reads a config value with a fallback.
+//
+// The defaults are the approved prices, so the page is correct on a deployment
+// that has not set them yet rather than blank. An override exists because a
+// price should be changeable without a deploy.
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // developerPaidTierAvailable reports whether there is a Stripe price to send
