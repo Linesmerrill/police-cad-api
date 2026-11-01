@@ -225,6 +225,24 @@ func (d DeveloperAPI) FileCommunityReportDraftHandler(w http.ResponseWriter, r *
 			"source":     draft.SourceName,
 		})
 
+	// The integration has been waiting for exactly this. An event means it
+	// does not have to poll the draft to find out, and the record id is in the
+	// payload so it can deep-link the player straight to what was filed.
+	EmitDeveloperEvent(d.EventDB, devEvent{
+		Type:               models.EventReportDraftFiled,
+		CommunityID:        cc.ID.Hex(),
+		ResourceID:         draft.ID.Hex(),
+		ResourceExternalID: draft.ExternalID,
+		ResourceSource:     draft.SourceName,
+		Actor:              models.EventActorWebsite,
+		Data: map[string]string{
+			"kind":            draft.Kind,
+			"filedRecordId":   recordID,
+			"filedRecordKind": recordKind,
+			"reviewedBy":      actorName,
+		},
+	})
+
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"draft":  d.reviewView(*updated),
 		"filed":  true,
@@ -290,6 +308,22 @@ func (d DeveloperAPI) RejectCommunityReportDraftHandler(w http.ResponseWriter, r
 	logAudit(d.ALDB, cc.ID, "report_draft.rejected", "community",
 		actorID, actorName, draft.ID.Hex(), draft.Kind,
 		map[string]interface{}{"externalId": draft.ExternalID, "source": draft.SourceName})
+
+	// The reason travels with the event, because it is the thing the officer in
+	// the game needs to be told and the integration is what tells them.
+	EmitDeveloperEvent(d.EventDB, devEvent{
+		Type:               models.EventReportDraftRejected,
+		CommunityID:        cc.ID.Hex(),
+		ResourceID:         draft.ID.Hex(),
+		ResourceExternalID: draft.ExternalID,
+		ResourceSource:     draft.SourceName,
+		Actor:              models.EventActorWebsite,
+		Data: map[string]string{
+			"kind":       draft.Kind,
+			"reviewedBy": actorName,
+			"notes":      notes,
+		},
+	})
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"draft": d.reviewView(*updated)})
 }

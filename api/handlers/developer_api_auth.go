@@ -105,6 +105,16 @@ type DeveloperAPI struct {
 	// template and its per-department toggle; both are optional, and a draft
 	// that names a template is refused rather than accepted unchecked when
 	// they are absent.
+	// The activity feed, the event stream and the webhook endpoints.
+	//
+	// All three are optional: a nil store means that feature answers "not
+	// available" rather than panicking, which is what lets the surface run in
+	// a test or a partial deployment without every collection present.
+	ActivityDB        databases.DeveloperActivityDatabase
+	EventDB           databases.DeveloperEventDatabase
+	WebhookDB         databases.DeveloperWebhookDatabase
+	WebhookDeliveryDB databases.DeveloperWebhookDeliveryDatabase
+
 	ReportDraftDB    databases.DeveloperReportDraftDatabase
 	WarrantDB        databases.WarrantDatabase
 	FormTemplateDB   databases.FormTemplateDatabase
@@ -289,6 +299,27 @@ func devError(w http.ResponseWriter, status int, code, message string, extra map
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+// devErrorTraced writes the same shape and records the code on the request's
+// activity row.
+//
+// Separate from devError rather than folded into it, because devError has no
+// request to read the trace from — and threading one through every call site
+// would mean touching a hundred lines to serve the three places where the code
+// is the thing a developer needs the feed to tell them.
+//
+// Used where a refusal is not self-evident from the status: which scope was
+// missing, which limit was hit. Everywhere else the status is the whole story
+// and the row records that.
+func (d DeveloperAPI) devErrorTraced(w http.ResponseWriter, r *http.Request, status int, code, message string, extra map[string]interface{}) {
+	if trace, ok := devTraceFrom(r.Context()); ok {
+		trace.ErrorCode = code
+		if scope, has := extra["requiredScope"].(string); has {
+			trace.RequiredScope = scope
+		}
+	}
+	devError(w, status, code, message, extra)
+}
+
 // ---- the middleware ----
 
 // RequireDeveloperAPIKey authenticates a developer key and applies its rate
@@ -315,6 +346,24 @@ func (d DeveloperAPI) RequireDeveloperAPIKey(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+
+		// Every response carries a request id, including the ones this
+		// middleware refuses. Set before any other work, so a developer
+		// quoting an id in a ticket can always be matched to a request — and
+		// so a 401 is as traceable as a 200, which is when it matters most.
+		//
+		// The caller's own correlation id is echoed beside ours, never in
+		// place of it: a value the caller controls cannot be an identity.
+		trace := &devRequestTrace{
+			RequestID:     newRequestID(),
+			CorrelationID: safeCorrelationID(r.Header.Get(devCorrelationIDHeader)),
+			StartedAt:     time.Now(),
+		}
+		w.Header().Set(devRequestIDHeader, trace.RequestID)
+		if trace.CorrelationID != "" {
+			w.Header().Set(devCorrelationIDHeader, trace.CorrelationID)
+		}
+		r = r.WithContext(withDevTrace(r.Context(), trace))
 
 		// Enabled but unconfigured is a deployment mistake, not a request
 		// error. Refusing loudly beats hashing every key with an empty secret
@@ -433,7 +482,15 @@ func (d DeveloperAPI) RequireDeveloperAPIKey(next http.Handler) http.Handler {
 		// numbers. Carry it.
 		dc := &DevAPIContext{Key: *key, Account: *account, Limits: limits,
 			Usage: *usage, Entitlement: entitlement}
-		next.ServeHTTP(w, r.WithContext(withDevContext(r.Context(), dc)))
+
+		// The activity row is written after the handler has answered, because
+		// until then there is no status to record. The recorder remembers the
+		// status and deliberately does not buffer the body: the feed never
+		// stores one, so holding a copy of every response on the way out would
+		// be memory spent on nothing.
+		recorder := &devStatusRecorder{ResponseWriter: w}
+		next.ServeHTTP(recorder, r.WithContext(withDevContext(r.Context(), dc)))
+		d.recordActivity(dc, trace, r, recorder.statusOr())
 	})
 }
 

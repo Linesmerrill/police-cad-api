@@ -36,7 +36,10 @@ func (d DeveloperAPI) RequireScope(scope string, next http.HandlerFunc) http.Han
 		}
 		if !dc.Key.HasScope(scope) {
 			d.RecordOutcome(r, http.StatusForbidden)
-			devError(w, http.StatusForbidden, "missing_scope",
+			// Traced, so the activity feed says which scope was missing. That
+			// is the single most common thing an integration author needs the
+			// feed to explain, and a bare 403 on a row does not say it.
+			d.devErrorTraced(w, r, http.StatusForbidden, "missing_scope",
 				"This API key does not have the scope needed for that.",
 				map[string]interface{}{"requiredScope": scope, "keyScopes": dc.Key.Scopes})
 			return
@@ -93,7 +96,7 @@ func (d DeveloperAPI) ResolveCommunity(w http.ResponseWriter, r *http.Request) (
 		// One answer for "no such community" and "not granted to you", so a key
 		// cannot be used to discover which community ids exist.
 		d.RecordOutcome(r, http.StatusForbidden)
-		devError(w, http.StatusForbidden, "community_not_granted",
+		d.devErrorTraced(w, r, http.StatusForbidden, "community_not_granted",
 			"This API key is not approved for that community.",
 			map[string]interface{}{"communityId": communityID})
 		return nil, false

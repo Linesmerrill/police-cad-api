@@ -78,9 +78,17 @@ func (f *fakeDevKeyDB) FindOne(_ context.Context, filter interface{}) (*models.D
 		return nil, mongo.ErrNoDocuments
 	}
 	if oid, ok := devFilterObjectID(m["_id"]); ok {
-		if k, found := f.byID[oid.Hex()]; found {
-			return &k, nil
+		k, found := f.byID[oid.Hex()]
+		if !found {
+			return nil, mongo.ErrNoDocuments
 		}
+		// The console routes put the owning user in the filter so a key id
+		// belonging to somebody else is a 404. A fake that ignored that
+		// condition would make every ownership test pass for the wrong reason.
+		if want, has := devFilterString(m["userId"]); has && k.UserID != want {
+			return nil, mongo.ErrNoDocuments
+		}
+		return &k, nil
 	}
 	return nil, mongo.ErrNoDocuments
 }

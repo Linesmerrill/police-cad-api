@@ -2,13 +2,17 @@ package handlers
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -1011,6 +1015,8 @@ func (f *fakeReportDraftDB) UpdateOne(_ context.Context, filter, update interfac
 	fm, _ := filter.(bson.M)
 	um, _ := update.(bson.M)
 	set, _ := um["$set"].(bson.M)
+	push, _ := um["$push"].(bson.M)
+	pull, _ := um["$pull"].(bson.M)
 
 	oid, ok := devFilterObjectID(fm["_id"])
 	if !ok {
@@ -1019,6 +1025,25 @@ func (f *fakeReportDraftDB) UpdateOne(_ context.Context, filter, update interfac
 	for i := range f.drafts {
 		if f.drafts[i].ID != oid {
 			continue
+		}
+		// Attachments arrive as $push and leave as $pull, so the fake has to
+		// understand both. Without them an attachment write looks like it
+		// worked and the list stays empty, which would make the idempotency
+		// and count-cap tests pass while proving nothing.
+		if v, has := push["attachments"].(models.DeveloperReportAttachment); has {
+			f.drafts[i].Attachments = append(f.drafts[i].Attachments, v)
+		}
+		if cond, has := pull["attachments"].(bson.M); has {
+			if wanted, found := devFilterString(cond["id"]); found {
+				kept := f.drafts[i].Attachments[:0:0]
+				for _, a := range f.drafts[i].Attachments {
+					if a.ID == wanted {
+						continue
+					}
+					kept = append(kept, a)
+				}
+				f.drafts[i].Attachments = kept
+			}
 		}
 		if v, has := set["status"].(string); has {
 			f.drafts[i].Status = v
@@ -2956,6 +2981,46 @@ func TestE2E_ListFiltersComeFromOurOwnConstants(t *testing.T) {
 		}
 	})
 
+	t.Run("activity outcome", func(t *testing.T) {
+		got, err := devSafeActivityOutcome("DENIED")
+		if err != nil || got != models.DeveloperActivityDenied {
+			t.Errorf("got %q, %v", got, err)
+		}
+		if _, err := devSafeActivityOutcome("refused"); err == nil {
+			t.Error("an outcome we do not record must be refused")
+		}
+	})
+
+	t.Run("event types", func(t *testing.T) {
+		got, err := devSafeEventTypes("call.created,call.closed")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 || got[0] != models.EventCallCreated || got[1] != models.EventCallClosed {
+			t.Errorf("got %+v", got)
+		}
+		if _, err := devSafeEventTypes("call.close"); err == nil {
+			t.Error("a typo must be refused rather than matching nothing")
+		}
+		if _, err := devSafeEventTypes(""); err == nil {
+			t.Error("an empty list must be refused rather than matching everything")
+		}
+	})
+
+	t.Run("webhook subscription", func(t *testing.T) {
+		got, err := validateWebhookEvents([]string{"call.created", "call.created"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Deduplicated, and the value is ours.
+		if len(got) != 1 || got[0] != models.EventCallCreated {
+			t.Errorf("got %+v", got)
+		}
+		if _, err := validateWebhookEvents([]string{"call.close"}); err == nil {
+			t.Error("a typo must be refused at save time rather than never firing")
+		}
+	})
+
 }
 
 // The list handlers go through those helpers, not around them. A filter value
@@ -2973,4 +3038,1351 @@ func TestE2E_ListHandlersRefuseAnUnknownKind(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "invalid_kind") {
 		t.Errorf("got %s", rr.Body.String())
 	}
+}
+
+// ============================================================================
+// Phase 3b: the activity feed, the change cursor, webhooks, attachments.
+//
+// Items 4-6 of Hiceguy's follow-up. The common thread in these tests is that a
+// developer has to be able to find out what happened without asking us, and
+// that nothing we push out is a second source of truth — a missed delivery
+// degrades to the polling case rather than to a gap.
+// ============================================================================
+
+type fakeActivityDB struct {
+	databases.DeveloperActivityDatabase
+	mu   sync.Mutex
+	rows []models.DeveloperAPIActivity
+}
+
+func (f *fakeActivityDB) InsertOne(_ context.Context, row models.DeveloperAPIActivity) (databases.InsertOneResultHelper, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rows = append(f.rows, row)
+	return fakeInsertResult{id: row.ID}, nil
+}
+
+func (f *fakeActivityDB) Find(_ context.Context, filter interface{}, _ ...*options.FindOptions) ([]models.DeveloperAPIActivity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+	out := []models.DeveloperAPIActivity{}
+	for _, row := range f.rows {
+		if v, ok := devFilterString(m["keyId"]); ok && row.KeyID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["communityId"]); ok && row.CommunityID != v {
+			continue
+		}
+		if v, ok := devFilterString(m["outcome"]); ok && row.Outcome != v {
+			continue
+		}
+		if v, ok := devFilterString(m["requestId"]); ok && row.RequestID != v {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (f *fakeActivityDB) CountDocuments(ctx context.Context, filter interface{}, _ ...*options.CountOptions) (int64, error) {
+	rows, err := f.Find(ctx, filter)
+	return int64(len(rows)), err
+}
+
+func (f *fakeActivityDB) snapshot() []models.DeveloperAPIActivity {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]models.DeveloperAPIActivity{}, f.rows...)
+}
+
+type fakeEventDB struct {
+	databases.DeveloperEventDatabase
+	mu     sync.Mutex
+	events []models.DeveloperAPIEvent
+}
+
+func (f *fakeEventDB) InsertOne(_ context.Context, event models.DeveloperAPIEvent) (databases.InsertOneResultHelper, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+	return fakeInsertResult{id: event.ID}, nil
+}
+
+func (f *fakeEventDB) Find(_ context.Context, filter interface{}, opts ...*options.FindOptions) ([]models.DeveloperAPIEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+
+	out := []models.DeveloperAPIEvent{}
+	for _, event := range f.events {
+		if v, ok := devFilterString(m["communityId"]); ok && event.CommunityID != v {
+			continue
+		}
+		if cond, ok := m["_id"].(bson.M); ok {
+			if gt, has := cond["$gt"].(primitive.ObjectID); has && !(event.ID.Hex() > gt.Hex()) {
+				continue
+			}
+		}
+		if cond, ok := m["type"].(bson.M); ok {
+			if wanted, has := cond["$in"].([]string); has && !containsString(wanted, event.Type) {
+				continue
+			}
+		}
+		if cond, ok := m["actorKeyId"].(bson.M); ok {
+			if ne, has := cond["$ne"].(string); has && event.ActorKeyID == ne {
+				continue
+			}
+		}
+		out = append(out, event)
+	}
+
+	// Honour the sort direction the handler asked for, because the cursor's
+	// correctness depends on it: ascending to walk forward, descending to find
+	// the newest when priming.
+	descending := false
+	if len(opts) > 0 && opts[0] != nil && opts[0].Sort != nil {
+		if d, ok := opts[0].Sort.(bson.D); ok && len(d) > 0 {
+			if v, isInt := d[0].Value.(int); isInt && v < 0 {
+				descending = true
+			}
+		}
+	}
+	sortEventsByID(out, descending)
+
+	if len(opts) > 0 && opts[0] != nil && opts[0].Limit != nil {
+		if n := int(*opts[0].Limit); n < len(out) {
+			out = out[:n]
+		}
+	}
+	return out, nil
+}
+
+func sortEventsByID(events []models.DeveloperAPIEvent, descending bool) {
+	for i := 1; i < len(events); i++ {
+		for j := i; j > 0; j-- {
+			before := events[j].ID.Hex() < events[j-1].ID.Hex()
+			if descending {
+				before = events[j].ID.Hex() > events[j-1].ID.Hex()
+			}
+			if !before {
+				break
+			}
+			events[j], events[j-1] = events[j-1], events[j]
+		}
+	}
+}
+
+func (f *fakeEventDB) CountDocuments(ctx context.Context, filter interface{}, _ ...*options.CountOptions) (int64, error) {
+	rows, err := f.Find(ctx, filter)
+	return int64(len(rows)), err
+}
+
+func (f *fakeEventDB) waitForEvents(t *testing.T, want int) []models.DeveloperAPIEvent {
+	t.Helper()
+	// Events are emitted off the request path, so the test waits rather than
+	// asserting immediately. Short, bounded, and a failure says how many
+	// arrived.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		f.mu.Lock()
+		got := append([]models.DeveloperAPIEvent{}, f.events...)
+		f.mu.Unlock()
+		if len(got) >= want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected at least %d events, got %d: %+v", want, len(got), got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+type fakeWebhookDB struct {
+	databases.DeveloperWebhookDatabase
+	mu    sync.Mutex
+	hooks []models.DeveloperWebhook
+}
+
+func (f *fakeWebhookDB) FindOne(_ context.Context, filter interface{}) (*models.DeveloperWebhook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+	for _, hook := range f.hooks {
+		if oid, ok := devFilterObjectID(m["_id"]); ok && hook.ID != oid {
+			continue
+		}
+		if v, ok := devFilterString(m["keyId"]); ok && hook.KeyID != v {
+			continue
+		}
+		found := hook
+		return &found, nil
+	}
+	return nil, mongo.ErrNoDocuments
+}
+
+func (f *fakeWebhookDB) Find(_ context.Context, filter interface{}, _ ...*options.FindOptions) ([]models.DeveloperWebhook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+	out := []models.DeveloperWebhook{}
+	for _, hook := range f.hooks {
+		if v, ok := devFilterString(m["keyId"]); ok && hook.KeyID != v {
+			continue
+		}
+		out = append(out, hook)
+	}
+	return out, nil
+}
+
+func (f *fakeWebhookDB) InsertOne(_ context.Context, hook models.DeveloperWebhook) (databases.InsertOneResultHelper, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hooks = append(f.hooks, hook)
+	return fakeInsertResult{id: hook.ID}, nil
+}
+
+func (f *fakeWebhookDB) UpdateOne(_ context.Context, filter, update interface{}, _ ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fm, _ := filter.(bson.M)
+	um, _ := update.(bson.M)
+	set, _ := um["$set"].(bson.M)
+	oid, _ := devFilterObjectID(fm["_id"])
+
+	for i := range f.hooks {
+		if f.hooks[i].ID != oid {
+			continue
+		}
+		if v, ok := set["url"].(string); ok {
+			f.hooks[i].URL = v
+		}
+		if v, ok := set["events"].([]string); ok {
+			f.hooks[i].Events = v
+		}
+		if v, ok := set["communities"].([]string); ok {
+			f.hooks[i].Communities = v
+		}
+		if v, ok := set["status"].(string); ok {
+			f.hooks[i].Status = v
+		}
+		if v, ok := set["secretHash"].(string); ok {
+			f.hooks[i].SecretHash = v
+		}
+		if v, ok := set["secretPrefix"].(string); ok {
+			f.hooks[i].SecretPrefix = v
+		}
+		if v, ok := set["consecutiveFailures"].(int); ok {
+			f.hooks[i].ConsecutiveFailures = v
+		}
+		if v, ok := set["disabledReason"].(string); ok {
+			f.hooks[i].DisabledReason = v
+		}
+		return &mongo.UpdateResult{ModifiedCount: 1}, nil
+	}
+	return &mongo.UpdateResult{}, nil
+}
+
+func (f *fakeWebhookDB) DeleteOne(_ context.Context, filter interface{}, _ ...*options.DeleteOptions) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, _ := filter.(bson.M)
+	oid, _ := devFilterObjectID(m["_id"])
+	kept := f.hooks[:0:0]
+	for _, hook := range f.hooks {
+		if hook.ID == oid {
+			continue
+		}
+		kept = append(kept, hook)
+	}
+	f.hooks = kept
+	return nil
+}
+
+func (f *fakeWebhookDB) CountDocuments(ctx context.Context, filter interface{}, _ ...*options.CountOptions) (int64, error) {
+	rows, err := f.Find(ctx, filter)
+	return int64(len(rows)), err
+}
+
+// eventsFixture is the phase-3 stack with the activity, event and webhook
+// stores in place.
+type eventsFixture struct {
+	*reportFixture
+	activityDB *fakeActivityDB
+	eventDB    *fakeEventDB
+	webhookDB  *fakeWebhookDB
+}
+
+func newEventsFixture(t *testing.T) *eventsFixture {
+	t.Helper()
+	base := newReportFixture(t)
+
+	activityDB := &fakeActivityDB{}
+	eventDB := &fakeEventDB{}
+	webhookDB := &fakeWebhookDB{}
+	base.api.ActivityDB = activityDB
+	base.api.EventDB = eventDB
+	base.api.WebhookDB = webhookDB
+
+	return &eventsFixture{
+		reportFixture: base,
+		activityDB:    activityDB,
+		eventDB:       eventDB,
+		webhookDB:     webhookDB,
+	}
+}
+
+// ---- item 4: the activity feed ----
+
+// Every response carries a request id, including the ones the middleware
+// refuses. A 401 that cannot be traced is the one a developer most needs to
+// trace.
+func TestE2E_EveryResponseCarriesARequestID(t *testing.T) {
+	f := newEventsFixture(t)
+
+	t.Run("on a success", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/dev/whoami", nil)
+		req.Header.Set("Authorization", "Bearer "+f.plaintext)
+		f.api.RequireDeveloperAPIKey(http.HandlerFunc(f.api.DevWhoamiHandler)).ServeHTTP(rr, req)
+
+		if rr.Header().Get(devRequestIDHeader) == "" {
+			t.Error("a successful response must carry a request id")
+		}
+	})
+
+	t.Run("on a refusal", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/dev/whoami", nil)
+		req.Header.Set("Authorization", "Bearer lpc_live_not_a_real_key")
+		f.api.RequireDeveloperAPIKey(http.HandlerFunc(f.api.DevWhoamiHandler)).ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", rr.Code)
+		}
+		if rr.Header().Get(devRequestIDHeader) == "" {
+			t.Error("a refused response must carry a request id too; that is the one worth tracing")
+		}
+	})
+}
+
+// A caller's own id is echoed beside ours, never in place of it.
+func TestE2E_CorrelationIDIsEchoedNotTrusted(t *testing.T) {
+	f := newEventsFixture(t)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dev/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	req.Header.Set(devCorrelationIDHeader, "sixpd-tick-8821")
+	f.api.RequireDeveloperAPIKey(http.HandlerFunc(f.api.DevWhoamiHandler)).ServeHTTP(rr, req)
+
+	if got := rr.Header().Get(devCorrelationIDHeader); got != "sixpd-tick-8821" {
+		t.Errorf("the caller's correlation id must come back, got %q", got)
+	}
+	// Ours is still there and is not the caller's.
+	ours := rr.Header().Get(devRequestIDHeader)
+	if ours == "" || ours == "sixpd-tick-8821" {
+		t.Errorf("our own id must be separate from the caller's, got %q", ours)
+	}
+
+	rows := f.activityDB.snapshot()
+	if len(rows) != 1 {
+		t.Fatalf("expected one activity row, got %d", len(rows))
+	}
+	if rows[0].CorrelationID != "sixpd-tick-8821" {
+		t.Errorf("the correlation id must be recorded, got %q", rows[0].CorrelationID)
+	}
+	if rows[0].RequestID != ours {
+		t.Errorf("the row must carry the id we returned, got %q want %q", rows[0].RequestID, ours)
+	}
+}
+
+// A header value we reflect back has to be safe to reflect. A correlation id
+// with a newline in it is a response-splitting attempt and is dropped rather
+// than echoed.
+func TestE2E_CorrelationIDIsSanitised(t *testing.T) {
+	for _, bad := range []string{
+		"has\r\nInjected: header",
+		"starts-with-$operator",
+		strings.Repeat("x", maxCorrelationIDLen+50),
+	} {
+		got := safeCorrelationID(bad)
+		if strings.ContainsAny(got, "\r\n") {
+			t.Errorf("a reflected value must never carry a newline, got %q", got)
+		}
+		if len(got) > maxCorrelationIDLen {
+			t.Errorf("a reflected value must be bounded, got %d characters", len(got))
+		}
+	}
+	// And a dollar-prefixed value is refused outright rather than truncated,
+	// because it is about to be stored and queried.
+	if safeCorrelationID("$ne") != "" {
+		t.Error("an operator-shaped value must be dropped")
+	}
+}
+
+// The feed records the shape of the exchange and nothing of its contents.
+func TestE2E_ActivityRecordsTheExchangeNotTheContents(t *testing.T) {
+	f := newEventsFixture(t)
+
+	f.upsertDraft(t, `{"externalId":"act-1","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"narrative":{"text":"something a reviewer would read"}}`)
+
+	rows := f.activityDB.snapshot()
+	if len(rows) == 0 {
+		t.Fatal("the request was not recorded")
+	}
+	row := rows[len(rows)-1]
+
+	if row.Method != http.MethodPost {
+		t.Errorf("the method must be recorded, got %q", row.Method)
+	}
+	if row.Status != http.StatusCreated {
+		t.Errorf("the status must be recorded, got %d", row.Status)
+	}
+	if row.Outcome != models.DeveloperActivityOK {
+		t.Errorf("expected an ok outcome, got %q", row.Outcome)
+	}
+	if row.CommunityID != f.community.ID.Hex() {
+		t.Errorf("the community must be recorded, got %q", row.CommunityID)
+	}
+
+	// Nothing from the body. This is the property the feed's whole design
+	// rests on, so it is asserted rather than assumed.
+	serialized := fmt.Sprintf("%+v", row)
+	for _, secret := range []string{
+		"something a reviewer would read",
+		f.plaintext,
+		"Bearer",
+	} {
+		if strings.Contains(serialized, secret) {
+			t.Errorf("the activity row must not carry %q", secret)
+		}
+	}
+}
+
+// The route is the mux template, not the raw path. A feed keyed on raw paths
+// would have as many distinct values as there are communities.
+func TestE2E_ActivityRouteIsBounded(t *testing.T) {
+	f := newEventsFixture(t)
+	f.upsertDraft(t, `{"externalId":"act-2","reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	rows := f.activityDB.snapshot()
+	row := rows[len(rows)-1]
+	if strings.Contains(row.Route, f.community.ID.Hex()) {
+		t.Errorf("the route must not carry a community id, got %q", row.Route)
+	}
+
+	// The same property through the real router, which is where the template
+	// actually comes from. The test above goes through mux.SetURLVars, so it
+	// exercises the no-matched-route fallback — which must also be bounded.
+	router := mux.NewRouter()
+	var recorded string
+	router.Handle("/api/v1/dev/communities/{communityId}/reports/drafts",
+		http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+			recorded = devRouteTemplate(req)
+		})).Methods("POST")
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/dev/communities/"+f.community.ID.Hex()+"/reports/drafts", nil)
+	router.ServeHTTP(httptest.NewRecorder(), req)
+
+	if recorded != "/communities/{communityId}/reports/drafts" {
+		t.Errorf("the route must be the template, got %q", recorded)
+	}
+}
+
+// A missing-scope refusal records which scope was missing, which is the thing
+// a bare 403 on a row does not say.
+func TestE2E_ActivityNamesTheMissingScope(t *testing.T) {
+	f := newEventsFixture(t)
+	f.keyDB.byHash = upgradeKeyScopes(f.keyDB.byHash, models.ScopeReportsRead)
+
+	f.upsertDraft(t, `{"externalId":"act-3","reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	rows := f.activityDB.snapshot()
+	if len(rows) == 0 {
+		t.Fatal("the refusal was not recorded")
+	}
+	row := rows[len(rows)-1]
+	if row.Outcome != models.DeveloperActivityDenied {
+		t.Errorf("expected a denied outcome, got %q", row.Outcome)
+	}
+	if row.ErrorCode != "missing_scope" {
+		t.Errorf("the error code must be recorded, got %q", row.ErrorCode)
+	}
+	if row.RequiredScope != models.ScopeReportsWrite {
+		t.Errorf("the missing scope must be named, got %q", row.RequiredScope)
+	}
+}
+
+// A key reads its own feed and nobody else's, with no scope required — the
+// keys that most need the diagnostic are the ones being refused.
+func TestE2E_ActivityFeedIsTheKeysOwn(t *testing.T) {
+	f := newEventsFixture(t)
+	f.upsertDraft(t, `{"externalId":"act-4","reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	// Another key's row, in the same store.
+	f.activityDB.mu.Lock()
+	f.activityDB.rows = append(f.activityDB.rows, models.DeveloperAPIActivity{
+		ID: primitive.NewObjectID(), RequestID: "req_someone_else",
+		KeyID: primitive.NewObjectID().Hex(), Route: "/whoami",
+		Outcome: models.DeveloperActivityOK,
+	})
+	f.activityDB.mu.Unlock()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dev/activity", nil)
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	f.api.RequireDeveloperAPIKey(http.HandlerFunc(f.api.DevActivityHandler)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Data          []devActivityView `json:"data"`
+		RetentionDays int               `json:"retentionDays"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	for _, row := range out.Data {
+		if row.RequestID == "req_someone_else" {
+			t.Fatal("a key must not see another key's activity")
+		}
+	}
+	// The retention window is published in the response, not only in the docs.
+	if out.RetentionDays != models.DeveloperAPIActivityRetentionDays {
+		t.Errorf("the retention window must be stated, got %d", out.RetentionDays)
+	}
+}
+
+// A revoked key cannot read the feed either.
+func TestE2E_ActivityFeedRefusesARevokedKey(t *testing.T) {
+	f := newEventsFixture(t)
+	for hash, key := range f.keyDB.byHash {
+		key.Status = models.DeveloperKeyRevoked
+		f.keyDB.byHash[hash] = key
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dev/activity", nil)
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	f.api.RequireDeveloperAPIKey(http.HandlerFunc(f.api.DevActivityHandler)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+// ---- item 5a: the change cursor ----
+
+// A first call returns nothing and hands back a position. Replaying a week of
+// history to a client that is about to read current state anyway is not a
+// service.
+func TestE2E_ChangesFirstCallPrimesTheCursor(t *testing.T) {
+	f := newEventsFixture(t)
+
+	rr := f.run(t, http.MethodGet, "/changes", "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Data          []devEventView `json:"data"`
+		Cursor        string         `json:"cursor"`
+		Primed        bool           `json:"primed"`
+		RetentionDays int            `json:"retentionDays"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(out.Data) != 0 {
+		t.Errorf("a first call must not replay history, got %d events", len(out.Data))
+	}
+	if out.Cursor == "" {
+		t.Error("a first call must hand back a usable cursor")
+	}
+	if !out.Primed {
+		t.Error("the response must say this was a priming call")
+	}
+	if out.RetentionDays != models.DeveloperEventRetentionDays {
+		t.Errorf("the retention window must be stated, got %d", out.RetentionDays)
+	}
+	// Also in a header, so a Lua HTTP callback does not have to parse the body.
+	if rr.Header().Get(devCursorHeader) == "" {
+		t.Error("the cursor must be available as a header")
+	}
+}
+
+// The cursor walks forward and never redelivers the event it names.
+func TestE2E_ChangesCursorAdvancesWithoutRepeating(t *testing.T) {
+	f := newEventsFixture(t)
+
+	// Prime.
+	first := f.run(t, http.MethodGet, "/changes", "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	var primed struct {
+		Cursor string `json:"cursor"`
+	}
+	_ = json.Unmarshal(first.Body.Bytes(), &primed)
+
+	// Something happens.
+	f.upsert(t, `{"externalId":"chg-1","source":"SixPD","title":"Traffic stop"}`)
+	f.eventDB.waitForEvents(t, 1)
+
+	second := f.run(t, http.MethodGet, "/changes?since="+primed.Cursor, "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	var page struct {
+		Data   []devEventView `json:"data"`
+		Cursor string         `json:"cursor"`
+	}
+	_ = json.Unmarshal(second.Body.Bytes(), &page)
+
+	if len(page.Data) != 1 || page.Data[0].Type != models.EventCallCreated {
+		t.Fatalf("expected one call.created, got %+v", page.Data)
+	}
+	if page.Data[0].ResourceExternalID != "chg-1" {
+		t.Errorf("the integration's own id must be on the event, got %q", page.Data[0].ResourceExternalID)
+	}
+	if page.Cursor == primed.Cursor {
+		t.Error("the cursor must advance")
+	}
+
+	// Asking again from the new cursor returns nothing. An inclusive bound
+	// would redeliver one event on every poll forever.
+	third := f.run(t, http.MethodGet, "/changes?since="+page.Cursor, "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	var empty struct {
+		Data []devEventView `json:"data"`
+	}
+	_ = json.Unmarshal(third.Body.Bytes(), &empty)
+	if len(empty.Data) != 0 {
+		t.Errorf("the cursor must not redeliver what it names, got %+v", empty.Data)
+	}
+}
+
+// A key can exclude its own writes, which is the difference between a working
+// integration and a loop: close a call, receive your own "call.closed", close
+// it again.
+func TestE2E_ChangesCanExcludeTheKeysOwnWrites(t *testing.T) {
+	f := newEventsFixture(t)
+
+	first := f.run(t, http.MethodGet, "/changes", "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	var primed struct {
+		Cursor string `json:"cursor"`
+	}
+	_ = json.Unmarshal(first.Body.Bytes(), &primed)
+
+	f.upsert(t, `{"externalId":"chg-2","source":"SixPD","title":"Mine"}`)
+	f.eventDB.waitForEvents(t, 1)
+
+	// Somebody else's change, in the same community.
+	f.eventDB.mu.Lock()
+	f.eventDB.events = append(f.eventDB.events, models.DeveloperAPIEvent{
+		ID: primitive.NewObjectID(), Type: models.EventCallClosed,
+		CommunityID: f.community.ID.Hex(), Actor: models.EventActorWebsite,
+	})
+	f.eventDB.mu.Unlock()
+
+	rr := f.run(t, http.MethodGet, "/changes?since="+primed.Cursor+"&excludeSelf=true", "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	var out struct {
+		Data []devEventView `json:"data"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+
+	for _, event := range out.Data {
+		if event.ActorKeyID == f.keyID.Hex() {
+			t.Error("excludeSelf must leave out this key's own writes")
+		}
+	}
+	if len(out.Data) != 1 || out.Data[0].Actor != models.EventActorWebsite {
+		t.Errorf("the other actor's change must still arrive, got %+v", out.Data)
+	}
+}
+
+// A type filter is validated against what we emit, so a typo is refused rather
+// than silently matching nothing.
+func TestE2E_ChangesRefusesAnUnknownEventType(t *testing.T) {
+	f := newEventsFixture(t)
+
+	rr := f.run(t, http.MethodGet, "/changes?since="+primitive.NewObjectID().Hex()+"&types=call.close", "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "invalid_event_type") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+// A cursor that is not a cursor is refused, rather than quietly matching
+// everything or nothing.
+func TestE2E_ChangesRefusesAJunkCursor(t *testing.T) {
+	f := newEventsFixture(t)
+
+	rr := f.run(t, http.MethodGet, "/changes?since=not-a-cursor", "", nil,
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "invalid_cursor") {
+		t.Errorf("got %s", rr.Body.String())
+	}
+}
+
+func TestE2E_ChangesRefuseAnotherCommunity(t *testing.T) {
+	f := newEventsFixture(t)
+	other := primitive.NewObjectID()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/dev/communities/"+other.Hex()+"/changes", nil)
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	req = mux.SetURLVars(req, map[string]string{"communityId": other.Hex()})
+	f.api.RequireDeveloperAPIKey(
+		f.api.RequireScope(models.ScopeCommunityRead, f.api.DevChangesHandler),
+	).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// The things an integration polls for all emit. Each of these is a question
+// somebody would otherwise have to sweep a collection to answer.
+func TestE2E_TheChangesThatMatterAllEmit(t *testing.T) {
+	t.Run("a closed call", func(t *testing.T) {
+		f := newEventsFixture(t)
+		f.upsert(t, `{"externalId":"emit-1","source":"SixPD","title":"Stop"}`)
+		f.run(t, http.MethodPost, "/dispatch/calls/emit-1/close", `{"source":"SixPD"}`,
+			map[string]string{"externalId": "emit-1"},
+			f.api.RequireScope(models.ScopeCallsWrite, f.api.DevCloseCallByExternalIDHandler))
+
+		events := f.eventDB.waitForEvents(t, 2)
+		if !hasEventType(events, models.EventCallClosed) {
+			t.Errorf("a closed call must emit, got %+v", eventTypes(events))
+		}
+	})
+
+	t.Run("a unit status change", func(t *testing.T) {
+		f := newEventsFixture(t)
+		f.run(t, http.MethodPut, "/units/status/bulk",
+			`{"units":[{"player":"`+fivemRef("member")+`","tenCodeId":"`+f.tenCodeID.Hex()+`"}]}`,
+			nil, f.api.RequireScope(models.ScopeUnitsWrite, f.api.DevBulkSetUnitStatusHandler))
+
+		events := f.eventDB.waitForEvents(t, 1)
+		if !hasEventType(events, models.EventUnitStatusChanged) {
+			t.Errorf("a status change must emit, got %+v", eventTypes(events))
+		}
+	})
+
+	t.Run("a warrant request", func(t *testing.T) {
+		f := newEventsFixture(t)
+		f.requestWarrant(t, `{"externalId":"emit-2","source":"SixPD",
+			"requestingOfficer":"`+fivemRef("admin")+`","accusedFirstName":"John",
+			"probableCause":"Observed leaving the scene."}`)
+
+		events := f.eventDB.waitForEvents(t, 1)
+		if !hasEventType(events, models.EventWarrantRequested) {
+			t.Errorf("a warrant request must emit, got %+v", eventTypes(events))
+		}
+	})
+
+	t.Run("an assignment, separately from the update", func(t *testing.T) {
+		f := newEventsFixture(t)
+		f.upsert(t, `{"externalId":"emit-3","source":"SixPD","title":"Stop"}`)
+		f.upsert(t, `{"externalId":"emit-3","source":"SixPD","title":"Stop",
+			"assignedUnits":["`+fivemRef("member")+`"]}`)
+
+		events := f.eventDB.waitForEvents(t, 3)
+		// Two events on one write: "edited" and "these units are on it". A
+		// client that only wants the second should not have to diff every
+		// update to find it.
+		if !hasEventType(events, models.EventCallAssigned) {
+			t.Errorf("an assignment must emit its own event, got %+v", eventTypes(events))
+		}
+		if !hasEventType(events, models.EventCallUpdated) {
+			t.Errorf("the update must emit too, got %+v", eventTypes(events))
+		}
+	})
+}
+
+// An unknown event type is refused at the emit site rather than written. A row
+// nobody can subscribe to is worse than no row.
+func TestE2E_EmitRefusesAnUnknownType(t *testing.T) {
+	f := newEventsFixture(t)
+
+	EmitDeveloperEvent(f.eventDB, devEvent{
+		Type:        "call.exploded",
+		CommunityID: f.community.ID.Hex(),
+		Actor:       models.EventActorDeveloperAPI,
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	f.eventDB.mu.Lock()
+	defer f.eventDB.mu.Unlock()
+	if len(f.eventDB.events) != 0 {
+		t.Errorf("an unknown type must not be written, got %+v", f.eventDB.events)
+	}
+}
+
+func hasEventType(events []models.DeveloperAPIEvent, want string) bool {
+	for _, e := range events {
+		if e.Type == want {
+			return true
+		}
+	}
+	return false
+}
+
+func eventTypes(events []models.DeveloperAPIEvent) []string {
+	out := make([]string, 0, len(events))
+	for _, e := range events {
+		out = append(out, e.Type)
+	}
+	return out
+}
+
+// ---- item 5b: webhooks ----
+
+// The SSRF gate. This is the reason webhooks were declined on #277, so each
+// shape it has to refuse is named rather than covered by a single happy case.
+func TestE2E_WebhookURLGateRefusesWhatItMust(t *testing.T) {
+	refused := []struct {
+		name string
+		url  string
+	}{
+		{"plain http, which would ship the signature in clear", "http://example.com/hook"},
+		{"loopback", "https://127.0.0.1/hook"},
+		{"loopback by name", "https://localhost/hook"},
+		{"a private range", "https://10.0.0.5/hook"},
+		{"another private range", "https://192.168.1.10/hook"},
+		{"link-local", "https://169.254.1.1/hook"},
+		{"the cloud metadata address, which is the whole trick", "https://169.254.169.254/latest/meta-data/"},
+		{"carrier-grade NAT", "https://100.64.0.1/hook"},
+		{"the unspecified address", "https://0.0.0.0/hook"},
+		{"IPv6 loopback", "https://[::1]/hook"},
+		{"credentials in the url", "https://user:pass@example.com/hook"},
+		{"no host", "https:///hook"},
+		{"not a url at all", "nonsense"},
+		{"empty", ""},
+	}
+	for _, c := range refused {
+		if _, err := validateWebhookURL(c.url); err == nil {
+			t.Errorf("%s must be refused: %q", c.name, c.url)
+		}
+	}
+}
+
+// And the gate is not so strict that a real endpoint cannot be saved.
+func TestE2E_WebhookURLGateAcceptsAPublicHTTPSEndpoint(t *testing.T) {
+	got, err := validateWebhookURL("https://example.com/lpc/hook?v=1")
+	if err != nil {
+		t.Fatalf("a public https endpoint must be accepted: %v", err)
+	}
+	// Rebuilt from the parsed URL, like every other outside string here.
+	if got != "https://example.com/lpc/hook?v=1" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// A signature covers the timestamp as well as the body, which is what stops a
+// captured delivery being replayable tomorrow.
+func TestE2E_WebhookSignatureCoversTheTimestamp(t *testing.T) {
+	body := []byte(`{"event":{"id":"abc"}}`)
+	at := time.Unix(1762000000, 0)
+
+	sig := SignWebhookPayload("whsec_test", at, body)
+	if !strings.HasPrefix(sig, "t=1762000000,v1=") {
+		t.Fatalf("the timestamp must be in the header, got %q", sig)
+	}
+
+	// A different timestamp over the same body is a different signature. If it
+	// were not, the timestamp would be something an attacker could rewrite.
+	later := SignWebhookPayload("whsec_test", at.Add(time.Hour), body)
+	if strings.TrimPrefix(sig, "t=1762000000,") == strings.TrimPrefix(later, "t=1762003600,") {
+		t.Error("the signature must change with the timestamp")
+	}
+
+	// A different secret is a different signature.
+	other := SignWebhookPayload("whsec_other", at, body)
+	if other == sig {
+		t.Error("the signature must depend on the secret")
+	}
+
+	// And a tampered body does not verify.
+	tampered := SignWebhookPayload("whsec_test", at, []byte(`{"event":{"id":"def"}}`))
+	if tampered == sig {
+		t.Error("the signature must depend on the body")
+	}
+}
+
+// The signature format is published, and a receiver's verification code is
+// written against the published description rather than against our source. So
+// the format itself is pinned here: computed independently, byte for byte.
+//
+// The delivery worker has its own copy of this function, because api/handlers
+// cannot import api/scheduler without a cycle over a six-line helper. That the
+// two agree is asserted in api/scheduler, where both can be imported.
+func TestE2E_WebhookSignatureFormatIsPinned(t *testing.T) {
+	body := []byte(`{"a":1}`)
+	at := time.Unix(1762000111, 0)
+
+	mac := hmac.New(sha256.New, []byte("whsec_x"))
+	mac.Write([]byte("1762000111"))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	want := "t=1762000111,v1=" + hex.EncodeToString(mac.Sum(nil))
+
+	if got := SignWebhookPayload("whsec_x", at, body); got != want {
+		t.Fatalf("the published signature format must not drift\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// Registering an endpoint returns the secret exactly once and never again.
+func TestE2E_WebhookSecretIsShownOnce(t *testing.T) {
+	f := newEventsFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "")
+
+	created := f.consoleRun(t, http.MethodPost,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks?userId="+f.keyOwnerID(),
+		`{"url":"https://example.com/hook"}`,
+		map[string]string{"keyId": f.keyID.Hex()},
+		f.api.CreateDeveloperWebhookHandler)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", created.Code, created.Body.String())
+	}
+
+	var out struct {
+		Webhook       map[string]interface{} `json:"webhook"`
+		SigningSecret string                 `json:"signingSecret"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if !strings.HasPrefix(out.SigningSecret, webhookSecretPrefix) {
+		t.Errorf("the secret should be recognisable on sight, got %q", out.SigningSecret)
+	}
+
+	// Listing never returns it again.
+	listed := f.consoleRun(t, http.MethodGet,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks?userId="+f.keyOwnerID(), "",
+		map[string]string{"keyId": f.keyID.Hex()},
+		f.api.ListDeveloperWebhooksHandler)
+	if strings.Contains(listed.Body.String(), out.SigningSecret) {
+		t.Error("the signing secret must never be returned again")
+	}
+	if !strings.Contains(listed.Body.String(), "secretPrefix") {
+		t.Error("the console needs a prefix to tell two secrets apart")
+	}
+}
+
+// Rotating keeps the endpoint and its subscription, so it is not an outage.
+func TestE2E_WebhookRotateKeepsTheEndpoint(t *testing.T) {
+	f := newEventsFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "")
+
+	created := f.consoleRun(t, http.MethodPost,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks?userId="+f.keyOwnerID(),
+		`{"url":"https://example.com/hook","events":["call.created"]}`,
+		map[string]string{"keyId": f.keyID.Hex()},
+		f.api.CreateDeveloperWebhookHandler)
+	var madeOut struct {
+		Webhook       map[string]interface{} `json:"webhook"`
+		SigningSecret string                 `json:"signingSecret"`
+	}
+	_ = json.Unmarshal(created.Body.Bytes(), &madeOut)
+	hookID, _ := madeOut.Webhook["id"].(string)
+
+	rotated := f.consoleRun(t, http.MethodPost,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks/"+hookID+"/rotate?userId="+f.keyOwnerID(),
+		`{}`, map[string]string{"keyId": f.keyID.Hex(), "webhookId": hookID},
+		f.api.RotateDeveloperWebhookSecretHandler)
+	if rotated.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rotated.Code, rotated.Body.String())
+	}
+	var rotatedOut struct {
+		SigningSecret string `json:"signingSecret"`
+	}
+	_ = json.Unmarshal(rotated.Body.Bytes(), &rotatedOut)
+	if rotatedOut.SigningSecret == "" || rotatedOut.SigningSecret == madeOut.SigningSecret {
+		t.Error("rotating must issue a new secret")
+	}
+
+	f.webhookDB.mu.Lock()
+	defer f.webhookDB.mu.Unlock()
+	if len(f.webhookDB.hooks) != 1 {
+		t.Fatalf("rotating must not create a second endpoint, got %d", len(f.webhookDB.hooks))
+	}
+	hook := f.webhookDB.hooks[0]
+	if hook.URL != "https://example.com/hook" || len(hook.Events) != 1 {
+		t.Errorf("the endpoint and its subscription must survive a rotate, got %+v", hook)
+	}
+}
+
+// An unknown event type is refused at save time rather than silently never
+// firing.
+func TestE2E_WebhookRefusesAnUnknownSubscription(t *testing.T) {
+	f := newEventsFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "")
+
+	rr := f.consoleRun(t, http.MethodPost,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks?userId="+f.keyOwnerID(),
+		`{"url":"https://example.com/hook","events":["call.close"]}`,
+		map[string]string{"keyId": f.keyID.Hex()},
+		f.api.CreateDeveloperWebhookHandler)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// A key cannot subscribe an endpoint to a community it is not granted.
+func TestE2E_WebhookRefusesAnUngrantedCommunity(t *testing.T) {
+	f := newEventsFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "")
+
+	rr := f.consoleRun(t, http.MethodPost,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks?userId="+f.keyOwnerID(),
+		`{"url":"https://example.com/hook","communities":["`+primitive.NewObjectID().Hex()+`"]}`,
+		map[string]string{"keyId": f.keyID.Hex()},
+		f.api.CreateDeveloperWebhookHandler)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// A webhook id belonging to another key is a 404, so its existence is never
+// confirmed.
+func TestE2E_WebhookFromAnotherKeyIsNotFound(t *testing.T) {
+	f := newEventsFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "")
+
+	foreign := models.DeveloperWebhook{
+		ID: primitive.NewObjectID(), KeyID: primitive.NewObjectID().Hex(),
+		URL: "https://elsewhere.example.com/hook", Status: models.WebhookStatusActive,
+	}
+	f.webhookDB.mu.Lock()
+	f.webhookDB.hooks = append(f.webhookDB.hooks, foreign)
+	f.webhookDB.mu.Unlock()
+
+	rr := f.consoleRun(t, http.MethodDelete,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks/"+foreign.ID.Hex()+"?userId="+f.keyOwnerID(),
+		"", map[string]string{"keyId": f.keyID.Hex(), "webhookId": foreign.ID.Hex()},
+		f.api.DeleteDeveloperWebhookHandler)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+	f.webhookDB.mu.Lock()
+	defer f.webhookDB.mu.Unlock()
+	if len(f.webhookDB.hooks) != 1 {
+		t.Error("the other key's endpoint must still be there")
+	}
+}
+
+// An endpoint belonging to another developer's key cannot be reached at all.
+func TestE2E_WebhookRoutesRefuseAnotherDevelopersKey(t *testing.T) {
+	f := newEventsFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "")
+
+	rr := f.consoleRun(t, http.MethodGet,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks?userId="+primitive.NewObjectID().Hex(), "",
+		map[string]string{"keyId": f.keyID.Hex()},
+		f.api.ListDeveloperWebhooksHandler)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for somebody else's key, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// An endpoint starts at now, not at the beginning of the log.
+func TestE2E_WebhookStartsAtNowNotAtTheBeginning(t *testing.T) {
+	f := newEventsFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "")
+
+	// A week of history already in the log.
+	f.eventDB.mu.Lock()
+	for i := 0; i < 3; i++ {
+		f.eventDB.events = append(f.eventDB.events, models.DeveloperAPIEvent{
+			ID:   primitive.NewObjectIDFromTimestamp(time.Now().Add(-time.Duration(i+1) * time.Hour)),
+			Type: models.EventCallCreated, CommunityID: f.community.ID.Hex(),
+		})
+	}
+	f.eventDB.mu.Unlock()
+
+	f.consoleRun(t, http.MethodPost,
+		"/api/v1/developer/keys/"+f.keyID.Hex()+"/webhooks?userId="+f.keyOwnerID(),
+		`{"url":"https://example.com/hook"}`,
+		map[string]string{"keyId": f.keyID.Hex()},
+		f.api.CreateDeveloperWebhookHandler)
+
+	f.webhookDB.mu.Lock()
+	defer f.webhookDB.mu.Unlock()
+	if len(f.webhookDB.hooks) != 1 {
+		t.Fatal("the endpoint was not created")
+	}
+	cursor := f.webhookDB.hooks[0].Cursor
+	if cursor == "" {
+		t.Fatal("a new endpoint needs a cursor, or it would replay the log")
+	}
+	for _, event := range f.eventDB.events {
+		if event.ID.Hex() > cursor {
+			t.Errorf("a new endpoint must not be positioned before existing history: %s > %s",
+				event.ID.Hex(), cursor)
+		}
+	}
+}
+
+// ---- item 6: attachments ----
+
+// Metadata and a link. The thing the model refuses is the interesting part.
+func TestE2E_AttachmentRefusesToBeCalledEvidence(t *testing.T) {
+	f := newEventsFixture(t)
+	f.upsertDraft(t, `{"externalId":"att-1","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	rr := f.run(t, http.MethodPost, "/reports/drafts/att-1/attachments?source=SixPD",
+		`{"kind":"evidence","url":"https://clips.example.com/a.mp4"}`,
+		map[string]string{"externalId": "att-1"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	// And the refusal explains why rather than just listing the enum.
+	if !strings.Contains(rr.Body.String(), "not evidence") {
+		t.Errorf("the refusal should say why, got %s", rr.Body.String())
+	}
+	for _, kind := range models.ReportAttachmentKinds() {
+		if kind == "evidence" {
+			t.Fatal("there must be no evidence attachment kind")
+		}
+	}
+}
+
+func TestE2E_AttachmentIsMetadataAndALink(t *testing.T) {
+	f := newEventsFixture(t)
+	f.upsertDraft(t, `{"externalId":"att-2","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	rr := f.run(t, http.MethodPost, "/reports/drafts/att-2/attachments?source=SixPD",
+		`{"kind":"clip","label":"Dashcam","url":"https://clips.example.com/a.mp4",
+		  "contentType":"video/mp4","sizeBytes":8421376}`,
+		map[string]string{"externalId": "att-2"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Attachment models.DeveloperReportAttachment `json:"attachment"`
+		Added      bool                             `json:"added"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if !out.Added || out.Attachment.ID == "" {
+		t.Errorf("expected an added attachment, got %+v", out)
+	}
+	if out.Attachment.AddedByKey != f.keyID.Hex() {
+		t.Errorf("the key that attached it must be recorded, got %q", out.Attachment.AddedByKey)
+	}
+	// Audited, because a reviewer may act on it.
+	if audit, ok := f.api.ALDB.(*fakeAuditDB); ok {
+		audit.mu.Lock()
+		defer audit.mu.Unlock()
+		found := false
+		for _, entry := range audit.entries {
+			if strings.Contains(entry.Action, "attachment_added") {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("attaching must be audited")
+		}
+	}
+}
+
+// The same URL twice is a retry, not a second attachment for a reviewer to
+// look at twice.
+func TestE2E_AttachmentIsIdempotentOnTheURL(t *testing.T) {
+	f := newEventsFixture(t)
+	f.upsertDraft(t, `{"externalId":"att-3","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	body := `{"kind":"clip","url":"https://clips.example.com/b.mp4"}`
+
+	first := f.run(t, http.MethodPost, "/reports/drafts/att-3/attachments?source=SixPD", body,
+		map[string]string{"externalId": "att-3"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+	second := f.run(t, http.MethodPost, "/reports/drafts/att-3/attachments?source=SixPD", body,
+		map[string]string{"externalId": "att-3"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+
+	if first.Code != http.StatusCreated {
+		t.Fatalf("expected 201 first, got %d: %s", first.Code, first.Body.String())
+	}
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected 200 on the repeat, got %d: %s", second.Code, second.Body.String())
+	}
+	var out struct {
+		Added bool `json:"added"`
+	}
+	_ = json.Unmarshal(second.Body.Bytes(), &out)
+	if out.Added {
+		t.Error("a repeat must report adding nothing")
+	}
+}
+
+// Bounded, so a typo cannot render "4 PB" on a reviewer's screen and a draft
+// cannot grow past what a person can read.
+func TestE2E_AttachmentLimitsAreEnforced(t *testing.T) {
+	t.Run("an absurd declared size", func(t *testing.T) {
+		if _, err := buildAttachment(nil, devAttachmentRequest{
+			Kind: "clip", URL: "https://clips.example.com/a.mp4",
+			SizeBytes: maxAttachmentSizeBytes + 1,
+		}); err == nil {
+			t.Error("an out-of-range size must be refused")
+		}
+	})
+
+	t.Run("a url with credentials in it", func(t *testing.T) {
+		if _, err := buildAttachment(nil, devAttachmentRequest{
+			Kind: "clip", URL: "https://user:pass@clips.example.com/a.mp4",
+		}); err == nil {
+			t.Error("credentials in an attachment url would end up on a reviewer's screen")
+		}
+	})
+
+	t.Run("an unbounded url", func(t *testing.T) {
+		if _, err := buildAttachment(nil, devAttachmentRequest{
+			Kind: "clip", URL: "https://clips.example.com/" + strings.Repeat("a", maxAttachmentURLLen),
+		}); err == nil {
+			t.Error("an oversized url must be refused")
+		}
+	})
+
+	t.Run("no url at all", func(t *testing.T) {
+		if _, err := buildAttachment(nil, devAttachmentRequest{Kind: "clip"}); err == nil {
+			t.Error("this surface stores a link; without one there is nothing to store")
+		}
+	})
+
+	t.Run("the count cap", func(t *testing.T) {
+		f := newEventsFixture(t)
+		f.upsertDraft(t, `{"externalId":"att-4","source":"SixPD",
+			"reportingOfficer":"`+fivemRef("admin")+`"}`)
+		for i := 0; i < maxAttachmentsPerRecord; i++ {
+			rr := f.run(t, http.MethodPost, "/reports/drafts/att-4/attachments?source=SixPD",
+				fmt.Sprintf(`{"kind":"clip","url":"https://clips.example.com/%d.mp4"}`, i),
+				map[string]string{"externalId": "att-4"},
+				f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("attachment %d: expected 201, got %d: %s", i, rr.Code, rr.Body.String())
+			}
+		}
+		over := f.run(t, http.MethodPost, "/reports/drafts/att-4/attachments?source=SixPD",
+			`{"kind":"clip","url":"https://clips.example.com/one-too-many.mp4"}`,
+			map[string]string{"externalId": "att-4"},
+			f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+		if over.Code != http.StatusConflict {
+			t.Fatalf("expected 409 past the cap, got %d: %s", over.Code, over.Body.String())
+		}
+	})
+}
+
+// Nothing can be attached to a draft a person has already acted on. A clip
+// arriving afterwards must not change what they signed off.
+func TestE2E_AttachmentRefusedOnAReviewedDraft(t *testing.T) {
+	f := newEventsFixture(t)
+	_, created := f.upsertDraft(t, `{"externalId":"att-5","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	f.draftDB.mu.Lock()
+	for i := range f.draftDB.drafts {
+		if f.draftDB.drafts[i].ID.Hex() == created.Draft.ID {
+			f.draftDB.drafts[i].Status = models.ReportDraftStatusSubmitted
+		}
+	}
+	f.draftDB.mu.Unlock()
+
+	rr := f.run(t, http.MethodPost, "/reports/drafts/att-5/attachments?source=SixPD",
+		`{"kind":"clip","url":"https://clips.example.com/late.mp4"}`,
+		map[string]string{"externalId": "att-5"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestE2E_AttachmentsRefuseAnotherCommunity(t *testing.T) {
+	f := newEventsFixture(t)
+	other := primitive.NewObjectID()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/dev/communities/"+other.Hex()+"/reports/drafts/x/attachments",
+		strings.NewReader(`{"kind":"clip","url":"https://clips.example.com/a.mp4"}`))
+	req.Header.Set("Authorization", "Bearer "+f.plaintext)
+	req = mux.SetURLVars(req, map[string]string{"communityId": other.Hex(), "externalId": "x"})
+	f.api.RequireDeveloperAPIKey(
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler),
+	).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestE2E_AttachmentsRefuseARevokedKey(t *testing.T) {
+	f := newEventsFixture(t)
+	for hash, key := range f.keyDB.byHash {
+		key.Status = models.DeveloperKeyRevoked
+		f.keyDB.byHash[hash] = key
+	}
+
+	rr := f.run(t, http.MethodPost, "/reports/drafts/x/attachments?source=SixPD",
+		`{"kind":"clip","url":"https://clips.example.com/a.mp4"}`,
+		map[string]string{"externalId": "x"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ---- helpers ----
+
+// keyOwnerID is the LPC user the fixture's key belongs to, which the console
+// routes check ownership against.
+//
+// Read from byID rather than byHash, because that is the map the console's
+// lookup uses — the fixture re-points the key's owner in byHash only, and
+// reading the wrong map here would send a userId the lookup does not match.
+func (f *eventsFixture) keyOwnerID() string {
+	if key, ok := f.keyDB.byID[f.keyID.Hex()]; ok {
+		return key.UserID
+	}
+	return ""
+}
+
+// consoleRun drives a first-party console route, the way the website does.
+func (f *eventsFixture) consoleRun(t *testing.T, method, path, body string, vars map[string]string, h http.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	var req *http.Request
+	if body == "" {
+		req = httptest.NewRequest(method, path, nil)
+	} else {
+		req = httptest.NewRequest(method, path, strings.NewReader(body))
+	}
+	req = mux.SetURLVars(req, vars)
+	rr := httptest.NewRecorder()
+	h(rr, req)
+	return rr
 }

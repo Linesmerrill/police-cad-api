@@ -22,6 +22,15 @@ import (
 // Call exported for testing purposes
 type Call struct {
 	DB databases.CallDatabase
+	// EventDB records a call change on the Developer API's change feed.
+	//
+	// Here, on the website's own handler, and not only on the developer
+	// surface. An integration polling "what changed in this community" cares
+	// about a call a dispatcher closed in the CAD every bit as much as one it
+	// closed itself — a feed that only saw the API's own writes would be a
+	// feed of the integration's own echo. Optional: nil means the feed is not
+	// wired and nothing is recorded.
+	EventDB databases.DeveloperEventDatabase
 }
 
 // CallHandler returns all calls
@@ -284,6 +293,22 @@ func (c Call) CreateCallHandler(w http.ResponseWriter, r *http.Request) {
 		"call":    newCall,
 		"actorId": actorID,
 	})
+	// The id off the document we just built, not off a re-read: newCall is a
+	// bson.M here, which is why this reaches into it rather than a struct.
+	newCallID := ""
+	if oid, ok := newCall["_id"].(primitive.ObjectID); ok {
+		newCallID = oid.Hex()
+	}
+	EmitDeveloperEvent(c.EventDB, devEvent{
+		Type:        models.EventCallCreated,
+		CommunityID: requestBody.CommunityID,
+		ResourceID:  newCallID,
+		Actor:       models.EventActorWebsite,
+		Data: map[string]string{
+			"title":  requestBody.Title,
+			"status": "open",
+		},
+	})
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -341,6 +366,28 @@ func (c Call) UpdateCallByIDHandler(w http.ResponseWriter, r *http.Request) {
 		go notifyNodeServer("call_updated", updatedCall.Details.CommunityID, map[string]interface{}{
 			"call":    updatedCall,
 			"actorId": actorID,
+		})
+		// A closed call gets its own type. "A call changed" and "a call is
+		// over" are different things to an integration: the second is the one
+		// that ends a scene, and making it a separate type means a client can
+		// subscribe to just that.
+		eventType := models.EventCallUpdated
+		status := "open"
+		if !updatedCall.Details.Status {
+			eventType = models.EventCallClosed
+			status = "closed"
+		}
+		EmitDeveloperEvent(c.EventDB, devEvent{
+			Type:               eventType,
+			CommunityID:        updatedCall.Details.CommunityID,
+			ResourceID:         updatedCall.ID,
+			ResourceExternalID: updatedCall.Details.ExternalID,
+			ResourceSource:     updatedCall.Details.Source,
+			Actor:              models.EventActorWebsite,
+			Data: map[string]string{
+				"title":  updatedCall.Details.Title,
+				"status": status,
+			},
 		})
 	} else if fetchErr != nil {
 		zap.S().Warnf("UpdateCallByIDHandler: post-update fetch failed, skipping broadcast: %v", fetchErr)

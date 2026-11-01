@@ -231,6 +231,19 @@ func (d DeveloperAPI) DevCreateCivilianHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// One event type for all four record kinds, with the kind in the payload.
+	// A subscriber watching "a record appeared" wants one subscription, and the
+	// four shapes have nothing in common beyond that.
+	recordEvent := devKeyEvent(dc, models.EventRecordCreated, cc.Community.ID.Hex())
+	recordEvent.ResourceID = civilian.ID.Hex()
+	recordEvent.ResourceExternalID = req.ExternalID
+	recordEvent.ResourceSource = req.Source
+	recordEvent.Data = map[string]string{
+		"recordKind": "civilian",
+		"playerRef":  player.Provider + ":" + player.Identifier,
+	}
+	d.emit(recordEvent)
+
 	d.RecordOutcome(r, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -426,6 +439,20 @@ func (d DeveloperAPI) DevCreateVehicleHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// One event type for all four record kinds, with the kind in the payload.
+	// A subscriber watching "a record appeared" wants one subscription, and the
+	// four shapes have nothing in common beyond that.
+	recordEvent := devKeyEvent(dc, models.EventRecordCreated, cc.Community.ID.Hex())
+	recordEvent.ResourceID = vehicle.ID.Hex()
+	recordEvent.ResourceExternalID = req.ExternalID
+	recordEvent.ResourceSource = req.Source
+	recordEvent.Data = map[string]string{
+		"recordKind": "vehicle",
+		"playerRef":  player.Provider + ":" + player.Identifier,
+		"plate":      plate,
+	}
+	d.emit(recordEvent)
+
 	d.RecordOutcome(r, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -578,6 +605,19 @@ func (d DeveloperAPI) DevCreateFirearmHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// One event type for all four record kinds, with the kind in the payload.
+	// A subscriber watching "a record appeared" wants one subscription, and the
+	// four shapes have nothing in common beyond that.
+	recordEvent := devKeyEvent(dc, models.EventRecordCreated, cc.Community.ID.Hex())
+	recordEvent.ResourceID = firearm.ID.Hex()
+	recordEvent.ResourceExternalID = req.ExternalID
+	recordEvent.ResourceSource = req.Source
+	recordEvent.Data = map[string]string{
+		"recordKind": "firearm",
+		"playerRef":  player.Provider + ":" + player.Identifier,
+	}
+	d.emit(recordEvent)
+
 	d.RecordOutcome(r, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -728,6 +768,20 @@ func (d DeveloperAPI) DevCreateLicenseHandler(w http.ResponseWriter, r *http.Req
 		devError(w, http.StatusInternalServerError, "server_error", "Could not issue that license.", nil)
 		return
 	}
+
+	// One event type for all four record kinds, with the kind in the payload.
+	// A subscriber watching "a record appeared" wants one subscription, and the
+	// four shapes have nothing in common beyond that.
+	recordEvent := devKeyEvent(dc, models.EventRecordCreated, cc.Community.ID.Hex())
+	recordEvent.ResourceID = license.ID.Hex()
+	recordEvent.ResourceExternalID = req.ExternalID
+	recordEvent.ResourceSource = req.Source
+	recordEvent.Data = map[string]string{
+		"recordKind":  "license",
+		"playerRef":   player.Provider + ":" + player.Identifier,
+		"licenseType": licenseType,
+	}
+	d.emit(recordEvent)
 
 	d.RecordOutcome(r, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")

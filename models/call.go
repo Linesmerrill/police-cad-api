@@ -62,6 +62,14 @@ type CallDetails struct {
 	// CreatedByKeyID is the developer key that raised it, for the per-key
 	// audit trail and for cleaning up after a misbehaving integration.
 	CreatedByKeyID string `json:"createdByKeyId,omitempty" bson:"createdByKeyId,omitempty"`
+	// Attachments are links to things that live elsewhere — a clip, a
+	// screenshot, a log — with no bytes held here.
+	//
+	// Deliberately never carrying a kind of "evidence": a link we have not
+	// seen, on a server we do not control, has not earned that standing in a
+	// system that produces jail time. A dispatcher can look at a clip and
+	// decide for themselves what it is.
+	Attachments []DeveloperReportAttachment `json:"attachments,omitempty" bson:"attachments,omitempty"`
 }
 
 // CallNotes holds the structure for the notes associated with a call.

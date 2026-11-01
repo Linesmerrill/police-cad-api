@@ -50,7 +50,7 @@ You are right to insist the key never reaches client Lua. The
 [quickstart](QUICKSTART.md) says to use `set` and not `setr` in `server.cfg`,
 because `setr` replicates a convar to every connected client.
 
-### Per-key audit trail
+### Per-key audit trail (see also: Per-key activity history, below)
 
 **Needs extension (small).** Today: per-key per-day usage counts, including
 refusals by status, on the developer dashboard; and community audit-log entries
@@ -236,12 +236,92 @@ request.
 | Your own cleanup | `DELETE /communities/{communityId}/synthetic-records`. Synthetic only, this key only, this community only, and `confirm` must be the community id, so a cleanup aimed at a test community cannot run against a live one because a config value was stale. Narrow it with `source` and `externalId`; batches are bounded and `more` tells you to call again |
 | The owner's cleanup | a community owner can remove everything a key wrote, from the community's settings on the website, with `scope: "synthetic"` or `"all"`. That path exists for an integration that has stopped answering, so it does not need the key's cooperation, and it clears any unreviewed drafts too, because a draft left in a reviewer's queue by a revoked integration is one somebody would file |
 
+### Per-key activity history
+
+**Available.** `GET /api/v1/dev/activity`, and in the developer console under
+each key.
+
+No scope required, deliberately: a key that is being refused has to be able to
+find out why, and gating the diagnostic would withhold it from exactly the keys
+that need it. Scoped to the calling key by construction.
+
+| | |
+|---|---|
+| Request ids | every response from this API carries `X-Request-Id`, including the ones the middleware refuses, a 401 that cannot be traced is the one you most need to trace. Quote one in a ticket and we can find the row |
+| Correlation ids | send `X-Correlation-Id` and we echo it back and record it beside ours. Never used to look anything up on our side: a value you control cannot be an identity, so it sits alongside our id rather than in place of it |
+| What a row says | route (the template, not your path), community, method, status, a coarse outcome, our own `error` code, and on a `missing_scope` refusal **which scope was missing**: the single most common thing this feed exists to explain |
+| What a row does not say | no request body, no response body, no header values, no key material, no claim code. A feed holding any of those would be a place to go looking for them |
+| Retention | **30 days**, published in the docs, in the response, and on the console screen. Enforced by a TTL index rather than a job, because a window that depends on a cron is one that quietly stops being true the first time the cron is wedged |
+
+### Incremental polling, and webhooks
+
+**Both available, and this reverses our earlier answer on #277.**
+
+The reasons for declining webhooks were real: outbound HTTP to
+developer-controlled URLs is an SSRF surface, and delivery brings signing,
+retries, replay protection and dead-letters with it. None of those arguments
+goes away by shipping, so they are answered rather than avoided, see the table
+below.
+
+**The cursor first, because it is what makes polling cheap.**
+`GET /api/v1/dev/communities/{id}/changes?since=<cursor>` returns only what has
+changed. The cursor is an event id; the first call returns a position rather
+than a week of history; `excludeSelf=true` leaves out your own writes, which is
+the difference between an integration and a loop.
+
+**The same events, pushed.** Register an endpoint per key in the console. The
+delivery body carries the event in the same shape the cursor endpoint returns,
+so moving from one to the other does not mean rewriting your handler, and you
+can run both while you migrate, because the event id is stable and the
+duplicate is recognisable.
+
+Events emitted: `call.created`, `call.updated`, `call.closed`,
+`call.assigned`, `unit.status_changed`, `record.created`,
+`report_draft.filed`, `report_draft.rejected`, `warrant.requested`,
+`warrant.reviewed`. Named after what happened in the product rather than after
+the endpoint that caused it, **the website's own handlers emit too**, so a call
+a dispatcher closed in the CAD reaches you like one you closed yourself. A feed
+that only saw the API's own writes would be a feed of your own echo.
+
+| concern | how it is answered |
+|---|---|
+| SSRF | https only; the resolved address is checked against every private, loopback, link-local, CGNAT and cloud-metadata range; **every** A record has to pass, not the first; redirects are refused outright, because a public URL that 302s to `169.254.169.254` is the whole trick; and the check runs again immediately before each request, because DNS is not ours |
+| Signing | HMAC-SHA256 over `"<t>." + rawBody`, in `X-LPC-Signature: t=<unix>,v1=<hex>`. Per-endpoint secret, shown once, rotatable without losing the endpoint or its subscription |
+| Replay | the timestamp is inside the signed material and the tolerance is published at **300 seconds**, so a captured delivery stops being replayable five minutes later |
+| Retries | published and finite: 10s, 30s, 2m, 5m, 15m. Expressed as "how long since this endpoint last failed", so a dead endpoint costs one request per step however many events are queued |
+| Giving up | 20 consecutive failures switches the endpoint off with a reason in the console. An endpoint that 500s forever is not a transient failure, and retrying it indefinitely spends our capacity on somebody else's outage |
+| Dead-letters | **nothing is lost.** A failed delivery leaves the endpoint's cursor where it was, so the event is still readable from the polling endpoint for its 7 days. Webhooks are a transport over the event log, not a second source of truth, so a missed delivery degrades to the polling case rather than to a gap |
+| Ordering | deliveries stop at the first failure rather than carrying on, because an integration that receives `call.closed` before `call.created` has to handle a case we can simply not create |
+| Grants | re-read per delivery, not trusted from the subscription. A community owner withdrawing their grant stops deliveries about their community immediately, exactly as it stops requests |
+| Debugging | `GET /developer/keys/{id}/webhooks/{id}/deliveries` is the attempt log, with our status and our error text, never the receiver's response body, which is their content |
+
+Event retention is **7 days**, shorter than the activity feed on purpose: a
+cursor staler than that means you should re-read current state rather than
+replay a week, and saying so is better than letting you try.
+
 ### Report/evidence attachment metadata
 
-Shipped in the follow-up PR covering per-key activity, polling cursors and
-webhooks. The model already carries the attachment shape (metadata and a link,
-never bytes), and `kind` is deliberately one of `clip`, `screenshot`, `log`,
-`document`, `other`: never `evidence`.
+**Available.** On a report draft and on a dispatch call.
+
+Metadata and a link. **No binary upload, and that is the answer rather than a
+first step**: accepting third-party binaries would mean scanning, storage,
+quotas, a takedown path and a legal position on content we host, and none of it
+is needed for a reviewer clicking through to the clip your server already
+recorded. We never fetch the URL either, so it is a link a person opens rather
+than a request we make.
+
+**`kind` is never `evidence`**, and trying it returns an error that says why
+rather than just listing the enum. A link we have not seen, on a server we do
+not control, has not earned that standing in a system that produces jail time;
+a reviewer can look at a clip and decide for themselves what it is. The same
+applies to a generated narrative, it is labelled as generated on the review
+screen and in the filed report, and there is no field that would call it
+evidence.
+
+Limits: `clip` / `screenshot` / `log` / `document` / `other`, 10 per record,
+1024-character URL, http or https, no credentials in it, and a bounded declared
+size so a typo cannot render "4 PB" on a reviewer's screen. Every attach and
+detach is audited.
 
 ### Idempotent writes, predictable errors
 
