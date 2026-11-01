@@ -71,6 +71,9 @@ func (a *App) New() *mux.Router {
 		CivDB:       databases.NewCivilianDatabase(a.dbHelper),
 		VehDB:       databases.NewVehicleDatabase(a.dbHelper),
 		FirDB:       databases.NewFirearmDatabase(a.dbHelper),
+		LicDB:       databases.NewLicenseDatabase(a.dbHelper),
+		CallDB:      databases.NewCallDatabase(a.dbHelper),
+		BoloDB:      databases.NewBoloDatabase(a.dbHelper),
 	}
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB, CivDB: databases.NewCivilianDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
@@ -270,6 +273,35 @@ func (a *App) New() *mux.Router {
 	devRouter.Handle("/communities/{communityId}/members/{playerRef}", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevUpdateMemberHandler)).Methods("PATCH")
 	devRouter.Handle("/communities/{communityId}/members/{playerRef}", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevRemoveMemberHandler)).Methods("DELETE")
 	devRouter.Handle("/communities/{communityId}/members/{playerRef}/approve", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevApproveMemberHandler)).Methods("POST")
+
+	// Community reference data, so a mod can discover ids rather than hardcode
+	// them per community and break when an owner edits one.
+	devRouter.Handle("/communities/{communityId}/departments", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevListDepartmentsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/ten-codes", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevListTenCodesHandler)).Methods("GET")
+
+	// The live CAD surface. The bulk status endpoint is the one a FiveM server
+	// should use on a tick: one call per tick is 60 requests a minute, where a
+	// loop over 64 players would be 3,840.
+	devRouter.Handle("/communities/{communityId}/units", devAPI.RequireScope(models.ScopeUnitsRead, devAPI.DevListUnitsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/units/status/bulk", devAPI.RequireScope(models.ScopeUnitsWrite, devAPI.DevBulkSetUnitStatusHandler)).Methods("PUT")
+	devRouter.Handle("/communities/{communityId}/units/{playerRef}/status", devAPI.RequireScope(models.ScopeUnitsWrite, devAPI.DevSetUnitStatusHandler)).Methods("PUT")
+
+	devRouter.Handle("/communities/{communityId}/calls", devAPI.RequireScope(models.ScopeCallsRead, devAPI.DevListCallsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/calls", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCreateCallHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/calls/{callId}/close", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCloseCallHandler)).Methods("POST")
+
+	devRouter.Handle("/communities/{communityId}/bolos", devAPI.RequireScope(models.ScopeBolosRead, devAPI.DevListBolosHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/bolos", devAPI.RequireScope(models.ScopeBolosWrite, devAPI.DevCreateBoloHandler)).Methods("POST")
+
+	// Records a player makes in the game, and the lookups an officer runs on
+	// them.
+	devRouter.Handle("/communities/{communityId}/civilians", devAPI.RequireScope(models.ScopeCiviliansRead, devAPI.DevSearchCiviliansHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/civilians", devAPI.RequireScope(models.ScopeCiviliansWrite, devAPI.DevCreateCivilianHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/vehicles", devAPI.RequireScope(models.ScopeVehiclesRead, devAPI.DevSearchVehiclesHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/vehicles", devAPI.RequireScope(models.ScopeVehiclesWrite, devAPI.DevCreateVehicleHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/firearms", devAPI.RequireScope(models.ScopeFirearmsRead, devAPI.DevSearchFirearmsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/firearms", devAPI.RequireScope(models.ScopeFirearmsWrite, devAPI.DevCreateFirearmHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/licenses", devAPI.RequireScope(models.ScopeLicensesWrite, devAPI.DevCreateLicenseHandler)).Methods("POST")
 
 	// Developer API management, on the ordinary authenticated surface. A
 	// developer key cannot reach these, so a key can never mint another key,

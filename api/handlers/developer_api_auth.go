@@ -90,9 +90,12 @@ type DeveloperAPI struct {
 	ALDB        databases.AuditLogDatabase
 
 	// Record stores, used by provisioning and by the claim transfer.
-	CivDB databases.CivilianDatabase
-	VehDB databases.VehicleDatabase
-	FirDB databases.FirearmDatabase
+	CivDB  databases.CivilianDatabase
+	VehDB  databases.VehicleDatabase
+	FirDB  databases.FirearmDatabase
+	LicDB  databases.LicenseDatabase
+	CallDB databases.CallDatabase
+	BoloDB databases.BoloDatabase
 }
 
 // ---- key material ----

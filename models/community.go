@@ -320,6 +320,17 @@ type MemberDetail struct {
 	ActiveDepartmentID   string            `json:"activeDepartmentId" bson:"activeDepartmentId"`
 	ActiveDepartmentName string            `json:"activeDepartmentName" bson:"activeDepartmentName"`
 	DepartmentCallSigns  map[string]string `json:"departmentCallSigns,omitempty" bson:"departmentCallSigns,omitempty"`
+
+	// Location is where a unit last reported being, as free text the way a game
+	// reports it ("Grapeseed", a street name, a postal). New with the Developer
+	// API: a FiveM mod knows where every player is and dispatch had no way to
+	// see it, because unit position was not modelled anywhere.
+	//
+	// Free text rather than coordinates on purpose. Communities describe
+	// position in whatever vocabulary their map and their roleplay use, and a
+	// lat/long would be unreadable on a dispatch board.
+	Location          string              `json:"location,omitempty" bson:"location,omitempty"`
+	LocationUpdatedAt *primitive.DateTime `json:"locationUpdatedAt,omitempty" bson:"locationUpdatedAt,omitempty"`
 }
 
 // RankRequirement defines a single threshold for rank eligibility.

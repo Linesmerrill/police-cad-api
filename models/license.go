@@ -35,4 +35,9 @@ type LicenseDetails struct {
 	OwnerName         string `json:"ownerName,omitempty" bson:"ownerName,omitempty"`
 	ActiveCommunityID string `json:"activeCommunityID,omitempty" bson:"activeCommunityID,omitempty"`
 	UserID            string `json:"userID,omitempty" bson:"userID,omitempty"`
+
+	// Source marks a record a Developer API key created on a player's behalf,
+	// so a misbehaving key's entire output can be found and removed together.
+	// Absent on every record a person made themselves.
+	Source *RecordSource `json:"source,omitempty" bson:"source,omitempty"`
 }
