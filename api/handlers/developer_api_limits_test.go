@@ -669,3 +669,151 @@ func TestDeveloperAccount_UpgradeLinkIsOverridable(t *testing.T) {
 		t.Errorf("config should win, got %q", out.UpgradeURL)
 	}
 }
+
+// ---- the community picker ----
+
+// The key form used to ask for a raw community id. The picker needs names, and
+// it needs to know which communities this person could approve a key into
+// themselves, so it can say so before they create a key that silently waits.
+func TestListDeveloperCommunities_SortsGrantableFirstAndNamesThem(t *testing.T) {
+	f := newLimitsFixture(t, models.TierPremium, 0)
+
+	owned := primitive.NewObjectID()
+	adminOf := primitive.NewObjectID()
+	memberOf := primitive.NewObjectID()
+	other := primitive.NewObjectID()
+
+	user := f.owner
+	user.Details.Communities = []models.UserCommunity{
+		{CommunityID: memberOf.Hex(), Status: "active"},
+		{CommunityID: owned.Hex(), Status: "active"},
+		{CommunityID: adminOf.Hex(), Status: "active"},
+	}
+	f.userDB.users[user.ID] = user
+
+	build := func(id primitive.ObjectID, name, ownerID string, adminMembers []string) models.Community {
+		c := models.Community{ID: id}
+		c.Details.Name = name
+		c.Details.OwnerID = ownerID
+		if len(adminMembers) > 0 {
+			c.Details.Roles = []models.Role{{
+				Name:        "Staff",
+				Members:     adminMembers,
+				Permissions: []models.Permission{{Name: "administrator", Enabled: true}},
+			}}
+		}
+		return c
+	}
+	f.api.CDB = &pickerCommunityDB{communities: []models.Community{
+		build(memberOf, "Zebra RP", other.Hex(), nil),
+		build(owned, "My Server", user.ID, nil),
+		build(adminOf, "Alpha County", other.Hex(), []string{user.ID}),
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/communities?userId="+user.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.ListDeveloperCommunitiesHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Data       []developerCommunityOption `json:"data"`
+		TotalCount int                        `json:"totalCount"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if out.TotalCount != 3 || len(out.Data) != 3 {
+		t.Fatalf("expected three communities, got %+v", out.Data)
+	}
+	// Grantable first, then by name: the common case at the top, and a stable
+	// order between loads.
+	if out.Data[0].Name != "Alpha County" || !out.Data[0].CanGrant {
+		t.Errorf("expected the admin community first, got %+v", out.Data[0])
+	}
+	if out.Data[1].Name != "My Server" || !out.Data[1].CanGrant {
+		t.Errorf("expected the owned community second, got %+v", out.Data[1])
+	}
+	// Membership alone does not let you approve a key.
+	if out.Data[2].Name != "Zebra RP" || out.Data[2].CanGrant {
+		t.Errorf("a plain member must not be marked grantable, got %+v", out.Data[2])
+	}
+}
+
+func TestListDeveloperCommunities_EmptyWhenInNone(t *testing.T) {
+	f := newLimitsFixture(t, models.TierFree, 0)
+	f.api.CDB = &pickerCommunityDB{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/communities?userId="+f.owner.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.ListDeveloperCommunitiesHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	// An empty list, never null: the form renders an empty state from it, and a
+	// null would make that a crash rather than a message.
+	if !strings.Contains(rr.Body.String(), `"data":[]`) {
+		t.Errorf("expected an empty array, got %s", rr.Body.String())
+	}
+}
+
+func TestListDeveloperCommunities_RequiresAnActor(t *testing.T) {
+	f := newLimitsFixture(t, models.TierFree, 0)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/communities", nil)
+	rr := httptest.NewRecorder()
+	f.api.ListDeveloperCommunitiesHandler(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestListDeveloperCommunities_SkipsUnreadableMemberships(t *testing.T) {
+	// A membership row with a junk id must not take the whole picker down.
+	f := newLimitsFixture(t, models.TierFree, 0)
+	user := f.owner
+	good := primitive.NewObjectID()
+	user.Details.Communities = []models.UserCommunity{
+		{CommunityID: "not-an-id"},
+		{CommunityID: ""},
+		{CommunityID: good.Hex()},
+	}
+	f.userDB.users[user.ID] = user
+
+	c := models.Community{ID: good}
+	c.Details.Name = "Still Here"
+	c.Details.OwnerID = user.ID
+	f.api.CDB = &pickerCommunityDB{communities: []models.Community{c}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/communities?userId="+user.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.ListDeveloperCommunitiesHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Still Here") {
+		t.Errorf("the readable community should survive, got %s", rr.Body.String())
+	}
+}
+
+// pickerCommunityDB answers the picker's one query: find by a set of ids.
+type pickerCommunityDB struct {
+	databases.CommunityDatabase
+	communities []models.Community
+}
+
+func (f *pickerCommunityDB) Find(_ context.Context, _ interface{}, _ ...*options.FindOptions) (databases.MongoCursor, error) {
+	docs := make([]interface{}, 0, len(f.communities))
+	for _, c := range f.communities {
+		docs = append(docs, c)
+	}
+	return databases.NewMongoCursorFromDocuments(docs)
+}
+
+func (f *pickerCommunityDB) CountDocuments(_ context.Context, _ interface{}, _ ...*options.CountOptions) (int64, error) {
+	return 0, nil
+}
+
+func (f *pickerCommunityDB) FindOneIncludingPending(_ context.Context, _ interface{}) (*models.Community, error) {
+	return nil, mongo.ErrNoDocuments
+}

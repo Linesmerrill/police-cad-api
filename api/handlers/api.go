@@ -321,6 +321,9 @@ func (a *App) New() *mux.Router {
 	// developer key cannot reach these, so a key can never mint another key,
 	// widen its own scopes, or approve itself into a community.
 	apiCreate.Handle("/developer/account", http.HandlerFunc(devAPI.GetDeveloperAccountHandler)).Methods("GET")
+	// The communities this user belongs to, for the key form's picker. A
+	// convenience only: grants are still decided server-side at key creation.
+	apiCreate.Handle("/developer/communities", http.HandlerFunc(devAPI.ListDeveloperCommunitiesHandler)).Methods("GET")
 	apiCreate.Handle("/developer/account/enable", http.HandlerFunc(devAPI.EnableDeveloperAccountHandler)).Methods("POST")
 	apiCreate.Handle("/developer/account/disable", http.HandlerFunc(devAPI.DisableDeveloperAccountHandler)).Methods("POST")
 	apiCreate.Handle("/developer/keys", http.HandlerFunc(devAPI.ListDeveloperKeysHandler)).Methods("GET")
