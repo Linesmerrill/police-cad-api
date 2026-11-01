@@ -57,6 +57,24 @@ func (a *App) New() *mux.Router {
 		}
 	}()
 	sessionDB := databases.NewClockSessionDatabase(a.dbHelper)
+	devAPI := DeveloperAPI{
+		AccountDB:   databases.NewDeveloperAccountDatabase(a.dbHelper),
+		KeyDB:       databases.NewDeveloperAPIKeyDatabase(a.dbHelper),
+		GrantDB:     databases.NewDeveloperGrantDatabase(a.dbHelper),
+		UsageDB:     databases.NewDeveloperUsageDatabase(a.dbHelper),
+		RateDB:      databases.NewDeveloperRateDatabase(a.dbHelper),
+		IdentityDB:  databases.NewPlayerIdentityDatabase(a.dbHelper),
+		ClaimCodeDB: databases.NewDeveloperClaimCodeDatabase(a.dbHelper),
+		CDB:         databases.NewCommunityDatabase(a.dbHelper),
+		UDB:         databases.NewUserDatabase(a.dbHelper),
+		ALDB:        alDB,
+		CivDB:       databases.NewCivilianDatabase(a.dbHelper),
+		VehDB:       databases.NewVehicleDatabase(a.dbHelper),
+		FirDB:       databases.NewFirearmDatabase(a.dbHelper),
+		LicDB:       databases.NewLicenseDatabase(a.dbHelper),
+		CallDB:      databases.NewCallDatabase(a.dbHelper),
+		BoloDB:      databases.NewBoloDatabase(a.dbHelper),
+	}
 	u := User{DB: databases.NewUserDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EntDB: databases.NewContentCreatorEntitlementDatabase(a.dbHelper), PTDB: ptDB, ALDB: alDB, UPDB: upDB, SEDB: seDB, ACDB: acDB, SDB: sessionDB, CivDB: databases.NewCivilianDatabase(a.dbHelper)}
 	dept := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
 	c := Community{DB: databases.NewCommunityDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper), ADB: databases.NewArchivedCommunityDatabase(a.dbHelper), IDB: databases.NewInviteCodeDatabase(a.dbHelper), UPDB: databases.NewUserPreferencesDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), VDB: databases.NewVehicleDatabase(a.dbHelper), FDB: databases.NewFirearmDatabase(a.dbHelper), DBHelper: a.dbHelper, PTDB: ptDB, ALDB: alDB, TLDB: tlDB, OffDB: databases.NewRpPromoOffenseDatabase(a.dbHelper)}
@@ -216,6 +234,106 @@ func (a *App) New() *mux.Router {
 	pendingGate := CommunityPendingGate(databases.NewCommunityDatabase(a.dbHelper))
 	apiCreate.Use(pendingGate)
 	apiV2.Use(pendingGate)
+
+	// The Developer API: third-party keys, on their own subrouter with their
+	// own authentication. See docs/DEVELOPER_API.md.
+	//
+	// A separate subrouter rather than routes on apiCreate, so the middleware
+	// below is the only way in and cannot be bypassed by a route someone adds
+	// to the wrong router. It deliberately does NOT use api.Middleware: a
+	// website or mobile credential must not authenticate here, and a developer
+	// key must not authenticate there.
+	//
+	// The pending-deletion gate is not attached either. It keys off a
+	// communityId route variable and 410s, while the developer surface answers
+	// a deleted community with its own 403 from ResolveCommunity, which says
+	// something a third-party integration can act on.
+	devRouter := r.PathPrefix("/api/v1/dev").Subrouter()
+	devRouter.Use(devAPI.RequireDeveloperAPIKey)
+
+	// No scope needed: a key with the wrong scopes still has to be able to
+	// find out what it does hold.
+	devRouter.Handle("/whoami", http.HandlerFunc(devAPI.DevWhoamiHandler)).Methods("GET")
+	devRouter.Handle("/communities", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevListCommunitiesHandler)).Methods("GET")
+	devRouter.Handle("/communities", devAPI.RequireScope(models.ScopeCommunitiesProvision, devAPI.DevCreateCommunityHandler)).Methods("POST")
+
+	// Player provisioning. A mod names a player by their game identifier; it
+	// never sends us an LPC user id or an email, because both would be values
+	// the mod controls.
+	devRouter.Handle("/players", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevUpsertPlayerHandler)).Methods("POST")
+	devRouter.Handle("/players/{provider}/{identifier}", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevGetPlayerHandler)).Methods("GET")
+	devRouter.Handle("/players/{provider}/{identifier}/claim-code", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevIssueClaimCodeHandler)).Methods("POST")
+
+	// Membership, driven from inside the game. Every write names an acting
+	// player, and the permission check runs against that player exactly as the
+	// website would run it against a signed-in user, so a key can never grant
+	// more than the player it acts for.
+	devRouter.Handle("/communities/{communityId}/members", devAPI.RequireScope(models.ScopeMembersRead, devAPI.DevListMembersHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/members", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevAddMemberHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/members/{playerRef}", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevUpdateMemberHandler)).Methods("PATCH")
+	devRouter.Handle("/communities/{communityId}/members/{playerRef}", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevRemoveMemberHandler)).Methods("DELETE")
+	devRouter.Handle("/communities/{communityId}/members/{playerRef}/approve", devAPI.RequireScope(models.ScopeMembersWrite, devAPI.DevApproveMemberHandler)).Methods("POST")
+
+	// Community reference data, so a mod can discover ids rather than hardcode
+	// them per community and break when an owner edits one.
+	devRouter.Handle("/communities/{communityId}/departments", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevListDepartmentsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/ten-codes", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevListTenCodesHandler)).Methods("GET")
+
+	// The live CAD surface. The bulk status endpoint is the one a FiveM server
+	// should use on a tick: one call per tick is 60 requests a minute, where a
+	// loop over 64 players would be 3,840.
+	devRouter.Handle("/communities/{communityId}/units", devAPI.RequireScope(models.ScopeUnitsRead, devAPI.DevListUnitsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/units/status/bulk", devAPI.RequireScope(models.ScopeUnitsWrite, devAPI.DevBulkSetUnitStatusHandler)).Methods("PUT")
+	devRouter.Handle("/communities/{communityId}/units/{playerRef}/status", devAPI.RequireScope(models.ScopeUnitsWrite, devAPI.DevSetUnitStatusHandler)).Methods("PUT")
+
+	devRouter.Handle("/communities/{communityId}/calls", devAPI.RequireScope(models.ScopeCallsRead, devAPI.DevListCallsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/calls", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCreateCallHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/calls/{callId}/close", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCloseCallHandler)).Methods("POST")
+
+	// Dispatch calls addressed by the integration's own id. This is the shape
+	// a game server needs: it reconnects, replays a queue and retries a
+	// timeout, and none of that may put a second call on a dispatch board.
+	devRouter.Handle("/communities/{communityId}/dispatch/calls", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevUpsertCallHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/dispatch/calls/{externalId}", devAPI.RequireScope(models.ScopeCallsRead, devAPI.DevGetCallByExternalIDHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/dispatch/calls/{externalId}/close", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevCloseCallByExternalIDHandler)).Methods("POST")
+
+	devRouter.Handle("/communities/{communityId}/bolos", devAPI.RequireScope(models.ScopeBolosRead, devAPI.DevListBolosHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/bolos", devAPI.RequireScope(models.ScopeBolosWrite, devAPI.DevCreateBoloHandler)).Methods("POST")
+
+	// Records a player makes in the game, and the lookups an officer runs on
+	// them.
+	devRouter.Handle("/communities/{communityId}/civilians", devAPI.RequireScope(models.ScopeCiviliansRead, devAPI.DevSearchCiviliansHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/civilians", devAPI.RequireScope(models.ScopeCiviliansWrite, devAPI.DevCreateCivilianHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/vehicles", devAPI.RequireScope(models.ScopeVehiclesRead, devAPI.DevSearchVehiclesHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/vehicles", devAPI.RequireScope(models.ScopeVehiclesWrite, devAPI.DevCreateVehicleHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/firearms", devAPI.RequireScope(models.ScopeFirearmsRead, devAPI.DevSearchFirearmsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/firearms", devAPI.RequireScope(models.ScopeFirearmsWrite, devAPI.DevCreateFirearmHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/licenses", devAPI.RequireScope(models.ScopeLicensesWrite, devAPI.DevCreateLicenseHandler)).Methods("POST")
+
+	// Developer API management, on the ordinary authenticated surface. A
+	// developer key cannot reach these, so a key can never mint another key,
+	// widen its own scopes, or approve itself into a community.
+	apiCreate.Handle("/developer/account", http.HandlerFunc(devAPI.GetDeveloperAccountHandler)).Methods("GET")
+	apiCreate.Handle("/developer/account/enable", http.HandlerFunc(devAPI.EnableDeveloperAccountHandler)).Methods("POST")
+	apiCreate.Handle("/developer/account/disable", http.HandlerFunc(devAPI.DisableDeveloperAccountHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys", http.HandlerFunc(devAPI.ListDeveloperKeysHandler)).Methods("GET")
+	apiCreate.Handle("/developer/keys", http.HandlerFunc(devAPI.CreateDeveloperKeyHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys/{keyId}", http.HandlerFunc(devAPI.RevokeDeveloperKeyHandler)).Methods("DELETE")
+	apiCreate.Handle("/developer/keys/{keyId}/rotate", http.HandlerFunc(devAPI.RotateDeveloperKeyHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys/{keyId}/usage", http.HandlerFunc(devAPI.GetDeveloperKeyUsageHandler)).Methods("GET")
+
+	// Claiming, on the first-party surface only. A developer key cannot reach
+	// these: a developer minting a code and redeeming it themselves is exactly
+	// what must not be possible.
+	apiCreate.Handle("/developer/claim", http.HandlerFunc(devAPI.ClaimProvisionedAccountHandler)).Methods("POST")
+	apiCreate.Handle("/developer/claim/discord", http.HandlerFunc(devAPI.DiscordClaimProvisionedAccountHandler)).Methods("POST")
+
+	// The community owner's side. Route variable is {communityId}, so the
+	// pending-deletion gate applies: an owner mid-deletion has no business
+	// approving new key access.
+	apiCreate.Handle("/developer/community/{communityId}/keys", http.HandlerFunc(devAPI.ListCommunityDeveloperKeysHandler)).Methods("GET")
+	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/approve", http.HandlerFunc(devAPI.ApproveCommunityDeveloperKeyHandler)).Methods("POST")
+	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/revoke", http.HandlerFunc(devAPI.RevokeCommunityDeveloperKeyHandler)).Methods("POST")
 
 	// Metrics handler (must be after apiV2 is defined)
 	metricsHandler := MetricsHandler{}

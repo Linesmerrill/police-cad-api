@@ -20,6 +20,11 @@ const (
 	gatewayHeader = "X-API-Key"
 )
 
+// developerAPIPathPrefix mirrors handlers.devAPIPathPrefix. Duplicated rather
+// than imported because the api package cannot import handlers without a
+// cycle; api/write_auth_test.go asserts the two stay equal.
+const developerAPIPathPrefix = "/api/v1/dev/"
+
 // publicWritePaths are the only mutating endpoints reachable without a logged-in
 // user: the signup / login / email-verification flows. Everything else must
 // present either a valid bearer token (browser + mobile) or the first-party
@@ -115,6 +120,21 @@ func RequireWriteAuth(next http.Handler) http.Handler {
 			return
 		}
 		if publicWritePaths[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// The Developer API carries its own, stricter gate (see
+		// handlers.RequireDeveloperAPIKey). A third-party key is none of the
+		// three things this middleware accepts — it is not our gateway secret,
+		// not a browser on our origin, and not a user's bearer session — so it
+		// has to be let through here and authenticated there instead.
+		//
+		// This is the one prefix that gets to skip this check, and the reason
+		// it is safe is that the middleware behind it demands more, not less:
+		// a valid unrevoked key, an active developer account, an active grant
+		// for the community being written to, and the scope for the route.
+		if strings.HasPrefix(r.URL.Path, developerAPIPathPrefix) {
 			next.ServeHTTP(w, r)
 			return
 		}

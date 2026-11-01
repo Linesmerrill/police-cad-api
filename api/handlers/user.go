@@ -195,6 +195,16 @@ func (u User) UserLoginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// An unclaimed account a developer integration created cannot be signed
+		// into. It has no password hash, so the compare above has already
+		// failed, but this is asserted here too: see the matching check in
+		// api/middleware.go and docs/DEVELOPER_API.md.
+		if !dbEmailResp.CanAuthenticate() {
+			config.InfoStatus("unauthorized", http.StatusUnauthorized, w,
+				fmt.Errorf("account has not been claimed"))
+			return
+		}
+
 		if usernameMatch {
 			w.WriteHeader(http.StatusOK)
 			return

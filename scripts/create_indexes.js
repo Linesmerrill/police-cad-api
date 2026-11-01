@@ -1131,5 +1131,123 @@ createIndexSafe(
   { name: "cc_creators_user_status_idx", background: true }
 );
 
+// ---------------------------------------------------------------------------
+// Developer API (docs/DEVELOPER_API.md)
+// ---------------------------------------------------------------------------
+
+// The hot path. Every third-party request looks a key up by the SHA-256 of what
+// it presented, so this index is on the critical path of the whole surface.
+// Unique because two keys hashing the same would mean a collision in SHA-256,
+// and if that ever happened we would want the insert to fail loudly.
+createIndexSafe(
+  db.developer_api_keys,
+  { keyHash: 1 },
+  { name: "dev_api_keys_hash_idx", unique: true, background: true }
+);
+
+// The developer's own key list, and the plan's key-count check on creation.
+createIndexSafe(
+  db.developer_api_keys,
+  { developerId: 1, status: 1 },
+  { name: "dev_api_keys_developer_status_idx", background: true }
+);
+
+// One developer account per LPC user.
+createIndexSafe(
+  db.developer_accounts,
+  { userId: 1 },
+  { name: "dev_accounts_user_idx", unique: true, background: true }
+);
+
+// Checked on every request that names a community: is this key allowed in here.
+createIndexSafe(
+  db.developer_community_grants,
+  { keyId: 1, communityId: 1 },
+  { name: "dev_grants_key_community_idx", unique: true, background: true }
+);
+
+// The community owner's view: every key with access to my community.
+createIndexSafe(
+  db.developer_community_grants,
+  { communityId: 1, status: 1 },
+  { name: "dev_grants_community_status_idx", background: true }
+);
+
+// The usage dashboard's range query. Reads and writes of a single day go by
+// _id, which needs no index.
+createIndexSafe(
+  db.developer_api_usage,
+  { keyId: 1, day: 1 },
+  { name: "dev_usage_key_day_idx", background: true }
+);
+
+// Usage rows keep 400 days so the dashboard can show a year, then expire.
+createIndexSafe(
+  db.developer_api_usage,
+  { expiresAt: 1 },
+  { name: "dev_usage_ttl_idx", expireAfterSeconds: 0, background: true }
+);
+
+// The per-minute burst counters. Written and read by _id; this index only
+// exists so Mongo sweeps them. Without it the collection would grow by one
+// document per key per active minute, forever.
+createIndexSafe(
+  db.developer_api_rate,
+  { expiresAt: 1 },
+  { name: "dev_rate_ttl_idx", expireAfterSeconds: 0, background: true }
+);
+
+// The identity map. Unique is load-bearing, not just an optimisation: it is
+// what makes a player upsert idempotent, and what settles two mods racing on
+// the same player (one insert wins, the loser re-reads the winner's row).
+createIndexSafe(
+  db.player_identities,
+  { provider: 1, identifier: 1 },
+  { name: "player_identities_provider_identifier_idx", unique: true, background: true }
+);
+
+// "Which players did this developer create", for support and for cleaning up
+// after a misbehaving key.
+createIndexSafe(
+  db.player_identities,
+  { createdByKeyId: 1 },
+  { name: "player_identities_key_idx", background: true }
+);
+
+// Every LPC user's identities, for the claim flow and the account page.
+createIndexSafe(
+  db.player_identities,
+  { userId: 1 },
+  { name: "player_identities_user_idx", background: true }
+);
+
+// Claim codes are looked up by hash when a player redeems one.
+createIndexSafe(
+  db.developer_claim_codes,
+  { codeHash: 1 },
+  { name: "dev_claim_codes_hash_idx", unique: true, background: true }
+);
+
+// A claim code that is never used disappears on its own.
+createIndexSafe(
+  db.developer_claim_codes,
+  { expiresAt: 1 },
+  { name: "dev_claim_codes_ttl_idx", expireAfterSeconds: 0, background: true }
+);
+
+// The lookup that makes every dispatch write idempotent. A game server
+// reconnecting and replaying its queue resolves each incident by its own id,
+// so this runs on every call it sends.
+//
+// Not unique: the fields are absent on every call made through the website,
+// and a unique index over a sparse triple would collide on all of them.
+// Uniqueness is enforced in the handler, which is also where a duplicate turns
+// into an update rather than an error.
+createIndexSafe(
+  db.calls,
+  { "call.communityID": 1, "call.source": 1, "call.externalId": 1 },
+  { name: "calls_community_source_external_idx", background: true }
+);
+
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 

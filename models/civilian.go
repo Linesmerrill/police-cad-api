@@ -50,6 +50,11 @@ type CivilianDetails struct {
 	BalanceInitialized   bool               `json:"balanceInitialized" bson:"balanceInitialized"`   // Economy: true once lazy-backfilled
 	CreatedAt            primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+
+	// Source marks a record a Developer API key created on a player's behalf,
+	// so a misbehaving key's entire output can be found and removed together.
+	// Absent on every record a person made themselves.
+	Source *RecordSource `json:"source,omitempty" bson:"source,omitempty"`
 }
 
 // CriminalHistory holds the structure for the criminal history

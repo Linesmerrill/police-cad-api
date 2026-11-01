@@ -138,6 +138,10 @@ type CommunityDetails struct {
 	Economy                       EconomySettings         `json:"economy" bson:"economy"`
 	CourtProcessing        CourtProcessingSettings `json:"courtProcessing" bson:"courtProcessing"`
 	RankSettings                  RankSettings            `json:"rankSettings" bson:"rankSettings"`
+	// Source marks a community a Developer API key created, so a misbehaving
+	// key's communities can be found and cleaned up together. Absent on every
+	// community a person made themselves.
+	Source *RecordSource `json:"source,omitempty" bson:"source,omitempty"`
 	// RpPromotion holds the community's last "RP server promotion" Discord post
 	// and the timestamp used to enforce the once-per-cooldown posting gate.
 	// Pointer so legacy communities that never promoted serialize it as absent.
@@ -316,6 +320,17 @@ type MemberDetail struct {
 	ActiveDepartmentID   string            `json:"activeDepartmentId" bson:"activeDepartmentId"`
 	ActiveDepartmentName string            `json:"activeDepartmentName" bson:"activeDepartmentName"`
 	DepartmentCallSigns  map[string]string `json:"departmentCallSigns,omitempty" bson:"departmentCallSigns,omitempty"`
+
+	// Location is where a unit last reported being, as free text the way a game
+	// reports it ("Grapeseed", a street name, a postal). New with the Developer
+	// API: a FiveM mod knows where every player is and dispatch had no way to
+	// see it, because unit position was not modelled anywhere.
+	//
+	// Free text rather than coordinates on purpose. Communities describe
+	// position in whatever vocabulary their map and their roleplay use, and a
+	// lat/long would be unreadable on a dispatch board.
+	Location          string              `json:"location,omitempty" bson:"location,omitempty"`
+	LocationUpdatedAt *primitive.DateTime `json:"locationUpdatedAt,omitempty" bson:"locationUpdatedAt,omitempty"`
 }
 
 // RankRequirement defines a single threshold for rank eligibility.
