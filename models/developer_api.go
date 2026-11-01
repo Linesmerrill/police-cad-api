@@ -64,26 +64,26 @@ const (
 // settings, and there never will be. Those are not missing from the list; they
 // are absent from the surface.
 const (
-	ScopeCommunityRead        = "community:read"
-	ScopeUnitsRead            = "units:read"
-	ScopeUnitsWrite           = "units:write"
-	ScopeCallsRead            = "calls:read"
-	ScopeCallsWrite           = "calls:write"
-	ScopeBolosRead            = "bolos:read"
-	ScopeBolosWrite           = "bolos:write"
-	ScopeCiviliansRead        = "civilians:read"
-	ScopeCiviliansWrite       = "civilians:write"
-	ScopeVehiclesRead         = "vehicles:read"
-	ScopeVehiclesWrite        = "vehicles:write"
-	ScopeFirearmsRead         = "firearms:read"
-	ScopeFirearmsWrite        = "firearms:write"
-	ScopeLicensesWrite        = "licenses:write"
+	ScopeCommunityRead  = "community:read"
+	ScopeUnitsRead      = "units:read"
+	ScopeUnitsWrite     = "units:write"
+	ScopeCallsRead      = "calls:read"
+	ScopeCallsWrite     = "calls:write"
+	ScopeBolosRead      = "bolos:read"
+	ScopeBolosWrite     = "bolos:write"
+	ScopeCiviliansRead  = "civilians:read"
+	ScopeCiviliansWrite = "civilians:write"
+	ScopeVehiclesRead   = "vehicles:read"
+	ScopeVehiclesWrite  = "vehicles:write"
+	ScopeFirearmsRead   = "firearms:read"
+	ScopeFirearmsWrite  = "firearms:write"
+	ScopeLicensesWrite  = "licenses:write"
 	// ScopeShiftsWrite is reserved, not offered. Clocking in is coupled to the
 	// economy system (it needs community.economy.enabled and the department's
 	// own economy toggle), which most communities have off, so a scope for it
 	// would be selectable and then do nothing for nearly everyone. Left here so
 	// the string is not reused for something else.
-	ScopeShiftsWrite = "shifts:write"
+	ScopeShiftsWrite          = "shifts:write"
 	ScopePlayersProvision     = "players:provision"
 	ScopeCommunitiesProvision = "communities:provision"
 	ScopeMembersRead          = "members:read"
