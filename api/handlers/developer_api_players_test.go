@@ -105,7 +105,7 @@ func TestSanitizeProvisionedUsername(t *testing.T) {
 
 type fakeIdentityDB struct {
 	databases.PlayerIdentityDatabase
-	mu  sync.Mutex
+	mu   sync.Mutex
 	rows []models.PlayerIdentity
 	// failNextInsertAsDuplicate simulates losing the unique-index race.
 	failNextInsertAsDuplicate bool
@@ -116,16 +116,16 @@ func (f *fakeIdentityDB) FindOne(_ context.Context, filter interface{}) (*models
 	defer f.mu.Unlock()
 	m, _ := filter.(bson.M)
 	for _, row := range f.rows {
-		if p, ok := m["provider"].(string); ok && row.Provider != p {
+		if p, ok := devFilterString(m["provider"]); ok && row.Provider != p {
 			continue
 		}
-		if i, ok := m["identifier"].(string); ok && row.Identifier != i {
+		if i, ok := devFilterString(m["identifier"]); ok && row.Identifier != i {
 			continue
 		}
-		if d, ok := m["createdByDeveloperId"].(string); ok && row.CreatedByDeveloperID != d {
+		if d, ok := devFilterString(m["createdByDeveloperId"]); ok && row.CreatedByDeveloperID != d {
 			continue
 		}
-		if u, ok := m["userId"].(string); ok && row.UserID != u {
+		if u, ok := devFilterString(m["userId"]); ok && row.UserID != u {
 			continue
 		}
 		found := row
@@ -170,7 +170,7 @@ func (f *fakeUserDB) FindOne(_ context.Context, filter interface{}, _ ...*option
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	m, _ := filter.(bson.M)
-	if oid, ok := m["_id"].(primitive.ObjectID); ok {
+	if oid, ok := devFilterObjectID(m["_id"]); ok {
 		if u, found := f.users[oid.Hex()]; found {
 			return devSingleResult{v: u}
 		}
@@ -219,8 +219,8 @@ func (f devSingleResult) Decode(out interface{}) error {
 
 type fakeClaimCodeDB struct {
 	databases.DeveloperClaimCodeDatabase
-	mu    sync.Mutex
-	codes []models.DeveloperClaimCode
+	mu             sync.Mutex
+	codes          []models.DeveloperClaimCode
 	deletedFilters []interface{}
 }
 
@@ -229,7 +229,7 @@ func (f *fakeClaimCodeDB) FindOne(_ context.Context, filter interface{}) (*model
 	defer f.mu.Unlock()
 	m, _ := filter.(bson.M)
 	for _, c := range f.codes {
-		if h, ok := m["codeHash"].(string); ok && c.CodeHash == h {
+		if h, ok := devFilterString(m["codeHash"]); ok && c.CodeHash == h {
 			found := c
 			return &found, nil
 		}
@@ -251,7 +251,7 @@ func (f *fakeClaimCodeDB) UpdateOne(_ context.Context, filter, update interface{
 	um, _ := update.(bson.M)
 	set, _ := um["$set"].(bson.M)
 	for i, c := range f.codes {
-		if oid, ok := fm["_id"].(primitive.ObjectID); ok && c.ID == oid {
+		if oid, ok := devFilterObjectID(fm["_id"]); ok && c.ID == oid {
 			// Honour the "only while unused" filter, which is what makes the
 			// redemption single-use under a race.
 			if _, requiresUnused := fm["usedAt"]; requiresUnused && c.UsedAt != nil {
@@ -440,7 +440,7 @@ func TestDevUpsertPlayer_CapStopsCreationNotLookups(t *testing.T) {
 		id: {ID: id, AccountsCreated: limits.AccountsPerKeyDay},
 	}
 
-	rr, _ := f.upsert(t, `{"provider":"fivem","identifier":"brand-new"}`)
+	rr, _ := f.upsert(t, `{"provider":"fivem","identifier":"beef01"}`)
 	if rr.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 at the account cap, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -450,10 +450,10 @@ func TestDevUpsertPlayer_CapStopsCreationNotLookups(t *testing.T) {
 
 	// A player we already know still resolves.
 	f.identityDB.rows = []models.PlayerIdentity{{
-		ID: primitive.NewObjectID(), Provider: "fivem", Identifier: "known",
+		ID: primitive.NewObjectID(), Provider: "fivem", Identifier: "beef02",
 		UserID: primitive.NewObjectID().Hex(), CreatedByDeveloperID: f.developerID.Hex(),
 	}}
-	rr2, _ := f.upsert(t, `{"provider":"fivem","identifier":"known"}`)
+	rr2, _ := f.upsert(t, `{"provider":"fivem","identifier":"beef02"}`)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("a known player must still resolve at the cap, got %d", rr2.Code)
 	}
@@ -544,7 +544,7 @@ func TestDevGetPlayer_OnlySeesItsOwnPlayers(t *testing.T) {
 	f := newProvisionFixture(t)
 	f.identityDB.rows = []models.PlayerIdentity{{
 		ID: primitive.NewObjectID(), Provider: "discord", Identifier: "198573466634",
-		UserID: primitive.NewObjectID().Hex(),
+		UserID:               primitive.NewObjectID().Hex(),
 		CreatedByDeveloperID: primitive.NewObjectID().Hex(), // someone else's
 	}}
 

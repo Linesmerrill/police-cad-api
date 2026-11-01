@@ -82,7 +82,7 @@ func (d DeveloperAPI) ClaimProvisionedAccountHandler(w http.ResponseWriter, r *h
 	// be the one doing the claiming, or a developer who got hold of one could
 	// use it to absorb another.
 	var claimant models.User
-	if err := d.UDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(actorID)}).Decode(&claimant); err != nil {
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(actorID))}).Decode(&claimant); err != nil {
 		config.InfoStatus("sign in and try again", http.StatusUnauthorized, w, err)
 		return
 	}
@@ -92,7 +92,7 @@ func (d DeveloperAPI) ClaimProvisionedAccountHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	record, err := d.ClaimCodeDB.FindOne(ctx, bson.M{"codeHash": hashClaimCode(code)})
+	record, err := d.ClaimCodeDB.FindOne(ctx, bson.M{"codeHash": devEq(hashClaimCode(code))})
 	if err != nil || record == nil {
 		// One message for wrong, expired and already-used. Distinguishing them
 		// would turn this into an oracle for which codes exist.
@@ -116,7 +116,7 @@ func (d DeveloperAPI) ClaimProvisionedAccountHandler(w http.ResponseWriter, r *h
 	// update matches and the other does not, so the records can only move once.
 	now := primitive.NewDateTimeFromTime(time.Now())
 	res, err := d.ClaimCodeDB.UpdateOne(ctx,
-		bson.M{"_id": record.ID, "usedAt": nil},
+		bson.M{"_id": devEq(record.ID), "usedAt": nil},
 		bson.M{"$set": bson.M{"usedAt": now, "usedByUserId": actorID}})
 	if err != nil {
 		config.ErrorStatus("could not redeem that code", http.StatusInternalServerError, w, err)
@@ -137,11 +137,11 @@ func (d DeveloperAPI) ClaimProvisionedAccountHandler(w http.ResponseWriter, r *h
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"claimed":      true,
-		"provider":     record.Provider,
-		"identifier":   record.Identifier,
-		"moved":        moved,
-		"message":      "Your in-game characters are now on this account.",
+		"claimed":    true,
+		"provider":   record.Provider,
+		"identifier": record.Identifier,
+		"moved":      moved,
+		"message":    "Your in-game characters are now on this account.",
 	})
 }
 
@@ -185,7 +185,7 @@ func (d DeveloperAPI) transferProvisionedAccount(ctx context.Context, fromUserID
 
 	// The game identity now belongs to the real account.
 	if _, err := d.IdentityDB.UpdateMany(ctx,
-		bson.M{"userId": fromUserID},
+		bson.M{"userId": devEq(fromUserID)},
 		bson.M{"$set": bson.M{"userId": toUserID, "claimed": true, "updatedAt": primitive.NewDateTimeFromTime(time.Now())}}); err != nil {
 		return moved, err
 	}
@@ -194,7 +194,7 @@ func (d DeveloperAPI) transferProvisionedAccount(ctx context.Context, fromUserID
 	// a member of the same community on their real account does not end up
 	// with two rows for it.
 	var shell models.User
-	if err := d.UDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(fromUserID)}).Decode(&shell); err == nil {
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(fromUserID))}).Decode(&shell); err == nil {
 		for _, membership := range shell.Details.Communities {
 			fresh := membership
 			fresh.ID = primitive.NewObjectID().Hex()
@@ -215,7 +215,7 @@ func (d DeveloperAPI) transferProvisionedAccount(ctx context.Context, fromUserID
 		Identifier: record.Identifier,
 		AddedAt:    primitive.NewDateTimeFromTime(time.Now()),
 	}
-	if _, err := d.UDB.UpdateOne(ctx, bson.M{"_id": objectIDOrZero(toUserID)},
+	if _, err := d.UDB.UpdateOne(ctx, bson.M{"_id": devEq(objectIDOrZero(toUserID))},
 		bson.M{"$addToSet": bson.M{"user.gameIdentities": identityEntry}}); err != nil {
 		zap.S().Warnw("developer api: could not record a game identity on claim", "error", err)
 	}
@@ -234,7 +234,7 @@ func (d DeveloperAPI) reassignOwnedRecords(ctx context.Context, fromUserID, toUs
 
 	if d.CivDB != nil {
 		res, err := d.CivDB.UpdateMany(ctx,
-			bson.M{"civilian.userID": fromUserID},
+			bson.M{"civilian.userID": devEq(fromUserID)},
 			bson.M{"$set": bson.M{"civilian.userID": toUserID}})
 		if err != nil {
 			return moved, err
@@ -250,14 +250,14 @@ func (d DeveloperAPI) reassignOwnedRecords(ctx context.Context, fromUserID, toUs
 	// older vehicles.
 	if d.VehDB != nil {
 		if res, err := d.VehDB.UpdateMany(ctx,
-			bson.M{"vehicle.registeredOwnerID": fromUserID},
+			bson.M{"vehicle.registeredOwnerID": devEq(fromUserID)},
 			bson.M{"$set": bson.M{"vehicle.registeredOwnerID": toUserID}}); err == nil && res != nil {
 			moved.Vehicles = res.ModifiedCount
 		}
 	}
 	if d.FirDB != nil {
 		if res, err := d.FirDB.UpdateMany(ctx,
-			bson.M{"firearm.registeredOwnerID": fromUserID},
+			bson.M{"firearm.registeredOwnerID": devEq(fromUserID)},
 			bson.M{"$set": bson.M{"firearm.registeredOwnerID": toUserID}}); err == nil && res != nil {
 			moved.Firearms = res.ModifiedCount
 		}
@@ -271,7 +271,7 @@ func (d DeveloperAPI) reassignOwnedRecords(ctx context.Context, fromUserID, toUs
 func (d DeveloperAPI) markClaimed(ctx context.Context, shellUserID string, record *models.DeveloperClaimCode) error {
 	now := primitive.NewDateTimeFromTime(time.Now())
 	claimedTrue := true
-	_, err := d.UDB.UpdateOne(ctx, bson.M{"_id": objectIDOrZero(shellUserID)}, bson.M{"$set": bson.M{
+	_, err := d.UDB.UpdateOne(ctx, bson.M{"_id": devEq(objectIDOrZero(shellUserID))}, bson.M{"$set": bson.M{
 		"user.claimed":   claimedTrue,
 		"user.claimedAt": now,
 	}})
@@ -280,7 +280,7 @@ func (d DeveloperAPI) markClaimed(ctx context.Context, shellUserID string, recor
 	}
 
 	// Any other outstanding code for this shell is dead now.
-	if _, err := d.ClaimCodeDB.DeleteMany(ctx, bson.M{"userId": shellUserID, "usedAt": nil}); err != nil {
+	if _, err := d.ClaimCodeDB.DeleteMany(ctx, bson.M{"userId": devEq(shellUserID), "usedAt": nil}); err != nil {
 		zap.S().Warnw("developer api: could not clear remaining claim codes", "error", err)
 	}
 	return nil
@@ -308,7 +308,7 @@ func (d DeveloperAPI) DiscordClaimProvisionedAccountHandler(w http.ResponseWrite
 	defer cancel()
 
 	var claimant models.User
-	if err := d.UDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(actorID)}).Decode(&claimant); err != nil {
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(actorID))}).Decode(&claimant); err != nil {
 		config.InfoStatus("sign in and try again", http.StatusUnauthorized, w, err)
 		return
 	}
@@ -323,10 +323,14 @@ func (d DeveloperAPI) DiscordClaimProvisionedAccountHandler(w http.ResponseWrite
 		return
 	}
 
-	discordID := models.NormalizePlayerIdentifier(models.PlayerProviderDiscord, claimant.Details.Discord.ID)
+	discordID, err := devSafeIdentifier(models.PlayerProviderDiscord, claimant.Details.Discord.ID)
+	if err != nil {
+		config.InfoStatus("your linked Discord account is not usable for this", http.StatusBadRequest, w, err)
+		return
+	}
 	identity, err := d.IdentityDB.FindOne(ctx, bson.M{
-		"provider":   models.PlayerProviderDiscord,
-		"identifier": discordID,
+		"provider":   devEq(models.PlayerProviderDiscord),
+		"identifier": devEq(discordID),
 	})
 	if err != nil || identity == nil {
 		config.InfoStatus("we have no in-game characters waiting for your Discord account",

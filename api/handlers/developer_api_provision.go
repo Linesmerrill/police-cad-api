@@ -78,8 +78,8 @@ func (d DeveloperAPI) DevCreateCommunityHandler(w http.ResponseWriter, r *http.R
 
 	// Total per key.
 	grantCount, err := d.GrantDB.CountDocuments(ctx, bson.M{
-		"keyId":  dc.Key.ID.Hex(),
-		"source": models.DeveloperGrantCreatedByKey,
+		"keyId":  devEq(dc.Key.ID.Hex()),
+		"source": devEq(models.DeveloperGrantCreatedByKey),
 		"status": bson.M{"$ne": models.DeveloperKeyRevoked},
 	})
 	if err == nil && int(grantCount) >= dc.Limits.CommunitiesPerKey {
@@ -99,13 +99,13 @@ func (d DeveloperAPI) DevCreateCommunityHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	var owner models.User
-	if err := d.UDB.FindOne(ctx, bson.M{"_id": ownerOID}).Decode(&owner); err != nil {
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(ownerOID)}).Decode(&owner); err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not resolve the key's owner.", nil)
 		return
 	}
 	plan := models.PlanFromUser(&owner)
 	cap := models.CommunityCap(plan)
-	active, _ := d.CDB.CountDocuments(ctx, bson.M{"community.ownerID": ownerID})
+	active, _ := d.CDB.CountDocuments(ctx, bson.M{"community.ownerID": devEq(ownerID)})
 	if int(active) >= cap {
 		d.RecordOutcome(r, http.StatusForbidden)
 		devError(w, http.StatusForbidden, "owner_community_limit_reached",
@@ -153,9 +153,9 @@ func (d DeveloperAPI) DevCreateCommunityHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// The owner's own membership, the same shape the website writes.
-	_, _ = d.UDB.UpdateOne(ctx, bson.M{"_id": ownerOID, "user.communities": nil},
+	_, _ = d.UDB.UpdateOne(ctx, bson.M{"_id": devEq(ownerOID), "user.communities": nil},
 		bson.M{"$set": bson.M{"user.communities": bson.A{}}})
-	_, _ = d.UDB.UpdateOne(ctx, bson.M{"_id": ownerOID}, bson.M{"$addToSet": bson.M{
+	_, _ = d.UDB.UpdateOne(ctx, bson.M{"_id": devEq(ownerOID)}, bson.M{"$addToSet": bson.M{
 		"user.communities": models.UserCommunity{
 			ID:          primitive.NewObjectID().Hex(),
 			CommunityID: community.ID.Hex(),

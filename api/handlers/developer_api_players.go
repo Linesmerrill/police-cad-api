@@ -51,13 +51,13 @@ type devUpsertPlayerRequest struct {
 }
 
 type devPlayerResponse struct {
-	PlayerRef string `json:"playerRef"`
-	PlayerID  string `json:"playerId"`
-	Provider  string `json:"provider"`
+	PlayerRef  string `json:"playerRef"`
+	PlayerID   string `json:"playerId"`
+	Provider   string `json:"provider"`
 	Identifier string `json:"identifier"`
-	Username  string `json:"username"`
-	Claimed   bool   `json:"claimed"`
-	Created   bool   `json:"created"`
+	Username   string `json:"username"`
+	Claimed    bool   `json:"claimed"`
+	Created    bool   `json:"created"`
 }
 
 // DevUpsertPlayerHandler maps a game identifier to an LPC account, creating one
@@ -83,16 +83,14 @@ func (d DeveloperAPI) DevUpsertPlayerHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(req.Provider))
-	if !models.IsValidPlayerProvider(provider) {
-		devError(w, http.StatusBadRequest, "invalid_provider",
-			"provider must be one of: fivem, discord, steam.",
-			map[string]interface{}{"provider": req.Provider})
+	provider, err := devSafeProvider(req.Provider)
+	if err != nil {
+		devError(w, http.StatusBadRequest, "invalid_provider", err.Error(), nil)
 		return
 	}
-	identifier := models.NormalizePlayerIdentifier(provider, req.Identifier)
-	if identifier == "" {
-		devError(w, http.StatusBadRequest, "invalid_identifier", "identifier is required.", nil)
+	identifier, err := devSafeIdentifier(provider, req.Identifier)
+	if err != nil {
+		devError(w, http.StatusBadRequest, "invalid_identifier", err.Error(), nil)
 		return
 	}
 
@@ -133,7 +131,7 @@ var errProvisionCapReached = fmt.Errorf("provisioning cap reached")
 // Returns the player and whether this call created the account.
 func (d DeveloperAPI) resolveOrCreatePlayer(ctx context.Context, dc *DevAPIContext, provider, identifier, username string) (*devPlayerResponse, bool, error) {
 	// Already known: hand back the same account, every time.
-	if existing, err := d.IdentityDB.FindOne(ctx, bson.M{"provider": provider, "identifier": identifier}); err == nil && existing != nil {
+	if existing, err := d.IdentityDB.FindOne(ctx, bson.M{"provider": devEq(provider), "identifier": devEq(identifier)}); err == nil && existing != nil {
 		return d.playerResponse(ctx, *existing, false), false, nil
 	}
 
@@ -214,7 +212,7 @@ func (d DeveloperAPI) resolveOrCreatePlayer(ctx context.Context, dc *DevAPIConte
 		if mongo.IsDuplicateKeyError(err) {
 			zap.S().Infow("developer api: lost a player-upsert race, using the winner",
 				"provider", provider, "orphanUserId", userOID.Hex())
-			winner, findErr := d.IdentityDB.FindOne(ctx, bson.M{"provider": provider, "identifier": identifier})
+			winner, findErr := d.IdentityDB.FindOne(ctx, bson.M{"provider": devEq(provider), "identifier": devEq(identifier)})
 			if findErr != nil || winner == nil {
 				return nil, false, findErr
 			}
@@ -248,7 +246,7 @@ func (d DeveloperAPI) playerResponse(ctx context.Context, identity models.Player
 		Created:    created,
 	}
 	var user models.User
-	if err := d.UDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(identity.UserID)}).Decode(&user); err == nil {
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(identity.UserID))}).Decode(&user); err == nil {
 		out.Username = user.Details.Username
 		out.Claimed = user.IsClaimed()
 	}
@@ -310,14 +308,14 @@ func (d DeveloperAPI) DevGetPlayerHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
-	if !models.IsValidPlayerProvider(provider) {
-		devError(w, http.StatusBadRequest, "invalid_provider", "provider must be one of: fivem, discord, steam.", nil)
+	provider, err := devSafeProvider(mux.Vars(r)["provider"])
+	if err != nil {
+		devError(w, http.StatusBadRequest, "invalid_provider", err.Error(), nil)
 		return
 	}
-	identifier := models.NormalizePlayerIdentifier(provider, mux.Vars(r)["identifier"])
-	if identifier == "" {
-		devError(w, http.StatusBadRequest, "invalid_identifier", "identifier is required.", nil)
+	identifier, err := devSafeIdentifier(provider, mux.Vars(r)["identifier"])
+	if err != nil {
+		devError(w, http.StatusBadRequest, "invalid_identifier", err.Error(), nil)
 		return
 	}
 
@@ -325,9 +323,9 @@ func (d DeveloperAPI) DevGetPlayerHandler(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	identity, err := d.IdentityDB.FindOne(ctx, bson.M{
-		"provider":             provider,
-		"identifier":           identifier,
-		"createdByDeveloperId": dc.Key.DeveloperID,
+		"provider":             devEq(provider),
+		"identifier":           devEq(identifier),
+		"createdByDeveloperId": devEq(dc.Key.DeveloperID),
 	})
 	if err != nil || identity == nil {
 		d.RecordOutcome(r, http.StatusNotFound)
@@ -356,11 +354,14 @@ func (d DeveloperAPI) DevIssueClaimCodeHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
-	identifier := models.NormalizePlayerIdentifier(provider, mux.Vars(r)["identifier"])
-	if !models.IsValidPlayerProvider(provider) || identifier == "" {
-		devError(w, http.StatusBadRequest, "invalid_identifier",
-			"provider must be one of fivem, discord, steam, and identifier is required.", nil)
+	provider, err := devSafeProvider(mux.Vars(r)["provider"])
+	if err != nil {
+		devError(w, http.StatusBadRequest, "invalid_provider", err.Error(), nil)
+		return
+	}
+	identifier, err := devSafeIdentifier(provider, mux.Vars(r)["identifier"])
+	if err != nil {
+		devError(w, http.StatusBadRequest, "invalid_identifier", err.Error(), nil)
 		return
 	}
 
@@ -368,9 +369,9 @@ func (d DeveloperAPI) DevIssueClaimCodeHandler(w http.ResponseWriter, r *http.Re
 	defer cancel()
 
 	identity, err := d.IdentityDB.FindOne(ctx, bson.M{
-		"provider":             provider,
-		"identifier":           identifier,
-		"createdByDeveloperId": dc.Key.DeveloperID,
+		"provider":             devEq(provider),
+		"identifier":           devEq(identifier),
+		"createdByDeveloperId": devEq(dc.Key.DeveloperID),
 	})
 	if err != nil || identity == nil {
 		d.RecordOutcome(r, http.StatusNotFound)
@@ -380,7 +381,7 @@ func (d DeveloperAPI) DevIssueClaimCodeHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	var user models.User
-	if err := d.UDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(identity.UserID)}).Decode(&user); err != nil {
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(identity.UserID))}).Decode(&user); err != nil {
 		d.RecordOutcome(r, http.StatusNotFound)
 		devError(w, http.StatusNotFound, "player_not_found", "That player's account is missing.", nil)
 		return
@@ -403,7 +404,7 @@ func (d DeveloperAPI) DevIssueClaimCodeHandler(w http.ResponseWriter, r *http.Re
 	// is about to put on screen is the only one that works. Otherwise a code
 	// from an earlier session, possibly still visible in someone's stream VOD,
 	// would stay live.
-	if _, err := d.ClaimCodeDB.DeleteMany(ctx, bson.M{"userId": identity.UserID, "usedAt": nil}); err != nil {
+	if _, err := d.ClaimCodeDB.DeleteMany(ctx, bson.M{"userId": devEq(identity.UserID), "usedAt": nil}); err != nil {
 		zap.S().Warnw("developer api: could not clear old claim codes", "error", err)
 	}
 
