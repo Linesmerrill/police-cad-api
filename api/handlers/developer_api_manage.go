@@ -89,6 +89,10 @@ type developerAccountResponse struct {
 	// The published comparison, from the same values the middleware enforces
 	// and the same tier list /pricing renders, so the page cannot drift from
 	// either reality or the prices people are actually charged.
+	// UpgradeURL points at the page that sells the subscription a developer's
+	// API limits actually follow — the user plans page, not community
+	// promotions. Those are two different products, and the wrong one shipped
+	// once already.
 	Tiers          []models.DeveloperTier          `json:"tiers"`
 	CommunityPlans []models.CommunityPlanAllowance `json:"communityPlans"`
 	WebsiteTiers   []SubscriptionTier              `json:"websiteTiers"`
@@ -127,7 +131,7 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 		Tiers:          models.DeveloperTiers(),
 		CommunityPlans: models.CommunityPlanAllowances(),
 		WebsiteTiers:   SubscriptionTiers(),
-		UpgradeURL:     envOr("PREMIUM_PLUS_URL", "/community-pricing"),
+		UpgradeURL:     envOr("DEVELOPER_UPGRADE_URL", "/pricing"),
 	}
 	resp.Limits = models.LimitsForPlan(resp.Entitlement.Plan)
 
@@ -1028,4 +1032,103 @@ func (d DeveloperAPI) setCommunityGrantStatus(w http.ResponseWriter, r *http.Req
 		keyID, "", map[string]interface{}{"status": status})
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"keyId": keyID, "status": status})
+}
+
+// ---- the communities a developer can point a key at ----
+
+// developerCommunityOption is one entry in the key form's community picker.
+type developerCommunityOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// CanGrant is whether this person can approve a key into this community
+	// themselves. False means the key is created and then waits for an owner or
+	// an admin, which the form says up front rather than letting someone find
+	// out when nothing works.
+	CanGrant bool `json:"canGrant"`
+}
+
+// ListDeveloperCommunitiesHandler returns the communities the signed-in user
+// belongs to, for the community picker on the key form.
+//
+// GET /api/v1/developer/communities
+//
+// The form used to ask for a raw community id typed by hand, which is a thing
+// nobody has memorised and which fails silently when mistyped.
+//
+// The existing /api/v2/user/{id}/communities is not usable here: it pages at
+// ten and carries no ownership, so it can neither fill a dropdown nor say which
+// communities this person could approve a key into.
+//
+// This changes nothing about enforcement. The dropdown is a convenience, and
+// every grant is still decided server-side from the community record when the
+// key is created — a forged id in the request is refused exactly as it was
+// before this existed.
+func (d DeveloperAPI) ListDeveloperCommunitiesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	actorID := devActorID(r)
+	if actorID == "" {
+		config.ErrorStatus("unauthorized", http.StatusUnauthorized, w, fmt.Errorf("no authenticated user"))
+		return
+	}
+
+	ctx, cancel := api.WithQueryTimeout(r.Context())
+	defer cancel()
+
+	var owner models.User
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(actorID))}).Decode(&owner); err != nil {
+		config.InfoStatus("sign in and try again", http.StatusUnauthorized, w, err)
+		return
+	}
+
+	// Membership comes from the user record, not community.members: that map is
+	// not a reliable membership list.
+	ids := make([]primitive.ObjectID, 0, len(owner.Details.Communities))
+	for _, membership := range owner.Details.Communities {
+		_, oid, err := devSafeObjectID(membership.CommunityID)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, oid)
+	}
+
+	options := []developerCommunityOption{}
+	if len(ids) > 0 {
+		cursor, err := d.CDB.Find(ctx, bson.M{"_id": bson.M{"$in": ids}})
+		if err != nil {
+			config.ErrorStatus("could not read your communities", http.StatusInternalServerError, w, err)
+			return
+		}
+		defer cursor.Close(ctx)
+
+		var communities []models.Community
+		if err := cursor.All(ctx, &communities); err != nil {
+			config.ErrorStatus("could not read your communities", http.StatusInternalServerError, w, err)
+			return
+		}
+		for i := range communities {
+			c := communities[i]
+			options = append(options, developerCommunityOption{
+				ID:   c.ID.Hex(),
+				Name: strings.TrimSpace(c.Details.Name),
+				// The same helper every community action uses, so the badge on
+				// the form cannot disagree with what approval actually allows.
+				CanGrant: userHasCommunityPermission(&c, actorID, "manage community settings"),
+			})
+		}
+	}
+
+	// The ones they can grant themselves first, then by name, so the common
+	// case is at the top and the order is stable between loads.
+	sort.SliceStable(options, func(i, j int) bool {
+		if options[i].CanGrant != options[j].CanGrant {
+			return options[i].CanGrant
+		}
+		return strings.ToLower(options[i].Name) < strings.ToLower(options[j].Name)
+	})
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":       options,
+		"totalCount": len(options),
+	})
 }
