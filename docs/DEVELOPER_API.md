@@ -419,14 +419,57 @@ These live on the normal authenticated surface, not the developer one.
 GET  /api/v1/developer/account                      POST /api/v1/developer/account/enable
                                                     POST /api/v1/developer/account/disable
 GET  /api/v1/developer/keys                         POST /api/v1/developer/keys
+GET  /api/v1/developer/keys/{id}                    PATCH /api/v1/developer/keys/{id}
 POST /api/v1/developer/keys/{id}/rotate             DELETE /api/v1/developer/keys/{id}
 GET  /api/v1/developer/keys/{id}/usage?from&to
+GET  /api/v1/developer/usage?days=7|30|90                  — the whole account, summed
+POST /api/v1/developer/keys/{id}/communities               — add one community
+DELETE /api/v1/developer/keys/{id}/communities/{communityId}
 POST /api/v1/developer/keys/{id}/request-community
+GET  /api/v1/developer/communities                         — the picker's list
 GET  /api/v1/developer/community/{communityId}/keys        — owner/admin view
 POST /api/v1/developer/community/{communityId}/keys/{keyId}/approve
 POST /api/v1/developer/community/{communityId}/keys/{keyId}/revoke
 POST /api/v1/developer/claim                               — a signed-in player redeems a code
 ```
+
+### Editing a key, and one key with several communities
+
+`PATCH /keys/{id}` changes a key's name and scopes **without changing the
+secret**. That is the whole point of it: widening a key used to mean revoking
+it, issuing another and redeploying whatever held the old one, so people
+over-scoped keys at creation to avoid the churn, and narrowing one had the same
+cost in the safe direction.
+
+The validation creation does is re-applied, including the rule that a key with
+no community and no `communities:provision` can do nothing — an edit can reach
+that state by removing the scope rather than by never having had it.
+
+A grant has always been one document per (key, community), and every
+community-scoped route reads the community from the URL, so several live grants
+on one key need **no migration and no change on the request path**. Only the
+first version of the create form insisted on exactly one.
+
+`POST /keys/{id}/communities` applies the same authority test as binding a
+community at creation: someone who can manage the community makes it live, an
+ordinary approved member creates a pending request, a non-member is refused.
+Adding a community to an existing key must not be an easier path than binding
+one at creation, or it becomes the path people use.
+
+`DELETE /keys/{id}/communities/{communityId}` is immediate and unconditional,
+including for the last one. Removing access is the safe direction, so it does
+not wait on an owner's approval. Removing the last community leaves the key
+permission-only; the response reports `keyNowInert` so the console can say the
+key can no longer reach anything.
+
+Grants are revoked, never deleted — the usage rows and the audit trail point at
+that pair, and a deleted row would take the record of what the key did with it.
+A revoked grant is revived rather than duplicated if the community is added
+back.
+
+**Limits are counted per key, not per community.** A key with three communities
+spends one rate and provisioning allowance across all three. The console says
+this on the key page rather than leaving it to be discovered from a 429.
 
 ### Where the new surface sits in the middleware chain
 
