@@ -338,7 +338,6 @@ Small on purpose, and driven by what a FiveM mod actually needs.
 | `vehicles:read` / `vehicles:write` | by plate |
 | `firearms:read` / `firearms:write` | by serial |
 | `licenses:write` | issue a license to a civilian |
-| `shifts:write` | clock a linked member in and out |
 | `players:provision` | upsert players, issue claim codes |
 | `communities:provision` | create a community owned by the developer |
 | `members:read` / `members:write` | roster, invite, approve, set role, remove |
@@ -365,12 +364,11 @@ GET    /api/v1/dev/communities/{id}/departments               community:read
 GET    /api/v1/dev/communities/{id}/ten-codes                 community:read
 
 GET    /api/v1/dev/communities/{id}/units                     units:read
-PUT    /api/v1/dev/communities/{id}/units/{playerRef}/status   units:write
 PUT    /api/v1/dev/communities/{id}/units/status/bulk          units:write   — up to 100 players
+PUT    /api/v1/dev/communities/{id}/units/{playerRef}/status   units:write
 
 GET    /api/v1/dev/communities/{id}/calls                     calls:read
 POST   /api/v1/dev/communities/{id}/calls                     calls:write
-PATCH  /api/v1/dev/communities/{id}/calls/{callId}            calls:write
 POST   /api/v1/dev/communities/{id}/calls/{callId}/close       calls:write
 
 GET    /api/v1/dev/communities/{id}/bolos                     bolos:read
@@ -378,15 +376,11 @@ POST   /api/v1/dev/communities/{id}/bolos                     bolos:write
 
 GET    /api/v1/dev/communities/{id}/civilians?name=           civilians:read
 POST   /api/v1/dev/communities/{id}/civilians                 civilians:write
-PATCH  /api/v1/dev/communities/{id}/civilians/{civilianId}     civilians:write
 GET    /api/v1/dev/communities/{id}/vehicles?plate=           vehicles:read
 POST   /api/v1/dev/communities/{id}/vehicles                  vehicles:write
 GET    /api/v1/dev/communities/{id}/firearms?serial=          firearms:read
 POST   /api/v1/dev/communities/{id}/firearms                  firearms:write
 POST   /api/v1/dev/communities/{id}/licenses                  licenses:write
-
-POST   /api/v1/dev/communities/{id}/shifts/clock-in           shifts:write
-POST   /api/v1/dev/communities/{id}/shifts/clock-out          shifts:write
 
 POST   /api/v1/dev/players                                    players:provision
 GET    /api/v1/dev/players/{provider}/{identifier}            players:provision
@@ -398,6 +392,11 @@ PATCH  /api/v1/dev/communities/{id}/members/{playerRef}        members:write
 DELETE /api/v1/dev/communities/{id}/members/{playerRef}        members:write
 POST   /api/v1/dev/communities/{id}/members/{playerRef}/approve members:write
 ```
+
+**Not in v1:** clocking a member in and out. It is coupled to the economy
+system — it needs `community.economy.enabled` and the department's own economy
+toggle — which most communities have off, so the scope would be selectable and
+then do nothing for nearly everyone. The scope string is reserved.
 
 The **bulk status** endpoint matters more than it looks. A FiveM server ticking
 once a second with 64 players is 64 requests per second if the mod loops, which

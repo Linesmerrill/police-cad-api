@@ -12,12 +12,12 @@ import (
 
 // Collections behind the Developer API. See docs/DEVELOPER_API.md.
 const (
-	developerAccountCollectionName = "developer_accounts"
-	developerAPIKeyCollectionName  = "developer_api_keys"
-	developerGrantCollectionName   = "developer_community_grants"
-	developerUsageCollectionName   = "developer_api_usage"
-	developerRateCollectionName    = "developer_api_rate"
-	playerIdentityCollectionName   = "player_identities"
+	developerAccountCollectionName   = "developer_accounts"
+	developerAPIKeyCollectionName    = "developer_api_keys"
+	developerGrantCollectionName     = "developer_community_grants"
+	developerUsageCollectionName     = "developer_api_usage"
+	developerRateCollectionName      = "developer_api_rate"
+	playerIdentityCollectionName     = "player_identities"
 	developerClaimCodeCollectionName = "developer_claim_codes"
 )
 
@@ -208,7 +208,7 @@ func NewDeveloperRateDatabase(db DatabaseHelper) DeveloperRateDatabase {
 // the failure an in-memory limiter has and this store exists to avoid.
 func (d *developerRateDatabase) IncrementAndCount(ctx context.Context, id string, expiresAt interface{}) (int, error) {
 	update := bson.M{
-		"$inc": bson.M{"n": 1},
+		"$inc":         bson.M{"n": 1},
 		"$setOnInsert": bson.M{"expiresAt": expiresAt},
 	}
 	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)

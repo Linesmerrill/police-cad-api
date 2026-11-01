@@ -45,7 +45,7 @@ const (
 // "an owner let this key in" and "this key made this community" carry different
 // weight when someone is working out what happened.
 const (
-	DeveloperGrantCreatedByKey = "created_by_key"
+	DeveloperGrantCreatedByKey  = "created_by_key"
 	DeveloperGrantOwnerApproved = "owner_approved"
 )
 
@@ -64,25 +64,30 @@ const (
 // settings, and there never will be. Those are not missing from the list; they
 // are absent from the surface.
 const (
-	ScopeCommunityRead       = "community:read"
-	ScopeUnitsRead           = "units:read"
-	ScopeUnitsWrite          = "units:write"
-	ScopeCallsRead           = "calls:read"
-	ScopeCallsWrite          = "calls:write"
-	ScopeBolosRead           = "bolos:read"
-	ScopeBolosWrite          = "bolos:write"
-	ScopeCiviliansRead       = "civilians:read"
-	ScopeCiviliansWrite      = "civilians:write"
-	ScopeVehiclesRead        = "vehicles:read"
-	ScopeVehiclesWrite       = "vehicles:write"
-	ScopeFirearmsRead        = "firearms:read"
-	ScopeFirearmsWrite       = "firearms:write"
-	ScopeLicensesWrite       = "licenses:write"
-	ScopeShiftsWrite         = "shifts:write"
-	ScopePlayersProvision    = "players:provision"
+	ScopeCommunityRead        = "community:read"
+	ScopeUnitsRead            = "units:read"
+	ScopeUnitsWrite           = "units:write"
+	ScopeCallsRead            = "calls:read"
+	ScopeCallsWrite           = "calls:write"
+	ScopeBolosRead            = "bolos:read"
+	ScopeBolosWrite           = "bolos:write"
+	ScopeCiviliansRead        = "civilians:read"
+	ScopeCiviliansWrite       = "civilians:write"
+	ScopeVehiclesRead         = "vehicles:read"
+	ScopeVehiclesWrite        = "vehicles:write"
+	ScopeFirearmsRead         = "firearms:read"
+	ScopeFirearmsWrite        = "firearms:write"
+	ScopeLicensesWrite        = "licenses:write"
+	// ScopeShiftsWrite is reserved, not offered. Clocking in is coupled to the
+	// economy system (it needs community.economy.enabled and the department's
+	// own economy toggle), which most communities have off, so a scope for it
+	// would be selectable and then do nothing for nearly everyone. Left here so
+	// the string is not reused for something else.
+	ScopeShiftsWrite = "shifts:write"
+	ScopePlayersProvision     = "players:provision"
 	ScopeCommunitiesProvision = "communities:provision"
-	ScopeMembersRead         = "members:read"
-	ScopeMembersWrite        = "members:write"
+	ScopeMembersRead          = "members:read"
+	ScopeMembersWrite         = "members:write"
 )
 
 // developerScopeDescriptions is every valid scope and what it grants, in the
@@ -107,7 +112,6 @@ var developerScopeDescriptions = []struct {
 	{ScopeFirearmsRead, "Look up firearms by serial"},
 	{ScopeFirearmsWrite, "Register firearms for linked players"},
 	{ScopeLicensesWrite, "Issue licenses to civilians"},
-	{ScopeShiftsWrite, "Clock linked members in and out"},
 	{ScopePlayersProvision, "Create and link player accounts from game identifiers"},
 	{ScopeCommunitiesProvision, "Create communities owned by the developer"},
 	{ScopeMembersRead, "Read the community's member roster"},
@@ -148,12 +152,12 @@ func IsValidDeveloperScope(scope string) bool {
 // mod looping by mistake should not be able to make ten thousand accounts
 // before anyone notices.
 type DeveloperLimits struct {
-	RequestsPerMinute   int `json:"requestsPerMinute"`
-	RequestsPerDay      int `json:"requestsPerDay"`
-	KeysPerDeveloper    int `json:"keysPerDeveloper"`
-	AccountsPerKeyDay   int `json:"accountsPerKeyDay"`
+	RequestsPerMinute    int `json:"requestsPerMinute"`
+	RequestsPerDay       int `json:"requestsPerDay"`
+	KeysPerDeveloper     int `json:"keysPerDeveloper"`
+	AccountsPerKeyDay    int `json:"accountsPerKeyDay"`
 	CommunitiesPerKeyDay int `json:"communitiesPerKeyDay"`
-	CommunitiesPerKey   int `json:"communitiesPerKey"`
+	CommunitiesPerKey    int `json:"communitiesPerKey"`
 }
 
 var developerPlanLimits = map[string]DeveloperLimits{
@@ -187,22 +191,22 @@ func LimitsForPlan(plan string) DeveloperLimits {
 
 // DeveloperAccount is one LPC user's developer registration.
 type DeveloperAccount struct {
-	ID              primitive.ObjectID `json:"id" bson:"_id"`
-	UserID          string             `json:"userId" bson:"userId"`
-	Plan            string             `json:"plan" bson:"plan"`
-	PlanActive      bool               `json:"planActive" bson:"planActive"`
-	StripeCustomerID string            `json:"-" bson:"stripeCustomerId,omitempty"`
-	StripeSubscriptionID string        `json:"-" bson:"stripeSubscriptionId,omitempty"`
-	AppName         string             `json:"appName,omitempty" bson:"appName,omitempty"`
-	AppURL          string             `json:"appUrl,omitempty" bson:"appUrl,omitempty"`
-	TermsAcceptedAt *primitive.DateTime `json:"termsAcceptedAt,omitempty" bson:"termsAcceptedAt,omitempty"`
-	TermsVersion    string             `json:"termsVersion,omitempty" bson:"termsVersion,omitempty"`
-	Status          string             `json:"status" bson:"status"`
-	SuspendedReason string             `json:"suspendedReason,omitempty" bson:"suspendedReason,omitempty"`
-	SuspendedBy     string             `json:"-" bson:"suspendedBy,omitempty"`
-	SuspendedAt     *primitive.DateTime `json:"suspendedAt,omitempty" bson:"suspendedAt,omitempty"`
-	CreatedAt       primitive.DateTime `json:"createdAt" bson:"createdAt"`
-	UpdatedAt       primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
+	ID                   primitive.ObjectID  `json:"id" bson:"_id"`
+	UserID               string              `json:"userId" bson:"userId"`
+	Plan                 string              `json:"plan" bson:"plan"`
+	PlanActive           bool                `json:"planActive" bson:"planActive"`
+	StripeCustomerID     string              `json:"-" bson:"stripeCustomerId,omitempty"`
+	StripeSubscriptionID string              `json:"-" bson:"stripeSubscriptionId,omitempty"`
+	AppName              string              `json:"appName,omitempty" bson:"appName,omitempty"`
+	AppURL               string              `json:"appUrl,omitempty" bson:"appUrl,omitempty"`
+	TermsAcceptedAt      *primitive.DateTime `json:"termsAcceptedAt,omitempty" bson:"termsAcceptedAt,omitempty"`
+	TermsVersion         string              `json:"termsVersion,omitempty" bson:"termsVersion,omitempty"`
+	Status               string              `json:"status" bson:"status"`
+	SuspendedReason      string              `json:"suspendedReason,omitempty" bson:"suspendedReason,omitempty"`
+	SuspendedBy          string              `json:"-" bson:"suspendedBy,omitempty"`
+	SuspendedAt          *primitive.DateTime `json:"suspendedAt,omitempty" bson:"suspendedAt,omitempty"`
+	CreatedAt            primitive.DateTime  `json:"createdAt" bson:"createdAt"`
+	UpdatedAt            primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
 }
 
 // EffectivePlan is the plan to apply right now. A plan that is not active bills

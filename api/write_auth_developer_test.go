@@ -46,7 +46,7 @@ func TestRequireWriteAuth_DeveloperExemptionIsNarrow(t *testing.T) {
 	}))
 
 	for _, path := range []string{
-		"/api/v1/developer/keys",     // the management surface: a session route
+		"/api/v1/developer/keys",    // the management surface: a session route
 		"/api/v1/dev",               // no trailing slash: not the subrouter
 		"/api/v1/devious/community", // shares a prefix, is not the surface
 		"/api/v2/dev/communities",   // v2 has no developer surface

@@ -1,0 +1,920 @@
+openapi: 3.1.0
+
+# The LPC Developer API.
+#
+# Hand-written rather than generated, because the generator would describe the
+# Go structs and what a third party needs described is the contract: which scope
+# each route wants, what a player reference is, and what the error codes mean.
+#
+# See QUICKSTART.md for the walkthrough and DEVELOPER_API.md for the design.
+
+info:
+  title: LPC Developer API
+  version: "1.0.0"
+  description: |
+    Community-scoped API keys for building against Lines Police CAD.
+
+    **Authentication.** Send your key as `Authorization: Bearer lpc_live_…` on
+    every request. Not in `X-API-Key`: that header is our own first-party
+    gateway secret and a developer key will never satisfy it.
+
+    **Player references.** You name a player by their game identifier, as
+    `provider:identifier` — `fivem:1a2b3c4d`, `discord:198573466634`. Never by
+    an email, and never by an LPC user id you did not get from us. A FiveM
+    `license:` prefix is optional and case does not matter.
+
+    **Rate limits.** Every response carries `X-RateLimit-*`, and a 429 carries
+    `Retry-After`. Use the bulk status endpoint on a tick rather than looping
+    over players: one call per tick stays inside the free limit where a loop
+    over 64 players does not.
+  contact:
+    name: LPC support
+    url: https://discord.gg/Y9ytW2ZMp4
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.linespolice-cad.com/api/v1/dev
+    description: Production
+
+security:
+  - developerKey: []
+
+tags:
+  - name: Key
+    description: Checking your own credentials.
+  - name: Communities
+    description: The communities a key may act in, and creating new ones.
+  - name: Players
+    description: Mapping game identifiers to LPC accounts, and claim codes.
+  - name: Members
+    description: The roster, driven by an acting player.
+  - name: Units
+    description: Who is on duty, and their status.
+  - name: Calls
+  - name: BOLOs
+  - name: Records
+    description: Characters, vehicles, firearms and licenses.
+
+paths:
+  /whoami:
+    get:
+      tags: [Key]
+      summary: Describe the calling key
+      description: |
+        Needs no scope, deliberately: a key with the wrong scopes still has to
+        be able to find out what it does hold, or debugging a 403 means
+        guessing. Start here when something is not working.
+      responses:
+        "200":
+          description: The key, its plan, its limits, its communities and today's usage.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Whoami" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /communities:
+    get:
+      tags: [Communities]
+      summary: List the communities this key may act in
+      description: |
+        Only ever returns communities already granted to this key, including
+        pending and revoked grants so you can see a request you are waiting on.
+        There is no search: a key cannot be used to discover communities it has
+        no business with.
+      security: [{ developerKey: [community:read] }]
+      responses:
+        "200":
+          description: The key's communities.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  communities:
+                    type: array
+                    items: { $ref: "#/components/schemas/CommunitySummary" }
+        "403": { $ref: "#/components/responses/MissingScope" }
+    post:
+      tags: [Communities]
+      summary: Create a community
+      description: |
+        The community is owned by **your** LPC account and counts against your
+        plan exactly like one created on the website. It starts private.
+
+        Three limits apply: your own plan's community cap, a per-key daily
+        creation cap, and a per-key total.
+      security: [{ developerKey: [communities:provision] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 60 }
+                description: { type: string }
+                tags:
+                  type: array
+                  items: { type: string }
+                visibility:
+                  type: string
+                  enum: [private, public]
+                  default: private
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  community: { $ref: "#/components/schemas/CreatedCommunity" }
+        "403":
+          description: |
+            `owner_community_limit_reached` — the developer's own plan cap.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`community_limit_reached` — this key's total."
+        "429":
+          description: "`provision_cap_reached` — this key's daily cap."
+
+  /communities/{communityId}/departments:
+    get:
+      tags: [Communities]
+      summary: List departments and their ranks
+      description: Read these ids rather than hardcoding them; owners edit them.
+      security: [{ developerKey: [community:read] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      responses:
+        "200":
+          description: The community's departments.
+        "403": { $ref: "#/components/responses/CommunityNotGranted" }
+
+  /communities/{communityId}/ten-codes:
+    get:
+      tags: [Communities]
+      summary: List ten-codes
+      description: |
+        You need these ids to set a unit's status. Read them rather than
+        hardcoding: a hardcoded id breaks the day an owner renames a code.
+      security: [{ developerKey: [community:read] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      responses:
+        "200":
+          description: The community's ten-codes.
+        "403": { $ref: "#/components/responses/CommunityNotGranted" }
+
+  /players:
+    post:
+      tags: [Players]
+      summary: Upsert a player by game identifier
+      description: |
+        **Idempotent.** Call it on every connect. The same identifier always
+        returns the same account, enforced by a unique index rather than by a
+        check, so two servers calling at the same instant still end up with one
+        account.
+
+        A player we have not seen gets a new account that **cannot be logged
+        into**: it holds no email and no password. That is the mechanism, not an
+        omission — an email you send us is an email you control. The player
+        takes ownership with a claim code.
+      security: [{ developerKey: [players:provision] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, identifier]
+              properties:
+                provider: { $ref: "#/components/schemas/Provider" }
+                identifier:
+                  type: string
+                  description: FiveM license (with or without the `license:` prefix), Discord ID, or Steam ID.
+                  example: "license:1a2b3c4d5e6f7a8b"
+                username:
+                  type: string
+                  maxLength: 32
+                  description: A display name only. Never used to find or match an account.
+      responses:
+        "200":
+          description: The player was already known.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  player: { $ref: "#/components/schemas/Player" }
+        "201":
+          description: A new account was created, unclaimed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  player: { $ref: "#/components/schemas/Player" }
+        "429":
+          description: "`provision_cap_reached` — the daily account cap. Lookups of players you already know still work."
+
+  /players/{provider}/{identifier}:
+    get:
+      tags: [Players]
+      summary: Look a player up
+      description: |
+        Only players **your** key created are visible. Otherwise a key could ask
+        whether an arbitrary Discord ID has an LPC account, which is nobody's
+        business but the account holder's.
+      security: [{ developerKey: [players:provision] }]
+      parameters:
+        - { $ref: "#/components/parameters/provider" }
+        - { $ref: "#/components/parameters/identifier" }
+      responses:
+        "200":
+          description: The player.
+        "404":
+          description: "`player_not_found` — no player of yours has that identifier."
+
+  /players/{provider}/{identifier}/claim-code:
+    post:
+      tags: [Players]
+      summary: Issue a claim code
+      description: |
+        Show the code and URL in game. The player opens the URL, signs in or
+        signs up, and enters the code; everything you made for them moves onto
+        their account.
+
+        Single use, 30 minutes, and issuing a new one kills any outstanding
+        code — so an older code still visible in a stream VOD stops working.
+        Only for unclaimed accounts your key created.
+      security: [{ developerKey: [players:provision] }]
+      parameters:
+        - { $ref: "#/components/parameters/provider" }
+        - { $ref: "#/components/parameters/identifier" }
+      responses:
+        "201":
+          description: The code. Shown once; only its hash is stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: "K7M2-QX9P-4T" }
+                  expiresAt: { type: string, format: date-time }
+                  url: { type: string, format: uri }
+                  instructions: { type: string }
+        "404": { description: "`player_not_found`" }
+        "409": { description: "`already_claimed` — the player owns their account; they sign in normally." }
+
+  /communities/{communityId}/members:
+    get:
+      tags: [Members]
+      summary: List the roster
+      security: [{ developerKey: [members:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200": { description: The community's members. }
+        "403": { $ref: "#/components/responses/CommunityNotGranted" }
+    post:
+      tags: [Members]
+      summary: Add a member
+      description: |
+        `actingPlayer` is the player doing the adding, and they must hold
+        **manage members** in the community (the owner and administrators
+        always do). **A key never grants more than the acting player holds.**
+
+        A friend we have not seen is provisioned here, so "invite my mate" is
+        one call. The response's `needsClaim` tells you to show them a claim
+        code.
+
+        Adding an existing member is a no-op rather than an error, so calling
+        this on every join is safe.
+      security: [{ developerKey: [members:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actingPlayer, player]
+              properties:
+                actingPlayer: { $ref: "#/components/schemas/PlayerRef" }
+                player: { $ref: "#/components/schemas/PlayerRef" }
+                username: { type: string }
+                status:
+                  type: string
+                  enum: [approved, pending]
+                  default: approved
+      responses:
+        "200": { description: "Already a member; `added` is false." }
+        "201": { description: Added. }
+        "403":
+          description: |
+            `acting_player_lacks_permission`, `acting_player_not_a_member`,
+            `acting_player_banned`, or `player_banned` — a banned player cannot
+            be re-invited by a key; an admin lifts the ban on the website.
+
+  /communities/{communityId}/members/{playerRef}:
+    patch:
+      tags: [Members]
+      summary: Set a member's department and rank
+      description: |
+        Roles are **not** assignable by a key: roles carry permissions, so a key
+        handing one out is a privilege-escalation path. Sending `roleId` is a
+        403. Change roles on the website.
+      security: [{ developerKey: [members:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/playerRef" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actingPlayer, departmentId]
+              properties:
+                actingPlayer: { $ref: "#/components/schemas/PlayerRef" }
+                departmentId: { type: string }
+                rankId: { type: string }
+      responses:
+        "200": { description: Updated. }
+        "403": { description: "`roles_not_assignable`, or an acting-player failure." }
+        "404": { description: "`department_not_found` or `rank_not_found`." }
+        "409": { description: "`not_a_member`" }
+    delete:
+      tags: [Members]
+      summary: Remove a member, or leave
+      description: |
+        Leaving is this call with `actingPlayer` equal to the target, and needs
+        no permission. Removing somebody else needs **manage members**.
+
+        The owner can neither be removed nor leave: a community with no owner
+        has nobody who can administer it. Transfer ownership on the website.
+      security: [{ developerKey: [members:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/playerRef" }
+      responses:
+        "200": { description: Removed, or already not a member. }
+        "409": { description: "`owner_cannot_be_removed`" }
+
+  /communities/{communityId}/members/{playerRef}/approve:
+    post:
+      tags: [Members]
+      summary: Approve a join request
+      security: [{ developerKey: [members:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/playerRef" }
+      responses:
+        "200": { description: Approved, or already approved. }
+        "404": { description: "`no_request`" }
+        "403": { description: "`player_banned`, or an acting-player failure." }
+
+  /communities/{communityId}/units:
+    get:
+      tags: [Units]
+      summary: Who is on duty
+      security: [{ developerKey: [units:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: onDuty
+          in: query
+          schema: { type: boolean }
+          description: Only units with a status set.
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200": { description: The units. }
+
+  /communities/{communityId}/units/status/bulk:
+    put:
+      tags: [Units]
+      summary: Set many units' statuses
+      description: |
+        **Use this on a tick, not the single-unit endpoint in a loop.** A server
+        with 64 players looping once a second is 3,840 requests a minute, over
+        even the paid limit. One bulk call per tick is 60 a minute.
+
+        **Partial by design.** Each unit reports its own result, so one unknown
+        player does not discard the other sixty-three — a game server cannot
+        usefully retry a whole tick. Up to 100 units per call.
+      security: [{ developerKey: [units:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [units]
+              properties:
+                units:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { $ref: "#/components/schemas/UnitStatusEntry" }
+      responses:
+        "200":
+          description: Per-unit results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied: { type: integer }
+                  failed: { type: integer }
+                  units:
+                    type: array
+                    items: { $ref: "#/components/schemas/UnitStatusResult" }
+        "400": { description: "`too_many_units`, or an empty batch." }
+
+  /communities/{communityId}/units/{playerRef}/status:
+    put:
+      tags: [Units]
+      summary: Set one unit's status
+      description: |
+        For reacting to a single event. A failure here is the whole request, so
+        it returns 422 rather than a 200 with the error buried in a list.
+      security: [{ developerKey: [units:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/playerRef" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UnitStatusEntry" }
+      responses:
+        "200": { description: Set. }
+        "422": { description: "`ten_code_not_found`, `player_not_a_member`, `department_not_found` or `nothing_to_set`." }
+
+  /communities/{communityId}/calls:
+    get:
+      tags: [Calls]
+      summary: List calls
+      description: Open calls only unless `includeClosed=true`.
+      security: [{ developerKey: [calls:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: includeClosed
+          in: query
+          schema: { type: boolean, default: false }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200": { description: The calls. }
+    post:
+      tags: [Calls]
+      summary: Raise a call
+      description: |
+        `caller` is optional: plenty of calls are raised by a script rather than
+        a person. When given, it must be a member.
+
+        `location` is written into the top of the call's text, because the call
+        model has no location field — a location stored where no surface renders
+        it is one no officer would ever see.
+      security: [{ developerKey: [calls:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                description: { type: string }
+                location: { type: string }
+                caller: { $ref: "#/components/schemas/PlayerRef" }
+                departments:
+                  type: array
+                  items: { type: string }
+      responses:
+        "201": { description: Raised, and pushed to live dashboards. }
+
+  /communities/{communityId}/calls/{callId}/close:
+    post:
+      tags: [Calls]
+      summary: Close a call
+      security: [{ developerKey: [calls:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: callId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Closed. }
+        "404": { description: "`call_not_found` — including a call in another community." }
+
+  /communities/{communityId}/bolos:
+    get:
+      tags: [BOLOs]
+      summary: List BOLOs
+      security: [{ developerKey: [bolos:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200": { description: The BOLOs. }
+    post:
+      tags: [BOLOs]
+      summary: Raise a BOLO
+      description: |
+        `reporter` is required and must be a member: a BOLO is acted on by other
+        players, so an unattributable one is worse than none.
+
+        `plate` is written into the description text, for the same reason a
+        call's location is.
+      security: [{ developerKey: [bolos:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, reporter]
+              properties:
+                title: { type: string }
+                reporter: { $ref: "#/components/schemas/PlayerRef" }
+                description: { type: string }
+                location: { type: string }
+                plate: { type: string }
+                departmentId:
+                  type: string
+                  description: Scopes the BOLO to one department instead of the community.
+      responses:
+        "201": { description: Raised. }
+
+  /communities/{communityId}/civilians:
+    get:
+      tags: [Records]
+      summary: Look characters up by name
+      security: [{ developerKey: [civilians:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: name
+          in: query
+          required: true
+          schema: { type: string }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200": { description: Matching characters, scoped to this community. }
+    post:
+      tags: [Records]
+      summary: Create a character
+      description: |
+        The community's own settings apply. If its approval system is on, the
+        character arrives `pending` and `pendingApproval` is true; if it caps
+        characters per player, that cap applies. **A key does not override the
+        settings the owner chose.**
+      security: [{ developerKey: [civilians:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [player, firstName, lastName]
+              properties:
+                player: { $ref: "#/components/schemas/PlayerRef" }
+                firstName: { type: string }
+                lastName: { type: string }
+                birthday: { type: string, example: "1998-04-10" }
+                gender: { type: string }
+                race: { type: string }
+                hairColor: { type: string }
+                eyeColor: { type: string }
+                height: { type: string }
+                weight: { type: string }
+                address: { type: string }
+                occupation: { type: string }
+                image: { type: string, format: uri }
+      responses:
+        "201": { description: Created. }
+        "403": { description: "`player_not_a_member`" }
+        "409": { description: "`civilian_limit_reached`" }
+
+  /communities/{communityId}/vehicles:
+    get:
+      tags: [Records]
+      summary: Look a vehicle up by plate
+      security: [{ developerKey: [vehicles:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: plate
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: |
+            Matching vehicles. The `stolen`, `validRegistration` and
+            `validInsurance` flags are booleans here: the stored values use two
+            historical encodings with opposite polarity, so they are resolved
+            for you.
+    post:
+      tags: [Records]
+      summary: Register a vehicle to a character
+      security: [{ developerKey: [vehicles:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [player, civilianId, plate]
+              properties:
+                player: { $ref: "#/components/schemas/PlayerRef" }
+                civilianId: { type: string }
+                plate: { type: string }
+                licensePlateState: { type: string }
+                vin: { type: string }
+                make: { type: string }
+                model: { type: string }
+                year: { type: string }
+                color: { type: string }
+                type: { type: string }
+                image: { type: string, format: uri }
+      responses:
+        "201": { description: Registered. }
+        "404": { description: "`civilian_not_found` — one answer for absent, not theirs, and not in this community." }
+
+  /communities/{communityId}/firearms:
+    get:
+      tags: [Records]
+      summary: Look a firearm up by serial
+      security: [{ developerKey: [firearms:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: serial
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Matching firearms. }
+    post:
+      tags: [Records]
+      summary: Register a firearm to a character
+      security: [{ developerKey: [firearms:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [player, civilianId, serialNumber]
+              properties:
+                player: { $ref: "#/components/schemas/PlayerRef" }
+                civilianId: { type: string }
+                serialNumber: { type: string }
+                name: { type: string }
+                weaponType: { type: string }
+                caliber: { type: string }
+                image: { type: string, format: uri }
+      responses:
+        "201": { description: Registered. }
+
+  /communities/{communityId}/licenses:
+    post:
+      tags: [Records]
+      summary: Issue a license to a character
+      security: [{ developerKey: [licenses:write] }]
+      parameters: [{ $ref: "#/components/parameters/communityId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [player, civilianId, type]
+              properties:
+                player: { $ref: "#/components/schemas/PlayerRef" }
+                civilianId: { type: string }
+                type: { type: string, example: "Driver License" }
+                status: { type: string, default: Approved }
+                expirationDate: { type: string, example: "10/25/2034" }
+                notes: { type: string }
+      responses:
+        "201": { description: Issued. }
+
+components:
+  securitySchemes:
+    developerKey:
+      type: http
+      scheme: bearer
+      bearerFormat: lpc_live_
+      description: |
+        Your key, as `Authorization: Bearer lpc_live_…`.
+
+        The scopes listed per operation are what that route requires. A key
+        without one gets a 403 naming the scope it needed.
+
+  parameters:
+    communityId:
+      name: communityId
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-f0-9]{24}$" }
+      description: A community this key is granted. Get the ids from `GET /communities`.
+    playerRef:
+      name: playerRef
+      in: path
+      required: true
+      schema: { type: string }
+      example: "fivem:1a2b3c4d5e6f7a8b"
+    provider:
+      name: provider
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Provider" }
+    identifier:
+      name: identifier
+      in: path
+      required: true
+      schema: { type: string }
+    page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+
+  responses:
+    Unauthorized:
+      description: |
+        `invalid_key`. The key is wrong, revoked, or sent in the wrong header.
+        An unknown key and a revoked key answer identically, so this cannot be
+        used to discover which keys exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MissingScope:
+      description: "`missing_scope`. The body names the scope the route needed."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    CommunityNotGranted:
+      description: |
+        `community_not_granted`. One answer for "no such community" and "not
+        granted to you", so a key cannot be used to probe which community ids
+        exist. Also `community_pending_deletion` when an owner has deleted it.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Provider:
+      type: string
+      enum: [fivem, discord, steam]
+
+    PlayerRef:
+      type: string
+      description: |
+        `provider:identifier`, for example `fivem:1a2b3c4d` or
+        `discord:198573466634`. A FiveM `license:` prefix is optional.
+
+        `lpc:<userId>` is accepted but buys nothing: the user still has to be a
+        member of the community, which is the real boundary, so a forged id
+        simply fails that check.
+      example: "fivem:1a2b3c4d5e6f7a8b"
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: A stable code to branch on.
+          example: missing_scope
+        message:
+          type: string
+          description: Written for a person to read.
+        requiredScope: { type: string }
+        retryAfterSeconds: { type: integer }
+        limit: { type: integer }
+        scope:
+          type: string
+          enum: [minute, day, accounts_per_day, communities_per_day]
+
+    Whoami:
+      type: object
+      properties:
+        key:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            displayPrefix:
+              type: string
+              description: Safe to quote in a support ticket. The key itself is not.
+              example: lpc_live_a1b2c3d4
+            scopes:
+              type: array
+              items: { type: string }
+            createdAt: { type: string, format: date-time }
+        plan: { type: string, enum: [free, pro] }
+        limits: { $ref: "#/components/schemas/Limits" }
+        communities:
+          type: array
+          items: { $ref: "#/components/schemas/CommunitySummary" }
+        usage:
+          type: object
+          properties:
+            requestsToday: { type: integer }
+            accountsCreatedToday: { type: integer }
+            communitiesCreatedToday: { type: integer }
+            dailyLimitResetsAt: { type: string, format: date-time }
+
+    Limits:
+      type: object
+      properties:
+        requestsPerMinute: { type: integer }
+        requestsPerDay: { type: integer }
+        keysPerDeveloper: { type: integer }
+        accountsPerKeyDay: { type: integer }
+        communitiesPerKeyDay: { type: integer }
+        communitiesPerKey: { type: integer }
+
+    CommunitySummary:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        grantSource:
+          type: string
+          enum: [created_by_key, owner_approved]
+        grantStatus:
+          type: string
+          enum: [pending, active, revoked]
+          description: Only `active` can be acted in.
+        membersCount: { type: integer }
+        pendingDeletion:
+          type: boolean
+          description: The owner deleted it. Read-only for 30 days.
+
+    CreatedCommunity:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        ownerId: { type: string }
+        visibility: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Player:
+      type: object
+      properties:
+        playerRef: { $ref: "#/components/schemas/PlayerRef" }
+        playerId: { type: string }
+        provider: { $ref: "#/components/schemas/Provider" }
+        identifier: { type: string }
+        username: { type: string }
+        claimed:
+          type: boolean
+          description: |
+            False means the player has not taken ownership yet. They cannot log
+            in, and cannot see what you made for them, until they do.
+        created: { type: boolean }
+
+    UnitStatusEntry:
+      type: object
+      properties:
+        player: { $ref: "#/components/schemas/PlayerRef" }
+        tenCodeId:
+          type: string
+          description: One of the community's own ten-codes. Read them from `/ten-codes`.
+        location:
+          type: string
+          maxLength: 120
+          description: Free text, as the game reports it.
+          example: Grapeseed
+        departmentId: { type: string }
+
+    UnitStatusResult:
+      type: object
+      properties:
+        player: { type: string }
+        playerId: { type: string }
+        ok: { type: boolean }
+        error:
+          type: string
+          description: Present when `ok` is false.
+          example: player_not_a_member
+        message: { type: string }
