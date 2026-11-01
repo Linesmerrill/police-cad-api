@@ -1251,3 +1251,27 @@ createIndexSafe(
 
 print("\n=== All indexes (including Performance Advisor recommendations) processed ===");
 
+
+// ---- Sign in with Google and Apple ----
+
+// The identity key. Unique on (provider, subject) is what makes "one provider
+// account signs into one LPC account" a property of the data: two concurrent
+// sign-ups for the same Google account cannot both create an account, and the
+// loser re-reads the winner's row.
+//
+// Subject, never email. People change their Google address, Apple hands out a
+// different relay address per app, and two providers can report the same
+// address for different people.
+createIndexSafe(
+  db.auth_identities,
+  { provider: 1, subject: 1 },
+  { name: "auth_identities_provider_subject_idx", unique: true, background: true }
+);
+
+// "How can this account be signed into" — read on every settings page load and
+// by the guard that refuses to remove the last sign-in method.
+createIndexSafe(
+  db.auth_identities,
+  { userId: 1 },
+  { name: "auth_identities_user_idx", background: true }
+);

@@ -19,6 +19,7 @@ const (
 	developerRateCollectionName      = "developer_api_rate"
 	playerIdentityCollectionName     = "player_identities"
 	developerClaimCodeCollectionName = "developer_claim_codes"
+	authIdentityCollectionName       = "auth_identities"
 )
 
 // DeveloperAccountDatabase is one LPC user's developer registration.
