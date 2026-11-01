@@ -57,5 +57,6 @@ default `-mod=vendor` fail locally. CI has no `vendor/` directory, so pass
 - **Error envelope:** `response.message`. v1 endpoints return flat arrays;
   v2 endpoints return `{ data, totalCount, page, limit }`.
 - **Cron jobs** must call `scheduler.SendCronAlert(...)` on failure paths.
-- **Expected not-found** uses `config.InfoStatus` with a 404.
-  `config.ErrorStatus` logs a stacktrace and floods the logs.
+- **Expected not-found** uses `config.InfoStatus` with a 404. `config.ErrorStatus`
+  reserves zap's Error level — and the multi-KB stacktrace production attaches to
+  it — for genuine 5xx faults, so don't reach for it to report something expected.
