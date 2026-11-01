@@ -162,13 +162,13 @@ func (f *fakeDevGrantDB) FindOne(_ context.Context, filter interface{}) (*models
 // ---- fixtures ----
 
 type devFixture struct {
-	api      DeveloperAPI
-	keyDB    *fakeDevKeyDB
-	rateDB   *fakeDevRateDB
-	usageDB  *fakeDevUsageDB
-	grantDB  *fakeDevGrantDB
-	plaintext string
-	keyID     primitive.ObjectID
+	api         DeveloperAPI
+	keyDB       *fakeDevKeyDB
+	rateDB      *fakeDevRateDB
+	usageDB     *fakeDevUsageDB
+	grantDB     *fakeDevGrantDB
+	plaintext   string
+	keyID       primitive.ObjectID
 	developerID primitive.ObjectID
 }
 
@@ -198,10 +198,10 @@ func newDevFixture(t *testing.T, scopes ...string) *devFixture {
 	}
 
 	f := &devFixture{
-		keyDB:   &fakeDevKeyDB{byHash: map[string]models.DeveloperAPIKey{hash: key}, byID: map[string]models.DeveloperAPIKey{keyID.Hex(): key}},
-		rateDB:  &fakeDevRateDB{},
-		usageDB: &fakeDevUsageDB{},
-		grantDB: &fakeDevGrantDB{},
+		keyDB:     &fakeDevKeyDB{byHash: map[string]models.DeveloperAPIKey{hash: key}, byID: map[string]models.DeveloperAPIKey{keyID.Hex(): key}},
+		rateDB:    &fakeDevRateDB{},
+		usageDB:   &fakeDevUsageDB{},
+		grantDB:   &fakeDevGrantDB{},
 		plaintext: plaintext, keyID: keyID, developerID: developerID,
 	}
 	f.api = DeveloperAPI{
