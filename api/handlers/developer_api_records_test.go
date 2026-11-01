@@ -280,6 +280,41 @@ func TestDevSearchCivilians_IsScopedByQuery(t *testing.T) {
 	}
 }
 
+// The escaping has to be at the call site, not only in the helper. Normalizing
+// a name does not strip regex metacharacters, so a search for ".*" reached the
+// database unescaped and matched every civilian in the community.
+func TestDevSearchCivilians_EscapesBothRegexBranches(t *testing.T) {
+	f := newRecordFixture(t)
+
+	rr := f.run(t, http.MethodGet, "/civilians?name=.%2A", "", nil,
+		f.api.RequireScope(models.ScopeCiviliansRead, f.api.DevSearchCiviliansHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	filter, ok := f.civDB.lastFilter.(bson.M)
+	if !ok {
+		t.Fatalf("expected a bson filter, got %T", f.civDB.lastFilter)
+	}
+	branches, ok := filter["$or"].([]bson.M)
+	if !ok {
+		t.Fatalf("expected an $or, got %T", filter["$or"])
+	}
+	for _, branch := range branches {
+		for field, condition := range branch {
+			cond, ok := condition.(bson.M)
+			if !ok {
+				continue
+			}
+			pattern, _ := cond["$regex"].(string)
+			if strings.Contains(pattern, ".*") {
+				t.Errorf("%s: the wildcard reached the database unescaped as %q, "+
+					"which would match every record in the community", field, pattern)
+			}
+		}
+	}
+}
+
 func TestDevSearchCivilians_RequiresAName(t *testing.T) {
 	f := newRecordFixture(t)
 

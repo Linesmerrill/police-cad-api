@@ -233,7 +233,11 @@ func (d DeveloperAPI) DevSearchCiviliansHandler(w http.ResponseWriter, r *http.R
 	civilians, err := d.CivDB.Find(ctx, bson.M{
 		"civilian.activeCommunityID": cc.Community.ID.Hex(),
 		"$or": []bson.M{
-			{"civilian.searchName": bson.M{"$regex": normalizeDevSearchName(name), "$options": "i"}},
+			// Both branches are escaped. normalizeDevSearchName only lowercases
+			// and collapses whitespace — it does not strip regex
+			// metacharacters, so escaping has to happen after it, not instead
+			// of it.
+			{"civilian.searchName": bson.M{"$regex": regexEscapeDev(normalizeDevSearchName(name)), "$options": "i"}},
 			{"civilian.name": bson.M{"$regex": regexEscapeDev(name), "$options": "i"}},
 		},
 	}, options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
