@@ -2,13 +2,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -26,6 +27,11 @@ import (
 // acting player, and the permission check runs against that player, so a key
 // can never grant more than the player it acts for.
 
+// Player references in this file are the hex form of a role name: a real FiveM
+// licence is hexadecimal and the validators hold identifiers to their
+// provider's shape, so a bare word is refused. The seeding helper encodes the
+// same way, so "fivem:6d656d626572" is the player seeded as "member".
+
 // ---- fixture ----
 
 type memberFixture struct {
@@ -33,12 +39,12 @@ type memberFixture struct {
 	communityDB *fakeMemberCommunityDB
 	community   models.Community
 
-	ownerID     string
-	adminID     string
-	plainID     string
-	outsiderID  string
-	deptID      primitive.ObjectID
-	rankID      primitive.ObjectID
+	ownerID    string
+	adminID    string
+	plainID    string
+	outsiderID string
+	deptID     primitive.ObjectID
+	rankID     primitive.ObjectID
 }
 
 type fakeMemberCommunityDB struct {
@@ -55,7 +61,7 @@ func (f *fakeMemberCommunityDB) FindOneIncludingPending(_ context.Context, filte
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	m, _ := filter.(bson.M)
-	if oid, ok := m["_id"].(primitive.ObjectID); ok {
+	if oid, ok := devFilterObjectID(m["_id"]); ok {
 		if c, found := f.communities[oid.Hex()]; found {
 			return &c, nil
 		}
@@ -115,11 +121,11 @@ func (f *fakeMemberUserDB) CountDocuments(_ context.Context, filter interface{},
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	m, _ := filter.(bson.M)
-	oid, _ := m["_id"].(primitive.ObjectID)
+	oid, _ := devFilterObjectID(m["_id"])
 	elem, _ := m["user.communities"].(bson.M)
 	match, _ := elem["$elemMatch"].(bson.M)
-	wantCommunity, _ := match["communityId"].(string)
-	wantStatus, _ := match["status"].(string)
+	wantCommunity, _ := devFilterString(match["communityId"])
+	wantStatus, _ := devFilterString(match["status"])
 
 	u, ok := f.users[oid.Hex()]
 	if !ok {
@@ -230,7 +236,7 @@ func (f *memberFixture) seedPlayer(userID, name, communityID, status string) {
 	f.identityDB.mu.Lock()
 	f.identityDB.rows = append(f.identityDB.rows, models.PlayerIdentity{
 		ID: primitive.NewObjectID(), Provider: models.PlayerProviderFiveM,
-		Identifier: name, UserID: userID, Claimed: true,
+		Identifier: hex.EncodeToString([]byte(name)), UserID: userID, Claimed: true,
 		CreatedByDeveloperID: f.developerID.Hex(), CreatedByKeyID: f.keyID.Hex(),
 	})
 	f.identityDB.mu.Unlock()
@@ -270,7 +276,7 @@ func (f *memberFixture) run(t *testing.T, method, suffix, body string, extraVars
 func TestDevAddMember_KeyCannotActWithoutAPermittedPlayer(t *testing.T) {
 	t.Run("a plain member cannot add anyone", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.addMember(t, `{"actingPlayer":"fivem:member","player":"fivem:newfriend"}`)
+		rr := f.addMember(t, `{"actingPlayer":"fivem:6d656d626572","player":"fivem:6e6577667269656e64"}`)
 		if rr.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
 		}
@@ -281,7 +287,7 @@ func TestDevAddMember_KeyCannotActWithoutAPermittedPlayer(t *testing.T) {
 
 	t.Run("an outsider cannot add anyone", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.addMember(t, `{"actingPlayer":"fivem:outsider","player":"fivem:newfriend"}`)
+		rr := f.addMember(t, `{"actingPlayer":"fivem:6f75747369646572","player":"fivem:6e6577667269656e64"}`)
 		if rr.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d", rr.Code)
 		}
@@ -292,7 +298,7 @@ func TestDevAddMember_KeyCannotActWithoutAPermittedPlayer(t *testing.T) {
 
 	t.Run("no acting player at all is refused", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.addMember(t, `{"player":"fivem:newfriend"}`)
+		rr := f.addMember(t, `{"player":"fivem:6e6577667269656e64"}`)
 		if rr.Code != http.StatusBadRequest && rr.Code != http.StatusForbidden {
 			t.Fatalf("a write with no acting player must be refused, got %d", rr.Code)
 		}
@@ -300,7 +306,7 @@ func TestDevAddMember_KeyCannotActWithoutAPermittedPlayer(t *testing.T) {
 
 	t.Run("an admin with manage members can", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:newfriend","username":"Friend"}`)
+		rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6e6577667269656e64","username":"Friend"}`)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 		}
@@ -308,7 +314,7 @@ func TestDevAddMember_KeyCannotActWithoutAPermittedPlayer(t *testing.T) {
 
 	t.Run("the owner always can", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.addMember(t, `{"actingPlayer":"fivem:owner","player":"fivem:newfriend"}`)
+		rr := f.addMember(t, `{"actingPlayer":"fivem:6f776e6572","player":"fivem:6e6577667269656e64"}`)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 		}
@@ -322,7 +328,7 @@ func TestDevAddMember_KeyCannotActWithoutAPermittedPlayer(t *testing.T) {
 func TestDevAddMember_AlreadyAMember(t *testing.T) {
 	f := newMemberFixture(t)
 
-	rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:member"}`)
+	rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6d656d626572"}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for an existing member, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -341,7 +347,7 @@ func TestDevAddMember_AlreadyAMember(t *testing.T) {
 func TestDevAddMember_UnknownFriendIsProvisionedAndNeedsClaiming(t *testing.T) {
 	f := newMemberFixture(t)
 
-	rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:brandnew","username":"Mate"}`)
+	rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6272616e646e6577","username":"Mate"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -371,7 +377,7 @@ func TestDevAddMember_FriendWithAnExistingAccountIsLinkedNotDuplicated(t *testin
 
 	// "outsider" already has an LPC account and a fivem identity, and is not in
 	// this community.
-	rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:outsider"}`)
+	rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6f75747369646572"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -403,7 +409,7 @@ func TestDevAddMember_BannedPlayerCannotBeReInvited(t *testing.T) {
 	c.Details.BanList = []string{f.outsiderID}
 	f.communityDB.communities[f.community.ID.Hex()] = c
 
-	rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:outsider"}`)
+	rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6f75747369646572"}`)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for a banned player, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -420,7 +426,7 @@ func TestDevAddMember_BannedActingPlayerCannotAct(t *testing.T) {
 	c.Details.BanList = []string{f.adminID}
 	f.communityDB.communities[f.community.ID.Hex()] = c
 
-	rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:brandnew"}`)
+	rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6272616e646e6577"}`)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rr.Code)
 	}
@@ -438,7 +444,7 @@ func TestDevMembers_PendingDeletionCommunityIsReadOnly(t *testing.T) {
 	c.Details.PendingDeletionAt = &pending
 	f.communityDB.communities[f.community.ID.Hex()] = c
 
-	rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:brandnew"}`)
+	rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6272616e646e6577"}`)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for a community being deleted, got %d", rr.Code)
 	}
@@ -452,7 +458,7 @@ func TestDevMembers_PendingDeletionCommunityIsReadOnly(t *testing.T) {
 func TestDevMembers_KeyRevokedMidSessionStopsImmediately(t *testing.T) {
 	f := newMemberFixture(t)
 
-	if rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:brandnew"}`); rr.Code != http.StatusCreated {
+	if rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6272616e646e6577"}`); rr.Code != http.StatusCreated {
 		t.Fatalf("expected the first write to work, got %d", rr.Code)
 	}
 
@@ -461,7 +467,7 @@ func TestDevMembers_KeyRevokedMidSessionStopsImmediately(t *testing.T) {
 		f.keyDB.byHash[hash] = key
 	}
 
-	if rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:another"}`); rr.Code != http.StatusUnauthorized {
+	if rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:616e6f74686572"}`); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 after revocation, got %d", rr.Code)
 	}
 }
@@ -473,7 +479,7 @@ func TestDevMembers_GrantRevokedStopsImmediately(t *testing.T) {
 
 	f.grantDB.grants[0].Status = models.DeveloperKeyRevoked
 
-	rr := f.addMember(t, `{"actingPlayer":"fivem:admin","player":"fivem:brandnew"}`)
+	rr := f.addMember(t, `{"actingPlayer":"fivem:61646d696e","player":"fivem:6272616e646e6577"}`)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 after the grant was revoked, got %d", rr.Code)
 	}
@@ -486,9 +492,9 @@ func TestDevMembers_GrantRevokedStopsImmediately(t *testing.T) {
 func TestDevUpdateMember_RolesAreNotAssignable(t *testing.T) {
 	f := newMemberFixture(t)
 
-	rr := f.run(t, http.MethodPatch, "/members/fivem:member",
-		`{"actingPlayer":"fivem:admin","roleId":"`+primitive.NewObjectID().Hex()+`"}`,
-		map[string]string{"playerRef": "fivem:member"},
+	rr := f.run(t, http.MethodPatch, "/members/fivem:6d656d626572",
+		`{"actingPlayer":"fivem:61646d696e","roleId":"`+primitive.NewObjectID().Hex()+`"}`,
+		map[string]string{"playerRef": "fivem:6d656d626572"},
 		f.api.RequireScope(models.ScopeMembersWrite, f.api.DevUpdateMemberHandler))
 
 	if rr.Code != http.StatusForbidden {
@@ -502,9 +508,9 @@ func TestDevUpdateMember_RolesAreNotAssignable(t *testing.T) {
 func TestDevUpdateMember_DepartmentAndRank(t *testing.T) {
 	t.Run("a real department and rank are accepted", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodPatch, "/members/fivem:member",
-			`{"actingPlayer":"fivem:admin","departmentId":"`+f.deptID.Hex()+`","rankId":"`+f.rankID.Hex()+`"}`,
-			map[string]string{"playerRef": "fivem:member"},
+		rr := f.run(t, http.MethodPatch, "/members/fivem:6d656d626572",
+			`{"actingPlayer":"fivem:61646d696e","departmentId":"`+f.deptID.Hex()+`","rankId":"`+f.rankID.Hex()+`"}`,
+			map[string]string{"playerRef": "fivem:6d656d626572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevUpdateMemberHandler))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -513,9 +519,9 @@ func TestDevUpdateMember_DepartmentAndRank(t *testing.T) {
 
 	t.Run("a department that does not exist is refused", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodPatch, "/members/fivem:member",
-			`{"actingPlayer":"fivem:admin","departmentId":"`+primitive.NewObjectID().Hex()+`"}`,
-			map[string]string{"playerRef": "fivem:member"},
+		rr := f.run(t, http.MethodPatch, "/members/fivem:6d656d626572",
+			`{"actingPlayer":"fivem:61646d696e","departmentId":"`+primitive.NewObjectID().Hex()+`"}`,
+			map[string]string{"playerRef": "fivem:6d656d626572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevUpdateMemberHandler))
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("expected 404, got %d", rr.Code)
@@ -524,9 +530,9 @@ func TestDevUpdateMember_DepartmentAndRank(t *testing.T) {
 
 	t.Run("a rank that does not exist is refused rather than written dangling", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodPatch, "/members/fivem:member",
-			`{"actingPlayer":"fivem:admin","departmentId":"`+f.deptID.Hex()+`","rankId":"`+primitive.NewObjectID().Hex()+`"}`,
-			map[string]string{"playerRef": "fivem:member"},
+		rr := f.run(t, http.MethodPatch, "/members/fivem:6d656d626572",
+			`{"actingPlayer":"fivem:61646d696e","departmentId":"`+f.deptID.Hex()+`","rankId":"`+primitive.NewObjectID().Hex()+`"}`,
+			map[string]string{"playerRef": "fivem:6d656d626572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevUpdateMemberHandler))
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("expected 404 for an unknown rank, got %d", rr.Code)
@@ -535,9 +541,9 @@ func TestDevUpdateMember_DepartmentAndRank(t *testing.T) {
 
 	t.Run("a player who is not a member yet cannot be given a department", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodPatch, "/members/fivem:outsider",
-			`{"actingPlayer":"fivem:admin","departmentId":"`+f.deptID.Hex()+`"}`,
-			map[string]string{"playerRef": "fivem:outsider"},
+		rr := f.run(t, http.MethodPatch, "/members/fivem:6f75747369646572",
+			`{"actingPlayer":"fivem:61646d696e","departmentId":"`+f.deptID.Hex()+`"}`,
+			map[string]string{"playerRef": "fivem:6f75747369646572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevUpdateMemberHandler))
 		if rr.Code != http.StatusConflict {
 			t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
@@ -553,8 +559,8 @@ func TestDevRemoveMember_OwnerCannotBeRemovedOrLeave(t *testing.T) {
 	f := newMemberFixture(t)
 
 	t.Run("an admin cannot remove the owner", func(t *testing.T) {
-		rr := f.run(t, http.MethodDelete, "/members/fivem:owner",
-			`{"actingPlayer":"fivem:admin"}`, map[string]string{"playerRef": "fivem:owner"},
+		rr := f.run(t, http.MethodDelete, "/members/fivem:6f776e6572",
+			`{"actingPlayer":"fivem:61646d696e"}`, map[string]string{"playerRef": "fivem:6f776e6572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevRemoveMemberHandler))
 		if rr.Code != http.StatusConflict {
 			t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
@@ -565,8 +571,8 @@ func TestDevRemoveMember_OwnerCannotBeRemovedOrLeave(t *testing.T) {
 	})
 
 	t.Run("the owner cannot leave either", func(t *testing.T) {
-		rr := f.run(t, http.MethodDelete, "/members/fivem:owner",
-			`{"actingPlayer":"fivem:owner"}`, map[string]string{"playerRef": "fivem:owner"},
+		rr := f.run(t, http.MethodDelete, "/members/fivem:6f776e6572",
+			`{"actingPlayer":"fivem:6f776e6572"}`, map[string]string{"playerRef": "fivem:6f776e6572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevRemoveMemberHandler))
 		if rr.Code != http.StatusConflict {
 			t.Fatalf("expected 409, got %d", rr.Code)
@@ -579,8 +585,8 @@ func TestDevRemoveMember_OwnerCannotBeRemovedOrLeave(t *testing.T) {
 func TestDevRemoveMember_LeavingNeedsNoPermission(t *testing.T) {
 	t.Run("a plain member can leave", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodDelete, "/members/fivem:member",
-			`{"actingPlayer":"fivem:member"}`, map[string]string{"playerRef": "fivem:member"},
+		rr := f.run(t, http.MethodDelete, "/members/fivem:6d656d626572",
+			`{"actingPlayer":"fivem:6d656d626572"}`, map[string]string{"playerRef": "fivem:6d656d626572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevRemoveMemberHandler))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -597,8 +603,8 @@ func TestDevRemoveMember_LeavingNeedsNoPermission(t *testing.T) {
 
 	t.Run("a plain member cannot remove somebody else", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodDelete, "/members/fivem:admin",
-			`{"actingPlayer":"fivem:member"}`, map[string]string{"playerRef": "fivem:admin"},
+		rr := f.run(t, http.MethodDelete, "/members/fivem:61646d696e",
+			`{"actingPlayer":"fivem:6d656d626572"}`, map[string]string{"playerRef": "fivem:61646d696e"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevRemoveMemberHandler))
 		if rr.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d", rr.Code)
@@ -613,8 +619,8 @@ func TestDevApproveMember(t *testing.T) {
 		f := newMemberFixture(t)
 		f.seedPlayer(primitive.NewObjectID().Hex(), "waiting", f.community.ID.Hex(), models.CommunityMemberStatusPending)
 
-		rr := f.run(t, http.MethodPost, "/members/fivem:waiting/approve",
-			`{"actingPlayer":"fivem:admin"}`, map[string]string{"playerRef": "fivem:waiting"},
+		rr := f.run(t, http.MethodPost, "/members/fivem:77616974696e67/approve",
+			`{"actingPlayer":"fivem:61646d696e"}`, map[string]string{"playerRef": "fivem:77616974696e67"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevApproveMemberHandler))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -623,8 +629,8 @@ func TestDevApproveMember(t *testing.T) {
 
 	t.Run("somebody who never asked cannot be approved", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodPost, "/members/fivem:outsider/approve",
-			`{"actingPlayer":"fivem:admin"}`, map[string]string{"playerRef": "fivem:outsider"},
+		rr := f.run(t, http.MethodPost, "/members/fivem:6f75747369646572/approve",
+			`{"actingPlayer":"fivem:61646d696e"}`, map[string]string{"playerRef": "fivem:6f75747369646572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevApproveMemberHandler))
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
@@ -633,8 +639,8 @@ func TestDevApproveMember(t *testing.T) {
 
 	t.Run("an already approved member is a no-op, not an error", func(t *testing.T) {
 		f := newMemberFixture(t)
-		rr := f.run(t, http.MethodPost, "/members/fivem:member/approve",
-			`{"actingPlayer":"fivem:admin"}`, map[string]string{"playerRef": "fivem:member"},
+		rr := f.run(t, http.MethodPost, "/members/fivem:6d656d626572/approve",
+			`{"actingPlayer":"fivem:61646d696e"}`, map[string]string{"playerRef": "fivem:6d656d626572"},
 			f.api.RequireScope(models.ScopeMembersWrite, f.api.DevApproveMemberHandler))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d", rr.Code)
@@ -652,7 +658,7 @@ func TestDevApproveMember(t *testing.T) {
 func TestDevMembers_ForgedLpcIdStillFailsTheMembershipCheck(t *testing.T) {
 	f := newMemberFixture(t)
 
-	rr := f.addMember(t, `{"actingPlayer":"lpc:`+primitive.NewObjectID().Hex()+`","player":"fivem:brandnew"}`)
+	rr := f.addMember(t, `{"actingPlayer":"lpc:`+primitive.NewObjectID().Hex()+`","player":"fivem:6272616e646e6577"}`)
 	if rr.Code != http.StatusForbidden && rr.Code != http.StatusBadRequest {
 		t.Fatalf("a made-up LPC id must not be able to act, got %d: %s", rr.Code, rr.Body.String())
 	}

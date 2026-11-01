@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -91,12 +91,12 @@ func (d DeveloperAPI) resolvePlayerRef(ctx context.Context, dc *DevAPIContext, r
 	provider := strings.ToLower(strings.TrimSpace(parts[0]))
 
 	if provider == "lpc" {
-		userID := strings.TrimSpace(parts[1])
-		if objectIDOrZero(userID).IsZero() {
+		userID, oid, err := devSafeObjectID(parts[1])
+		if err != nil {
 			return nil, fmt.Errorf("that is not a valid player reference")
 		}
 		var user models.User
-		if err := d.UDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(userID)}).Decode(&user); err != nil {
+		if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(oid)}).Decode(&user); err != nil {
 			return nil, fmt.Errorf("no such player")
 		}
 		return &resolvedPlayer{
@@ -105,15 +105,19 @@ func (d DeveloperAPI) resolvePlayerRef(ctx context.Context, dc *DevAPIContext, r
 		}, nil
 	}
 
-	if !models.IsValidPlayerProvider(provider) {
+	provider, err := devSafeProvider(provider)
+	if err != nil {
 		return nil, fmt.Errorf("provider must be one of: fivem, discord, steam, lpc")
 	}
-	identifier := models.NormalizePlayerIdentifier(provider, parts[1])
-	if identifier == "" {
-		return nil, fmt.Errorf("a player identifier is required")
+	identifier, err := devSafeIdentifier(provider, parts[1])
+	if err != nil {
+		return nil, err
 	}
 
-	if existing, err := d.IdentityDB.FindOne(ctx, bson.M{"provider": provider, "identifier": identifier}); err == nil && existing != nil {
+	if existing, err := d.IdentityDB.FindOne(ctx, bson.M{
+		"provider":   devEq(provider),
+		"identifier": devEq(identifier),
+	}); err == nil && existing != nil {
 		resp := d.playerResponse(ctx, *existing, false)
 		return &resolvedPlayer{
 			UserID: resp.PlayerID, Provider: provider, Identifier: identifier,
@@ -217,8 +221,8 @@ func (d DeveloperAPI) DevListMembersHandler(w http.ResponseWriter, r *http.Reque
 	limit, page, skip := api.ParseLimitPage(r, 50, 200)
 	cur, err := d.UDB.Find(ctx, bson.M{
 		"user.communities": bson.M{"$elemMatch": bson.M{
-			"communityId": cc.Community.ID.Hex(),
-			"status":      bson.M{"$in": []string{models.CommunityMemberStatusApproved, models.CommunityMemberStatusPending}},
+			"communityId": devEq(cc.Community.ID.Hex()),
+			"status":      devEqAny(models.CommunityMemberStatusApproved, models.CommunityMemberStatusPending),
 		}},
 	}, memberFindOptions(limit, skip))
 	if err != nil {
@@ -342,19 +346,19 @@ func (d DeveloperAPI) DevAddMemberHandler(w http.ResponseWriter, r *http.Request
 		// A previously declined or pending row is flipped in place rather than
 		// appended, so a player never ends up with two rows for one community.
 		if _, err := d.UDB.UpdateOne(ctx,
-			bson.M{"_id": objectIDOrZero(target.UserID), "user.communities.communityId": cc.Community.ID.Hex()},
+			bson.M{"_id": devEq(objectIDOrZero(target.UserID)), "user.communities.communityId": devEq(cc.Community.ID.Hex())},
 			bson.M{"$set": bson.M{"user.communities.$.status": status}}); err != nil {
 			devError(w, http.StatusInternalServerError, "server_error", "Could not add that player.", nil)
 			return
 		}
 	} else {
 		if _, err := d.UDB.UpdateOne(ctx,
-			bson.M{"_id": objectIDOrZero(target.UserID), "user.communities": nil},
+			bson.M{"_id": devEq(objectIDOrZero(target.UserID)), "user.communities": nil},
 			bson.M{"$set": bson.M{"user.communities": bson.A{}}}); err != nil {
 			zap.S().Debugw("developer api: communities array init", "error", err)
 		}
 		if _, err := d.UDB.UpdateOne(ctx,
-			bson.M{"_id": objectIDOrZero(target.UserID)},
+			bson.M{"_id": devEq(objectIDOrZero(target.UserID))},
 			bson.M{"$addToSet": bson.M{"user.communities": models.UserCommunity{
 				ID:          primitive.NewObjectID().Hex(),
 				CommunityID: cc.Community.ID.Hex(),
@@ -445,7 +449,7 @@ func (d DeveloperAPI) DevApproveMemberHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if _, err := d.UDB.UpdateOne(ctx,
-		bson.M{"_id": objectIDOrZero(target.UserID), "user.communities.communityId": cc.Community.ID.Hex()},
+		bson.M{"_id": devEq(objectIDOrZero(target.UserID)), "user.communities.communityId": devEq(cc.Community.ID.Hex())},
 		bson.M{"$set": bson.M{"user.communities.$.status": models.CommunityMemberStatusApproved}}); err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not approve that player.", nil)
 		return
@@ -519,10 +523,10 @@ func (d DeveloperAPI) DevUpdateMemberHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	departmentID := strings.TrimSpace(req.DepartmentID)
-	if departmentID == "" {
+	departmentID, _, err := devSafeObjectID(req.DepartmentID)
+	if err != nil {
 		d.RecordOutcome(r, http.StatusBadRequest)
-		devError(w, http.StatusBadRequest, "invalid_department", "departmentId is required.", nil)
+		devError(w, http.StatusBadRequest, "invalid_department", "departmentId is required and must be a valid id.", nil)
 		return
 	}
 	dept := findCommunityDepartment(&cc.Community, departmentID)
@@ -534,7 +538,16 @@ func (d DeveloperAPI) DevUpdateMemberHandler(w http.ResponseWriter, r *http.Requ
 	}
 	// A rank has to exist in the community, or a mod could write a dangling id
 	// that every surface then has to tolerate.
-	rankID := strings.TrimSpace(req.RankID)
+	rankID := ""
+	if strings.TrimSpace(req.RankID) != "" {
+		canonical, _, rErr := devSafeObjectID(req.RankID)
+		if rErr != nil {
+			d.RecordOutcome(r, http.StatusBadRequest)
+			devError(w, http.StatusBadRequest, "invalid_rank", "rankId must be a valid id.", nil)
+			return
+		}
+		rankID = canonical
+	}
 	if rankID != "" && !communityHasRank(&cc.Community, rankID) {
 		d.RecordOutcome(r, http.StatusNotFound)
 		devError(w, http.StatusNotFound, "rank_not_found", "This community has no rank with that id.", nil)
@@ -560,8 +573,8 @@ func (d DeveloperAPI) DevUpdateMemberHandler(w http.ResponseWriter, r *http.Requ
 	// the append below would never run.
 	_, err = d.CDB.FindOneAndUpdate(ctx, bson.M{
 		"_id":                                  cc.Community.ID,
-		"community.departments.id":             objectIDOrZero(departmentID),
-		"community.departments.members.userID": target.UserID,
+		"community.departments.id":             devEq(objectIDOrZero(departmentID)),
+		"community.departments.members.userID": devEq(target.UserID),
 	}, bson.M{"$set": bson.M{
 		"community.departments.$[dept].members.$[member].rankId": rankID,
 		"community.departments.$[dept].members.$[member].status": models.CommunityMemberStatusApproved,
@@ -574,7 +587,7 @@ func (d DeveloperAPI) DevUpdateMemberHandler(w http.ResponseWriter, r *http.Requ
 		}
 		// Nobody matched, so this is their first time in the department.
 		if addErr := d.CDB.UpdateOne(ctx,
-			bson.M{"_id": cc.Community.ID, "community.departments.id": objectIDOrZero(departmentID)},
+			bson.M{"_id": devEq(cc.Community.ID), "community.departments.id": devEq(objectIDOrZero(departmentID))},
 			bson.M{"$addToSet": bson.M{"community.departments.$.members": entry}}); addErr != nil {
 			devError(w, http.StatusInternalServerError, "server_error", "Could not update that member.", nil)
 			return
@@ -668,7 +681,7 @@ func (d DeveloperAPI) DevRemoveMemberHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if _, err := d.UDB.UpdateOne(ctx, bson.M{"_id": objectIDOrZero(target.UserID)},
+	if _, err := d.UDB.UpdateOne(ctx, bson.M{"_id": devEq(objectIDOrZero(target.UserID))},
 		bson.M{"$pull": bson.M{"user.communities": bson.M{"communityId": cc.Community.ID.Hex()}}}); err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not remove that player.", nil)
 		return
@@ -704,7 +717,7 @@ func (d DeveloperAPI) DevRemoveMemberHandler(w http.ResponseWriter, r *http.Requ
 // never gone on duty is missing from it.
 func (d DeveloperAPI) membershipStatus(ctx context.Context, userID, communityID string) (string, bool) {
 	var user models.User
-	if err := d.UDB.FindOne(ctx, bson.M{"_id": objectIDOrZero(userID)}).Decode(&user); err != nil {
+	if err := d.UDB.FindOne(ctx, bson.M{"_id": devEq(objectIDOrZero(userID))}).Decode(&user); err != nil {
 		return "", false
 	}
 	for _, m := range user.Details.Communities {
@@ -718,11 +731,11 @@ func (d DeveloperAPI) membershipStatus(ctx context.Context, userID, communityID 
 // memberSummary is the slim member shape the developer surface returns.
 func (d DeveloperAPI) memberSummary(p *resolvedPlayer, status string) map[string]interface{} {
 	return map[string]interface{}{
-		"playerId":   p.UserID,
-		"playerRef":  p.Provider + ":" + p.Identifier,
-		"username":   p.Username,
-		"status":     status,
-		"claimed":    p.Claimed,
+		"playerId":  p.UserID,
+		"playerRef": p.Provider + ":" + p.Identifier,
+		"username":  p.Username,
+		"status":    status,
+		"claimed":   p.Claimed,
 	}
 }
 
@@ -731,7 +744,7 @@ func (d DeveloperAPI) memberSummary(p *resolvedPlayer, status string) map[string
 // $inc rather than a recount, so two mods adding players at once cannot both
 // read the same number and write the same total.
 func (d DeveloperAPI) adjustMembersCount(ctx context.Context, communityID primitive.ObjectID, delta int) {
-	if err := d.CDB.UpdateOne(ctx, bson.M{"_id": communityID},
+	if err := d.CDB.UpdateOne(ctx, bson.M{"_id": devEq(communityID)},
 		bson.M{"$inc": bson.M{"community.membersCount": delta}}); err != nil {
 		zap.S().Warnw("developer api: could not adjust membersCount",
 			"communityId", communityID.Hex(), "delta", delta, "error", err)
