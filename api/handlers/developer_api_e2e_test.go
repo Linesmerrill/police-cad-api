@@ -4207,19 +4207,42 @@ func TestE2E_AttachmentIsMetadataAndALink(t *testing.T) {
 	if out.Attachment.AddedByKey != f.keyID.Hex() {
 		t.Errorf("the key that attached it must be recorded, got %q", out.Attachment.AddedByKey)
 	}
-	// Audited, because a reviewer may act on it.
-	if audit, ok := f.api.ALDB.(*fakeAuditDB); ok {
+	// Audited, because a reviewer may act on it. Waited for rather than read
+	// immediately: logAudit writes on a goroutine so it never delays a
+	// request, which means asserting straight after the response is a race.
+	waitForAuditAction(t, f.api.ALDB, "attachment_added")
+}
+
+// waitForAuditAction waits for an audit entry whose action contains want.
+//
+// logAudit deliberately writes off the request path, so a test that reads the
+// entries the instant a handler returns is testing the scheduler rather than
+// the handler. This polls with a bounded deadline and says what it did see.
+func waitForAuditAction(t *testing.T, store databases.AuditLogDatabase, want string) {
+	t.Helper()
+	audit, ok := store.(*fakeAuditDB)
+	if !ok {
+		t.Fatalf("the fixture's audit store is %T, not the fake", store)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
 		audit.mu.Lock()
-		defer audit.mu.Unlock()
-		found := false
+		actions := make([]string, 0, len(audit.entries))
 		for _, entry := range audit.entries {
-			if strings.Contains(entry.Action, "attachment_added") {
-				found = true
+			actions = append(actions, entry.Action)
+		}
+		audit.mu.Unlock()
+
+		for _, action := range actions {
+			if strings.Contains(action, want) {
+				return
 			}
 		}
-		if !found {
-			t.Error("attaching must be audited")
+		if time.Now().After(deadline) {
+			t.Fatalf("expected an audit entry containing %q, saw %v", want, actions)
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
