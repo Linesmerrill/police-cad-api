@@ -55,6 +55,10 @@ var publicWritePaths = map[string]bool{
 var writeAllowedOrigins = []string{
 	"https://www.linespolice-cad.com",
 	"https://linespolice-cad.com",
+	// The developer console's own host. CORS already admits any
+	// *.linespolice-cad.com subdomain, but this list is exact-match, so a
+	// browser write from the console would be refused without this line.
+	"https://developer.linespolice-cad.com",
 	"https://police-cad-dev.herokuapp.com",
 	"http://localhost:8080",
 	"http://localhost:3000",
