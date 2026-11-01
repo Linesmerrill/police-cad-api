@@ -630,3 +630,42 @@ func TestDeveloperAccount_FollowsThePriceDrop(t *testing.T) {
 		t.Errorf("the developer page must follow the live cohort price, got %+v", *plus)
 	}
 }
+
+// The upgrade link has to point at the page that sells the subscription API
+// limits actually follow. It shipped pointing at /community-pricing, which
+// sells community promotions — a different product — so developers clicking
+// "raise your limits" were sent to buy something that would not raise them.
+func TestDeveloperAccount_UpgradeLinkPointsAtUserPlans(t *testing.T) {
+	f := newLimitsFixture(t, models.TierFree, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/account?userId="+f.owner.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.GetDeveloperAccountHandler(rr, req)
+
+	var out developerAccountResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if out.UpgradeURL != "/pricing" {
+		t.Errorf("upgrade url: got %q want /pricing", out.UpgradeURL)
+	}
+	if strings.Contains(out.UpgradeURL, "community-pricing") {
+		t.Error("community-pricing sells promotions, not the plan that sets API limits")
+	}
+}
+
+func TestDeveloperAccount_UpgradeLinkIsOverridable(t *testing.T) {
+	// So the destination can move without a deploy.
+	t.Setenv("DEVELOPER_UPGRADE_URL", "https://example.com/plans")
+	f := newLimitsFixture(t, models.TierFree, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/account?userId="+f.owner.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.GetDeveloperAccountHandler(rr, req)
+
+	var out developerAccountResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if out.UpgradeURL != "https://example.com/plans" {
+		t.Errorf("config should win, got %q", out.UpgradeURL)
+	}
+}

@@ -89,6 +89,10 @@ type developerAccountResponse struct {
 	// The published comparison, from the same values the middleware enforces
 	// and the same tier list /pricing renders, so the page cannot drift from
 	// either reality or the prices people are actually charged.
+	// UpgradeURL points at the page that sells the subscription a developer's
+	// API limits actually follow — the user plans page, not community
+	// promotions. Those are two different products, and the wrong one shipped
+	// once already.
 	Tiers          []models.DeveloperTier          `json:"tiers"`
 	CommunityPlans []models.CommunityPlanAllowance `json:"communityPlans"`
 	WebsiteTiers   []SubscriptionTier              `json:"websiteTiers"`
@@ -127,7 +131,7 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 		Tiers:          models.DeveloperTiers(),
 		CommunityPlans: models.CommunityPlanAllowances(),
 		WebsiteTiers:   SubscriptionTiers(),
-		UpgradeURL:     envOr("PREMIUM_PLUS_URL", "/community-pricing"),
+		UpgradeURL:     envOr("DEVELOPER_UPGRADE_URL", "/pricing"),
 	}
 	resp.Limits = models.LimitsForPlan(resp.Entitlement.Plan)
 
