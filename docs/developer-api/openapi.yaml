@@ -41,7 +41,9 @@ info:
     `GET /activity` is this key's own request history — which route, which
     community, what we answered, and on a refusal which of our error codes we
     used. Quote a request id in a ticket and we can find it. Send
-    `X-Correlation-Id` and we echo it back so your logs line up with ours.
+    `X-Correlation-Id` and we echo it back so your logs line up with ours —
+    letters, digits and `. _ : -`, up to 128 characters, since it is the one
+    value we reflect; anything else is dropped rather than echoed.
 
     **Finding out what changed.** `GET /communities/{id}/changes` takes a
     cursor and returns only what has happened since, so polling costs a request
@@ -2109,7 +2111,9 @@ components:
           description: Ours, returned on every response in `X-Request-Id`.
         correlationId:
           type: string
-          description: Yours, echoed from `X-Correlation-Id` when you sent one.
+          description: >-
+            Yours, echoed from `X-Correlation-Id` when you sent one. Letters,
+            digits and `. _ : -` only.
         communityId: { type: string }
         method: { type: string }
         route:

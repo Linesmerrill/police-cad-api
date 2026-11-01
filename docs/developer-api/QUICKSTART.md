@@ -571,7 +571,8 @@ receiver first.
 ## 11. When something is not working
 
 Every response carries `X-Request-Id`. Send `X-Correlation-Id` with your own id
-and we echo it back and record it beside ours.
+and we echo it back and record it beside ours — letters, digits and `. _ : -`,
+up to 128 characters, since it is the one value we hand straight back.
 
 ```bash
 curl -s "$BASE/activity?outcome=denied" -H "Authorization: Bearer $KEY"

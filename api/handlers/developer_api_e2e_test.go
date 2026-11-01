@@ -3401,23 +3401,37 @@ func TestE2E_CorrelationIDIsEchoedNotTrusted(t *testing.T) {
 // with a newline in it is a response-splitting attempt and is dropped rather
 // than echoed.
 func TestE2E_CorrelationIDIsSanitised(t *testing.T) {
+	// This is the one value we take from a caller and hand straight back in a
+	// response header, so the class is the narrow machine-handle one rather
+	// than "anything printable". Everything below is dropped entirely, not
+	// cleaned up: a malformed correlation id is not worth guessing at.
 	for _, bad := range []string{
 		"has\r\nInjected: header",
 		"starts-with-$operator",
-		strings.Repeat("x", maxCorrelationIDLen+50),
+		`<script>alert(1)</script>`,
+		`has"a quote`,
+		"has a space",
+		"has/a/slash",
 	} {
-		got := safeCorrelationID(bad)
-		if strings.ContainsAny(got, "\r\n") {
-			t.Errorf("a reflected value must never carry a newline, got %q", got)
-		}
-		if len(got) > maxCorrelationIDLen {
-			t.Errorf("a reflected value must be bounded, got %d characters", len(got))
+		if got := safeCorrelationID(bad); got != "" {
+			t.Errorf("%q must be dropped, got %q", bad, got)
 		}
 	}
-	// And a dollar-prefixed value is refused outright rather than truncated,
-	// because it is about to be stored and queried.
-	if safeCorrelationID("$ne") != "" {
-		t.Error("an operator-shaped value must be dropped")
+
+	// An oversized one is bounded rather than dropped. The characters are
+	// acceptable; there are just too many of them, and truncating leaves the
+	// developer something they can still match their own logs against.
+	long := safeCorrelationID(strings.Repeat("x", maxCorrelationIDLen+50))
+	if len(long) != maxCorrelationIDLen {
+		t.Errorf("an oversized id should be bounded to %d, got %d", maxCorrelationIDLen, len(long))
+	}
+
+	// And an ordinary one survives unchanged, because the point is to be
+	// usable rather than merely safe.
+	for _, good := range []string{"sixpd-tick-8821", "run_42.3", "a:b-c_d", "ABC123"} {
+		if got := safeCorrelationID(good); got != good {
+			t.Errorf("%q should survive, got %q", good, got)
+		}
 	}
 }
 

@@ -101,35 +101,29 @@ func withDevTrace(ctx context.Context, t *devRequestTrace) context.Context {
 // devStatusRecorder remembers what status a handler wrote.
 //
 // Needed because the activity row is written after the handler returns, and
-// net/http does not expose what was sent. It deliberately does not buffer the
-// body: the feed never stores one, so there is no reason to hold a copy of
-// every response in memory on the way out.
+// net/http does not expose what was sent.
+//
+// It overrides WriteHeader and nothing else. In particular it does not wrap
+// Write: the feed never stores a body, so interposing on the body would mean
+// every byte of every response passing through code that has no use for it. A
+// handler that writes a body without calling WriteHeader has sent a 200, which
+// is what net/http does implicitly and what statusOr reports — so the status is
+// captured without the write path being touched at all.
 type devStatusRecorder struct {
 	http.ResponseWriter
-	status  int
-	written bool
+	status int
 }
 
 func (r *devStatusRecorder) WriteHeader(status int) {
-	if !r.written {
+	if r.status == 0 {
 		r.status = status
-		r.written = true
 	}
 	r.ResponseWriter.WriteHeader(status)
 }
 
-func (r *devStatusRecorder) Write(b []byte) (int, error) {
-	if !r.written {
-		// A handler that writes a body without calling WriteHeader has sent a
-		// 200, which is what net/http does implicitly.
-		r.status = http.StatusOK
-		r.written = true
-	}
-	return r.ResponseWriter.Write(b)
-}
-
 // statusOr returns the recorded status, defaulting to 200 for a handler that
-// wrote nothing at all.
+// wrote a body without a status, or wrote nothing at all. Both are a 200 as far
+// as the client is concerned.
 func (r *devStatusRecorder) statusOr() int {
 	if r.status == 0 {
 		return http.StatusOK
@@ -139,10 +133,16 @@ func (r *devStatusRecorder) statusOr() int {
 
 // safeCorrelationID bounds and cleans the caller's own id.
 //
-// It is echoed in a response header and stored, so it passes the same
-// allowlist every other scalar does. Anything unacceptable is dropped rather
-// than refused: a malformed correlation id is not a reason to fail a call that
-// is otherwise fine.
+// The narrow class devSafeExternalID uses, not the permissive one devSafeScalar
+// allows, and for a specific reason: this is the one value on the surface we
+// take from a caller and hand straight back in a response header. A correlation
+// id is a machine-generated handle, so letters, digits and `. _ : -` cost a
+// developer nothing, and nothing outside that class can end up in a header we
+// wrote.
+//
+// Anything unacceptable is dropped rather than refused. A malformed correlation
+// id is not a reason to fail a call that is otherwise fine — the request still
+// gets our own id, which is the one that matters.
 func safeCorrelationID(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -151,14 +151,8 @@ func safeCorrelationID(raw string) string {
 	if len(trimmed) > maxCorrelationIDLen {
 		trimmed = trimmed[:maxCorrelationIDLen]
 	}
-	safe, err := devSafeScalar(trimmed, maxCorrelationIDLen, "correlationId")
+	safe, err := devSafeExternalID(trimmed)
 	if err != nil {
-		return ""
-	}
-	// A header value with a newline in it is a response-splitting attempt, and
-	// devSafeScalar already refuses control characters — this is belt and
-	// braces on the one value we reflect back.
-	if strings.ContainsAny(safe, "\r\n") {
 		return ""
 	}
 	return safe
