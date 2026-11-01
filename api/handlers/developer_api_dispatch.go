@@ -45,8 +45,12 @@ type devCallWriteRequest struct {
 	// key's name so a single-integration developer need not repeat themselves.
 	Source string `json:"source"`
 
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title string `json:"title"`
+	// Description is a pointer for the same reason the lists below are:
+	// omitted leaves the current text alone, and an explicit "" clears it.
+	// A plain string cannot tell those apart, so an upsert that only sent a
+	// title used to blank the description.
+	Description *string `json:"description"`
 	Location    string `json:"location"`
 	Type        string `json:"type"`
 	Priority    string `json:"priority"`
@@ -56,8 +60,14 @@ type devCallWriteRequest struct {
 	// AssignedUnits are player references. Replaces the assignment outright
 	// rather than merging, because a dispatch board that drifts out of step
 	// with the game is worse than one that lags it.
-	AssignedUnits []string `json:"assignedUnits"`
-	Departments   []string `json:"departments"`
+	//
+	// Pointers so that three cases stay distinct, which the OpenAPI already
+	// promised and the code did not honour: omitted (nil) leaves the current
+	// value alone, an explicit [] clears it, and a non-empty list replaces it.
+	// As plain slices, an upsert that simply did not mention assignedUnits
+	// wiped the assignment.
+	AssignedUnits *[]string `json:"assignedUnits"`
+	Departments   *[]string `json:"departments"`
 
 	// Disposition is how it ended. Only meaningful on close.
 	Disposition string `json:"disposition"`
@@ -128,9 +138,13 @@ func (d DeveloperAPI) DevUpsertCallHandler(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	assigned, ok := d.resolveAssignedUnits(w, r, dc, cc, req.AssignedUnits)
-	if !ok {
-		return
+	var assigned []string
+	if req.AssignedUnits != nil {
+		var ok bool
+		assigned, ok = d.resolveAssignedUnits(w, r, dc, cc, *req.AssignedUnits)
+		if !ok {
+			return
+		}
 	}
 
 	callerID, callerName := "", ""
@@ -151,11 +165,19 @@ func (d DeveloperAPI) DevUpsertCallHandler(w http.ResponseWriter, r *http.Reques
 	now := time.Now()
 	if existing != nil {
 		set := bson.M{
-			"call.title":       title,
-			"call.details":     truncateDispatchText(req.Description),
-			"call.departments": nonNilStringSlice(req.Departments),
-			"call.assignedTo":  assigned,
-			"call.updatedAt":   now,
+			"call.title":     title,
+			"call.updatedAt": now,
+		}
+		// Only what the caller actually sent. Writing these unconditionally is
+		// what cleared an assignment on an upsert that never mentioned one.
+		if req.Description != nil {
+			set["call.details"] = truncateDispatchText(*req.Description)
+		}
+		if req.Departments != nil {
+			set["call.departments"] = nonNilStringSlice(*req.Departments)
+		}
+		if req.AssignedUnits != nil {
+			set["call.assignedTo"] = nonNilStringSlice(assigned)
 		}
 		applyOptionalDispatchFields(set, req)
 
@@ -179,7 +201,7 @@ func (d DeveloperAPI) DevUpsertCallHandler(w http.ResponseWriter, r *http.Reques
 		ID: callID,
 		Details: models.CallDetails{
 			Title:             title,
-			Details:           truncateDispatchText(req.Description),
+			Details:           truncateDispatchText(derefString(req.Description)),
 			ShortDescription:  title,
 			Location:          truncateDispatchText(req.Location),
 			Type:              truncateShort(req.Type),
@@ -188,8 +210,8 @@ func (d DeveloperAPI) DevUpsertCallHandler(w http.ResponseWriter, r *http.Reques
 			CommunityID:       cc.Community.ID.Hex(),
 			CreatedByID:       callerID,
 			CreatedByUsername: callerName,
-			Departments:       nonNilStringSlice(req.Departments),
-			AssignedTo:        assigned,
+			Departments:       nonNilStringSlice(derefStrings(req.Departments)),
+			AssignedTo:        nonNilStringSlice(assigned),
 			CallNotes:         []models.CallNotes{},
 			Source:            source,
 			ExternalID:        externalID,
@@ -416,6 +438,24 @@ func (d DeveloperAPI) resolveAssignedUnits(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	return out, true
+}
+
+// derefString reads an optional string, treating omitted as empty. Only for
+// the create path, where there is nothing to leave alone.
+func derefString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+// derefStrings reads an optional list, treating omitted as empty. Only for the
+// create path, where there is nothing to leave alone.
+func derefStrings(v *[]string) []string {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // applyOptionalDispatchFields sets only the dispatch fields the caller sent.

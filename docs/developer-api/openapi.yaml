@@ -39,7 +39,6 @@ servers:
       Production. Defined once in models.DeveloperAPIBaseURL and overridable
       with DEVELOPER_API_PUBLIC_BASE_URL, so this list cannot drift from the
       quickstart or the console.
-    description: Production
 
 security:
   - developerKey: []
@@ -1073,10 +1072,16 @@ components:
         assignedUnits:
           type: array
           items: { $ref: "#/components/schemas/PlayerRef" }
-          description: Replaces the assignment outright. All-or-nothing.
+          description: |
+            Replaces the assignment outright, all-or-nothing. On an update,
+            leave it out to keep the current assignment and send `[]` to
+            unassign everyone.
         departments:
           type: array
           items: { type: string }
+          description: |
+            On an update, leave it out to keep the current departments and
+            send `[]` to clear them.
         disposition:
           type: string
           description: Only meaningful on close.

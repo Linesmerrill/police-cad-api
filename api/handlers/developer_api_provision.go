@@ -116,6 +116,14 @@ func (d DeveloperAPI) DevCreateCommunityHandler(w http.ResponseWriter, r *http.R
 	community.Details.CreatedAt = now
 	community.Details.UpdatedAt = now
 	community.Details.MembersCount = 1
+	// An uninitialised map marshals to BSON null, not to an empty document,
+	// and $set on "community.members.<id>.<field>" against null is an error
+	// rather than a no-op. That made setting unit status impossible on every
+	// community a key created. Communities made through the website get this
+	// map from their own join flow, which is why it only showed up here.
+	if community.Details.Members == nil {
+		community.Details.Members = map[string]models.MemberDetail{}
+	}
 
 	// The same defaults the website's own create path writes, so a community a
 	// mod made is not a second-class one: it has ten-codes, penal codes and a
