@@ -47,6 +47,33 @@ func PlanFromUser(u *User) string {
 	return plan
 }
 
+// CommunityPlanAllowance is one website plan's owned-community allowance.
+type CommunityPlanAllowance struct {
+	Plan      string `json:"plan"`
+	Cap       int    `json:"cap"`
+	Unlimited bool   `json:"unlimited"`
+}
+
+// CommunityPlanAllowances lists every website plan's community cap, cheapest
+// first.
+//
+// Exists so a page can render the real numbers instead of its own copy of them.
+// Both surfaces reading one function is the only way the published table and
+// the enforced cap cannot drift apart.
+func CommunityPlanAllowances() []CommunityPlanAllowance {
+	order := []string{TierFree, TierBase, TierPremium, TierPremiumPlus}
+	out := make([]CommunityPlanAllowance, 0, len(order))
+	for _, plan := range order {
+		cap := CommunityCap(plan)
+		out = append(out, CommunityPlanAllowance{
+			Plan:      plan,
+			Cap:       cap,
+			Unlimited: cap >= CommunityCapUnlimited,
+		})
+	}
+	return out
+}
+
 // CommunityCap returns the owned-community cap for a given plan. Unknown
 // plans fall back to the free cap — fail closed so a typo in a webhook
 // payload can't accidentally grant unlimited communities.

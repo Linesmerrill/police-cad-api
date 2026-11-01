@@ -84,6 +84,26 @@ type developerAccountResponse struct {
 	// numbers are easy to confuse, and a developer who hits the community limit
 	// should be told to look at their LPC plan rather than at their API tier.
 	Communities developerCommunityAllowance `json:"communities"`
+
+	// The published comparison table, from the same values the middleware
+	// enforces, so the page cannot drift from reality.
+	Tiers          []models.DeveloperTier          `json:"tiers"`
+	CommunityPlans []models.CommunityPlanAllowance `json:"communityPlans"`
+	Pricing        developerPricing                `json:"pricing"`
+}
+
+// developerPricing is what to show for the paid tier.
+//
+// The price is one config value rather than copy in a template, because a price
+// written into a page is a price that will be wrong somewhere. Until it is set,
+// PriceSet is false and the page shows a placeholder rather than inventing a
+// number.
+type developerPricing struct {
+	ProPrice    string `json:"proPrice,omitempty"`
+	ProInterval string `json:"proInterval,omitempty"`
+	Currency    string `json:"currency,omitempty"`
+	PriceSet    bool   `json:"priceSet"`
+	Purchasable bool   `json:"purchasable"`
 }
 
 // developerCommunityAllowance is the website plan's community allowance.
@@ -116,6 +136,9 @@ func (d DeveloperAPI) GetDeveloperAccountHandler(w http.ResponseWriter, r *http.
 		UpgradeAvailable: developerPaidTierAvailable(),
 		TermsVersion:     developerTermsVersion,
 		Communities:      d.communityAllowance(ctx, actorID),
+		Tiers:            models.DeveloperTiers(),
+		CommunityPlans:   models.CommunityPlanAllowances(),
+		Pricing:          developerPricingConfig(),
 	}
 
 	account, err := d.AccountDB.FindOne(ctx, bson.M{"userId": devEq(actorID)})
@@ -173,6 +196,30 @@ func (d DeveloperAPI) communityAllowance(ctx context.Context, actorID string) de
 		allowance.Owned = int(owned)
 	}
 	return allowance
+}
+
+// developerPricingConfig reads the paid tier's price from config.
+//
+// DEV_API_PRO_PRICE is the display string ("9.99"); the Stripe price id is
+// separate and is what makes the tier actually purchasable. Both unset is the
+// current state, and the page is expected to say so plainly.
+func developerPricingConfig() developerPricing {
+	price := strings.TrimSpace(os.Getenv("DEV_API_PRO_PRICE"))
+	interval := strings.TrimSpace(os.Getenv("DEV_API_PRO_INTERVAL"))
+	if interval == "" {
+		interval = "month"
+	}
+	currency := strings.TrimSpace(os.Getenv("DEV_API_PRO_CURRENCY"))
+	if currency == "" {
+		currency = "USD"
+	}
+	return developerPricing{
+		ProPrice:    price,
+		ProInterval: interval,
+		Currency:    currency,
+		PriceSet:    price != "",
+		Purchasable: developerPaidTierAvailable(),
+	}
 }
 
 // developerPaidTierAvailable reports whether there is a Stripe price to send

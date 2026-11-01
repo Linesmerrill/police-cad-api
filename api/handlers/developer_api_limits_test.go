@@ -378,3 +378,96 @@ func TestDeveloperAccount_DoesNotNagOnCurrentTerms(t *testing.T) {
 		t.Error("a developer on the current terms must not be prompted")
 	}
 }
+
+// ---- the published comparison table ----
+
+// The page renders the tier table from this response. If it ever stops matching
+// what the middleware enforces, developers write code against a number we do
+// not honour, so the table and the enforcement come from one function.
+func TestDeveloperAccount_PublishesTheRealTierLimits(t *testing.T) {
+	f := newLimitsFixture(t, models.TierFree, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/account?userId="+f.owner.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.GetDeveloperAccountHandler(rr, req)
+
+	var out developerAccountResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(out.Tiers) != 2 {
+		t.Fatalf("expected Free and Pro, got %+v", out.Tiers)
+	}
+	for _, tier := range out.Tiers {
+		enforced := models.LimitsForPlan(tier.Plan)
+		if tier.Limits != enforced {
+			t.Errorf("%s: published %+v but the middleware enforces %+v",
+				tier.Plan, tier.Limits, enforced)
+		}
+	}
+	// Cheapest first, so the page can render in order without sorting.
+	if out.Tiers[0].Plan != models.DeveloperPlanFree {
+		t.Errorf("expected Free first, got %q", out.Tiers[0].Plan)
+	}
+}
+
+func TestDeveloperAccount_PublishesTheWebsitePlanCaps(t *testing.T) {
+	f := newLimitsFixture(t, models.TierFree, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/developer/account?userId="+f.owner.ID, nil)
+	rr := httptest.NewRecorder()
+	f.api.GetDeveloperAccountHandler(rr, req)
+
+	var out developerAccountResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if len(out.CommunityPlans) != 4 {
+		t.Fatalf("expected four website plans, got %+v", out.CommunityPlans)
+	}
+	for _, plan := range out.CommunityPlans {
+		enforced := models.CommunityCap(plan.Plan)
+		if plan.Cap != enforced {
+			t.Errorf("%s: published cap %d but %d is enforced", plan.Plan, plan.Cap, enforced)
+		}
+		if plan.Unlimited != (enforced >= models.CommunityCapUnlimited) {
+			t.Errorf("%s: unlimited flag disagrees with the cap", plan.Plan)
+		}
+	}
+	// The sentinel must never be rendered as a number, so the flag has to be
+	// the thing the page keys on.
+	last := out.CommunityPlans[len(out.CommunityPlans)-1]
+	if !last.Unlimited {
+		t.Errorf("expected the top plan to be unlimited, got %+v", last)
+	}
+}
+
+func TestDeveloperPricing_SaysNothingUntilAPriceIsSet(t *testing.T) {
+	t.Setenv("DEV_API_PRO_PRICE", "")
+	t.Setenv("STRIPE_DEV_API_PRO_MONTHLY_PRICE_ID", "")
+
+	pricing := developerPricingConfig()
+	if pricing.PriceSet {
+		t.Error("with no price configured the page must not be told there is one")
+	}
+	if pricing.ProPrice != "" {
+		t.Errorf("expected no price, got %q", pricing.ProPrice)
+	}
+	if pricing.Purchasable {
+		t.Error("nothing is purchasable without a Stripe price id")
+	}
+	// Defaults still present, so the page can render "$X / month" once the
+	// amount arrives without a second config change.
+	if pricing.ProInterval != "month" || pricing.Currency != "USD" {
+		t.Errorf("expected sensible defaults, got %+v", pricing)
+	}
+}
+
+func TestDeveloperPricing_UsesTheConfiguredPrice(t *testing.T) {
+	t.Setenv("DEV_API_PRO_PRICE", "9.99")
+	t.Setenv("DEV_API_PRO_INTERVAL", "month")
+	t.Setenv("DEV_API_PRO_CURRENCY", "USD")
+
+	pricing := developerPricingConfig()
+	if !pricing.PriceSet || pricing.ProPrice != "9.99" {
+		t.Errorf("expected the configured price, got %+v", pricing)
+	}
+}

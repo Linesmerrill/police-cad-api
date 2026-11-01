@@ -186,6 +186,27 @@ var developerPlanLimits = map[string]DeveloperLimits{
 	},
 }
 
+// DeveloperTier is one developer tier's published allowance.
+type DeveloperTier struct {
+	Plan   string          `json:"plan"`
+	Limits DeveloperLimits `json:"limits"`
+}
+
+// DeveloperTiers lists every developer tier and its limits, cheapest first.
+//
+// Exists so the developer page can render the comparison table from the same
+// values the middleware enforces. A page with its own copy of these numbers
+// drifts the first time one is tuned, and the people reading it are the ones
+// who would then write code against the wrong figure.
+func DeveloperTiers() []DeveloperTier {
+	order := []string{DeveloperPlanFree, DeveloperPlanPro}
+	out := make([]DeveloperTier, 0, len(order))
+	for _, plan := range order {
+		out = append(out, DeveloperTier{Plan: plan, Limits: LimitsForPlan(plan)})
+	}
+	return out
+}
+
 // LimitsForPlan returns a plan's allowance, falling back to Free for anything
 // unrecognised. Falling back down rather than up matters: a plan string we
 // cannot read should cost a developer throughput, never hand them more.
