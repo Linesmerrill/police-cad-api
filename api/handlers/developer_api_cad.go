@@ -51,8 +51,8 @@ func (d DeveloperAPI) DevListUnitsHandler(w http.ResponseWriter, r *http.Request
 	limit, page, skip := api.ParseLimitPage(r, 50, maxDevRecordPageLimit)
 	cur, err := d.UDB.Find(ctx, bson.M{
 		"user.communities": bson.M{"$elemMatch": bson.M{
-			"communityId": cc.Community.ID.Hex(),
-			"status":      models.CommunityMemberStatusApproved,
+			"communityId": devEq(cc.Community.ID.Hex()),
+			"status":      devEq(models.CommunityMemberStatusApproved),
 		}},
 	}, options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
@@ -250,7 +250,18 @@ func (d DeveloperAPI) applyUnitStatuses(w http.ResponseWriter, r *http.Request, 
 		// The ten-code has to be one of this community's own. A mod writing an
 		// arbitrary id would put a status on the board that no client can
 		// render and nobody can clear.
-		tenCodeID := strings.TrimSpace(entry.TenCodeID)
+		tenCodeID := ""
+		if strings.TrimSpace(entry.TenCodeID) != "" {
+			canonical, _, tErr := devSafeObjectID(entry.TenCodeID)
+			if tErr != nil {
+				result["ok"] = false
+				result["error"] = "ten_code_not_found"
+				result["message"] = "This community has no ten-code with that id."
+				results = append(results, result)
+				continue
+			}
+			tenCodeID = canonical
+		}
 		if tenCodeID != "" && findTenCode(&cc.Community, tenCodeID) == nil {
 			result["ok"] = false
 			result["error"] = "ten_code_not_found"
@@ -259,7 +270,18 @@ func (d DeveloperAPI) applyUnitStatuses(w http.ResponseWriter, r *http.Request, 
 			continue
 		}
 
-		departmentID := strings.TrimSpace(entry.DepartmentID)
+		departmentID := ""
+		if strings.TrimSpace(entry.DepartmentID) != "" {
+			canonical, _, dErr := devSafeObjectID(entry.DepartmentID)
+			if dErr != nil {
+				result["ok"] = false
+				result["error"] = "department_not_found"
+				result["message"] = "This community has no department with that id."
+				results = append(results, result)
+				continue
+			}
+			departmentID = canonical
+		}
 		var dept *models.Department
 		if departmentID != "" {
 			if dept = findCommunityDepartment(&cc.Community, departmentID); dept == nil {
@@ -271,17 +293,26 @@ func (d DeveloperAPI) applyUnitStatuses(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 
+		memberKey, _, keyErr := devSafeObjectID(player.UserID)
+		if keyErr != nil {
+			result["ok"] = false
+			result["error"] = "invalid_player"
+			result["message"] = "That player's account id is not usable."
+			results = append(results, result)
+			continue
+		}
+
 		set := bson.M{}
 		if tenCodeID != "" {
-			set["community.members."+player.UserID+".tenCodeID"] = tenCodeID
+			set["community.members."+memberKey+".tenCodeID"] = tenCodeID
 		}
 		if location := strings.TrimSpace(entry.Location); location != "" {
-			set["community.members."+player.UserID+".location"] = truncateDevLocation(location)
-			set["community.members."+player.UserID+".locationUpdatedAt"] = primitive.NewDateTimeFromTime(time.Now())
+			set["community.members."+memberKey+".location"] = truncateDevLocation(location)
+			set["community.members."+memberKey+".locationUpdatedAt"] = primitive.NewDateTimeFromTime(time.Now())
 		}
 		if dept != nil {
-			set["community.members."+player.UserID+".activeDepartmentId"] = departmentID
-			set["community.members."+player.UserID+".activeDepartmentName"] = dept.Name
+			set["community.members."+memberKey+".activeDepartmentId"] = departmentID
+			set["community.members."+memberKey+".activeDepartmentName"] = dept.Name
 		}
 		if len(set) == 0 {
 			result["ok"] = false
@@ -291,7 +322,7 @@ func (d DeveloperAPI) applyUnitStatuses(w http.ResponseWriter, r *http.Request, 
 			continue
 		}
 
-		if err := d.CDB.UpdateOne(ctx, bson.M{"_id": cc.Community.ID}, bson.M{"$set": set}); err != nil {
+		if err := d.CDB.UpdateOne(ctx, bson.M{"_id": devEq(cc.Community.ID)}, bson.M{"$set": set}); err != nil {
 			result["ok"] = false
 			result["error"] = "server_error"
 			result["message"] = "Could not set that status."
@@ -362,7 +393,7 @@ func (d DeveloperAPI) DevListCallsHandler(w http.ResponseWriter, r *http.Request
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
 
-	filter := bson.M{"call.communityID": cc.Community.ID.Hex()}
+	filter := bson.M{"call.communityID": devEq(cc.Community.ID.Hex())}
 	// Open calls by default: a mod asking for calls almost always wants the
 	// ones that still need a unit.
 	if !strings.EqualFold(r.URL.Query().Get("includeClosed"), "true") {
@@ -508,7 +539,7 @@ func (d DeveloperAPI) DevCloseCallHandler(w http.ResponseWriter, r *http.Request
 	// Scoped by community in the filter, and UpdateOne on this store returns
 	// the matched call, so a miss is distinguishable from a write failure.
 	updated, err := d.CallDB.UpdateOne(ctx,
-		bson.M{"_id": callID, "call.communityID": cc.Community.ID.Hex()},
+		bson.M{"_id": devEq(callID), "call.communityID": devEq(cc.Community.ID.Hex())},
 		bson.M{"$set": bson.M{"call.status": false, "call.updatedAt": time.Now()}})
 	if err != nil || updated == nil {
 		d.RecordOutcome(r, http.StatusNotFound)
@@ -548,7 +579,7 @@ func (d DeveloperAPI) DevListBolosHandler(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	limit, page, skip := api.ParseLimitPage(r, 25, maxDevRecordPageLimit)
-	bolos, err := d.BoloDB.Find(ctx, bson.M{"bolo.communityID": cc.Community.ID.Hex()},
+	bolos, err := d.BoloDB.Find(ctx, bson.M{"bolo.communityID": devEq(cc.Community.ID.Hex())},
 		options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: -1}}))
 	if err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not load BOLOs.", nil)
@@ -611,7 +642,17 @@ func (d DeveloperAPI) DevCreateBoloHandler(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 
 	scope := "Community"
-	departmentID := strings.TrimSpace(req.DepartmentID)
+	departmentID := ""
+	if strings.TrimSpace(req.DepartmentID) != "" {
+		canonical, _, dErr := devSafeObjectID(req.DepartmentID)
+		if dErr != nil {
+			d.RecordOutcome(r, http.StatusNotFound)
+			devError(w, http.StatusNotFound, "department_not_found",
+				"This community has no department with that id.", nil)
+			return
+		}
+		departmentID = canonical
+	}
 	if departmentID != "" {
 		if findCommunityDepartment(&cc.Community, departmentID) == nil {
 			d.RecordOutcome(r, http.StatusNotFound)

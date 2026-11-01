@@ -137,7 +137,7 @@ func (d DeveloperAPI) DevCreateCivilianHandler(w http.ResponseWriter, r *http.Re
 	if cc.Community.Details.CivilianCreationLimitsEnabled && cc.Community.Details.CivilianCreationLimit > 0 {
 		existing, _ := d.CivDB.CountDocuments(ctx, bson.M{
 			"civilian.userID":            player.UserID,
-			"civilian.activeCommunityID": cc.Community.ID.Hex(),
+			"civilian.activeCommunityID": devEq(cc.Community.ID.Hex()),
 		})
 		if int(existing) >= cc.Community.Details.CivilianCreationLimit {
 			d.RecordOutcome(r, http.StatusConflict)
@@ -219,10 +219,10 @@ func (d DeveloperAPI) DevSearchCiviliansHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	if name == "" {
+	name, err := devSafeSearchTerm(r.URL.Query().Get("name"), "name")
+	if err != nil {
 		d.RecordOutcome(r, http.StatusBadRequest)
-		devError(w, http.StatusBadRequest, "invalid_query", "name is required.", nil)
+		devError(w, http.StatusBadRequest, "invalid_query", err.Error(), nil)
 		return
 	}
 
@@ -231,7 +231,7 @@ func (d DeveloperAPI) DevSearchCiviliansHandler(w http.ResponseWriter, r *http.R
 
 	limit, _, skip := api.ParseLimitPage(r, 25, maxDevRecordPageLimit)
 	civilians, err := d.CivDB.Find(ctx, bson.M{
-		"civilian.activeCommunityID": cc.Community.ID.Hex(),
+		"civilian.activeCommunityID": devEq(cc.Community.ID.Hex()),
 		"$or": []bson.M{
 			// Both branches are escaped. normalizeDevSearchName only lowercases
 			// and collapses whitespace — it does not strip regex
@@ -390,10 +390,10 @@ func (d DeveloperAPI) DevSearchVehiclesHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	plate := strings.TrimSpace(r.URL.Query().Get("plate"))
-	if plate == "" {
+	plate, err := devSafeSearchTerm(r.URL.Query().Get("plate"), "plate")
+	if err != nil {
 		d.RecordOutcome(r, http.StatusBadRequest)
-		devError(w, http.StatusBadRequest, "invalid_query", "plate is required.", nil)
+		devError(w, http.StatusBadRequest, "invalid_query", err.Error(), nil)
 		return
 	}
 
@@ -402,7 +402,7 @@ func (d DeveloperAPI) DevSearchVehiclesHandler(w http.ResponseWriter, r *http.Re
 
 	limit, _, skip := api.ParseLimitPage(r, 25, maxDevRecordPageLimit)
 	vehicles, err := d.VehDB.Find(ctx, bson.M{
-		"vehicle.activeCommunityID": cc.Community.ID.Hex(),
+		"vehicle.activeCommunityID": devEq(cc.Community.ID.Hex()),
 		"vehicle.plate":             bson.M{"$regex": "^" + regexEscapeDev(plate), "$options": "i"},
 	}, options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
@@ -530,10 +530,10 @@ func (d DeveloperAPI) DevSearchFirearmsHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	serial := strings.TrimSpace(r.URL.Query().Get("serial"))
-	if serial == "" {
+	serial, err := devSafeSearchTerm(r.URL.Query().Get("serial"), "serial")
+	if err != nil {
 		d.RecordOutcome(r, http.StatusBadRequest)
-		devError(w, http.StatusBadRequest, "invalid_query", "serial is required.", nil)
+		devError(w, http.StatusBadRequest, "invalid_query", err.Error(), nil)
 		return
 	}
 
@@ -542,7 +542,7 @@ func (d DeveloperAPI) DevSearchFirearmsHandler(w http.ResponseWriter, r *http.Re
 
 	limit, _, skip := api.ParseLimitPage(r, 25, maxDevRecordPageLimit)
 	firearms, err := d.FirDB.Find(ctx, bson.M{
-		"firearm.activeCommunityID": cc.Community.ID.Hex(),
+		"firearm.activeCommunityID": devEq(cc.Community.ID.Hex()),
 		"firearm.serialNumber":      bson.M{"$regex": "^" + regexEscapeDev(serial), "$options": "i"},
 	}, options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
@@ -669,10 +669,10 @@ func (d DeveloperAPI) DevCreateLicenseHandler(w http.ResponseWriter, r *http.Req
 // off somebody else's character; without the community check it could reach a
 // character in a community this key has no grant for.
 func (d DeveloperAPI) requireOwnedCivilian(w http.ResponseWriter, r *http.Request, cc *CommunityContext, player *resolvedPlayer, civilianID string) (*models.Civilian, bool) {
-	oid := objectIDOrZero(strings.TrimSpace(civilianID))
-	if oid.IsZero() {
+	_, oid, err := devSafeObjectID(civilianID)
+	if err != nil {
 		d.RecordOutcome(r, http.StatusBadRequest)
-		devError(w, http.StatusBadRequest, "invalid_civilian", "civilianId is required.", nil)
+		devError(w, http.StatusBadRequest, "invalid_civilian", "civilianId is required and must be a valid id.", nil)
 		return nil, false
 	}
 
@@ -682,7 +682,7 @@ func (d DeveloperAPI) requireOwnedCivilian(w http.ResponseWriter, r *http.Reques
 	civilian, err := d.CivDB.FindOne(ctx, bson.M{
 		"_id":                        oid,
 		"civilian.userID":            player.UserID,
-		"civilian.activeCommunityID": cc.Community.ID.Hex(),
+		"civilian.activeCommunityID": devEq(cc.Community.ID.Hex()),
 	})
 	if err != nil || civilian == nil {
 		// One answer for "no such character", "not theirs" and "not in this

@@ -109,13 +109,13 @@ func (f *fakeCivilianDB) FindOne(_ context.Context, filter interface{}, _ ...*op
 	f.lastFilter = filter
 	m, _ := filter.(bson.M)
 	for _, c := range f.civilians {
-		if oid, ok := m["_id"].(primitive.ObjectID); ok && c.ID != oid {
+		if oid, ok := devFilterObjectID(m["_id"]); ok && c.ID != oid {
 			continue
 		}
-		if u, ok := m["civilian.userID"].(string); ok && c.Details.UserID != u {
+		if u, ok := devFilterString(m["civilian.userID"]); ok && c.Details.UserID != u {
 			continue
 		}
-		if cm, ok := m["civilian.activeCommunityID"].(string); ok && c.Details.ActiveCommunityID != cm {
+		if cm, ok := devFilterString(m["civilian.activeCommunityID"]); ok && c.Details.ActiveCommunityID != cm {
 			continue
 		}
 		found := c
@@ -156,7 +156,7 @@ func TestDevCreateCivilian_RespectsTheCommunityCap(t *testing.T) {
 	f.civDB.count = 2 // the player already has their two
 
 	rr := f.run(t, http.MethodPost, "/civilians",
-		`{"player":"fivem:member","firstName":"John","lastName":"Smith"}`, nil,
+		`{"player":"fivem:6d656d626572","firstName":"John","lastName":"Smith"}`, nil,
 		f.api.RequireScope(models.ScopeCiviliansWrite, f.api.DevCreateCivilianHandler))
 
 	if rr.Code != http.StatusConflict {
@@ -179,7 +179,7 @@ func TestDevCreateCivilian_RespectsTheApprovalSystem(t *testing.T) {
 	f.communityDB.communities[f.community.ID.Hex()] = c
 
 	rr := f.run(t, http.MethodPost, "/civilians",
-		`{"player":"fivem:member","firstName":"John","lastName":"Smith"}`, nil,
+		`{"player":"fivem:6d656d626572","firstName":"John","lastName":"Smith"}`, nil,
 		f.api.RequireScope(models.ScopeCiviliansWrite, f.api.DevCreateCivilianHandler))
 
 	if rr.Code != http.StatusCreated {
@@ -206,7 +206,7 @@ func TestDevCreateCivilian_StampsTheKey(t *testing.T) {
 	f := newRecordFixture(t)
 
 	rr := f.run(t, http.MethodPost, "/civilians",
-		`{"player":"fivem:member","firstName":"John","lastName":"Smith"}`, nil,
+		`{"player":"fivem:6d656d626572","firstName":"John","lastName":"Smith"}`, nil,
 		f.api.RequireScope(models.ScopeCiviliansWrite, f.api.DevCreateCivilianHandler))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
@@ -237,7 +237,7 @@ func TestDevCreateCivilian_PlayerMustBeAMember(t *testing.T) {
 	f := newRecordFixture(t)
 
 	rr := f.run(t, http.MethodPost, "/civilians",
-		`{"player":"fivem:outsider","firstName":"John","lastName":"Smith"}`, nil,
+		`{"player":"fivem:6f75747369646572","firstName":"John","lastName":"Smith"}`, nil,
 		f.api.RequireScope(models.ScopeCiviliansWrite, f.api.DevCreateCivilianHandler))
 
 	if rr.Code != http.StatusForbidden {
@@ -252,7 +252,7 @@ func TestDevCreateCivilian_RequiresAName(t *testing.T) {
 	f := newRecordFixture(t)
 
 	rr := f.run(t, http.MethodPost, "/civilians",
-		`{"player":"fivem:member","firstName":"  ","lastName":""}`, nil,
+		`{"player":"fivem:6d656d626572","firstName":"  ","lastName":""}`, nil,
 		f.api.RequireScope(models.ScopeCiviliansWrite, f.api.DevCreateCivilianHandler))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
@@ -275,7 +275,8 @@ func TestDevSearchCivilians_IsScopedByQuery(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a bson filter, got %T", f.civDB.lastFilter)
 	}
-	if filter["civilian.activeCommunityID"] != f.community.ID.Hex() {
+	scoped, _ := devFilterString(filter["civilian.activeCommunityID"])
+	if scoped != f.community.ID.Hex() {
 		t.Errorf("the search must be scoped to the community in the path, got %v", filter)
 	}
 }
@@ -335,11 +336,11 @@ func TestDevBulkSetUnitStatus_IsPartial(t *testing.T) {
 	tenCodeID := f.seedTenCode()
 
 	body := `{"units":[
-		{"player":"fivem:member","tenCodeId":"` + tenCodeID + `","location":"Grapeseed"},
-		{"player":"fivem:nobody","tenCodeId":"` + tenCodeID + `"},
-		{"player":"fivem:outsider","tenCodeId":"` + tenCodeID + `"},
-		{"player":"fivem:admin","tenCodeId":"` + primitive.NewObjectID().Hex() + `"},
-		{"player":"fivem:admin"}
+		{"player":"fivem:6d656d626572","tenCodeId":"` + tenCodeID + `","location":"Grapeseed"},
+		{"player":"fivem:6e6f626f6479","tenCodeId":"` + tenCodeID + `"},
+		{"player":"fivem:6f75747369646572","tenCodeId":"` + tenCodeID + `"},
+		{"player":"fivem:61646d696e","tenCodeId":"` + primitive.NewObjectID().Hex() + `"},
+		{"player":"fivem:61646d696e"}
 	]}`
 
 	rr := f.run(t, http.MethodPut, "/units/status/bulk", body, nil,
@@ -367,10 +368,10 @@ func TestDevBulkSetUnitStatus_IsPartial(t *testing.T) {
 	}
 
 	wantErrors := map[string]string{
-		"fivem:member":   "",
-		"fivem:nobody":   "invalid_player",
-		"fivem:outsider": "player_not_a_member",
-		"fivem:admin":    "", // two entries, checked below
+		"fivem:6d656d626572":     "",
+		"fivem:6e6f626f6479":     "invalid_player",
+		"fivem:6f75747369646572": "player_not_a_member",
+		"fivem:61646d696e":       "", // two entries, checked below
 	}
 	for _, u := range out.Units {
 		if want, known := wantErrors[u.Player]; known && want != "" && u.Error != want {
@@ -389,7 +390,7 @@ func TestDevBulkSetUnitStatus_CapsTheBatch(t *testing.T) {
 
 	var entries []string
 	for i := 0; i <= maxBulkUnitStatus; i++ {
-		entries = append(entries, `{"player":"fivem:member"}`)
+		entries = append(entries, `{"player":"fivem:6d656d626572"}`)
 	}
 	body := `{"units":[` + strings.Join(entries, ",") + `]}`
 
@@ -418,9 +419,9 @@ func TestDevBulkSetUnitStatus_RejectsAnEmptyBatch(t *testing.T) {
 func TestDevSetUnitStatus_SingleFailureIsNotA200(t *testing.T) {
 	f := newRecordFixture(t)
 
-	rr := f.run(t, http.MethodPut, "/units/fivem:outsider/status",
+	rr := f.run(t, http.MethodPut, "/units/fivem:6f75747369646572/status",
 		`{"tenCodeId":"`+f.seedTenCode()+`"}`,
-		map[string]string{"playerRef": "fivem:outsider"},
+		map[string]string{"playerRef": "fivem:6f75747369646572"},
 		f.api.RequireScope(models.ScopeUnitsWrite, f.api.DevSetUnitStatusHandler))
 
 	if rr.Code != http.StatusUnprocessableEntity {
@@ -433,9 +434,9 @@ func TestDevSetUnitStatus_SingleFailureIsNotA200(t *testing.T) {
 func TestDevSetUnitStatus_TenCodeMustBelongToTheCommunity(t *testing.T) {
 	f := newRecordFixture(t)
 
-	rr := f.run(t, http.MethodPut, "/units/fivem:member/status",
+	rr := f.run(t, http.MethodPut, "/units/fivem:6d656d626572/status",
 		`{"tenCodeId":"`+primitive.NewObjectID().Hex()+`"}`,
-		map[string]string{"playerRef": "fivem:member"},
+		map[string]string{"playerRef": "fivem:6d656d626572"},
 		f.api.RequireScope(models.ScopeUnitsWrite, f.api.DevSetUnitStatusHandler))
 
 	if rr.Code != http.StatusUnprocessableEntity {

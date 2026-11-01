@@ -65,6 +65,11 @@ func TestProvisioningBodies_AreTypedStructs(t *testing.T) {
 		{"claim", `{"code":{"$ne":""}}`, &claimRequest{}},
 		{"add member", `{"actingPlayer":{"$ne":""},"player":"fivem:abc123"}`, &devAddMemberRequest{}},
 		{"update member", `{"actingPlayer":"fivem:abc123","departmentId":{"$gt":""}}`, &devUpdateMemberRequest{}},
+		{"create civilian", `{"player":"fivem:abc123","firstName":{"$ne":""}}`, &devCreateCivilianRequest{}},
+		{"create vehicle", `{"player":"fivem:abc123","civilianId":{"$ne":""}}`, &devCreateVehicleRequest{}},
+		{"create firearm", `{"player":"fivem:abc123","serialNumber":{"$ne":""}}`, &devCreateFirearmRequest{}},
+		{"create license", `{"player":"fivem:abc123","type":{"$ne":""}}`, &devCreateLicenseRequest{}},
+		{"bulk unit status", `{"units":[{"player":"fivem:abc123","tenCodeId":{"$ne":""}}]}`, &devBulkUnitStatusRequest{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,6 +143,55 @@ func TestDevUpdateMember_RefusesOperatorShapedIds(t *testing.T) {
 				t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+// A search term that is operator-shaped or oversized never reaches a query.
+func TestDevSearchTerms_AreBoundedAndOperatorFree(t *testing.T) {
+	f := newRecordFixture(t)
+
+	for name, query := range map[string]string{
+		"operator":  "?name=%24ne",
+		"where":     "?name=%24where",
+		"oversized": "?name=" + strings.Repeat("a", 200),
+		"missing":   "",
+		"blank":     "?name=%20%20",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rr := f.run(t, http.MethodGet, "/civilians"+query, "", nil,
+				f.api.RequireScope(models.ScopeCiviliansRead, f.api.DevSearchCiviliansHandler))
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// A unit status entry carries ids that end up in a key path, so an
+// operator-shaped one is refused for that entry.
+func TestDevBulkSetUnitStatus_RefusesOperatorShapedIds(t *testing.T) {
+	f := newRecordFixture(t)
+
+	body := `{"units":[{"player":"fivem:6d656d626572","tenCodeId":"$ne"}]}`
+	rr := f.run(t, http.MethodPut, "/units/status/bulk", body, nil,
+		f.api.RequireScope(models.ScopeUnitsWrite, f.api.DevBulkSetUnitStatusHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected a per-entry result, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Applied int `json:"applied"`
+		Units   []struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"units"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if out.Applied != 0 {
+		t.Error("an operator-shaped ten-code id must not be applied")
+	}
+	if len(out.Units) != 1 || out.Units[0].OK {
+		t.Errorf("expected the entry to be refused, got %+v", out.Units)
 	}
 }
 
