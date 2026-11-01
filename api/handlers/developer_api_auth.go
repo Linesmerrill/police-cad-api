@@ -109,6 +109,14 @@ type DeveloperAPI struct {
 	WarrantDB        databases.WarrantDatabase
 	FormTemplateDB   databases.FormTemplateDatabase
 	DeptFormToggleDB databases.DepartmentFormToggleDatabase
+
+	// What a reviewer's decision writes, on the first-party side only. These
+	// two are reachable from the review routes in
+	// developer_api_report_review.go and from nothing under the developer
+	// prefix: filing a report is a person's act, so the stores that hold a
+	// filed report are not wired to anything a key can call.
+	ArrestReportDB   databases.ArrestReportDatabase
+	FormSubmissionDB databases.FormSubmissionDatabase
 }
 
 // ---- key material ----

@@ -306,6 +306,13 @@ func totalRemoved(removed map[string]int64) int64 {
 func (d DeveloperAPI) CleanupCommunityKeyRecordsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	// Deletes records, so the permission check below has to rest on more than
+	// what a browser can present: this route is called from the website's own
+	// server with the first-party gateway secret, never from page JavaScript.
+	if !requireFirstPartyCaller(w, r, "developer key record cleanup") {
+		return
+	}
+
 	communityID, communityOID, err := devSafeObjectID(mux.Vars(r)["communityId"])
 	if err != nil {
 		config.InfoStatus("invalid community id", http.StatusBadRequest, w, err)

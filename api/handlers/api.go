@@ -79,6 +79,8 @@ func (a *App) New() *mux.Router {
 		WarrantDB:        databases.NewWarrantDatabase(a.dbHelper),
 		FormTemplateDB:   databases.NewFormTemplateDatabase(a.dbHelper),
 		DeptFormToggleDB: databases.NewDepartmentFormToggleDatabase(a.dbHelper),
+		ArrestReportDB:   databases.NewArrestReportDatabase(a.dbHelper),
+		FormSubmissionDB: databases.NewFormSubmissionDatabase(a.dbHelper),
 	}
 	social := NewSocialAuth(
 		databases.NewUserDatabase(a.dbHelper),
@@ -402,6 +404,17 @@ func (a *App) New() *mux.Router {
 	// developer's, because the person who needs it is an owner whose community
 	// holds rows from an integration that is no longer answering.
 	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/records", http.HandlerFunc(devAPI.CleanupCommunityKeyRecordsHandler)).Methods("DELETE")
+
+	// Reviewing a report draft, and filing it. On this surface and not the
+	// developer one, gated on the community's own "manage records": filing a
+	// report has consequences inside a community, so the only way to do it is
+	// to be a person the community trusted with records. A key cannot reach
+	// these routes at all, because they are not registered under the developer
+	// prefix. See developer_api_report_review.go.
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts", http.HandlerFunc(devAPI.ListCommunityReportDraftsHandler)).Methods("GET")
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts/{draftId}", http.HandlerFunc(devAPI.GetCommunityReportDraftHandler)).Methods("GET")
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts/{draftId}/file", http.HandlerFunc(devAPI.FileCommunityReportDraftHandler)).Methods("POST")
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts/{draftId}/reject", http.HandlerFunc(devAPI.RejectCommunityReportDraftHandler)).Methods("POST")
 
 	// Metrics handler (must be after apiV2 is defined)
 	metricsHandler := MetricsHandler{}

@@ -1056,6 +1056,26 @@ func (f *fakeReportDraftDB) UpdateOne(_ context.Context, filter, update interfac
 		if v, has := set["reportingOfficerName"].(string); has {
 			f.drafts[i].ReportingOfficerName = v
 		}
+		// The review half, written by the website rather than by a key.
+		if v, has := set["reviewedBy"].(string); has {
+			f.drafts[i].ReviewedBy = v
+		}
+		if v, has := set["reviewedByName"].(string); has {
+			f.drafts[i].ReviewedByName = v
+		}
+		if v, has := set["reviewedAt"].(primitive.DateTime); has {
+			at := v
+			f.drafts[i].ReviewedAt = &at
+		}
+		if v, has := set["reviewNotes"].(string); has {
+			f.drafts[i].ReviewNotes = v
+		}
+		if v, has := set["filedRecordId"].(string); has {
+			f.drafts[i].FiledRecordID = v
+		}
+		if v, has := set["filedRecordKind"].(string); has {
+			f.drafts[i].FiledRecordKind = v
+		}
 		found := f.drafts[i]
 		return &found, nil
 	}
@@ -2443,5 +2463,413 @@ func TestE2E_NoScopeFilesOrApproves(t *testing.T) {
 		if models.IsValidDeveloperScope(scope) {
 			t.Errorf("%s is issuable: a key must never be able to commit a legal record", scope)
 		}
+	}
+}
+
+// ---- the other half: a person reviewing a draft and filing it ----
+//
+// These routes are on the first-party surface, so they are driven here the way
+// the website drives them: the gateway secret in the header, and the acting
+// user named in the query. That the developer key cannot reach them at all is
+// not something a test can assert directly — they are simply not registered
+// under the developer prefix — so what is tested is the gate that does apply.
+
+type fakeArrestReportDB struct {
+	databases.ArrestReportDatabase
+	mu      sync.Mutex
+	reports []models.ArrestReport
+}
+
+func (f *fakeArrestReportDB) InsertOne(_ context.Context, report models.ArrestReport, _ ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reports = append(f.reports, report)
+	return fakeInsertResult{id: report.ID}, nil
+}
+
+type fakeFormSubmissionDB struct {
+	databases.FormSubmissionDatabase
+	mu          sync.Mutex
+	submissions []models.FormSubmission
+}
+
+func (f *fakeFormSubmissionDB) InsertOne(_ context.Context, doc interface{}, _ ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if submission, ok := doc.(models.FormSubmission); ok {
+		f.submissions = append(f.submissions, submission)
+	}
+	return fakeInsertResult{id: primitive.NewObjectID()}, nil
+}
+
+// reviewFixture is the report fixture with the stores a reviewer's decision
+// writes to, and the gateway secret configured so the first-party gate is
+// actually exercised rather than skipped.
+type reviewFixture struct {
+	*reportFixture
+	arrestDB *fakeArrestReportDB
+	formDB   *fakeFormSubmissionDB
+}
+
+func newReviewFixture(t *testing.T) *reviewFixture {
+	t.Helper()
+	base := newReportFixture(t)
+	t.Setenv(apiGatewayKeyEnv, "test-gateway-secret")
+
+	arrestDB := &fakeArrestReportDB{}
+	formDB := &fakeFormSubmissionDB{}
+	base.api.ArrestReportDB = arrestDB
+	base.api.FormSubmissionDB = formDB
+	return &reviewFixture{reportFixture: base, arrestDB: arrestDB, formDB: formDB}
+}
+
+// reviewRun drives a first-party review route: gateway secret in the header,
+// the acting user in the query, the way the website's own server route calls it.
+func (f *reviewFixture) reviewRun(t *testing.T, method, path, body string, vars map[string]string, h http.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	var req *http.Request
+	if body == "" {
+		req = httptest.NewRequest(method, path, nil)
+	} else {
+		req = httptest.NewRequest(method, path, strings.NewReader(body))
+	}
+	req.Header.Set(apiGatewayHeader, "test-gateway-secret")
+	req = mux.SetURLVars(req, vars)
+	rr := httptest.NewRecorder()
+	h(rr, req)
+	return rr
+}
+
+func (f *reviewFixture) draftIDOf(t *testing.T, externalID string) string {
+	t.Helper()
+	f.draftDB.mu.Lock()
+	defer f.draftDB.mu.Unlock()
+	for _, draft := range f.draftDB.drafts {
+		if draft.ExternalID == externalID {
+			return draft.ID.Hex()
+		}
+	}
+	t.Fatalf("no draft with external id %q", externalID)
+	return ""
+}
+
+// Without the gateway secret these routes refuse, because the permission check
+// underneath them resolves the acting user from a query parameter the caller
+// controls. On an endpoint that files an arrest report, that parameter alone is
+// not a basis for anything.
+func TestE2E_ReviewRoutesRequireTheFirstPartySecret(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-1","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	draftID := f.draftIDOf(t, "rev-1")
+
+	// No X-API-Key header.
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts/"+draftID+"/file?userId="+f.ownerID,
+		strings.NewReader(`{}`))
+	req = mux.SetURLVars(req, map[string]string{
+		"communityId": f.community.ID.Hex(), "draftId": draftID,
+	})
+	rr := httptest.NewRecorder()
+	f.api.FileCommunityReportDraftHandler(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without the first-party secret, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(f.arrestDB.reports) != 0 {
+		t.Error("nothing should have been filed")
+	}
+}
+
+// Reviewing is gated on the community's own "manage records", so a plain member
+// cannot file a report however they reach the route.
+func TestE2E_ReviewRefusesSomeoneWithoutManageRecords(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-2","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	draftID := f.draftIDOf(t, "rev-2")
+
+	rr := f.reviewRun(t, http.MethodPost,
+		"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts/"+draftID+"/file?userId="+f.plainID,
+		`{}`, map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID},
+		f.api.FileCommunityReportDraftHandler)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for a plain member, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(f.arrestDB.reports) != 0 {
+		t.Error("nothing should have been filed")
+	}
+}
+
+// Filing an arrest draft writes into the collection the CAD itself reads, so
+// the result behaves like a report an officer typed.
+func TestE2E_FilingAnArrestDraftWritesARealArrestReport(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{
+		"externalId":"rev-3","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"subject":{"player":"`+fivemRef("member")+`","displayName":"John Doe"},
+		"facts":{"location":"Route 68","summary":"Pursuit ended at the rail crossing."},
+		"narrative":{"text":"The driver accelerated away.","generated":true,"generatedBy":"sixpd-llm"},
+		"charges":["Reckless Driving"]
+	}`)
+	draftID := f.draftIDOf(t, "rev-3")
+
+	rr := f.reviewRun(t, http.MethodPost,
+		"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts/"+draftID+"/file?userId="+f.ownerID,
+		`{"notes":"Checked the clip, looks right."}`,
+		map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID},
+		f.api.FileCommunityReportDraftHandler)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	f.arrestDB.mu.Lock()
+	defer f.arrestDB.mu.Unlock()
+	if len(f.arrestDB.reports) != 1 {
+		t.Fatalf("expected one arrest report, got %d", len(f.arrestDB.reports))
+	}
+	filed := f.arrestDB.reports[0].Details
+	if filed.ActiveCommunityID != f.community.ID.Hex() {
+		t.Errorf("the report must belong to the community, got %q", filed.ActiveCommunityID)
+	}
+	// The officer on the report is the one who observed it, not the reviewer.
+	// Putting the reviewer there would misattribute the arrest.
+	if filed.OfficerID != f.adminID {
+		t.Errorf("the reporting officer must be the officer on the report, got %q", filed.OfficerID)
+	}
+	if len(filed.ChargesList) != 1 || filed.ChargesList[0].Amount != 1000 {
+		t.Errorf("the priced charges must carry across, got %+v", filed.ChargesList)
+	}
+	// The generated label travels into the record. Whoever reads this in three
+	// months should be able to see a model wrote it.
+	if !strings.Contains(filed.Narrative, "generated by") {
+		t.Errorf("a generated narrative must stay labelled in the filed report, got %q", filed.Narrative)
+	}
+	if !strings.Contains(filed.Narrative, "Not evidence") {
+		t.Errorf("the filed narrative must not read as evidence, got %q", filed.Narrative)
+	}
+	if !strings.Contains(filed.Narrative, "Pursuit ended") {
+		t.Errorf("the observed summary must survive filing, got %q", filed.Narrative)
+	}
+}
+
+// The draft then points at what was filed, which is how the integration finds
+// out without being told.
+func TestE2E_FilingClosesTheLoopForTheIntegration(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-4","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	draftID := f.draftIDOf(t, "rev-4")
+
+	f.reviewRun(t, http.MethodPost,
+		"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts/"+draftID+"/file?userId="+f.ownerID,
+		`{}`, map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID},
+		f.api.FileCommunityReportDraftHandler)
+
+	// Now read it back the way the integration does.
+	rr := f.run(t, http.MethodGet, "/reports/drafts/rev-4?source=SixPD", "",
+		map[string]string{"externalId": "rev-4"},
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevGetReportDraftHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var out draftEnvelope
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+
+	if out.Draft.Status != models.ReportDraftStatusSubmitted {
+		t.Errorf("expected submitted, got %q", out.Draft.Status)
+	}
+	if !out.Draft.Filed {
+		t.Error("filed must be true once a person has filed it")
+	}
+	if out.Draft.FiledRecordID == "" || out.Draft.FiledRecordKind != "arrestReport" {
+		t.Errorf("the draft must point at what was filed, got %+v", out.Draft)
+	}
+	if out.Draft.ReviewedByName == "" {
+		t.Error("the reviewer's name should be reported back")
+	}
+}
+
+// A double-click must not produce two arrest reports.
+func TestE2E_FilingTwiceDoesNotDuplicateTheRecord(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-5","source":"SixPD","kind":"arrest",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	draftID := f.draftIDOf(t, "rev-5")
+	vars := map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID}
+	path := "/api/v1/developer/community/" + f.community.ID.Hex() + "/report-drafts/" + draftID + "/file?userId=" + f.ownerID
+
+	first := f.reviewRun(t, http.MethodPost, path, `{}`, vars, f.api.FileCommunityReportDraftHandler)
+	second := f.reviewRun(t, http.MethodPost, path, `{}`, vars, f.api.FileCommunityReportDraftHandler)
+
+	if first.Code != http.StatusOK || second.Code != http.StatusOK {
+		t.Fatalf("both calls should answer 200, got %d and %d", first.Code, second.Code)
+	}
+	if len(f.arrestDB.reports) != 1 {
+		t.Fatalf("expected one arrest report, got %d", len(f.arrestDB.reports))
+	}
+	var out struct {
+		Filed  bool                   `json:"filed"`
+		Record map[string]interface{} `json:"record"`
+	}
+	_ = json.Unmarshal(second.Body.Bytes(), &out)
+	if out.Filed {
+		t.Error("the second call must report filing nothing")
+	}
+	if out.Record["id"] == "" {
+		t.Error("the second call must still hand back the record that exists")
+	}
+}
+
+// An incident draft files as a form submission against the community's form,
+// or the built-in Incident Report when it named none.
+func TestE2E_FilingAnIncidentDraftWritesAFormSubmission(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-6","source":"SixPD","kind":"incident",
+		"reportingOfficer":"`+fivemRef("admin")+`",
+		"facts":{"location":"Mirror Park","summary":"Shots heard.","fields":{"weather":"clear"}}}`)
+	draftID := f.draftIDOf(t, "rev-6")
+
+	rr := f.reviewRun(t, http.MethodPost,
+		"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts/"+draftID+"/file?userId="+f.ownerID,
+		`{}`, map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID},
+		f.api.FileCommunityReportDraftHandler)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	f.formDB.mu.Lock()
+	defer f.formDB.mu.Unlock()
+	if len(f.formDB.submissions) != 1 {
+		t.Fatalf("expected one form submission, got %d", len(f.formDB.submissions))
+	}
+	filed := f.formDB.submissions[0].Details
+	if filed.FormTemplateSlug != "incident-report" {
+		t.Errorf("a draft with no template should file against the built-in form, got %q", filed.FormTemplateSlug)
+	}
+	if filed.Status != "submitted" {
+		t.Errorf("expected submitted, got %q", filed.Status)
+	}
+	// The template's own answers survive, and so does the draft's structure,
+	// so nothing is lost when a community's form has no matching question.
+	if filed.Data["weather"] != "clear" {
+		t.Errorf("the template answers were dropped: %+v", filed.Data)
+	}
+	if filed.Data["lpcReportedSummary"] != "Shots heard." {
+		t.Errorf("the observed summary was dropped: %+v", filed.Data)
+	}
+	if len(f.arrestDB.reports) != 0 {
+		t.Error("an incident draft must not produce an arrest report")
+	}
+}
+
+// A rejection needs a reason, because the integration shows it to the officer.
+func TestE2E_RejectingADraftNeedsAReason(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-7","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	draftID := f.draftIDOf(t, "rev-7")
+	vars := map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID}
+	path := "/api/v1/developer/community/" + f.community.ID.Hex() + "/report-drafts/" + draftID + "/reject?userId=" + f.ownerID
+
+	empty := f.reviewRun(t, http.MethodPost, path, `{}`, vars, f.api.RejectCommunityReportDraftHandler)
+	if empty.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no reason, got %d: %s", empty.Code, empty.Body.String())
+	}
+
+	ok := f.reviewRun(t, http.MethodPost, path,
+		`{"notes":"The narrative does not match the clip."}`, vars,
+		f.api.RejectCommunityReportDraftHandler)
+	if ok.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", ok.Code, ok.Body.String())
+	}
+
+	// And the integration can read the reason.
+	read := f.run(t, http.MethodGet, "/reports/drafts/rev-7?source=SixPD", "",
+		map[string]string{"externalId": "rev-7"},
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevGetReportDraftHandler))
+	var out draftEnvelope
+	_ = json.Unmarshal(read.Body.Bytes(), &out)
+	if out.Draft.Status != models.ReportDraftStatusRejected {
+		t.Errorf("expected rejected, got %q", out.Draft.Status)
+	}
+	if !strings.Contains(out.Draft.ReviewNotes, "does not match") {
+		t.Errorf("the reason must reach the integration, got %q", out.Draft.ReviewNotes)
+	}
+	if out.Draft.Filed {
+		t.Error("a rejected draft is not filed")
+	}
+}
+
+// A draft id from another community is a 404, not a 403 after a read.
+func TestE2E_ReviewingAnotherCommunitysDraftIsNotFound(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-8","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	draftID := f.draftIDOf(t, "rev-8")
+
+	// Same draft id, but asked for under a community the caller does own and
+	// the draft does not belong to. Seeded so the permission check passes and
+	// the scoping is what decides.
+	other := models.Community{ID: primitive.NewObjectID()}
+	other.Details.OwnerID = f.ownerID
+	if err := f.communityDB.seed(other); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	rr := f.reviewRun(t, http.MethodGet,
+		"/api/v1/developer/community/"+other.ID.Hex()+"/report-drafts/"+draftID+"?userId="+f.ownerID,
+		"", map[string]string{"communityId": other.ID.Hex(), "draftId": draftID},
+		f.api.GetCommunityReportDraftHandler)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// The queue a reviewer opens is the drafts nobody has acted on, and it names
+// the integration that wrote each one — a community owner's first question.
+func TestE2E_ReviewQueueDefaultsToUnreviewedAndNamesTheKey(t *testing.T) {
+	f := newReviewFixture(t)
+	f.upsertDraft(t, `{"externalId":"rev-9","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+	f.upsertDraft(t, `{"externalId":"rev-10","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	// One of them gets withdrawn, so it should drop out of the queue.
+	f.run(t, http.MethodDelete, "/reports/drafts/rev-10?source=SixPD", "",
+		map[string]string{"externalId": "rev-10"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevWithdrawReportDraftHandler))
+
+	rr := f.reviewRun(t, http.MethodGet,
+		"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts?userId="+f.ownerID,
+		"", map[string]string{"communityId": f.community.ID.Hex()},
+		f.api.ListCommunityReportDraftsHandler)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Data []struct {
+			Draft            devReportDraftView `json:"draft"`
+			WrittenByKeyID   string             `json:"writtenByKeyId"`
+			WrittenByKeyName string             `json:"writtenByKeyName"`
+		} `json:"data"`
+		TotalCount int64 `json:"totalCount"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].Draft.ExternalID != "rev-9" {
+		t.Errorf("the queue should hold only the unreviewed draft, got %+v", out.Data)
+	}
+	if out.Data[0].WrittenByKeyID != f.keyID.Hex() {
+		t.Errorf("the queue must name the key that wrote it, got %q", out.Data[0].WrittenByKeyID)
+	}
+	if out.Data[0].WrittenByKeyName == "" {
+		t.Error("the key's name is what an owner can act on; an id alone is not")
 	}
 }

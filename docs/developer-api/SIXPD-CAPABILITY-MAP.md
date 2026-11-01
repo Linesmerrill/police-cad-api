@@ -172,6 +172,23 @@ What it carries:
 | Reconciliation | `GET …/reports/drafts/{externalId}` returns `status`, `reviewNotes`, `filedRecordId` and `filedRecordKind`, so you can tell a player what happened instead of guessing |
 | Withdrawal | `DELETE …/reports/drafts/{externalId}` takes an unreviewed draft out of the queue. Withdrawn, not deleted, and never for one a person has acted on |
 
+The review half is on our own first-party surface, gated on the community's
+`manage records` permission and on the website's server-side gateway secret, so
+no key can reach it:
+
+* `GET  /api/v1/developer/community/{communityId}/report-drafts` — the queue
+* `POST …/report-drafts/{draftId}/file` — files it. An `arrest` draft becomes an
+  **ArrestReport in the same collection the CAD writes to**, so it appears in
+  the arrest list, the court flow and the totals exactly like one typed by hand;
+  an `incident` or `citation` draft becomes a FormSubmission against the named
+  template, or the built-in Incident Report. Idempotent: a double-click returns
+  the record that exists rather than filing a second one
+* `POST …/report-drafts/{draftId}/reject` — notes required, and your integration
+  can read them
+
+A generated narrative keeps its label when it is filed, so whoever reads the
+report in three months can still see a model wrote it.
+
 ### Warrants
 
 **Available.** `warrants:read` and `warrants:write`.
