@@ -21,8 +21,14 @@ const DeveloperAPIKeyPrefix = "lpc_live_"
 // Developer plans. A plan decides limits and nothing else: it never widens what
 // a key is allowed to reach.
 const (
-	DeveloperPlanFree = "free"
-	DeveloperPlanPro  = "pro"
+	// Developer API tiers are the website subscription plans. There is no
+	// separate developer subscription: the keys here are deliberately the same
+	// strings as the website tiers, so a plan read off a user record is already
+	// a valid lookup and the two can never fall out of step.
+	DeveloperPlanFree        = TierFree
+	DeveloperPlanBase        = TierBase
+	DeveloperPlanPremium     = TierPremium
+	DeveloperPlanPremiumPlus = TierPremiumPlus
 )
 
 // Developer account status. Suspended is a staff action and stops every key the
@@ -151,13 +157,22 @@ func IsValidDeveloperScope(scope string) bool {
 // much lower, because those calls create rows that are awkward to undo, and a
 // mod looping by mistake should not be able to make ten thousand accounts
 // before anyone notices.
+//
+// Note what is deliberately absent: how many communities a developer may own.
+// A developer account is the person's ordinary LPC account with developer mode
+// switched on, so that number is already decided by their website plan
+// (CommunityCap), and a second cap here would have meant a paying customer
+// being refused their sixth community because a separate, unrelated tier said
+// three. A community made with a key counts exactly like one made by hand.
+//
+// The tier governs rate: how fast requests may come, how fast rows may be
+// provisioned, and how many keys one developer may hold.
 type DeveloperLimits struct {
 	RequestsPerMinute    int `json:"requestsPerMinute"`
 	RequestsPerDay       int `json:"requestsPerDay"`
 	KeysPerDeveloper     int `json:"keysPerDeveloper"`
 	AccountsPerKeyDay    int `json:"accountsPerKeyDay"`
 	CommunitiesPerKeyDay int `json:"communitiesPerKeyDay"`
-	CommunitiesPerKey    int `json:"communitiesPerKey"`
 }
 
 var developerPlanLimits = map[string]DeveloperLimits{
@@ -167,18 +182,57 @@ var developerPlanLimits = map[string]DeveloperLimits{
 		KeysPerDeveloper:     2,
 		AccountsPerKeyDay:    25,
 		CommunitiesPerKeyDay: 2,
-		CommunitiesPerKey:    3,
 	},
-	DeveloperPlanPro: {
+	DeveloperPlanBase: {
+		RequestsPerMinute:    120,
+		RequestsPerDay:       25000,
+		KeysPerDeveloper:     3,
+		AccountsPerKeyDay:    100,
+		CommunitiesPerKeyDay: 3,
+	},
+	DeveloperPlanPremium: {
+		RequestsPerMinute:    300,
+		RequestsPerDay:       100000,
+		KeysPerDeveloper:     5,
+		AccountsPerKeyDay:    250,
+		CommunitiesPerKeyDay: 5,
+	},
+	DeveloperPlanPremiumPlus: {
 		RequestsPerMinute:    600,
 		RequestsPerDay:       250000,
 		KeysPerDeveloper:     10,
 		AccountsPerKeyDay:    500,
 		CommunitiesPerKeyDay: 10,
-		CommunitiesPerKey:    25,
 	},
 }
 
+// DeveloperTier is one tier's published allowance.
+type DeveloperTier struct {
+	Plan   string          `json:"plan"`
+	Limits DeveloperLimits `json:"limits"`
+}
+
+// DeveloperTiers lists every tier and its limits, cheapest first.
+//
+// Exists so the developer page renders the comparison from the same values the
+// middleware enforces. A page with its own copy of these numbers drifts the
+// first time one is tuned, and the people reading it are the ones who would
+// then write code against the wrong figure.
+func DeveloperTiers() []DeveloperTier {
+	order := []string{
+		DeveloperPlanFree,
+		DeveloperPlanBase,
+		DeveloperPlanPremium,
+		DeveloperPlanPremiumPlus,
+	}
+	out := make([]DeveloperTier, 0, len(order))
+	for _, plan := range order {
+		out = append(out, DeveloperTier{Plan: plan, Limits: LimitsForPlan(plan)})
+	}
+	return out
+}
+
+// DeveloperTiers lists every developer tier and its limits, cheapest first.
 // LimitsForPlan returns a plan's allowance, falling back to Free for anything
 // unrecognised. Falling back down rather than up matters: a plan string we
 // cannot read should cost a developer throughput, never hand them more.
@@ -191,32 +245,68 @@ func LimitsForPlan(plan string) DeveloperLimits {
 
 // DeveloperAccount is one LPC user's developer registration.
 type DeveloperAccount struct {
-	ID                   primitive.ObjectID  `json:"id" bson:"_id"`
-	UserID               string              `json:"userId" bson:"userId"`
-	Plan                 string              `json:"plan" bson:"plan"`
-	PlanActive           bool                `json:"planActive" bson:"planActive"`
-	StripeCustomerID     string              `json:"-" bson:"stripeCustomerId,omitempty"`
-	StripeSubscriptionID string              `json:"-" bson:"stripeSubscriptionId,omitempty"`
-	AppName              string              `json:"appName,omitempty" bson:"appName,omitempty"`
-	AppURL               string              `json:"appUrl,omitempty" bson:"appUrl,omitempty"`
-	TermsAcceptedAt      *primitive.DateTime `json:"termsAcceptedAt,omitempty" bson:"termsAcceptedAt,omitempty"`
-	TermsVersion         string              `json:"termsVersion,omitempty" bson:"termsVersion,omitempty"`
-	Status               string              `json:"status" bson:"status"`
-	SuspendedReason      string              `json:"suspendedReason,omitempty" bson:"suspendedReason,omitempty"`
-	SuspendedBy          string              `json:"-" bson:"suspendedBy,omitempty"`
-	SuspendedAt          *primitive.DateTime `json:"suspendedAt,omitempty" bson:"suspendedAt,omitempty"`
-	CreatedAt            primitive.DateTime  `json:"createdAt" bson:"createdAt"`
-	UpdatedAt            primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
+	ID              primitive.ObjectID  `json:"id" bson:"_id"`
+	UserID          string              `json:"userId" bson:"userId"`
+	AppName         string              `json:"appName,omitempty" bson:"appName,omitempty"`
+	AppURL          string              `json:"appUrl,omitempty" bson:"appUrl,omitempty"`
+	TermsAcceptedAt *primitive.DateTime `json:"termsAcceptedAt,omitempty" bson:"termsAcceptedAt,omitempty"`
+	TermsVersion    string              `json:"termsVersion,omitempty" bson:"termsVersion,omitempty"`
+	Status          string              `json:"status" bson:"status"`
+	SuspendedReason string              `json:"suspendedReason,omitempty" bson:"suspendedReason,omitempty"`
+	SuspendedBy     string              `json:"-" bson:"suspendedBy,omitempty"`
+	SuspendedAt     *primitive.DateTime `json:"suspendedAt,omitempty" bson:"suspendedAt,omitempty"`
+	CreatedAt       primitive.DateTime  `json:"createdAt" bson:"createdAt"`
+	UpdatedAt       primitive.DateTime  `json:"updatedAt" bson:"updatedAt"`
 }
 
-// EffectivePlan is the plan to apply right now. A plan that is not active bills
-// as Free, so a lapsed subscription degrades throughput instead of locking a
-// developer out of their own integration mid-session.
-func (d DeveloperAccount) EffectivePlan() string {
-	if d.Plan == DeveloperPlanPro && d.PlanActive {
-		return DeveloperPlanPro
+// How a developer came to be on their tier. Only one answer remains, kept as a
+// named value so a response field does not carry a bare empty string.
+const DeveloperEntitlementWebsite = "website_plan"
+
+// DeveloperEntitlement is the tier a developer is on, and why.
+type DeveloperEntitlement struct {
+	Plan   string `json:"plan"`
+	Source string `json:"source"`
+	// WebsitePlan is the plan read off the user record, before the active check.
+	// Kept so the page can say "your subscription has lapsed" rather than just
+	// showing Free and leaving someone to work out why.
+	WebsitePlan string `json:"websitePlan"`
+	// Lapsed is a paid plan that is not active. The tier falls back to Free and
+	// the page has something specific to say about it.
+	Lapsed bool `json:"lapsed"`
+}
+
+// DeveloperPlanFor resolves the Developer API tier from an LPC account.
+//
+// The website subscription is the only input. There is no separate developer
+// subscription to buy and no second checkout: it is the same person and the
+// same account, so the plan they already pay for is the plan their API access
+// follows.
+//
+// An inactive subscription and an unrecognised plan both fall back to Free.
+// Falling back rather than up is the only safe direction for a value that
+// arrives from a webhook payload, and Free is a working tier, so a lapse costs
+// rate and nothing else — never access to an integration mid-session.
+func DeveloperPlanFor(user *User) DeveloperEntitlement {
+	raw := ""
+	if user != nil {
+		raw = strings.ToLower(strings.TrimSpace(user.Details.Subscription.Plan))
 	}
-	return DeveloperPlanFree
+
+	// PlanFromUser is the one place the active check lives, so this cannot
+	// disagree with the community cap about whether a subscription counts.
+	effective := PlanFromUser(user)
+	if _, known := developerPlanLimits[effective]; !known {
+		effective = DeveloperPlanFree
+	}
+
+	_, paidAndKnown := developerPlanLimits[raw]
+	return DeveloperEntitlement{
+		Plan:        effective,
+		Source:      DeveloperEntitlementWebsite,
+		WebsitePlan: raw,
+		Lapsed:      paidAndKnown && raw != DeveloperPlanFree && effective == DeveloperPlanFree,
+	}
 }
 
 // DeveloperAPIKey is one issued key.
