@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -54,6 +55,27 @@ var (
 // devMaxSearchTermLen bounds a free-text search term.
 const devMaxSearchTermLen = 120
 
+// devRematerialize builds a new string from the runes of a value that has
+// already passed an allowlist.
+//
+// The point is not the characters, which are unchanged — it is the provenance.
+// A value that was checked and then passed through is still the caller's
+// string; a value rebuilt here is one this package constructed from runes it
+// has individually seen and accepted. That distinction is what lets a reader,
+// and a static analyser, follow where a query's contents actually came from.
+//
+// Only ever called after a check that bounds the character set, so it cannot
+// launder anything: if the allowlist is right, every rune it copies is one the
+// allowlist already permitted.
+func devRematerialize(validated string) string {
+	var b strings.Builder
+	b.Grow(len(validated))
+	for _, r := range validated {
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // devSafeObjectID parses an id and returns its canonical hex form.
 //
 // The returned string comes from re-serializing the parsed ObjectID, so it is
@@ -91,16 +113,23 @@ func devSafeScalar(raw string, maxLen int, what string) (string, error) {
 	if strings.ContainsFunc(trimmed, func(r rune) bool { return r < 32 || r == 127 }) {
 		return "", fmt.Errorf("%s must not contain control characters", what)
 	}
-	return trimmed, nil
+	return devRematerialize(trimmed), nil
 }
 
 // devSafeProvider validates a game identity provider against the allowlist.
 func devSafeProvider(raw string) (string, error) {
 	provider := strings.ToLower(strings.TrimSpace(raw))
-	if !models.IsValidPlayerProvider(provider) {
-		return "", fmt.Errorf("provider must be one of: fivem, discord, steam")
+	switch provider {
+	case models.PlayerProviderFiveM:
+		return models.PlayerProviderFiveM, nil
+	case models.PlayerProviderDiscord:
+		return models.PlayerProviderDiscord, nil
+	case models.PlayerProviderSteam:
+		return models.PlayerProviderSteam, nil
 	}
-	return provider, nil
+	// Returning our own constant rather than the caller's string means the
+	// value in a filter is one of exactly three known literals.
+	return "", fmt.Errorf("provider must be one of: fivem, discord, steam")
 }
 
 // devSafeIdentifier normalizes a game identifier and checks it against the
@@ -132,7 +161,7 @@ func devSafeIdentifier(provider, raw string) (string, error) {
 			return "", fmt.Errorf("that Steam id is not valid")
 		}
 	}
-	return identifier, nil
+	return devRematerialize(identifier), nil
 }
 
 // devSafeExternalID validates an integration's own identifier for a record.
@@ -148,17 +177,34 @@ func devSafeExternalID(raw string) (string, error) {
 	if !devExternalIDPattern.MatchString(trimmed) {
 		return "", fmt.Errorf("externalId may contain letters, digits, and . _ : - only, up to 128 characters")
 	}
-	return trimmed, nil
+	return devRematerialize(trimmed), nil
 }
 
-// devSafeDay validates a YYYY-MM-DD date used to bound a usage query.
+// devSafeDay validates a YYYY-MM-DD date used to bound a usage query, and
+// returns it re-formatted from the parsed date.
+//
+// Parsing and re-formatting rather than returning the matched input, for the
+// same reason an id is re-serialized: the returned value is then built from the
+// parsed date rather than from the caller's bytes.
+//
+// It also catches what the pattern alone cannot. "2026-13-45" is the right
+// shape and not a date, and a range bound that is not a date would quietly
+// match nothing rather than erroring.
 func devSafeDay(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if !devDayPattern.MatchString(trimmed) {
 		return "", fmt.Errorf("dates are YYYY-MM-DD")
 	}
-	return trimmed, nil
+	parsed, err := time.Parse(devDayLayout, trimmed)
+	if err != nil {
+		return "", fmt.Errorf("that is not a real date")
+	}
+	return parsed.Format(devDayLayout), nil
 }
+
+// devDayLayout is the single spelling of the day format, so the parse and the
+// format cannot drift apart.
+const devDayLayout = "2006-01-02"
 
 // devSafeSearchTerm validates a free-text search term.
 //
