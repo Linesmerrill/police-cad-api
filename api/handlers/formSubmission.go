@@ -13,7 +13,6 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
@@ -101,12 +100,16 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		prefilled[k] = v
 	}
 
+	numbering := h.numbering()
 	reportNumber := body.ReportNumber
-	if strings.TrimSpace(reportNumber) == "" {
-		reportNumber = h.nextReportNumber(ctx, body.CommunityID, body.FormTemplateSlug, w, r)
-		if reportNumber == "" {
-			return // error already written
+	autoNumber := strings.TrimSpace(reportNumber) == ""
+	if autoNumber {
+		allocated, err := numbering.NextNumber(ctx, body.CommunityID, body.FormTemplateSlug)
+		if err != nil {
+			config.ErrorStatus("failed to allocate report number", http.StatusInternalServerError, w, err)
+			return
 		}
+		reportNumber = allocated
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
@@ -170,49 +173,14 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		},
 	}
 
-	// Insert with retry on duplicate-report-number collisions. The
-	// formCounter is keyed by (communityID, slug, year) but the
-	// unique index on submissions is (communityID, reportNumber) —
-	// so a brand-new template starts at seq=1 and collides with the
-	// existing template's first reports. On the first collision,
-	// catch the per-slug counter up to the highest used seq across
-	// all slugs in this community/year, then retry with a small budget
-	// to absorb concurrent-write races.
-	const maxAttempts = 5
-	autoNumber := strings.TrimSpace(body.ReportNumber) == ""
-	year := time.Now().Year()
-	var insertErr error
-	caughtUp := false
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		_, insertErr = h.DB.InsertOne(ctx, sub)
-		if insertErr == nil {
-			break
-		}
-		if !mongo.IsDuplicateKeyError(insertErr) || !autoNumber || attempt == maxAttempts-1 {
-			break
-		}
-		if !caughtUp {
-			// One-shot jump-ahead: find the highest reportNumber
-			// already in use for this community/year and bump our
-			// per-slug counter past it. Bounds the retry depth even
-			// when another template has hundreds of submissions.
-			if maxSeq, ok := h.maxReportNumberSeq(ctx, body.CommunityID, year); ok {
-				_ = h.CDB.CatchUp(ctx, body.CommunityID, body.FormTemplateSlug, year, maxSeq)
-			}
-			caughtUp = true
-		}
-		nextNum := h.nextReportNumber(ctx, body.CommunityID, body.FormTemplateSlug, w, r)
-		if nextNum == "" {
-			return // error already written by nextReportNumber
-		}
-		reportNumber = nextNum
-		sub.Details.ReportNumber = reportNumber
-		sub.ID = primitive.NewObjectID()
-	}
-	if insertErr != nil {
-		config.ErrorStatus("failed to create submission", http.StatusInternalServerError, w, insertErr)
+	// Insert with retry on duplicate-report-number collisions; see
+	// reportNumbering.Insert for why that happens. sub carries whatever was
+	// finally written, so the response below reports the real number.
+	if err := numbering.Insert(ctx, &sub, autoNumber); err != nil {
+		config.ErrorStatus("failed to create submission", http.StatusInternalServerError, w, err)
 		return
 	}
+	reportNumber = sub.Details.ReportNumber
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -953,58 +921,11 @@ func (h FormSubmission) resolveActiveTemplate(ctx context.Context, communityID, 
 	return "", nil, 0, fmt.Errorf("template %q not found for community %q", slug, communityID)
 }
 
-// maxReportNumberSeq returns the highest numeric tail across all
-// reportNumbers used in this community for the given year, e.g.
-// "RR-2026-000042" → 42. Used to seed a stale per-slug counter that
-// trails the actually-used number space. Returns ok=false when no
-// matching submissions exist.
-func (h FormSubmission) maxReportNumberSeq(ctx context.Context, communityID string, year int) (int64, bool) {
-	yearStr := strconv.Itoa(year)
-	filter := bson.M{
-		"formSubmission.communityID":  communityID,
-		"formSubmission.reportNumber": bson.M{"$regex": "-" + yearStr + "-"},
-	}
-	opts := options.FindOne().SetSort(bson.M{"formSubmission.reportNumber": -1})
-	top, err := h.DB.FindOne(ctx, filter, opts)
-	if err != nil || top == nil {
-		return 0, false
-	}
-	parts := strings.Split(top.Details.ReportNumber, "-")
-	if len(parts) == 0 {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// nextReportNumber atomically generates the next sequence and formats it
-// per the template's NumberFormat. On failure it writes an error response
-// and returns "".
-func (h FormSubmission) nextReportNumber(ctx context.Context, communityID, slug string, w http.ResponseWriter, r *http.Request) string {
-	year := time.Now().Year()
-	seq, err := h.CDB.NextSeq(ctx, communityID, slug, year)
-	if err != nil {
-		config.ErrorStatus("failed to allocate report number", http.StatusInternalServerError, w, err)
-		return ""
-	}
-
-	format := "RR-{YYYY}-{NNNNNN}"
-	tpl, err := h.TDB.FindOne(ctx, bson.M{
-		"formTemplate.communityID": communityID,
-		"formTemplate.slug":        slug,
-	})
-	if err == nil && tpl != nil && tpl.Details.NumberFormat != "" {
-		format = tpl.Details.NumberFormat
-	} else if def, ok := formdefaults.All()[slug]; ok && def.NumberFormat != "" {
-		format = def.NumberFormat
-	}
-
-	out := strings.ReplaceAll(format, "{YYYY}", strconv.Itoa(year))
-	out = strings.ReplaceAll(out, "{NNNNNN}", fmt.Sprintf("%06d", seq))
-	return out
+// numbering bundles the stores report numbering needs. Shared with the
+// developer review routes, which file a draft into the same collection and so
+// must allocate a number the same way.
+func (h FormSubmission) numbering() reportNumbering {
+	return reportNumbering{Subs: h.DB, Counters: h.CDB, Templates: h.TDB}
 }
 
 // lookupSignedBy resolves the username for the auth-context user ID and

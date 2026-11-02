@@ -400,6 +400,11 @@ func (d DeveloperAPI) fileArrestReport(ctx context.Context, cc *models.Community
 // Against the template the draft named, or the built-in Incident Report when it
 // named none — which is the template every community has and the one the CAD
 // itself falls back to.
+//
+// The report number is allocated through the same reportNumbering the website's
+// own form handler uses, and must be: formSubmissions carries a unique index on
+// (communityID, reportNumber), so filing without a number succeeded once per
+// community and then failed on every report after it.
 func (d DeveloperAPI) fileFormSubmission(ctx context.Context, cc *models.Community, draft models.DeveloperReportDraft, actorID, actorName string) (string, string, error) {
 	if d.FormSubmissionDB == nil {
 		return "", "", fmt.Errorf("form submissions unavailable")
@@ -425,12 +430,23 @@ func (d DeveloperAPI) fileFormSubmission(ctx context.Context, cc *models.Communi
 		data["lpcCharges"] = strings.Join(chargeNames(draft.Charges), ", ")
 	}
 
+	numbering := reportNumbering{
+		Subs:      d.FormSubmissionDB,
+		Counters:  d.FormCounterDB,
+		Templates: d.FormTemplateDB,
+	}
+	reportNumber, err := numbering.NextNumber(ctx, cc.ID.Hex(), slug)
+	if err != nil {
+		return "", "", err
+	}
+
 	now := primitive.NewDateTimeFromTime(time.Now())
 	submission := models.FormSubmission{ID: primitive.NewObjectID()}
 	submission.Details = models.FormSubmissionDetails{
 		CommunityID:      cc.ID.Hex(),
 		DepartmentID:     draft.DepartmentID,
 		FormTemplateSlug: slug,
+		ReportNumber:     reportNumber,
 		Data:             data,
 		Status:           "submitted",
 		SignedBy: models.FormSubmissionSignature{
@@ -448,7 +464,7 @@ func (d DeveloperAPI) fileFormSubmission(ctx context.Context, cc *models.Communi
 		submission.Details.Links = []models.FormSubmissionLink{{Type: "call", ID: draft.CallID}}
 	}
 
-	if _, err := d.FormSubmissionDB.InsertOne(ctx, submission); err != nil {
+	if err := numbering.Insert(ctx, &submission, true); err != nil {
 		return "", "", err
 	}
 	return submission.ID.Hex(), "formSubmission", nil

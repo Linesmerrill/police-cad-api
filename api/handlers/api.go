@@ -86,6 +86,7 @@ func (a *App) New() *mux.Router {
 		DeptFormToggleDB: databases.NewDepartmentFormToggleDatabase(a.dbHelper),
 		ArrestReportDB:   databases.NewArrestReportDatabase(a.dbHelper),
 		FormSubmissionDB: databases.NewFormSubmissionDatabase(a.dbHelper),
+		FormCounterDB:    databases.NewFormCounterDatabase(a.dbHelper),
 
 		ActivityDB:        databases.NewDeveloperActivityDatabase(a.dbHelper),
 		EventDB:           devEventDB,
