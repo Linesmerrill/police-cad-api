@@ -137,6 +137,84 @@ func (v Warrant) WarrantsByUserIDHandler(w http.ResponseWriter, r *http.Request)
 	w.Write(b)
 }
 
+// warrantRandomJudgeNames are the judges a random-mode community draws from.
+var warrantRandomJudgeNames = []string{
+	"Smith", "Carter", "Patel", "Nguyen", "Brown",
+	"Lopez", "Williams", "Johnson", "Davis", "Martinez",
+}
+
+// warrantDecision is what a community's approval mode does to a warrant that
+// has just been raised.
+type warrantDecision struct {
+	Status     string
+	JudgeName  string
+	JudgeNotes string
+	// Decided is true when the mode settled it on the spot, so there is a
+	// review timestamp and a history entry to write and nothing for a judge
+	// to do.
+	Decided bool
+}
+
+// HistoryEntry is the line the decision adds to the warrant's history.
+func (d warrantDecision) HistoryEntry(at primitive.DateTime) models.WarrantHistoryEntry {
+	return models.WarrantHistoryEntry{
+		Action:    d.Status,
+		UserName:  d.JudgeName,
+		Notes:     d.JudgeNotes,
+		Timestamp: at,
+	}
+}
+
+// decideNewWarrant applies a community's own warrant approval mode.
+//
+// Shared by the website's create handler and the Developer API's request
+// handler, because the whole point of the modes is that a community gets the
+// same answer whoever asked. A request through a key is a request from the
+// officer it names, and a community that auto-approves should not behave
+// differently because that officer's radio happens to be a script. The key
+// still cannot approve, deny or review anything: it asks, and the community's
+// own rule answers.
+//
+// A community that sets no mode is auto-approve, which is what the website has
+// always defaulted to.
+func decideNewWarrant(community *models.Community) warrantDecision {
+	mode := "auto-approve"
+	rate := 0.7 // 70%, the documented default for random mode
+	if community != nil && community.Details.WarrantApprovalMode != "" {
+		mode = community.Details.WarrantApprovalMode
+		if community.Details.WarrantRandomApprovalRate > 0 {
+			rate = float64(community.Details.WarrantRandomApprovalRate) / 100.0
+		}
+	}
+
+	switch mode {
+	case "require-judge":
+		return warrantDecision{Status: models.WarrantStatusPending}
+	case "random":
+		judge := "Judge " + warrantRandomJudgeNames[rand.Intn(len(warrantRandomJudgeNames))]
+		if rand.Float64() < rate {
+			return warrantDecision{
+				Status:     models.WarrantStatusApproved,
+				JudgeName:  judge,
+				JudgeNotes: "Warrant approved based on submitted probable cause.",
+				Decided:    true,
+			}
+		}
+		return warrantDecision{
+			Status:     models.WarrantStatusDenied,
+			JudgeName:  judge,
+			JudgeNotes: "Insufficient probable cause to issue warrant.",
+			Decided:    true,
+		}
+	default: // auto-approve
+		return warrantDecision{
+			Status:    models.WarrantStatusApproved,
+			JudgeName: "Auto-Approved",
+			Decided:   true,
+		}
+	}
+}
+
 // CreateWarrantHandler creates a new warrant request
 func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 	var warrant models.Warrant
@@ -150,23 +228,19 @@ func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 	warrant.Details.CreatedAt = now
 	warrant.Details.UpdatedAt = now
 
-	// Determine initial status based on community warrant approval mode
-	approvalMode := "auto-approve" // default
-	approvalRate := 0.7           // default 70% for random mode
+	// The community's own approval mode decides this, through the shared helper
+	// below so the Developer API reaches the same answer.
+	var community *models.Community
 	if warrant.Details.ActiveCommunityID != "" && v.CDB != nil {
-		cID, err := primitive.ObjectIDFromHex(warrant.Details.ActiveCommunityID)
-		if err == nil {
+		if cID, idErr := primitive.ObjectIDFromHex(warrant.Details.ActiveCommunityID); idErr == nil {
 			ctx, cancel := api.WithQueryTimeout(r.Context())
 			defer cancel()
-			community, err := v.CDB.FindOne(ctx, bson.M{"_id": cID})
-			if err == nil && community.Details.WarrantApprovalMode != "" {
-				approvalMode = community.Details.WarrantApprovalMode
-				if community.Details.WarrantRandomApprovalRate > 0 {
-					approvalRate = float64(community.Details.WarrantRandomApprovalRate) / 100.0
-				}
+			if found, findErr := v.CDB.FindOne(ctx, bson.M{"_id": cID}); findErr == nil {
+				community = found
 			}
 		}
 	}
+	decision := decideNewWarrant(community)
 
 	// Initialize history with creation entry
 	warrant.Details.History = []models.WarrantHistoryEntry{
@@ -178,35 +252,12 @@ func (v Warrant) CreateWarrantHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	switch approvalMode {
-	case "require-judge":
-		warrant.Details.Status = "pending"
-	case "random":
+	warrant.Details.Status = decision.Status
+	warrant.Details.JudgeName = decision.JudgeName
+	warrant.Details.JudgeNotes = decision.JudgeNotes
+	if decision.Decided {
 		warrant.Details.ReviewedAt = now
-		randomJudgeNames := []string{"Smith", "Carter", "Patel", "Nguyen", "Brown", "Lopez", "Williams", "Johnson", "Davis", "Martinez"}
-		warrant.Details.JudgeName = "Judge " + randomJudgeNames[rand.Intn(len(randomJudgeNames))]
-		if rand.Float64() < approvalRate {
-			warrant.Details.Status = "approved"
-			warrant.Details.JudgeNotes = "Warrant approved based on submitted probable cause."
-		} else {
-			warrant.Details.Status = "denied"
-			warrant.Details.JudgeNotes = "Insufficient probable cause to issue warrant."
-		}
-		warrant.Details.History = append(warrant.Details.History, models.WarrantHistoryEntry{
-			Action:    warrant.Details.Status,
-			UserName:  warrant.Details.JudgeName,
-			Notes:     warrant.Details.JudgeNotes,
-			Timestamp: now,
-		})
-	default: // "auto-approve"
-		warrant.Details.Status = "approved"
-		warrant.Details.JudgeName = "Auto-Approved"
-		warrant.Details.ReviewedAt = now
-		warrant.Details.History = append(warrant.Details.History, models.WarrantHistoryEntry{
-			Action:    "approved",
-			UserName:  "Auto-Approved",
-			Timestamp: now,
-		})
+		warrant.Details.History = append(warrant.Details.History, decision.HistoryEntry(now))
 	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())

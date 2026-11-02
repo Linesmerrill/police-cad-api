@@ -52,9 +52,6 @@ type fakeMemberCommunityDB struct {
 	mu          sync.Mutex
 	communities map[string]models.Community
 	updates     []bson.M
-	// findOneAndUpdateMatches controls whether the department-member update
-	// reports a match, which is how the handler decides to append instead.
-	findOneAndUpdateMatches bool
 }
 
 func (f *fakeMemberCommunityDB) FindOneIncludingPending(_ context.Context, filter interface{}) (*models.Community, error) {
@@ -82,16 +79,56 @@ func (f *fakeMemberCommunityDB) UpdateOne(_ context.Context, _, update interface
 	return nil
 }
 
-func (f *fakeMemberCommunityDB) FindOneAndUpdate(_ context.Context, _, update interface{}, _ ...*options.FindOneAndUpdateOptions) (*models.Community, error) {
+// FindOneAndUpdate matches on the filter, the way Mongo would, rather than
+// from a flag the test sets.
+//
+// It used to answer from a flag, and that is what let the department write
+// filter on "community.departments.id" for weeks: models.Department stores its
+// id as bson "_id", so the real filter matched nothing while every test here
+// passed. Resolving the department by the field name a document actually has
+// means a wrong name fails here too.
+func (f *fakeMemberCommunityDB) FindOneAndUpdate(_ context.Context, filter, update interface{}, _ ...*options.FindOneAndUpdateOptions) (*models.Community, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if m, ok := update.(bson.M); ok {
 		f.updates = append(f.updates, m)
 	}
-	if !f.findOneAndUpdateMatches {
+
+	fm, _ := filter.(bson.M)
+	oid, ok := devFilterObjectID(fm["_id"])
+	if !ok {
 		return nil, mongo.ErrNoDocuments
 	}
-	return &models.Community{}, nil
+	community, found := f.communities[oid.Hex()]
+	if !found {
+		return nil, mongo.ErrNoDocuments
+	}
+
+	deptID, ok := devFilterObjectID(fm["community.departments._id"])
+	if !ok {
+		return nil, mongo.ErrNoDocuments
+	}
+	dept := findCommunityDepartment(&community, deptID.Hex())
+	if dept == nil {
+		return nil, mongo.ErrNoDocuments
+	}
+
+	// Present only on the guarded update, which is the one asking "does this
+	// person already have a row in this department".
+	if want, has := fm["community.departments.members.userID"]; has {
+		userID, _ := devFilterString(want)
+		already := false
+		for _, member := range dept.Members {
+			if member.UserID == userID {
+				already = true
+				break
+			}
+		}
+		if !already {
+			return nil, mongo.ErrNoDocuments
+		}
+	}
+	return &community, nil
 }
 
 func (f *fakeMemberCommunityDB) CountDocuments(_ context.Context, _ interface{}, _ ...*options.CountOptions) (int64, error) {

@@ -102,9 +102,9 @@ const (
 	ScopeReportsRead  = "reports:read"
 	ScopeReportsWrite = "reports:write"
 
-	// Warrants. warrants:write requests one; it never issues one. A request
-	// lands pending for the community's own reviewer however the community
-	// has configured its approval mode.
+	// Warrants. warrants:write asks for one; it never decides one. The
+	// community's own approval mode answers, exactly as it does for a warrant
+	// raised on the website, and no scope lets a key approve, deny or review.
 	ScopeWarrantsRead  = "warrants:read"
 	ScopeWarrantsWrite = "warrants:write"
 )

@@ -202,25 +202,32 @@ report in three months can still see a model wrote it.
   confirmed.
 * `POST /communities/{communityId}/warrants/requests`: requests one.
 
-One thing to know, because it is deliberately *not* what the website does: **a
-request through a key always lands `pending`**, whatever the community's
-`warrantApprovalMode` says.
+**A request follows the community's own `warrantApprovalMode`**, exactly as a
+warrant raised on the website does:
 
-Auto-approve is the product default and most communities run it, so an officer
-clicking "request warrant" in the CAD gets an approved warrant immediately.
-That is a convenience for a person who is already in the CAD, has already
-passed the officer check, and is making one decision they can see the result
-of. A game server is none of those: it fires on a trigger, it retries, and
-nobody is watching the moment it happens. A key that could trip auto-approve
-could manufacture approved arrest warrants on a loop, and no community that
-turned auto-approve on for its officers was agreeing to that.
+| Mode | What a request does |
+|---|---|
+| `require-judge` | Lands `pending` for a judge to review |
+| `random` | Decided immediately, with a random judge name, at the community's own `warrantRandomApprovalRate` (70% unless it sets one) |
+| `auto-approve`, or unset | Approved immediately, judge name `Auto-Approved` |
 
-So the request goes into the pending queue the community already has, a person
-reviews it with the tools they already use, and you poll for the outcome.
-`judgeNotes` comes back on a denial, which is the only thing that explains one
-to your officer. The request is idempotent on `(community, source, externalId)`,
-and a retry after a decision hands you the decision rather than raising a second
-request.
+So read `status` on the response rather than assuming it. Under `random` and
+`auto-approve` the warrant comes back already decided; under `require-judge`
+it comes back `pending` and you poll, or subscribe, for the outcome.
+
+What a key cannot do is *decide*. It asks, on behalf of an officer it has to
+name and who passes the same checks as anyone else, and the community's own
+rule answers. There is no approve, deny or review route under the developer
+prefix, and the outcome is never read from your request body.
+
+The first history entry on the warrant names your integration, so anyone
+reading it later can see a script raised it. `judgeNotes` comes back on a
+denial, which is the only thing that explains one to your officer. The request
+is idempotent on `(community, source, externalId)`, and a retry hands you the
+request at whatever stage it has reached rather than raising a second one.
+
+Both halves are events: `warrant.requested` always, and `warrant.reviewed` as
+well when the community decided it on the spot.
 
 ### Synthetic NPC records
 
@@ -337,7 +344,7 @@ community + source + externalId), warrant requests, and attachments
 | ask | status |
 |---|---|
 | BOLOs read/write | **Available** (create, list) |
-| Warrants | **Available.** Community-scoped lookup, and a request flow that always lands pending for the community's own reviewer, see above for why a key does not get the auto-approve shortcut |
+| Warrants | **Available.** Community-scoped lookup, and a request flow that follows the community's own approval mode: pending under require-judge, decided at once under random or auto-approve. A key asks; it can never approve, deny or review |
 | Report attachment metadata and links | **Available.** A link plus its kind, label, content type and declared size, on a report draft and on a dispatch call: no binary upload, we never fetch the URL, 10 per record, every attach and detach audited, and `kind` is never `evidence` |
 | EMS/fire types and statuses | **Partly available**: departments carry templates including EMS and fire, and ten-codes are per community. Incident/medical forms fall under the reports work |
 | Scoped signed webhooks or streaming | **Available**, and this reverses our earlier answer. `GET …/changes?since=<cursor>` makes polling one request instead of a sweep, and signed webhooks deliver the same events: HMAC-SHA256 over a signed timestamp and the body, stable event ids, a published 300-second replay window, a published finite retry schedule, a rotatable signing secret, and per-key endpoint configuration in the console |

@@ -573,9 +573,6 @@ func (d DeveloperAPI) DevUpdateMemberHandler(w http.ResponseWriter, r *http.Requ
 	// Replace the player's row in that department if they already have one,
 	// otherwise append. Two rows for one person in one department would make
 	// their rank ambiguous.
-	// Replace the player's row in that department if they already have one,
-	// otherwise append. Two rows for one person in one department would make
-	// their rank ambiguous.
 	//
 	// FindOneAndUpdate rather than UpdateOne because this has to know whether
 	// it matched: UpdateOne on this store returns only an error, so an update
@@ -583,7 +580,7 @@ func (d DeveloperAPI) DevUpdateMemberHandler(w http.ResponseWriter, r *http.Requ
 	// the append below would never run.
 	_, err = d.CDB.FindOneAndUpdate(ctx, bson.M{
 		"_id":                                  cc.Community.ID,
-		"community.departments.id":             devEq(objectIDOrZero(departmentID)),
+		"community.departments._id":            devEq(objectIDOrZero(departmentID)),
 		"community.departments.members.userID": devEq(target.UserID),
 	}, bson.M{"$set": bson.M{
 		"community.departments.$[dept].members.$[member].rankId": rankID,
@@ -596,10 +593,21 @@ func (d DeveloperAPI) DevUpdateMemberHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		// Nobody matched, so this is their first time in the department.
-		if addErr := d.CDB.UpdateOne(ctx,
-			bson.M{"_id": devEq(cc.Community.ID), "community.departments.id": devEq(objectIDOrZero(departmentID))},
+		//
+		// FindOneAndUpdate rather than UpdateOne for the same reason as above,
+		// and it is load-bearing here: UpdateOne reports only an error, so a
+		// filter that matched no community was indistinguishable from a
+		// successful append, and this handler answered 200 while leaving the
+		// player in no department at all. The department's existence is already
+		// checked against the decoded community above, so nothing matching here
+		// means the write disagrees with the read and the caller must hear
+		// about it rather than be told it worked.
+		if _, addErr := d.CDB.FindOneAndUpdate(ctx,
+			bson.M{"_id": devEq(cc.Community.ID), "community.departments._id": devEq(objectIDOrZero(departmentID))},
 			bson.M{"$addToSet": bson.M{"community.departments.$.members": entry}}); addErr != nil {
-			devError(w, http.StatusInternalServerError, "server_error", "Could not update that member.", nil)
+			d.RecordOutcome(r, http.StatusInternalServerError)
+			devError(w, http.StatusInternalServerError, "server_error",
+				"Could not add that player to the department.", nil)
 			return
 		}
 	}
@@ -791,7 +799,7 @@ func communityHasRank(community *models.Community, rankID string) bool {
 // update touches that person's row and nobody else's.
 func departmentMemberArrayFilters(departmentID, userID string) *options.FindOneAndUpdateOptions {
 	return options.FindOneAndUpdate().SetArrayFilters(options.ArrayFilters{Filters: []interface{}{
-		bson.M{"dept.id": objectIDOrZero(departmentID)},
+		bson.M{"dept._id": objectIDOrZero(departmentID)},
 		bson.M{"member.userID": userID},
 	}})
 }

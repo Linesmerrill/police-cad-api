@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -124,6 +126,181 @@ func (f *e2eCommunityDB) UpdateOne(_ context.Context, filter, update interface{}
 		}
 	}
 	return nil
+}
+
+// FindOneAndUpdate is the write the member-department path depends on, so this
+// fake implements what that path actually needs: a filter that reaches into an
+// array of subdocuments by their real field names, $set through arrayFilters,
+// $addToSet through the positional operator, and mongo.ErrNoDocuments when
+// nothing matched.
+//
+// That last return is the whole point of implementing it here. The handler
+// decides between replacing a member's row and appending one by whether this
+// matched, and the member fixture's fake is simply *told* whether to match by a
+// flag. So a filter naming "community.departments.id", a field models.Department
+// does not have (its bson tag is "_id"), matched nothing in production, the
+// append matched nothing too, and the endpoint still answered 200 with the
+// player in no department at all. A fake that resolves these paths by their
+// real names cannot hide that.
+func (f *e2eCommunityDB) FindOneAndUpdate(_ context.Context, filter, update interface{}, opts ...*options.FindOneAndUpdateOptions) (*models.Community, error) {
+	fm, _ := filter.(bson.M)
+	um, _ := update.(bson.M)
+
+	oid, ok := devFilterObjectID(fm["_id"])
+	if !ok {
+		return nil, mongo.ErrNoDocuments
+	}
+	doc, found := f.docs[oid.Hex()]
+	if !found {
+		return nil, mongo.ErrNoDocuments
+	}
+	if !e2eFilterMatches(doc, fm) || !e2eArrayFiltersMatch(doc, fm) {
+		return nil, mongo.ErrNoDocuments
+	}
+
+	dept, deptFound := e2eDeptFromFilter(doc, fm)
+
+	if set, has := um["$set"].(bson.M); has {
+		for path, value := range set {
+			parts := strings.Split(path, ".")
+			// community.departments.$[dept].members.$[member].<field>
+			if len(parts) == 6 && parts[2] == "$[dept]" && parts[4] == "$[member]" {
+				if !deptFound {
+					return nil, mongo.ErrNoDocuments
+				}
+				member, memberFound := e2eMemberByUserID(dept, e2eWantedMemberUserID(opts...))
+				if !memberFound {
+					return nil, mongo.ErrNoDocuments
+				}
+				member[parts[5]] = value
+				continue
+			}
+			if err := e2eSetPath(doc, parts, value); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if add, has := um["$addToSet"].(bson.M); has {
+		for path, value := range add {
+			// community.departments.$.members
+			if path != "community.departments.$.members" {
+				return nil, mongo.ErrNoDocuments
+			}
+			if !deptFound {
+				return nil, mongo.ErrNoDocuments
+			}
+			raw, err := bson.Marshal(value)
+			if err != nil {
+				return nil, err
+			}
+			entry := bson.M{}
+			if err := bson.Unmarshal(raw, &entry); err != nil {
+				return nil, err
+			}
+			existing, _ := dept["members"].(bson.A)
+			dept["members"] = append(existing, entry)
+		}
+	}
+
+	return f.FindOne(context.Background(), bson.M{"_id": oid})
+}
+
+// e2eArrayFiltersMatch resolves the dotted paths that cross an array, by the
+// field names a real document has.
+func e2eArrayFiltersMatch(doc bson.M, filter bson.M) bool {
+	if want, has := filter["community.departments._id"]; has {
+		if _, found := e2eDeptByID(doc, want); !found {
+			return false
+		}
+	}
+	if want, has := filter["community.departments.members.userID"]; has {
+		wanted, _ := devFilterString(want)
+		anyone := false
+		for _, dept := range e2eDepartments(doc) {
+			if _, found := e2eMemberByUserID(dept, wanted); found {
+				anyone = true
+				break
+			}
+		}
+		if !anyone {
+			return false
+		}
+	}
+	return true
+}
+
+// e2eDepartments returns the community's departments as documents.
+func e2eDepartments(doc bson.M) []bson.M {
+	community, _ := doc["community"].(bson.M)
+	raw, _ := community["departments"].(bson.A)
+	out := make([]bson.M, 0, len(raw))
+	for _, entry := range raw {
+		if m, ok := entry.(bson.M); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// e2eDeptByID finds a department by its real "_id", which is the thing the bug
+// turned on.
+func e2eDeptByID(doc bson.M, want interface{}) (bson.M, bool) {
+	wanted, ok := devFilterObjectID(want)
+	if !ok {
+		return nil, false
+	}
+	for _, dept := range e2eDepartments(doc) {
+		if id, isID := dept["_id"].(primitive.ObjectID); isID && id == wanted {
+			return dept, true
+		}
+	}
+	return nil, false
+}
+
+func e2eDeptFromFilter(doc bson.M, filter bson.M) (bson.M, bool) {
+	want, has := filter["community.departments._id"]
+	if !has {
+		return nil, false
+	}
+	return e2eDeptByID(doc, want)
+}
+
+func e2eMemberByUserID(dept bson.M, userID string) (bson.M, bool) {
+	if userID == "" {
+		return nil, false
+	}
+	raw, _ := dept["members"].(bson.A)
+	for _, entry := range raw {
+		m, ok := entry.(bson.M)
+		if !ok {
+			continue
+		}
+		if id, isStr := m["userID"].(string); isStr && id == userID {
+			return m, true
+		}
+	}
+	return nil, false
+}
+
+// e2eWantedMemberUserID reads the member the arrayFilters single out, by the
+// real "member.userID" key the handler passes.
+func e2eWantedMemberUserID(opts ...*options.FindOneAndUpdateOptions) string {
+	for _, opt := range opts {
+		if opt == nil || opt.ArrayFilters == nil {
+			continue
+		}
+		for _, raw := range opt.ArrayFilters.Filters {
+			m, ok := raw.(bson.M)
+			if !ok {
+				continue
+			}
+			if id, has := m["member.userID"].(string); has {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // e2eFilterMatches handles the small filter vocabulary these tests use: the
@@ -1345,6 +1522,106 @@ func newReportFixture(t *testing.T) *reportFixture {
 	}
 }
 
+// The live bug Hark found: PATCH members with a departmentId answered 200 and
+// did nothing, so the very next call, creating a report draft for that officer,
+// failed with reporting_officer_has_no_department. Two writes in that handler
+// filtered on "community.departments.id" while models.Department stores its id
+// as bson "_id", so neither matched, and UpdateOne cannot report a no-match.
+//
+// This test is deliberately the whole chain rather than an assertion about a
+// filter: set the department through the real endpoint, read the community back
+// through the real decoder, then write the report. Each of the three steps
+// failed in production and only the third one was visible.
+func TestE2E_SettingADepartmentLetsThatOfficerWriteAReport(t *testing.T) {
+	f := newReportFixture(t)
+
+	// An approved member of the community who is in no department, which is
+	// every player's state right after they join.
+	recruitID := primitive.NewObjectID().Hex()
+	f.seedPlayer(recruitID, "recruit", f.community.ID.Hex(), models.CommunityMemberStatusApproved)
+	recruit := fivemRef("recruit")
+
+	// Writing a report is refused while they are in no department. If this
+	// passed, the rest of the test would prove nothing.
+	rr, _ := f.upsertDraft(t, `{"kind":"incident","externalId":"pre-dept-1",`+
+		`"reportingOfficer":"`+recruit+`","narrative":{"summary":"before"}}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("a departmentless officer should be refused: got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Now put them in one, through the endpoint under test.
+	rr = f.run(t, http.MethodPatch, "/members/"+recruit,
+		`{"actingPlayer":"`+fivemRef("admin")+`","departmentId":"`+f.deptID.Hex()+`"}`,
+		map[string]string{"playerRef": recruit},
+		f.api.RequireScope(models.ScopeMembersWrite, f.api.DevUpdateMemberHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setting the department: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// The 200 has to mean it happened. Read the community back the way the API
+	// reads it, so this checks the stored field names and not the fake's.
+	stored, err := f.communityDB.FindOne(context.Background(), bson.M{"_id": f.community.ID})
+	if err != nil {
+		t.Fatalf("reading the community back: %v", err)
+	}
+	if !playerIsInAnyDepartment(stored, recruitID) {
+		t.Fatalf("the endpoint answered 200 but the player is in no department: %+v",
+			stored.Details.Departments)
+	}
+	inTheRightOne := false
+	for _, dept := range stored.Details.Departments {
+		if dept.ID != f.deptID {
+			continue
+		}
+		for _, member := range dept.Members {
+			if member.UserID == recruitID {
+				inTheRightOne = true
+			}
+		}
+	}
+	if !inTheRightOne {
+		t.Errorf("the player is in a department, but not the one that was asked for")
+	}
+
+	// And the call that was failing now works.
+	rr, draft := f.upsertDraft(t, `{"kind":"incident","externalId":"post-dept-1",`+
+		`"reportingOfficer":"`+recruit+`","narrative":{"summary":"after"}}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("writing a report after joining a department: expected 201, got %d: %s",
+			rr.Code, rr.Body.String())
+	}
+	if draft.Draft.ID == "" {
+		t.Error("the draft came back without an id")
+	}
+}
+
+// The same chain for a warrant, which shares the officer check and used to
+// borrow the report wording with it.
+func TestE2E_WarrantRequestSaysWarrantNotReport(t *testing.T) {
+	f := newReportFixture(t)
+
+	recruitID := primitive.NewObjectID().Hex()
+	f.seedPlayer(recruitID, "recruit", f.community.ID.Hex(), models.CommunityMemberStatusApproved)
+	recruit := fivemRef("recruit")
+
+	rr, _ := f.requestWarrant(t, `{"accused":"`+fivemRef("member")+`","externalId":"w-1",`+
+		`"requestingOfficer":"`+recruit+`","probableCause":"Failed to appear in court."}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "write a report") {
+		t.Errorf("the warrant path should not talk about writing a report: %s", body)
+	}
+	if !strings.Contains(body, "request a warrant") || !strings.Contains(body, "requesting officer") {
+		t.Errorf("the warrant path should say what it is: %s", body)
+	}
+	// The code is part of the contract, so it does not change with the wording.
+	if !strings.Contains(body, "reporting_officer_has_no_department") {
+		t.Errorf("the error code must stay the same for integrations: %s", body)
+	}
+}
+
 type draftEnvelope struct {
 	Draft   devReportDraftView `json:"draft"`
 	Created bool               `json:"created"`
@@ -1362,6 +1639,19 @@ func (f *reportFixture) upsertDraft(t *testing.T, body string) (*httptest.Respon
 type warrantEnvelope struct {
 	Warrant devWarrantView `json:"warrant"`
 	Created bool           `json:"created"`
+}
+
+// setWarrantMode puts the community on one of its three approval modes, which
+// is what decides a new warrant whoever raised it.
+func (f *reportFixture) setWarrantMode(t *testing.T, mode string, randomRate int) {
+	t.Helper()
+	community := f.community
+	community.Details.WarrantApprovalMode = mode
+	community.Details.WarrantRandomApprovalRate = randomRate
+	f.community = community
+	if err := f.communityDB.seed(community); err != nil {
+		t.Fatalf("re-seeding the community: %v", err)
+	}
 }
 
 func (f *reportFixture) requestWarrant(t *testing.T, body string) (*httptest.ResponseRecorder, warrantEnvelope) {
@@ -1404,6 +1694,39 @@ func TestE2E_ReportDraftIsNotAFiledReport(t *testing.T) {
 	}
 	if out.Draft.ReviewLink == "" {
 		t.Error("a draft needs a link a person can open to review it")
+	}
+}
+
+// The review link has to be a path the website actually serves. It was not: it
+// pointed at /community/{id}/report-drafts/{draftId} while the only route that
+// existed was the list, so the one URL a game server could put in a
+// supervisor's chat was a 404.
+//
+// Asserting the path and not just that the string is non-empty, which is what
+// the test above did and why nobody noticed. The matching website route is in
+// police-cad app/routes.js, and its own spec opens exactly this shape.
+func TestE2E_ReviewLinkPointsAtARouteTheWebsiteServes(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, created := f.upsertDraft(t, `{"kind":"incident","externalId":"link-1","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`","facts":{"summary":"As observed"}}`)
+
+	link := created.Draft.ReviewLink
+	if link == "" {
+		t.Fatal("no review link")
+	}
+	parsed, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("the review link does not parse: %v", err)
+	}
+	if parsed.Scheme != "https" {
+		t.Errorf("a link handed to a supervisor should be https, got %q", parsed.Scheme)
+	}
+
+	want := "/community/" + f.community.ID.Hex() + "/report-drafts/" + created.Draft.ID
+	if parsed.Path != want {
+		t.Errorf("the review link path must match the website's route\n got: %s\nwant: %s",
+			parsed.Path, want)
 	}
 }
 
@@ -1938,43 +2261,140 @@ func TestE2E_ReportDraftsRefuseAKeyWithoutTheScope(t *testing.T) {
 
 // ---- warrants ----
 
-// A request lands pending whatever the community's approval mode says. See
-// developer_api_warrants.go: auto-approve is a convenience for a person making
-// one visible decision, not a behaviour to hand to a trigger that retries.
-func TestE2E_WarrantRequestIsAlwaysPending(t *testing.T) {
+// A request follows the community's own approval mode, the same way a warrant
+// raised on the website does. The key never decides anything: there is no
+// approve or review route under the developer prefix, and the outcome below
+// comes from the community's rule.
+func TestE2E_WarrantRequestFollowsTheCommunityMode(t *testing.T) {
+	t.Run("require-judge lands pending", func(t *testing.T) {
+		f := newReportFixture(t)
+		f.setWarrantMode(t, "require-judge", 0)
+
+		rr, out := f.requestWarrant(t, `{"externalId":"w-judge","source":"SixPD",
+			"requestingOfficer":"`+fivemRef("admin")+`","accused":"`+fivemRef("member")+`",
+			"probableCause":"Fled a lawful traffic stop."}`)
+
+		if rr.Code != http.StatusCreated || !out.Created {
+			t.Fatalf("expected 201 created, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if out.Warrant.Status != models.WarrantStatusPending {
+			t.Errorf("require-judge must leave it pending, got %q", out.Warrant.Status)
+		}
+		if !out.Warrant.AwaitingReview {
+			t.Error("the response must say a person has yet to look at it")
+		}
+		if out.Warrant.JudgeName != "" {
+			t.Errorf("no judge has seen it yet, got %q", out.Warrant.JudgeName)
+		}
+	})
+
+	t.Run("auto-approve approves, and so does an unset mode", func(t *testing.T) {
+		for _, mode := range []string{"auto-approve", ""} {
+			name := mode
+			if name == "" {
+				name = "(unset)"
+			}
+			t.Run(name, func(t *testing.T) {
+				f := newReportFixture(t)
+				f.setWarrantMode(t, mode, 0)
+
+				rr, out := f.requestWarrant(t, `{"externalId":"w-auto","source":"SixPD",
+					"requestingOfficer":"`+fivemRef("admin")+`","accused":"`+fivemRef("member")+`",
+					"probableCause":"Fled a lawful traffic stop."}`)
+
+				if rr.Code != http.StatusCreated {
+					t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+				}
+				if out.Warrant.Status != models.WarrantStatusApproved {
+					t.Errorf("%s must approve, got %q", name, out.Warrant.Status)
+				}
+				if !out.Warrant.Approved {
+					t.Error("the view should report it as approved")
+				}
+				if out.Warrant.AwaitingReview {
+					t.Error("nothing is awaiting review once the community has decided")
+				}
+				if out.Warrant.JudgeName != "Auto-Approved" {
+					t.Errorf("the decision should name itself, got %q", out.Warrant.JudgeName)
+				}
+			})
+		}
+	})
+
+	t.Run("random decides immediately, either way", func(t *testing.T) {
+		// Both outcomes are correct, so this asserts what is true of both:
+		// decided, with a judge name and a reason. A rate of 50 over several
+		// requests also makes a mode that silently always approved visible.
+		f := newReportFixture(t)
+		f.setWarrantMode(t, "random", 50)
+
+		approved, denied := 0, 0
+		for i := 0; i < 20; i++ {
+			_, out := f.requestWarrant(t, `{"externalId":"w-random-`+strconv.Itoa(i)+`","source":"SixPD",
+				"requestingOfficer":"`+fivemRef("admin")+`","accused":"`+fivemRef("member")+`",
+				"probableCause":"Fled a lawful traffic stop."}`)
+
+			switch out.Warrant.Status {
+			case models.WarrantStatusApproved:
+				approved++
+			case models.WarrantStatusDenied:
+				denied++
+			default:
+				t.Fatalf("random must decide, got %q", out.Warrant.Status)
+			}
+			if out.Warrant.AwaitingReview {
+				t.Error("a decided warrant is not awaiting review")
+			}
+			if !strings.HasPrefix(out.Warrant.JudgeName, "Judge ") {
+				t.Errorf("random mode names a judge, got %q", out.Warrant.JudgeName)
+			}
+		}
+		if approved == 0 || denied == 0 {
+			t.Errorf("at a 50%% rate over 20 requests both outcomes should appear, got %d approved and %d denied",
+				approved, denied)
+		}
+	})
+}
+
+// The outcome is its own event when the community settles it on the spot, so a
+// subscriber waiting to hear does not have to infer it from the request.
+func TestE2E_WarrantEventsCoverTheOutcome(t *testing.T) {
 	f := newReportFixture(t)
+	events := &fakeEventDB{}
+	f.api.EventDB = events
 
-	// The community is on auto-approve, which is the product default and what
-	// almost every community runs.
-	community := f.community
-	community.Details.WarrantApprovalMode = "auto-approve"
-	f.community = community
-	if err := f.communityDB.seed(community); err != nil {
-		t.Fatalf("re-seeding: %v", err)
+	f.setWarrantMode(t, "auto-approve", 0)
+	f.requestWarrant(t, `{"externalId":"w-events","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("admin")+`","accused":"`+fivemRef("member")+`",
+		"probableCause":"Fled a lawful traffic stop."}`)
+
+	seen := events.waitForEvents(t, 2)
+	kinds := map[string]string{}
+	for _, event := range seen {
+		kinds[event.Type] = event.Data["status"]
+	}
+	if _, has := kinds[models.EventWarrantRequested]; !has {
+		t.Errorf("the request itself must be an event, got %v", kinds)
+	}
+	if status, has := kinds[models.EventWarrantReviewed]; !has {
+		t.Errorf("an immediate decision must emit the reviewed event, got %v", kinds)
+	} else if status != models.WarrantStatusApproved {
+		t.Errorf("the reviewed event should carry the outcome, got %q", status)
 	}
 
-	rr, out := f.requestWarrant(t, `{
-		"externalId":"sixpd-warrant-1","source":"SixPD","warrantType":"arrest",
-		"requestingOfficer":"`+fivemRef("admin")+`",
-		"accused":"`+fivemRef("member")+`",
-		"probableCause":"Fled a lawful traffic stop and struck a parked vehicle.",
-		"charges":["Reckless Driving"]
-	}`)
+	// And a mode that leaves it for a judge emits only the request.
+	f2 := newReportFixture(t)
+	events2 := &fakeEventDB{}
+	f2.api.EventDB = events2
+	f2.setWarrantMode(t, "require-judge", 0)
+	f2.requestWarrant(t, `{"externalId":"w-events-2","source":"SixPD",
+		"requestingOfficer":"`+fivemRef("admin")+`","accused":"`+fivemRef("member")+`",
+		"probableCause":"Fled a lawful traffic stop."}`)
 
-	if rr.Code != http.StatusCreated || !out.Created {
-		t.Fatalf("expected 201 created, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if out.Warrant.Status != models.WarrantStatusPending {
-		t.Errorf("a key-requested warrant must land pending even on auto-approve, got %q", out.Warrant.Status)
-	}
-	if out.Warrant.Approved {
-		t.Error("nothing a key calls approves a warrant")
-	}
-	if !out.Warrant.AwaitingReview {
-		t.Error("the response must say a person has yet to look at it")
-	}
-	if out.Warrant.JudgeName != "" {
-		t.Errorf("no judge has seen it, so there must be no judge on it, got %q", out.Warrant.JudgeName)
+	for _, event := range events2.waitForEvents(t, 1) {
+		if event.Type == models.EventWarrantReviewed {
+			t.Error("nothing has reviewed it, so there is no reviewed event")
+		}
 	}
 }
 
@@ -1999,11 +2419,20 @@ func TestE2E_WarrantRequestRecordsTheIntegration(t *testing.T) {
 	if stored.RecordSource == nil || stored.RecordSource.Type != models.RecordSourceDeveloperAPI {
 		t.Errorf("the record source stamp is missing: %+v", stored.RecordSource)
 	}
-	if len(stored.History) != 1 || stored.History[0].Action != "created" {
-		t.Fatalf("expected one created history entry, got %+v", stored.History)
+	if len(stored.History) == 0 || stored.History[0].Action != "created" {
+		t.Fatalf("the first history entry should be the request, got %+v", stored.History)
 	}
 	if !strings.Contains(stored.History[0].Notes, "Developer API") {
 		t.Errorf("the history must say a script raised this, got %q", stored.History[0].Notes)
+	}
+	// The fixture community has no mode set, so it auto-approves, and the
+	// decision is the entry after the request. That is the same trail the
+	// website leaves.
+	if len(stored.History) != 2 || stored.History[1].Action != models.WarrantStatusApproved {
+		t.Fatalf("expected the decision to follow the request, got %+v", stored.History)
+	}
+	if stored.History[1].UserName != "Auto-Approved" {
+		t.Errorf("the decision should name itself, got %q", stored.History[1].UserName)
 	}
 }
 
@@ -2116,6 +2545,11 @@ func TestE2E_WarrantRequestNeedsAnAccused(t *testing.T) {
 // on every stop, and it is one request.
 func TestE2E_WarrantLookupByAccusedAndStatus(t *testing.T) {
 	f := newReportFixture(t)
+
+	// status=pending below, so the community has to be one that leaves them
+	// pending. Without this the fixture auto-approves and the filter is
+	// vacuously satisfied by an empty list.
+	f.setWarrantMode(t, "require-judge", 0)
 
 	f.requestWarrant(t, `{"externalId":"w-a","source":"SixPD",
 		"requestingOfficer":"`+fivemRef("admin")+`","accused":"`+fivemRef("member")+`",
@@ -4225,6 +4659,51 @@ func TestE2E_AttachmentIsMetadataAndALink(t *testing.T) {
 	// immediately: logAudit writes on a goroutine so it never delays a
 	// request, which means asserting straight after the response is a race.
 	waitForAuditAction(t, f.api.ALDB, "attachment_added")
+}
+
+// An attachment nobody can read afterwards is not an attachment. It was stored
+// and then returned by no read at all, so neither the integration that added it
+// nor the reviewer on the website could see it.
+func TestE2E_AnAttachmentComesBackOnTheDraft(t *testing.T) {
+	f := newEventsFixture(t)
+	f.upsertDraft(t, `{"externalId":"att-read","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	rr := f.run(t, http.MethodPost, "/reports/drafts/att-read/attachments?source=SixPD",
+		`{"kind":"screenshot","label":"Scene","url":"https://clips.example.com/scene.png",
+		  "contentType":"image/png","sizeBytes":20480}`,
+		map[string]string{"externalId": "att-read"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("attaching: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	rr = f.run(t, http.MethodGet, "/reports/drafts/att-read?source=SixPD", "",
+		map[string]string{"externalId": "att-read"},
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevGetReportDraftHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reading it back: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Draft devReportDraftView `json:"draft"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(out.Draft.Attachments) != 1 {
+		t.Fatalf("the attachment must come back on the draft, got %+v", out.Draft.Attachments)
+	}
+	got := out.Draft.Attachments[0]
+	if got.Kind != "screenshot" || got.Label != "Scene" {
+		t.Errorf("the reviewer needs the kind and the label, got %+v", got)
+	}
+	if got.URL != "https://clips.example.com/scene.png" {
+		t.Errorf("and the link, got %q", got.URL)
+	}
+	if got.AddedByKey == "" {
+		t.Error("and who added it, so the attribution can be shown")
+	}
 }
 
 // waitForAuditAction waits for an audit entry whose action contains want.
