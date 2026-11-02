@@ -2961,6 +2961,13 @@ func (f *fakeArrestReportDB) InsertOne(_ context.Context, report models.ArrestRe
 	return fakeInsertResult{id: report.ID}, nil
 }
 
+// fakeFormSubmissionDB stands in for the formSubmissions collection, including
+// its unique index on (communityID, reportNumber).
+//
+// The index is the point. Without it this fake accepted every insert, so a
+// filing path that never allocated a report number looked correct here and then
+// failed in production on the second report in a community. A fake that is
+// cheerier than the collection it stands for is worse than no fake at all.
 type fakeFormSubmissionDB struct {
 	databases.FormSubmissionDatabase
 	mu          sync.Mutex
@@ -2970,10 +2977,78 @@ type fakeFormSubmissionDB struct {
 func (f *fakeFormSubmissionDB) InsertOne(_ context.Context, doc interface{}, _ ...*options.InsertOneOptions) (databases.InsertOneResultHelper, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if submission, ok := doc.(models.FormSubmission); ok {
-		f.submissions = append(f.submissions, submission)
+	submission, ok := doc.(models.FormSubmission)
+	if !ok {
+		return fakeInsertResult{id: primitive.NewObjectID()}, nil
 	}
-	return fakeInsertResult{id: primitive.NewObjectID()}, nil
+	for _, existing := range f.submissions {
+		if existing.Details.CommunityID == submission.Details.CommunityID &&
+			existing.Details.ReportNumber == submission.Details.ReportNumber {
+			return nil, fakeDuplicateKeyError(submission.Details.ReportNumber)
+		}
+	}
+	f.submissions = append(f.submissions, submission)
+	return fakeInsertResult{id: submission.ID}, nil
+}
+
+// FindOne answers the one query reportNumbering asks it: the highest
+// reportNumber used in a community, when it is recovering from a collision.
+func (f *fakeFormSubmissionDB) FindOne(_ context.Context, _ interface{}, _ ...*options.FindOneOptions) (*models.FormSubmission, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var top *models.FormSubmission
+	for i := range f.submissions {
+		if top == nil || f.submissions[i].Details.ReportNumber > top.Details.ReportNumber {
+			top = &f.submissions[i]
+		}
+	}
+	if top == nil {
+		return nil, mongo.ErrNoDocuments
+	}
+	out := *top
+	return &out, nil
+}
+
+// fakeDuplicateKeyError is shaped so mongo.IsDuplicateKeyError recognises it,
+// which is what the retry in reportNumbering.Insert keys off.
+func fakeDuplicateKeyError(reportNumber string) error {
+	return mongo.WriteException{WriteErrors: mongo.WriteErrors{{
+		Code:    11000,
+		Message: "E11000 duplicate key error: reportNumber " + reportNumber,
+	}}}
+}
+
+// fakeFormCounterDB is the per-(community, slug, year) sequence, with the same
+// $max catch-up the real one has.
+type fakeFormCounterDB struct {
+	mu   sync.Mutex
+	seqs map[string]int64
+}
+
+func newFakeFormCounterDB() *fakeFormCounterDB {
+	return &fakeFormCounterDB{seqs: map[string]int64{}}
+}
+
+func (f *fakeFormCounterDB) key(communityID, slug string, year int) string {
+	return communityID + "|" + slug + "|" + strconv.Itoa(year)
+}
+
+func (f *fakeFormCounterDB) NextSeq(_ context.Context, communityID, slug string, year int) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := f.key(communityID, slug, year)
+	f.seqs[key]++
+	return f.seqs[key], nil
+}
+
+func (f *fakeFormCounterDB) CatchUp(_ context.Context, communityID, slug string, year int, minSeq int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := f.key(communityID, slug, year)
+	if f.seqs[key] < minSeq {
+		f.seqs[key] = minSeq
+	}
+	return nil
 }
 
 // reviewFixture is the report fixture with the stores a reviewer's decision
@@ -2981,8 +3056,9 @@ func (f *fakeFormSubmissionDB) InsertOne(_ context.Context, doc interface{}, _ .
 // actually exercised rather than skipped.
 type reviewFixture struct {
 	*reportFixture
-	arrestDB *fakeArrestReportDB
-	formDB   *fakeFormSubmissionDB
+	arrestDB  *fakeArrestReportDB
+	formDB    *fakeFormSubmissionDB
+	counterDB *fakeFormCounterDB
 }
 
 func newReviewFixture(t *testing.T) *reviewFixture {
@@ -2992,9 +3068,13 @@ func newReviewFixture(t *testing.T) *reviewFixture {
 
 	arrestDB := &fakeArrestReportDB{}
 	formDB := &fakeFormSubmissionDB{}
+	counterDB := newFakeFormCounterDB()
 	base.api.ArrestReportDB = arrestDB
 	base.api.FormSubmissionDB = formDB
-	return &reviewFixture{reportFixture: base, arrestDB: arrestDB, formDB: formDB}
+	base.api.FormCounterDB = counterDB
+	return &reviewFixture{
+		reportFixture: base, arrestDB: arrestDB, formDB: formDB, counterDB: counterDB,
+	}
 }
 
 // reviewRun drives a first-party review route: gateway secret in the header,
@@ -3235,8 +3315,110 @@ func TestE2E_FilingAnIncidentDraftWritesAFormSubmission(t *testing.T) {
 	if filed.Data["lpcReportedSummary"] != "Shots heard." {
 		t.Errorf("the observed summary was dropped: %+v", filed.Data)
 	}
+	if filed.ReportNumber == "" {
+		t.Error("a filed report needs a report number; the collection's unique index requires it")
+	}
 	if len(f.arrestDB.reports) != 0 {
 		t.Error("an incident draft must not produce an arrest report")
+	}
+}
+
+// Two drafts filed in the same community both become records.
+//
+// This is the production regression. formSubmissions carries a unique index on
+// (communityID, reportNumber) and the review path allocated no number, so the
+// first filing in a community wrote reportNumber:"" and succeeded, and the
+// second collided and answered 500 "failed to file report draft". A reviewer
+// saw a banner, the draft stayed open, and nothing they did helped.
+func TestE2E_TwoDraftsFiledInOneCommunityBothBecomeRecords(t *testing.T) {
+	f := newReviewFixture(t)
+
+	for _, externalID := range []string{"rev-dup-1", "rev-dup-2"} {
+		f.upsertDraft(t, `{"externalId":"`+externalID+`","source":"SixPD","kind":"incident",
+			"reportingOfficer":"`+fivemRef("admin")+`",
+			"facts":{"summary":"Shots heard."}}`)
+		draftID := f.draftIDOf(t, externalID)
+		rr := f.reviewRun(t, http.MethodPost,
+			"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts/"+draftID+"/file?userId="+f.ownerID,
+			`{}`, map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID},
+			f.api.FileCommunityReportDraftHandler)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("filing %s: expected 200, got %d: %s", externalID, rr.Code, rr.Body.String())
+		}
+	}
+
+	f.formDB.mu.Lock()
+	defer f.formDB.mu.Unlock()
+	if len(f.formDB.submissions) != 2 {
+		t.Fatalf("expected two form submissions, got %d", len(f.formDB.submissions))
+	}
+	first := f.formDB.submissions[0].Details.ReportNumber
+	second := f.formDB.submissions[1].Details.ReportNumber
+	if first == "" || second == "" {
+		t.Fatalf("both filings need a report number, got %q and %q", first, second)
+	}
+	if first == second {
+		t.Errorf("two reports cannot share a number, both are %q", first)
+	}
+	// Numbered the way the website's own form handler numbers them, because a
+	// filed draft is meant to be indistinguishable from a typed report.
+	for _, number := range []string{first, second} {
+		if !strings.HasPrefix(number, "RR-") {
+			t.Errorf("expected the built-in Incident Report format, got %q", number)
+		}
+	}
+}
+
+// A number the counter hands out that is already taken is renumbered, not
+// failed. The counter is per (community, slug, year) while the index is
+// community-wide, so a community whose numbers came from another template can
+// hand out one that already exists.
+func TestE2E_FilingRenumbersRoundACollision(t *testing.T) {
+	f := newReviewFixture(t)
+
+	// Whatever the counter is about to produce, already used by something else
+	// in this community.
+	taken, err := reportNumbering{
+		Subs: f.formDB, Counters: f.counterDB, Templates: f.api.FormTemplateDB,
+	}.NextNumber(context.Background(), f.community.ID.Hex(), "incident-report")
+	if err != nil {
+		t.Fatalf("allocating the colliding number: %v", err)
+	}
+	f.counterDB.mu.Lock()
+	f.counterDB.seqs = map[string]int64{}
+	f.counterDB.mu.Unlock()
+	f.formDB.mu.Lock()
+	f.formDB.submissions = append(f.formDB.submissions, models.FormSubmission{
+		ID: primitive.NewObjectID(),
+		Details: models.FormSubmissionDetails{
+			CommunityID:  f.community.ID.Hex(),
+			ReportNumber: taken,
+		},
+	})
+	f.formDB.mu.Unlock()
+
+	f.upsertDraft(t, `{"externalId":"rev-collide","source":"SixPD","kind":"incident",
+		"reportingOfficer":"`+fivemRef("admin")+`","facts":{"summary":"Shots heard."}}`)
+	draftID := f.draftIDOf(t, "rev-collide")
+	rr := f.reviewRun(t, http.MethodPost,
+		"/api/v1/developer/community/"+f.community.ID.Hex()+"/report-drafts/"+draftID+"/file?userId="+f.ownerID,
+		`{}`, map[string]string{"communityId": f.community.ID.Hex(), "draftId": draftID},
+		f.api.FileCommunityReportDraftHandler)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	f.formDB.mu.Lock()
+	defer f.formDB.mu.Unlock()
+	if len(f.formDB.submissions) != 2 {
+		t.Fatalf("expected the seeded report plus the filed one, got %d", len(f.formDB.submissions))
+	}
+	filed := f.formDB.submissions[1].Details.ReportNumber
+	if filed == taken {
+		t.Errorf("the filed report reused the taken number %q", filed)
+	}
+	if filed == "" {
+		t.Error("the filed report has no number at all")
 	}
 }
 

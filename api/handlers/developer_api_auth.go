@@ -127,6 +127,11 @@ type DeveloperAPI struct {
 	// filed report are not wired to anything a key can call.
 	ArrestReportDB   databases.ArrestReportDatabase
 	FormSubmissionDB databases.FormSubmissionDatabase
+	// FormCounterDB allocates the report number a filed submission needs. The
+	// collection's unique index on (communityID, reportNumber) makes this not
+	// optional: without it the first filing in a community works and every one
+	// after it is a duplicate key.
+	FormCounterDB databases.FormCounterDatabase
 }
 
 // ---- key material ----
