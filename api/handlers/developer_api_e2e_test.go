@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -1693,6 +1694,39 @@ func TestE2E_ReportDraftIsNotAFiledReport(t *testing.T) {
 	}
 	if out.Draft.ReviewLink == "" {
 		t.Error("a draft needs a link a person can open to review it")
+	}
+}
+
+// The review link has to be a path the website actually serves. It was not: it
+// pointed at /community/{id}/report-drafts/{draftId} while the only route that
+// existed was the list, so the one URL a game server could put in a
+// supervisor's chat was a 404.
+//
+// Asserting the path and not just that the string is non-empty, which is what
+// the test above did and why nobody noticed. The matching website route is in
+// police-cad app/routes.js, and its own spec opens exactly this shape.
+func TestE2E_ReviewLinkPointsAtARouteTheWebsiteServes(t *testing.T) {
+	f := newReportFixture(t)
+
+	_, created := f.upsertDraft(t, `{"kind":"incident","externalId":"link-1","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`","facts":{"summary":"As observed"}}`)
+
+	link := created.Draft.ReviewLink
+	if link == "" {
+		t.Fatal("no review link")
+	}
+	parsed, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("the review link does not parse: %v", err)
+	}
+	if parsed.Scheme != "https" {
+		t.Errorf("a link handed to a supervisor should be https, got %q", parsed.Scheme)
+	}
+
+	want := "/community/" + f.community.ID.Hex() + "/report-drafts/" + created.Draft.ID
+	if parsed.Path != want {
+		t.Errorf("the review link path must match the website's route\n got: %s\nwant: %s",
+			parsed.Path, want)
 	}
 }
 
