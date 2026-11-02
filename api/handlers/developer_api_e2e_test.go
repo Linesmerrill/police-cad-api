@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -1723,10 +1724,48 @@ func TestE2E_ReviewLinkPointsAtARouteTheWebsiteServes(t *testing.T) {
 		t.Errorf("a link handed to a supervisor should be https, got %q", parsed.Scheme)
 	}
 
-	want := "/community/" + f.community.ID.Hex() + "/report-drafts/" + created.Draft.ID
+	// The website's /community/... routes decode their first path segment, so
+	// the link carries the encoded community, never the raw ObjectId. A raw id
+	// decodes to nonsense there and the page answers "Community not found",
+	// which is exactly what the links handed out before this did.
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(f.community.ID.Hex()))
+	if encoded == f.community.ID.Hex() {
+		t.Fatal("the fixture community id encodes to itself, so this proves nothing")
+	}
+	want := "/community/" + encoded + "/report-drafts/" + created.Draft.ID
 	if parsed.Path != want {
 		t.Errorf("the review link path must match the website's route\n got: %s\nwant: %s",
 			parsed.Path, want)
+	}
+	// And it decodes back to the community it is about.
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	decoded, err := base64.RawURLEncoding.DecodeString(segments[1])
+	if err != nil {
+		t.Fatalf("the community segment is not the website's encoding: %v", err)
+	}
+	if string(decoded) != f.community.ID.Hex() {
+		t.Errorf("the link points at %q, not this community", string(decoded))
+	}
+}
+
+// The dispatch call deep link is spelled the same way, for the same reason.
+func TestE2E_DispatchCallLinkUsesTheWebsiteEncoding(t *testing.T) {
+	communityID := "6803ecda576732cfdd465db9"
+	link := dispatchCallLink(communityID, primitive.NewObjectID().Hex())
+	parsed, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("the call link does not parse: %v", err)
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(segments) != 2 || segments[0] != "community" {
+		t.Fatalf("unexpected call link path %q", parsed.Path)
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(segments[1])
+	if err != nil {
+		t.Fatalf("the community segment is not the website's encoding: %v", err)
+	}
+	if string(decoded) != communityID {
+		t.Errorf("the link points at %q, not %q", string(decoded), communityID)
 	}
 }
 

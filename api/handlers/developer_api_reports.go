@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1170,7 +1171,22 @@ func reportDraftReviewLink(communityID, draftID string) string {
 	if base == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/community/%s/report-drafts/%s", base, communityID, draftID)
+	return fmt.Sprintf("%s/community/%s/report-drafts/%s", base, websiteCommunityRef(communityID), draftID)
+}
+
+// websiteCommunityRef is how the website spells a community in its own URLs.
+//
+// Every /community/... page there decodes its first path segment, so a raw
+// ObjectId decodes to nonsense and the page answers "Community not found". The
+// website's own encodeId is base64, URL-safe alphabet, no padding, and this is
+// the same transform — not a different encoding that happens to round-trip.
+// Changing one without the other breaks every link this API hands out, so they
+// are documented as a pair.
+func websiteCommunityRef(communityID string) string {
+	if communityID == "" {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(communityID))
 }
 
 // publicWebBaseURL is the website a deep link points at.

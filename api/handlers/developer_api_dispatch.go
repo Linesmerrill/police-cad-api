@@ -550,7 +550,7 @@ func dispatchCallLink(communityID, callID string) string {
 	if base == "" || communityID == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/community/%s?call=%s", base, communityID, callID)
+	return fmt.Sprintf("%s/community/%s?call=%s", base, websiteCommunityRef(communityID), callID)
 }
 
 // formatDispatchTime renders the call model's loosely-typed timestamps.
