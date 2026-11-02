@@ -421,13 +421,15 @@ curl -sX POST "$BASE/communities/$COMMUNITY/warrants/requests" \
   }'
 ```
 
-**A request always lands `pending`.** That is deliberately not what the website
-does: a community can set its warrant mode to auto-approve, and most have, so
-an officer clicking the button in the CAD gets an approved warrant at once.
-That is a convenience for a person who is already in the CAD and can see the
-result. A game server fires on a trigger, retries, and nobody is watching, so
-a key gets the pending queue the community already has, a person reviews it
-with the tools they already use, and you read the outcome back.
+**The community's own warrant mode decides it**, exactly as it does for a
+warrant raised in the CAD. `require-judge` leaves it `pending` for a judge.
+`random` decides it immediately at the community's approval rate, with a random
+judge name. `auto-approve`, which is the default when a community sets nothing,
+approves it immediately.
+
+So read `status` on the response rather than assuming it. What a key cannot do
+is decide: it asks on behalf of an officer it names, and the community's rule
+answers. There is no approve or review route for a key.
 
 Poll `GET /communities/$COMMUNITY/warrants?accused=fivem:9f8e…&status=approved`
 to answer "is there a warrant out for this person?" in one request. `approved`
@@ -628,8 +630,9 @@ Not a matter of scopes, these are not on the surface at all:
 - **file a report.** A draft is a proposal; the verb that turns one into an
   arrest, citation or incident record is on the website, behind the community's
   own permission. There is no `reports:file` scope and there will not be one
-- **issue a warrant.** A request lands pending for the community's own
-  reviewer, whatever its approval mode says
+- **issue, approve, deny or review a warrant.** A key asks for one and the
+  community's own approval mode answers, so under require-judge it waits for a
+  judge. There is no route for a key to decide one
 
 ## Getting help
 

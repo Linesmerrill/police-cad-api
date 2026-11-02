@@ -32,10 +32,11 @@ info:
 
     **What this API cannot do.** There is no scope and no endpoint for money,
     billing, account security, admin, community settings or roles, and there
-    will not be. It also cannot file a report or issue a warrant: a report draft
-    is a proposal for a person to act on, and a warrant request lands pending
-    for the community's own reviewer. Those two are not gaps, a record with
-    legal consequences inside a community is a person's decision.
+    will not be. It also cannot file a report, or approve, deny or review a
+    warrant: a report draft is a proposal for a person to act on, and a warrant
+    request is answered by the community's own approval mode rather than by the
+    key. Those are not gaps, a record with legal consequences inside a
+    community is a person's decision.
 
     **Finding out what happened.** Every response carries `X-Request-Id`, and
     `GET /activity` is this key's own request history, which route, which
@@ -106,8 +107,8 @@ tags:
       a person with the community's permission to act on.
   - name: Warrants
     description: >-
-      Reading warrants, and requesting one. A request always lands pending for
-      the community's own reviewer.
+      Reading warrants, and requesting one. A request is answered by the
+      community's own approval mode, so read `status` on the response.
   - name: Simulated characters
     description: NPC records, and removing them.
   - name: Activity
@@ -1147,20 +1148,28 @@ paths:
       tags: [Warrants]
       summary: Request a warrant for the community's reviewer
       description: |
-        **A request always lands `pending`, whatever the community's approval
-        mode says.**
+        **The community's own `warrantApprovalMode` decides this**, exactly as
+        it does for a warrant raised on the website:
 
-        That is deliberately not what the website does. A community can set its
-        warrant mode to auto-approve, and most have, so an officer clicking
-        "request warrant" in the CAD gets an approved warrant immediately.
-        Auto-approve is a convenience for a person who is already in the CAD,
-        has already passed the officer check, and is making one decision they
-        can see the result of. A game server is none of those things: it fires
-        on a trigger, it retries, and nobody is watching the moment it happens.
+        - `require-judge`: lands `pending` for a judge to review.
+        - `random`: decided immediately, with a random judge name, at the
+          community's own `warrantRandomApprovalRate` (70% unless it sets one).
+        - `auto-approve`, or unset: approved immediately, judge name
+          `Auto-Approved`.
 
-        So the request goes into the pending queue the community already has, a
-        person reviews it with the tools they already use, and you find out by
-        reading it back. Poll `GET /warrants`, or read the warrant by id.
+        So read `status` on the response rather than assuming it, and under
+        `require-judge` poll `GET /warrants` or subscribe for the outcome.
+
+        What a key cannot do is decide. It asks, on behalf of an officer it has
+        to name and who passes the same checks as anyone else, and the
+        community's rule answers. There is no approve, deny or review route
+        under this prefix, and the outcome is never read from your request
+        body.
+
+        The warrant's first history entry names your integration, so anyone
+        reading it later can see a script raised it. Both halves are events:
+        `warrant.requested` always, and `warrant.reviewed` as well when the
+        community decided it on the spot.
 
         **Idempotent on `(community, source, externalId)`.** A retry returns the
         request you already made, at whatever stage it has reached, so a queue

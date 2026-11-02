@@ -19,25 +19,25 @@ import (
 
 // Warrants: an integration can look them up, and it can ask for one.
 //
-// Asking is the interesting half, and the shape of it is one decision: a
-// warrant requested through a key always lands pending, whatever the
-// community's approval mode says.
+// Asking follows the community's own warrant approval mode, exactly as a
+// warrant raised on the website does. require-judge leaves it pending for a
+// judge; random decides it there and then, with a random judge name, at the
+// community's own approval rate; auto-approve, and an unset mode, approve it.
+// The decision comes from decideNewWarrant in warrant.go, shared with the
+// website's create handler so the two cannot drift.
 //
-// That needs explaining, because it is deliberately NOT what the website does.
-// A community can set its warrant mode to auto-approve, and most have, so an
-// officer clicking "request warrant" in the CAD gets an approved warrant
-// immediately. Auto-approve is a convenience for a person who is already in the
-// CAD, has already passed the officer check, and is making one decision they
-// can see the result of. A game server is none of those things: it fires on a
-// trigger, it retries, and nobody is watching the moment it happens. Letting a
-// script trip auto-approve would mean a key could manufacture an approved
-// arrest warrant on a loop, and no community that turned on auto-approve for
-// its officers was agreeing to that.
+// The distinction that matters is between asking and deciding. A key asks, on
+// behalf of an officer it has to name and who has to pass the same officer
+// checks as anyone else. What answers is the community's own rule. A key has no
+// route to approve, deny or review anything: there is none under this prefix,
+// and the outcome here is never read from the request body.
 //
-// So the request lands in the pending queue the community already has, a person
-// reviews it with the tools they already use, and the integration finds out by
-// reading it back. Everything else about it — the history, the judge fields,
-// the execution path — is the existing warrant lifecycle untouched.
+// The request also records where it came from. Its first history entry names
+// the integration, so anyone reading the warrant later can see a script raised
+// it rather than the officer at their desk, and requests are idempotent on
+// (community, source, externalId) so a queue replay cannot produce a second
+// warrant. Everything else about it, the judge fields and the execution path,
+// is the existing warrant lifecycle untouched.
 
 // devWarrantPageLimit caps a warrant page.
 const devWarrantPageLimit = 100
@@ -266,13 +266,13 @@ func (d DeveloperAPI) DevGetWarrantHandler(w http.ResponseWriter, r *http.Reques
 //
 // POST /api/v1/dev/communities/{communityId}/warrants/requests — warrants:write
 //
-// Always pending. See this file's opening comment for why a key does not get
-// the community's auto-approve shortcut: it is a convenience for a person
-// making one visible decision, not a behaviour to hand to a trigger that fires
-// on its own and retries.
+// The community's own approval mode decides the outcome, the same way it does
+// for a warrant raised on the website: pending under require-judge, decided
+// immediately under random or auto-approve. See this file's opening comment.
 //
-// Idempotent on (community, source, externalId): a retry returns the pending
-// request it already made, so a queue replay cannot flood a judge.
+// Idempotent on (community, source, externalId): a retry returns the request it
+// already made, at whatever stage that has reached, so a queue replay cannot
+// produce a second warrant or a second decision.
 func (d DeveloperAPI) DevRequestWarrantHandler(w http.ResponseWriter, r *http.Request) {
 	dc, ok := DevContextFrom(r.Context())
 	if !ok {
