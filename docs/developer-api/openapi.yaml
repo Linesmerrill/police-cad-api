@@ -1834,7 +1834,11 @@ components:
         link:
           type: string
           format: uri
-          description: Opens this call in the CAD, so you can put a URL in a player's chat.
+          description: >
+            Opens this call in the CAD, so you can put a URL in a player's
+            chat. Use this URL as given; the community in a website path is the
+            `communityId` base64-encoded with the URL-safe alphabet and no
+            padding, not the raw id.
 
     UnitStatusEntry:
       type: object
@@ -2043,7 +2047,15 @@ components:
             conclude from a 201 is that a report exists.
         reviewLink:
           type: string
-          description: Opens the draft on the website for whoever may act on it.
+          format: uri
+          description: >
+            Opens the draft on the website for whoever may act on it. Use this
+            URL as given. The community in a website path is not the
+            `communityId` this API uses: it is that id base64-encoded with the
+            URL-safe alphabet and no padding, so a link you build yourself from
+            a raw `communityId` will not open.
+          example: >-
+            https://www.linespolice-cad.com/community/NmFlN2Q5MDMyZDA2N2I4MTE0ZWZkYzI1/report-drafts/6ae88981396bf86a4eb33aa0
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
