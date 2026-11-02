@@ -343,9 +343,10 @@ func (a *App) New() *mux.Router {
 	devRouter.Handle("/communities/{communityId}/reports/drafts/{externalId}", devAPI.RequireScope(models.ScopeReportsRead, devAPI.DevGetReportDraftHandler)).Methods("GET")
 	devRouter.Handle("/communities/{communityId}/reports/drafts/{externalId}", devAPI.RequireScope(models.ScopeReportsWrite, devAPI.DevWithdrawReportDraftHandler)).Methods("DELETE")
 
-	// Warrants. A key can read them and request one; the request lands pending
-	// for the community's own reviewer whatever its approval mode says, so a
-	// script cannot trip auto-approve. See developer_api_warrants.go.
+	// Warrants. A key can read them and request one; the community's own
+	// approval mode decides the request, exactly as it does for a warrant
+	// raised on the website. There is no route here to approve, deny or review
+	// one. See developer_api_warrants.go.
 	devRouter.Handle("/communities/{communityId}/warrants", devAPI.RequireScope(models.ScopeWarrantsRead, devAPI.DevListWarrantsHandler)).Methods("GET")
 	devRouter.Handle("/communities/{communityId}/warrants/requests", devAPI.RequireScope(models.ScopeWarrantsWrite, devAPI.DevRequestWarrantHandler)).Methods("POST")
 	devRouter.Handle("/communities/{communityId}/warrants/{warrantId}", devAPI.RequireScope(models.ScopeWarrantsRead, devAPI.DevGetWarrantHandler)).Methods("GET")
