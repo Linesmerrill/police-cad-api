@@ -323,7 +323,7 @@ func (d DeveloperAPI) DevRequestWarrantHandler(w http.ResponseWriter, r *http.Re
 	// The officer asking, and their access. Requesting a warrant is a police
 	// action, so the bar is the department membership the CAD itself requires —
 	// not a key scope, which only decides whether the integration may ask.
-	officer, ok := d.requireReportingOfficer(w, r, dc, cc, req.RequestingOfficer)
+	officer, ok := d.requireReportingOfficer(w, r, dc, cc, req.RequestingOfficer, officerRequestingWarrant)
 	if !ok {
 		return
 	}
@@ -364,12 +364,21 @@ func (d DeveloperAPI) DevRequestWarrantHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	now := primitive.NewDateTimeFromTime(time.Now())
+
+	// The community's own approval mode decides this, through the same helper
+	// the website's create handler uses. A request through a key is a request
+	// from the officer it names, so a community that auto-approves answers the
+	// same way here. What the key cannot do is approve, deny or review
+	// anything itself: there is no route for that under this prefix, and the
+	// decision below comes from the community's rule, never from the request.
+	decision := decideNewWarrant(&cc.Community)
+
 	warrant := models.Warrant{ID: primitive.NewObjectID()}
 	warrant.Details = models.WarrantDetails{
-		WarrantType: warrantType,
-		// Pending, always. The community's approval mode is honoured by the
-		// reviewer it points at, not bypassed by a script.
-		Status:                models.WarrantStatusPending,
+		WarrantType:           warrantType,
+		Status:                decision.Status,
+		JudgeName:             decision.JudgeName,
+		JudgeNotes:            decision.JudgeNotes,
 		AccusedID:             accused.UserID,
 		AccusedFirstName:      accused.FirstName,
 		AccusedLastName:       accused.LastName,
@@ -390,11 +399,18 @@ func (d DeveloperAPI) DevRequestWarrantHandler(w http.ResponseWriter, r *http.Re
 			Action:   "created",
 			UserID:   officer.UserID,
 			UserName: officer.Username,
-			// The history entry names the integration, so a judge reading it
+			// The history entry names the integration, so anyone reading it
 			// knows a script raised this and not the officer at their desk.
-			Notes:     "Requested through the Developer API by " + source + ". Awaiting review.",
+			Notes:     "Requested through the Developer API by " + source + ".",
 			Timestamp: now,
 		}},
+	}
+
+	// A mode that settles it on the spot leaves the same trail the website
+	// leaves: a review timestamp and the deciding entry after the request.
+	if decision.Decided {
+		warrant.Details.ReviewedAt = now
+		warrant.Details.History = append(warrant.Details.History, decision.HistoryEntry(now))
 	}
 
 	if _, err := d.WarrantDB.InsertOne(ctx, warrant); err != nil {
@@ -416,10 +432,28 @@ func (d DeveloperAPI) DevRequestWarrantHandler(w http.ResponseWriter, r *http.Re
 	requested.ResourceSource = source
 	requested.Data = map[string]string{
 		"warrantType": warrantType,
-		"status":      models.WarrantStatusPending,
+		"status":      decision.Status,
 		"accusedId":   accused.UserID,
 	}
 	d.emit(requested)
+
+	// When the community decided it immediately, that is a second thing that
+	// happened, and a subscriber waiting for the outcome should not have to
+	// infer it from the status on the request. It is the same event a later
+	// judge's decision emits.
+	if decision.Decided {
+		reviewed := devKeyEvent(dc, models.EventWarrantReviewed, cc.Community.ID.Hex())
+		reviewed.ResourceID = warrant.ID.Hex()
+		reviewed.ResourceExternalID = externalID
+		reviewed.ResourceSource = source
+		reviewed.Data = map[string]string{
+			"warrantType": warrantType,
+			"status":      decision.Status,
+			"accusedId":   accused.UserID,
+			"judgeName":   decision.JudgeName,
+		}
+		d.emit(reviewed)
+	}
 
 	d.RecordOutcome(r, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")

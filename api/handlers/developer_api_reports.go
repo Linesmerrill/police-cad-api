@@ -211,7 +211,7 @@ func (d DeveloperAPI) DevUpsertReportDraftHandler(w http.ResponseWriter, r *http
 	// The reporting officer, and their access. This is the check that matters:
 	// a key with reports:write still cannot produce a draft unless it can name
 	// a player who is entitled to write one in this community.
-	officer, ok := d.requireReportingOfficer(w, r, dc, cc, req.ReportingOfficer)
+	officer, ok := d.requireReportingOfficer(w, r, dc, cc, req.ReportingOfficer, officerWritingReport)
 	if !ok {
 		return
 	}
@@ -557,6 +557,20 @@ func (d DeveloperAPI) DevWithdrawReportDraftHandler(w http.ResponseWriter, r *ht
 
 // ---- resolution and validation ----
 
+// officerRole supplies the wording for the messages requireReportingOfficer
+// returns. Only the human text changes with it: the error codes stay
+// reporting_officer_* on both paths, because an integration keys on those and
+// renaming one would break it for the sake of a noun.
+type officerRole struct {
+	noun   string // completes "The ___ is not..."
+	cannot string // completes "...so they cannot ___."
+}
+
+var (
+	officerWritingReport     = officerRole{noun: "reporting officer", cannot: "write a report"}
+	officerRequestingWarrant = officerRole{noun: "requesting officer", cannot: "request a warrant"}
+)
+
 // requireReportingOfficer resolves the player a draft is attributed to and
 // checks they may write one in this community.
 //
@@ -565,7 +579,7 @@ func (d DeveloperAPI) DevWithdrawReportDraftHandler(w http.ResponseWriter, r *ht
 // an integration may name. Deliberately NOT a community permission like
 // "manage records" — that one gates filing and deleting, which is exactly the
 // thing this surface does not do.
-func (d DeveloperAPI) requireReportingOfficer(w http.ResponseWriter, r *http.Request, dc *DevAPIContext, cc *CommunityContext, ref string) (*resolvedPlayer, bool) {
+func (d DeveloperAPI) requireReportingOfficer(w http.ResponseWriter, r *http.Request, dc *DevAPIContext, cc *CommunityContext, ref string, role officerRole) (*resolvedPlayer, bool) {
 	if strings.TrimSpace(ref) == "" {
 		d.RecordOutcome(r, http.StatusBadRequest)
 		devError(w, http.StatusBadRequest, "reporting_officer_required",
@@ -587,14 +601,14 @@ func (d DeveloperAPI) requireReportingOfficer(w http.ResponseWriter, r *http.Req
 	if !isOwner && !isApprovedMemberOfCommunity(ctx, d.UDB, officer.UserID, cc.Community.ID.Hex()) {
 		d.RecordOutcome(r, http.StatusForbidden)
 		devError(w, http.StatusForbidden, "reporting_officer_not_a_member",
-			"The reporting officer is not an approved member of this community.",
+			"The "+role.noun+" is not an approved member of this community.",
 			map[string]interface{}{"playerRef": ref})
 		return nil, false
 	}
 	if userBannedFromCommunity(&cc.Community, officer.UserID) {
 		d.RecordOutcome(r, http.StatusForbidden)
 		devError(w, http.StatusForbidden, "reporting_officer_banned",
-			"The reporting officer is banned from this community.", nil)
+			"The "+role.noun+" is banned from this community.", nil)
 		return nil, false
 	}
 	if !isOwner && !helpers.IsCommunityAdmin(&cc.Community, officer.UserID) &&
@@ -603,8 +617,8 @@ func (d DeveloperAPI) requireReportingOfficer(w http.ResponseWriter, r *http.Req
 		// retrying, so it says what has to change instead.
 		d.RecordOutcome(r, http.StatusForbidden)
 		devError(w, http.StatusForbidden, "reporting_officer_has_no_department",
-			"The reporting officer is not in any department in this community, so they cannot write a report. "+
-				"Add them to a department first.",
+			"The "+role.noun+" is not in any department in this community, so they cannot "+
+				role.cannot+". Add them to a department first.",
 			map[string]interface{}{"playerRef": ref})
 		return nil, false
 	}
