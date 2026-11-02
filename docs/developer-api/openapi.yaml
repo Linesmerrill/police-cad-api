@@ -2008,6 +2008,22 @@ components:
               category: { type: string }
               amount: { type: number }
               jailTime: { type: string }
+        attachments:
+          type: array
+          description: >-
+            Metadata and a link, never bytes, and never evidence. The reviewer
+            on the website sees the same list.
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              kind: { type: string, enum: [clip, screenshot, log, document, other] }
+              label: { type: string }
+              url: { type: string }
+              contentType: { type: string }
+              sizeBytes: { type: integer }
+              addedByKeyId: { type: string }
+              addedAt: { type: string, format: date-time }
         reportingOfficerId: { type: string }
         reportingOfficerName: { type: string }
         reviewedByName: { type: string }

@@ -136,6 +136,12 @@ type devReportDraftView struct {
 	Narrative models.DeveloperReportNarrative `json:"narrative"`
 	Charges   []models.ArrestCharge           `json:"charges"`
 
+	// Attachments are metadata and a link, never bytes, and never evidence.
+	// They were stored by the attachment endpoints and then returned by
+	// nothing, so an integration could add one and neither it nor the reviewer
+	// on the website could see it afterwards.
+	Attachments []models.DeveloperReportAttachment `json:"attachments"`
+
 	ReportingOfficerID   string `json:"reportingOfficerId"`
 	ReportingOfficerName string `json:"reportingOfficerName,omitempty"`
 
@@ -1130,6 +1136,7 @@ func devReportDraftViewOf(draft models.DeveloperReportDraft) devReportDraftView 
 		Facts:                draft.Facts,
 		Narrative:            draft.Narrative,
 		Charges:              draft.Charges,
+		Attachments:          draft.Attachments,
 		ReportingOfficerID:   draft.ReportingOfficerID,
 		ReportingOfficerName: draft.ReportingOfficerName,
 		ReviewedByName:       draft.ReviewedByName,
@@ -1143,6 +1150,9 @@ func devReportDraftViewOf(draft models.DeveloperReportDraft) devReportDraftView 
 	}
 	if view.Charges == nil {
 		view.Charges = []models.ArrestCharge{}
+	}
+	if view.Attachments == nil {
+		view.Attachments = []models.DeveloperReportAttachment{}
 	}
 	if draft.ReviewedAt != nil {
 		view.ReviewedAt = formatDevDateTime(*draft.ReviewedAt)

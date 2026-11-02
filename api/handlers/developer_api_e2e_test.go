@@ -4627,6 +4627,51 @@ func TestE2E_AttachmentIsMetadataAndALink(t *testing.T) {
 	waitForAuditAction(t, f.api.ALDB, "attachment_added")
 }
 
+// An attachment nobody can read afterwards is not an attachment. It was stored
+// and then returned by no read at all, so neither the integration that added it
+// nor the reviewer on the website could see it.
+func TestE2E_AnAttachmentComesBackOnTheDraft(t *testing.T) {
+	f := newEventsFixture(t)
+	f.upsertDraft(t, `{"externalId":"att-read","source":"SixPD",
+		"reportingOfficer":"`+fivemRef("admin")+`"}`)
+
+	rr := f.run(t, http.MethodPost, "/reports/drafts/att-read/attachments?source=SixPD",
+		`{"kind":"screenshot","label":"Scene","url":"https://clips.example.com/scene.png",
+		  "contentType":"image/png","sizeBytes":20480}`,
+		map[string]string{"externalId": "att-read"},
+		f.api.RequireScope(models.ScopeReportsWrite, f.api.DevAddDraftAttachmentHandler))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("attaching: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	rr = f.run(t, http.MethodGet, "/reports/drafts/att-read?source=SixPD", "",
+		map[string]string{"externalId": "att-read"},
+		f.api.RequireScope(models.ScopeReportsRead, f.api.DevGetReportDraftHandler))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reading it back: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Draft devReportDraftView `json:"draft"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(out.Draft.Attachments) != 1 {
+		t.Fatalf("the attachment must come back on the draft, got %+v", out.Draft.Attachments)
+	}
+	got := out.Draft.Attachments[0]
+	if got.Kind != "screenshot" || got.Label != "Scene" {
+		t.Errorf("the reviewer needs the kind and the label, got %+v", got)
+	}
+	if got.URL != "https://clips.example.com/scene.png" {
+		t.Errorf("and the link, got %q", got.URL)
+	}
+	if got.AddedByKey == "" {
+		t.Error("and who added it, so the attribution can be shown")
+	}
+}
+
 // waitForAuditAction waits for an audit entry whose action contains want.
 //
 // logAudit deliberately writes off the request path, so a test that reads the
