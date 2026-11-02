@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -509,10 +508,7 @@ func (d DeveloperAPI) callView(ctx context.Context, call models.Call) devCallVie
 
 // dispatchCallLink is a deep link into the CAD for a call.
 func dispatchCallLink(communityID, callID string) string {
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_WEB_BASE_URL")), "/")
-	if base == "" {
-		base = "https://www.linespolice-cad.com"
-	}
+	base := publicWebBaseURL()
 	if base == "" || communityID == "" {
 		return ""
 	}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -49,6 +50,33 @@ func devRecordSource(dc *DevAPIContext, player *resolvedPlayer) *models.RecordSo
 	return src
 }
 
+// recordStamp builds the source stamp for a record a key is writing, settling
+// the synthetic question in one place.
+//
+// Synthetic is inherited as well as declared: a vehicle belonging to a
+// character the integration provisioned as an NPC is an NPC's vehicle whether
+// or not the request repeated the flag. That matters because the alternative is
+// an integration that marks its people correctly and then forgets on one of
+// four record types, leaving half its scenery in the name database.
+func (d DeveloperAPI) recordStamp(ctx context.Context, dc *DevAPIContext, player *resolvedPlayer, declared bool, source, externalID string) *models.RecordSource {
+	synthetic := declared || d.playerIsSyntheticForKey(ctx, dc, player)
+	normalizedSource := strings.TrimSpace(source)
+	if normalizedSource == "" && externalID != "" {
+		normalizedSource = strings.TrimSpace(dc.Key.Name)
+	}
+	safeSource, err := devSafeScalar(normalizedSource, 60, "source")
+	if err != nil {
+		safeSource = ""
+	}
+	safeExternal := ""
+	if externalID != "" {
+		if v, vErr := devSafeExternalID(externalID); vErr == nil {
+			safeExternal = v
+		}
+	}
+	return devSyntheticSourceStamp(dc, player, synthetic, safeSource, safeExternal)
+}
+
 // requireLinkedMember resolves a player reference and checks they are an
 // approved member of the community being written to.
 //
@@ -95,6 +123,19 @@ type devCreateCivilianRequest struct {
 	Address    string `json:"address"`
 	Occupation string `json:"occupation"`
 	Image      string `json:"image"`
+
+	// Synthetic declares this record as belonging to a simulated character
+	// rather than a person, which keeps it out of the searches and rosters
+	// players see. It is also inherited: a record whose owner was provisioned
+	// as synthetic is synthetic whether or not this field says so, so an
+	// integration marks its NPCs once and everything they own follows.
+	Synthetic bool `json:"synthetic"`
+	// ExternalID and Source are the integration's own handle for the thing
+	// this record stands for. Optional, and only useful for a synthetic
+	// record: they are what makes one addressable for cleanup after the
+	// integration has forgotten our ids.
+	ExternalID string `json:"externalId"`
+	Source     string `json:"source"`
 }
 
 // DevCreateCivilianHandler creates a character for a linked player.
@@ -181,7 +222,7 @@ func (d DeveloperAPI) DevCreateCivilianHandler(w http.ResponseWriter, r *http.Re
 			CriminalHistory:   []models.CriminalHistory{},
 			CreatedAt:         now,
 			UpdatedAt:         now,
-			Source:            devRecordSource(dc, player),
+			Source:            d.recordStamp(ctx, dc, player, req.Synthetic, req.Source, req.ExternalID),
 		},
 	}
 
@@ -230,7 +271,7 @@ func (d DeveloperAPI) DevSearchCiviliansHandler(w http.ResponseWriter, r *http.R
 	defer cancel()
 
 	limit, _, skip := api.ParseLimitPage(r, 25, maxDevRecordPageLimit)
-	civilians, err := d.CivDB.Find(ctx, bson.M{
+	civilians, err := d.CivDB.Find(ctx, applySyntheticScope(bson.M{
 		"civilian.activeCommunityID": devEq(cc.Community.ID.Hex()),
 		"$or": []bson.M{
 			// Both branches are escaped. normalizeDevSearchName only lowercases
@@ -240,7 +281,8 @@ func (d DeveloperAPI) DevSearchCiviliansHandler(w http.ResponseWriter, r *http.R
 			{"civilian.searchName": bson.M{"$regex": regexEscapeDev(normalizeDevSearchName(name)), "$options": "i"}},
 			{"civilian.name": bson.M{"$regex": regexEscapeDev(name), "$options": "i"}},
 		},
-	}, options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
+	}, "civilian.source.synthetic", devIncludeSynthetic(r)),
+		options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not search characters.", nil)
 		return
@@ -296,6 +338,19 @@ type devCreateVehicleRequest struct {
 	Color             string `json:"color"`
 	Type              string `json:"type"`
 	Image             string `json:"image"`
+
+	// Synthetic declares this record as belonging to a simulated character
+	// rather than a person, which keeps it out of the searches and rosters
+	// players see. It is also inherited: a record whose owner was provisioned
+	// as synthetic is synthetic whether or not this field says so, so an
+	// integration marks its NPCs once and everything they own follows.
+	Synthetic bool `json:"synthetic"`
+	// ExternalID and Source are the integration's own handle for the thing
+	// this record stands for. Optional, and only useful for a synthetic
+	// record: they are what makes one addressable for cleanup after the
+	// integration has forgotten our ids.
+	ExternalID string `json:"externalId"`
+	Source     string `json:"source"`
 }
 
 // DevCreateVehicleHandler registers a vehicle to a character.
@@ -362,7 +417,7 @@ func (d DeveloperAPI) DevCreateVehicleHandler(w http.ResponseWriter, r *http.Req
 			UserID:            player.UserID,
 			CreatedAt:         now,
 			UpdatedAt:         now,
-			Source:            devRecordSource(dc, player),
+			Source:            d.recordStamp(ctx, dc, player, req.Synthetic, req.Source, req.ExternalID),
 		},
 	}
 
@@ -401,10 +456,10 @@ func (d DeveloperAPI) DevSearchVehiclesHandler(w http.ResponseWriter, r *http.Re
 	defer cancel()
 
 	limit, _, skip := api.ParseLimitPage(r, 25, maxDevRecordPageLimit)
-	vehicles, err := d.VehDB.Find(ctx, bson.M{
+	vehicles, err := d.VehDB.Find(ctx, applySyntheticScope(bson.M{
 		"vehicle.activeCommunityID": devEq(cc.Community.ID.Hex()),
 		"vehicle.plate":             bson.M{"$regex": "^" + regexEscapeDev(plate), "$options": "i"},
-	}, options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
+	}, "vehicle.source.synthetic", devIncludeSynthetic(r)), options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not search vehicles.", nil)
 		return
@@ -446,6 +501,18 @@ type devCreateFirearmRequest struct {
 	WeaponType   string `json:"weaponType"`
 	Caliber      string `json:"caliber"`
 	Image        string `json:"image"`
+	// Synthetic declares this record as belonging to a simulated character
+	// rather than a person, which keeps it out of the searches and rosters
+	// players see. It is also inherited: a record whose owner was provisioned
+	// as synthetic is synthetic whether or not this field says so, so an
+	// integration marks its NPCs once and everything they own follows.
+	Synthetic bool `json:"synthetic"`
+	// ExternalID and Source are the integration's own handle for the thing
+	// this record stands for. Optional, and only useful for a synthetic
+	// record: they are what makes one addressable for cleanup after the
+	// integration has forgotten our ids.
+	ExternalID string `json:"externalId"`
+	Source     string `json:"source"`
 }
 
 // DevCreateFirearmHandler registers a firearm to a character.
@@ -502,7 +569,7 @@ func (d DeveloperAPI) DevCreateFirearmHandler(w http.ResponseWriter, r *http.Req
 			UserID:            player.UserID,
 			CreatedAt:         now,
 			UpdatedAt:         now,
-			Source:            devRecordSource(dc, player),
+			Source:            d.recordStamp(ctx, dc, player, req.Synthetic, req.Source, req.ExternalID),
 		},
 	}
 
@@ -541,10 +608,10 @@ func (d DeveloperAPI) DevSearchFirearmsHandler(w http.ResponseWriter, r *http.Re
 	defer cancel()
 
 	limit, _, skip := api.ParseLimitPage(r, 25, maxDevRecordPageLimit)
-	firearms, err := d.FirDB.Find(ctx, bson.M{
+	firearms, err := d.FirDB.Find(ctx, applySyntheticScope(bson.M{
 		"firearm.activeCommunityID": devEq(cc.Community.ID.Hex()),
 		"firearm.serialNumber":      bson.M{"$regex": "^" + regexEscapeDev(serial), "$options": "i"},
-	}, options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
+	}, "firearm.source.synthetic", devIncludeSynthetic(r)), options.Find().SetLimit(limit).SetSkip(skip).SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not search firearms.", nil)
 		return
@@ -578,6 +645,19 @@ type devCreateLicenseRequest struct {
 	Status         string `json:"status"`
 	ExpirationDate string `json:"expirationDate"`
 	Notes          string `json:"notes"`
+
+	// Synthetic declares this record as belonging to a simulated character
+	// rather than a person, which keeps it out of the searches and rosters
+	// players see. It is also inherited: a record whose owner was provisioned
+	// as synthetic is synthetic whether or not this field says so, so an
+	// integration marks its NPCs once and everything they own follows.
+	Synthetic bool `json:"synthetic"`
+	// ExternalID and Source are the integration's own handle for the thing
+	// this record stands for. Optional, and only useful for a synthetic
+	// record: they are what makes one addressable for cleanup after the
+	// integration has forgotten our ids.
+	ExternalID string `json:"externalId"`
+	Source     string `json:"source"`
 }
 
 // DevCreateLicenseHandler issues a license to a character.
@@ -640,7 +720,7 @@ func (d DeveloperAPI) DevCreateLicenseHandler(w http.ResponseWriter, r *http.Req
 			UserID:            player.UserID,
 			CreatedAt:         now,
 			UpdatedAt:         now,
-			Source:            devRecordSource(dc, player),
+			Source:            d.recordStamp(ctx, dc, player, req.Synthetic, req.Source, req.ExternalID),
 		},
 	}
 

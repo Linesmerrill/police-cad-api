@@ -94,6 +94,19 @@ const (
 	ScopeCommunitiesProvision = "communities:provision"
 	ScopeMembersRead          = "members:read"
 	ScopeMembersWrite         = "members:write"
+
+	// Report drafts. Two scopes rather than one, and neither of them is a
+	// scope to file a report: a draft is a proposal for a person to review,
+	// and reports:write is the permission to propose. Nothing a key holds
+	// submits a legal record — see developer_api_reports.go.
+	ScopeReportsRead  = "reports:read"
+	ScopeReportsWrite = "reports:write"
+
+	// Warrants. warrants:write requests one; it never issues one. A request
+	// lands pending for the community's own reviewer however the community
+	// has configured its approval mode.
+	ScopeWarrantsRead  = "warrants:read"
+	ScopeWarrantsWrite = "warrants:write"
 )
 
 // developerScopeDescriptions is every valid scope and what it grants, in the
@@ -122,6 +135,10 @@ var developerScopeDescriptions = []struct {
 	{ScopeCommunitiesProvision, "Create communities owned by the developer"},
 	{ScopeMembersRead, "Read the community's member roster"},
 	{ScopeMembersWrite, "Invite, approve, promote and remove members"},
+	{ScopeReportsRead, "Read the report drafts this key created"},
+	{ScopeReportsWrite, "Write report drafts for a person to review and file"},
+	{ScopeWarrantsRead, "Read the community's warrants"},
+	{ScopeWarrantsWrite, "Request a warrant for the community's reviewer"},
 }
 
 // DeveloperScope is one offerable scope, as the website renders it.
@@ -429,7 +446,16 @@ type PlayerIdentity struct {
 	UserID               string             `json:"userId" bson:"userId"`
 	CreatedByKeyID       string             `json:"createdByKeyId,omitempty" bson:"createdByKeyId,omitempty"`
 	CreatedByDeveloperID string             `json:"createdByDeveloperId,omitempty" bson:"createdByDeveloperId,omitempty"`
-	Claimed              bool               `json:"claimed" bson:"claimed"`
+	// Synthetic marks an identity a key created for a simulated character
+	// rather than a person. Set once, at creation, from what the integration
+	// declared — never inferred from provenance, because the same key also
+	// provisions accounts for real players arriving from the game.
+	//
+	// Claiming overrides it. Once a person signs in and takes the account over
+	// they are a player, whatever the row was created as, which is why
+	// playerIsSyntheticForKey checks Claimed first.
+	Synthetic bool `json:"synthetic,omitempty" bson:"synthetic,omitempty"`
+	Claimed   bool `json:"claimed" bson:"claimed"`
 	CreatedAt            primitive.DateTime `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            primitive.DateTime `json:"updatedAt" bson:"updatedAt"`
 }
@@ -495,7 +521,22 @@ type RecordSource struct {
 	DeveloperID string             `json:"developerId" bson:"developerId"`
 	Provider    string             `json:"provider,omitempty" bson:"provider,omitempty"`
 	Identifier  string             `json:"identifier,omitempty" bson:"identifier,omitempty"`
-	CreatedAt   primitive.DateTime `json:"createdAt" bson:"createdAt"`
+	// Synthetic marks a record that stands for a simulated character rather
+	// than a person. Explicit rather than inferred: a key creates records for
+	// real players too, so "a key made it" is not the same claim.
+	//
+	// What it buys is on the read side. A synthetic record is left out of the
+	// searches and rosters a player sees unless they ask for it, so a server
+	// can populate a hundred NPCs without burying the twelve people in the
+	// name database behind them.
+	Synthetic bool `json:"synthetic,omitempty" bson:"synthetic,omitempty"`
+	// ExternalID is the integration's own handle for the thing this record
+	// stands for, scoped by SourceName. Together they are what makes a
+	// synthetic record addressable for cleanup after the key that made it has
+	// forgotten our ids — or has been revoked.
+	ExternalID string             `json:"externalId,omitempty" bson:"externalId,omitempty"`
+	SourceName string             `json:"sourceName,omitempty" bson:"sourceName,omitempty"`
+	CreatedAt  primitive.DateTime `json:"createdAt" bson:"createdAt"`
 }
 
 // RecordSourceDeveloperAPI is the only Type we write today. It exists as a

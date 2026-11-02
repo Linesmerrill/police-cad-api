@@ -134,7 +134,10 @@ func (d DeveloperAPI) resolvePlayerRef(ctx context.Context, dc *DevAPIContext, r
 	// from in-game is the most common way a new player first appears, so
 	// requiring the mod to call /dev/players first would be friction for no
 	// safety gain — the account it creates is identical either way.
-	player, created, err := d.resolveOrCreatePlayer(ctx, dc, provider, identifier, username)
+	// Never synthetic. A player reference resolved on the way to a membership
+	// or a record write is a person a mod is acting for; NPCs are declared at
+	// POST /dev/players, where the integration says so explicitly.
+	player, created, err := d.resolveOrCreatePlayer(ctx, dc, provider, identifier, username, false)
 	if err != nil {
 		return nil, err
 	}
@@ -219,12 +222,18 @@ func (d DeveloperAPI) DevListMembersHandler(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 
 	limit, page, skip := api.ParseLimitPage(r, 50, 200)
-	cur, err := d.UDB.Find(ctx, bson.M{
+	// Simulated characters are left out unless the caller asks for them. A
+	// server that populated a city with NPCs still wants a roster it can read,
+	// and a page of four hundred NPCs with twelve players in it is not one.
+	//
+	// Written as "not explicitly synthetic", so every account that predates
+	// the field — which is all of them — keeps appearing.
+	cur, err := d.UDB.Find(ctx, applySyntheticScope(bson.M{
 		"user.communities": bson.M{"$elemMatch": bson.M{
 			"communityId": devEq(cc.Community.ID.Hex()),
 			"status":      devEqAny(models.CommunityMemberStatusApproved, models.CommunityMemberStatusPending),
 		}},
-	}, memberFindOptions(limit, skip))
+	}, "user.developerSynthetic", devIncludeSynthetic(r)), memberFindOptions(limit, skip))
 	if err != nil {
 		devError(w, http.StatusInternalServerError, "server_error", "Could not load that roster.", nil)
 		return
@@ -253,6 +262,7 @@ func (d DeveloperAPI) DevListMembersHandler(w http.ResponseWriter, r *http.Reque
 			"claimed":        u.IsClaimed(),
 			"gameIdentities": u.Details.GameIdentities,
 			"isOwner":        cc.Community.Details.OwnerID == u.ID,
+			"synthetic":      u.Details.DeveloperSynthetic && !u.IsClaimed(),
 		})
 	}
 

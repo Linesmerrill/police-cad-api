@@ -23,6 +23,10 @@ type VehicleDatabase interface {
 	Find(context.Context, interface{}, ...*options.FindOptions) ([]models.Vehicle, error)
 	InsertOne(context.Context, interface{}, ...*options.InsertOneOptions) (InsertOneResultHelper, error)
 	DeleteOne(context.Context, interface{}, ...*options.DeleteOptions) error
+	// DeleteMany removes a batch in one write. Added for the Developer API's
+	// synthetic-record cleanup, which removes a key's simulated rows and has to
+	// do it in bounded batches rather than one delete per row.
+	DeleteMany(context.Context, interface{}, ...*options.DeleteOptions) (int64, error)
 	UpdateOne(context.Context, interface{}, interface{}, ...*options.UpdateOptions) error
 	CountDocuments(context.Context, interface{}, ...*options.CountOptions) (int64, error)
 }
@@ -90,4 +94,8 @@ func (c *vehicleDatabase) CountDocuments(ctx context.Context, filter interface{}
 
 func (v *vehicleDatabase) UpdateMany(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	return v.db.Collection(vehicleName).UpdateMany(ctx, filter, update, opts...)
+}
+
+func (c *vehicleDatabase) DeleteMany(ctx context.Context, filter interface{}, opts ...*options.DeleteOptions) (int64, error) {
+	return c.db.Collection(vehicleName).DeleteMany(ctx, filter, opts...)
 }

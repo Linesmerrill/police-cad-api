@@ -9,6 +9,33 @@ type Warrant struct {
 	Version int32              `json:"__v" bson:"__v"`
 }
 
+// Warrant statuses, as the website and the mobile app already write them.
+//
+// Named here so a handler can compare against a constant rather than a literal.
+// The strings are unchanged: existing documents hold these exact values and
+// renaming one would strand every warrant already in the database.
+const (
+	WarrantStatusPending   = "pending"
+	WarrantStatusApproved  = "approved"
+	WarrantStatusDenied    = "denied"
+	WarrantStatusExecuted  = "executed"
+	WarrantStatusExpired   = "expired"
+	WarrantStatusWithdrawn = "withdrawn"
+)
+
+// WarrantStatuses lists every status, for validating a filter and for the
+// error message that names the valid ones.
+func WarrantStatuses() []string {
+	return []string{
+		WarrantStatusPending,
+		WarrantStatusApproved,
+		WarrantStatusDenied,
+		WarrantStatusExecuted,
+		WarrantStatusExpired,
+		WarrantStatusWithdrawn,
+	}
+}
+
 // WarrantHistoryEntry records a single event in the warrant lifecycle
 type WarrantHistoryEntry struct {
 	Action    string             `json:"action" bson:"action"`       // "created", "approved", "denied", "edited", "resubmitted", "executed", "withdrawn"
@@ -57,6 +84,16 @@ type WarrantDetails struct {
 
 	// Department context
 	DepartmentID string `json:"departmentId,omitempty" bson:"departmentId,omitempty"` // department the officer was active in
+
+	// Integration provenance, set only when a Developer API key requested the
+	// warrant. Source scopes ExternalID the same way it does on a dispatch
+	// call, and the pair is what makes a request idempotent across a game
+	// server's retries. A warrant a person raised on the website carries none
+	// of these, which is also how the two are told apart.
+	Source         string        `json:"source,omitempty" bson:"source,omitempty"`
+	ExternalID     string        `json:"externalId,omitempty" bson:"externalId,omitempty"`
+	CreatedByKeyID string        `json:"createdByKeyId,omitempty" bson:"createdByKeyId,omitempty"`
+	RecordSource   *RecordSource `json:"recordSource,omitempty" bson:"recordSource,omitempty"`
 
 	// Metadata
 	ActiveCommunityID string             `json:"activeCommunityID" bson:"activeCommunityID"`

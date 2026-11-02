@@ -99,6 +99,18 @@ type UserDetails struct {
 	// before this feature), false means provisioned and not yet claimed, and
 	// such an account must never be able to log in.
 	DeveloperProvisioned     bool                `json:"developerProvisioned,omitempty" bson:"developerProvisioned,omitempty"`
+	// DeveloperSynthetic marks a provisioned account that stands for a
+	// simulated character rather than a person, as the integration declared it.
+	//
+	// It lives on the account as well as on the identity row so a roster query
+	// can exclude NPCs in one filter. The alternative — resolving every
+	// member's identity to find out — is a read per member on a page a game
+	// server polls, which is the sort of thing that is fine until a community
+	// has four hundred of them.
+	//
+	// Claiming clears it, because at that point there is a person behind the
+	// account.
+	DeveloperSynthetic       bool                `json:"developerSynthetic,omitempty" bson:"developerSynthetic,omitempty"`
 	Claimed                  *bool               `json:"claimed,omitempty" bson:"claimed,omitempty"`
 	ProvisionedByKeyID       string              `json:"provisionedByKeyId,omitempty" bson:"provisionedByKeyId,omitempty"`
 	ProvisionedByDeveloperID string              `json:"provisionedByDeveloperId,omitempty" bson:"provisionedByDeveloperId,omitempty"`

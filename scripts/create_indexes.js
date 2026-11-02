@@ -1275,3 +1275,66 @@ createIndexSafe(
   { userId: 1 },
   { name: "auth_identities_user_idx", background: true }
 );
+
+// ---- Developer API phase 3: report drafts, warrant requests, NPCs ----
+
+// A draft is addressed by the integration's own id, and this index is what
+// makes the upsert idempotent rather than merely usually-idempotent: two
+// retries racing cannot both insert, so a reconnect and queue replay cannot
+// put a second draft in a reviewer's queue.
+createIndexSafe(
+  db.developer_report_drafts,
+  { communityId: 1, sourceName: 1, externalId: 1 },
+  { name: "dev_report_drafts_external_idx", unique: true, background: true }
+);
+
+// A key reading back its own drafts, newest first. _id is in the key so the
+// sort is a total order: a paged list sorted only by createdAt repeats and
+// omits rows when several drafts share a timestamp, which a game server
+// writing in bursts produces constantly.
+createIndexSafe(
+  db.developer_report_drafts,
+  { communityId: 1, "source.keyId": 1, createdAt: -1, _id: -1 },
+  { name: "dev_report_drafts_key_recent_idx", background: true }
+);
+
+// The reviewer's queue on the website: what is still waiting in my community.
+createIndexSafe(
+  db.developer_report_drafts,
+  { communityId: 1, status: 1, createdAt: -1 },
+  { name: "dev_report_drafts_status_idx", background: true }
+);
+
+// A warrant requested through a key, by the integration's own id. Not unique:
+// the warrants collection holds every warrant a community has ever had and
+// almost none of them carry these fields, so a unique index would collide on
+// the missing-value key. Idempotency here is enforced by the handler's lookup;
+// the index is what makes that lookup one seek instead of a collection scan.
+createIndexSafe(
+  db.warrants,
+  { "warrant.activeCommunityID": 1, "warrant.source": 1, "warrant.externalId": 1 },
+  { name: "warrants_external_ref_idx", background: true, sparse: true }
+);
+
+// "Is there a warrant out for this person" — the question a game server asks
+// on every stop, and the one that was a scan before this index.
+createIndexSafe(
+  db.warrants,
+  { "warrant.activeCommunityID": 1, "warrant.accusedID": 1, "warrant.status": 1 },
+  { name: "warrants_community_accused_status_idx", background: true }
+);
+
+// Finding a key's simulated records to remove them. Sparse because only the
+// rows a Developer API key created carry a source at all, which on any real
+// community is a small fraction of the collection.
+["civilians", "vehicles", "firearms"].forEach(function (name) {
+  var wrapper = name.slice(0, -1);
+  var spec = {};
+  spec[wrapper + ".source.keyId"] = 1;
+  spec[wrapper + ".source.synthetic"] = 1;
+  createIndexSafe(db[name], spec, {
+    name: name + "_dev_source_synthetic_idx",
+    background: true,
+    sparse: true,
+  });
+});

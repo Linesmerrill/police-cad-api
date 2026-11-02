@@ -74,6 +74,13 @@ func (a *App) New() *mux.Router {
 		LicDB:       databases.NewLicenseDatabase(a.dbHelper),
 		CallDB:      databases.NewCallDatabase(a.dbHelper),
 		BoloDB:      databases.NewBoloDatabase(a.dbHelper),
+
+		ReportDraftDB:    databases.NewDeveloperReportDraftDatabase(a.dbHelper),
+		WarrantDB:        databases.NewWarrantDatabase(a.dbHelper),
+		FormTemplateDB:   databases.NewFormTemplateDatabase(a.dbHelper),
+		DeptFormToggleDB: databases.NewDepartmentFormToggleDatabase(a.dbHelper),
+		ArrestReportDB:   databases.NewArrestReportDatabase(a.dbHelper),
+		FormSubmissionDB: databases.NewFormSubmissionDatabase(a.dbHelper),
 	}
 	social := NewSocialAuth(
 		databases.NewUserDatabase(a.dbHelper),
@@ -317,6 +324,27 @@ func (a *App) New() *mux.Router {
 	devRouter.Handle("/communities/{communityId}/firearms", devAPI.RequireScope(models.ScopeFirearmsWrite, devAPI.DevCreateFirearmHandler)).Methods("POST")
 	devRouter.Handle("/communities/{communityId}/licenses", devAPI.RequireScope(models.ScopeLicensesWrite, devAPI.DevCreateLicenseHandler)).Methods("POST")
 
+	// Report drafts. There is no route here that files one, and that absence
+	// is the design: a draft is a proposal for a person with the community's
+	// own permission to act on, and the verb that turns it into a legal record
+	// lives on the website. See developer_api_reports.go.
+	devRouter.Handle("/communities/{communityId}/reports/drafts", devAPI.RequireScope(models.ScopeReportsRead, devAPI.DevListReportDraftsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/reports/drafts", devAPI.RequireScope(models.ScopeReportsWrite, devAPI.DevUpsertReportDraftHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/reports/drafts/{externalId}", devAPI.RequireScope(models.ScopeReportsRead, devAPI.DevGetReportDraftHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/reports/drafts/{externalId}", devAPI.RequireScope(models.ScopeReportsWrite, devAPI.DevWithdrawReportDraftHandler)).Methods("DELETE")
+
+	// Warrants. A key can read them and request one; the request lands pending
+	// for the community's own reviewer whatever its approval mode says, so a
+	// script cannot trip auto-approve. See developer_api_warrants.go.
+	devRouter.Handle("/communities/{communityId}/warrants", devAPI.RequireScope(models.ScopeWarrantsRead, devAPI.DevListWarrantsHandler)).Methods("GET")
+	devRouter.Handle("/communities/{communityId}/warrants/requests", devAPI.RequireScope(models.ScopeWarrantsWrite, devAPI.DevRequestWarrantHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/warrants/{warrantId}", devAPI.RequireScope(models.ScopeWarrantsRead, devAPI.DevGetWarrantHandler)).Methods("GET")
+
+	// Simulated characters. A key removes its own; an owner removes a key's
+	// output from the website, on the first-party route below, which is what
+	// they need when the integration has stopped answering.
+	devRouter.Handle("/communities/{communityId}/synthetic-records", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevCleanupSyntheticRecordsHandler)).Methods("DELETE")
+
 	// Developer API management, on the ordinary authenticated surface. A
 	// developer key cannot reach these, so a key can never mint another key,
 	// widen its own scopes, or approve itself into a community.
@@ -372,6 +400,21 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/developer/community/{communityId}/keys", http.HandlerFunc(devAPI.ListCommunityDeveloperKeysHandler)).Methods("GET")
 	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/approve", http.HandlerFunc(devAPI.ApproveCommunityDeveloperKeyHandler)).Methods("POST")
 	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/revoke", http.HandlerFunc(devAPI.RevokeCommunityDeveloperKeyHandler)).Methods("POST")
+	// Removing what a key wrote. On the community's side rather than the
+	// developer's, because the person who needs it is an owner whose community
+	// holds rows from an integration that is no longer answering.
+	apiCreate.Handle("/developer/community/{communityId}/keys/{keyId}/records", http.HandlerFunc(devAPI.CleanupCommunityKeyRecordsHandler)).Methods("DELETE")
+
+	// Reviewing a report draft, and filing it. On this surface and not the
+	// developer one, gated on the community's own "manage records": filing a
+	// report has consequences inside a community, so the only way to do it is
+	// to be a person the community trusted with records. A key cannot reach
+	// these routes at all, because they are not registered under the developer
+	// prefix. See developer_api_report_review.go.
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts", http.HandlerFunc(devAPI.ListCommunityReportDraftsHandler)).Methods("GET")
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts/{draftId}", http.HandlerFunc(devAPI.GetCommunityReportDraftHandler)).Methods("GET")
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts/{draftId}/file", http.HandlerFunc(devAPI.FileCommunityReportDraftHandler)).Methods("POST")
+	apiCreate.Handle("/developer/community/{communityId}/report-drafts/{draftId}/reject", http.HandlerFunc(devAPI.RejectCommunityReportDraftHandler)).Methods("POST")
 
 	// Metrics handler (must be after apiV2 is defined)
 	metricsHandler := MetricsHandler{}
