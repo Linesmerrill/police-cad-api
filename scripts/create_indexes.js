@@ -1338,3 +1338,95 @@ createIndexSafe(
     sparse: true,
   });
 });
+
+// ---- Developer API phase 3b: activity, events, webhooks ----
+
+// The key's own feed, and the console's view of it. Newest first, with _id in
+// the key so the sort is a total order — a paged feed sorted only by a
+// timestamp repeats and omits rows when several requests land in the same
+// millisecond, which on a game server's tick is constantly.
+createIndexSafe(
+  db.developer_api_activity,
+  { keyId: 1, at: -1, _id: -1 },
+  { name: "dev_activity_key_recent_idx", background: true }
+);
+
+// "What did my key do in that community", and the outcome filter that answers
+// "show me what was refused".
+createIndexSafe(
+  db.developer_api_activity,
+  { keyId: 1, communityId: 1, at: -1 },
+  { name: "dev_activity_key_community_idx", background: true }
+);
+createIndexSafe(
+  db.developer_api_activity,
+  { keyId: 1, outcome: 1, at: -1 },
+  { name: "dev_activity_key_outcome_idx", background: true }
+);
+
+// Looking one row up by the request id a developer quoted in a ticket. This is
+// the whole reason the id is on every response.
+createIndexSafe(
+  db.developer_api_activity,
+  { requestId: 1 },
+  { name: "dev_activity_request_idx", background: true }
+);
+
+// The published 30-day retention. Enforced by Mongo rather than by a job: a
+// retention window that depends on a cron running is one that quietly stops
+// being true the first time the cron is wedged.
+createIndexSafe(
+  db.developer_api_activity,
+  { expiresAt: 1 },
+  { name: "dev_activity_ttl_idx", expireAfterSeconds: 0, background: true }
+);
+
+// The change feed. Exactly the shape both readers use — the cursor endpoint
+// and the webhook worker — which is "this community, _id greater than this one,
+// in _id order". The type is in the key so a filtered subscription is still one
+// index scan rather than a scan plus a filter.
+createIndexSafe(
+  db.developer_api_events,
+  { communityId: 1, _id: 1 },
+  { name: "dev_events_community_cursor_idx", background: true }
+);
+createIndexSafe(
+  db.developer_api_events,
+  { communityId: 1, type: 1, _id: 1 },
+  { name: "dev_events_community_type_cursor_idx", background: true }
+);
+
+// Seven days, published. Shorter than the activity feed on purpose: a cursor
+// staler than this means the client should re-read current state rather than
+// replay a week, and the docs say so.
+createIndexSafe(
+  db.developer_api_events,
+  { expiresAt: 1 },
+  { name: "dev_events_ttl_idx", expireAfterSeconds: 0, background: true }
+);
+
+// The delivery worker's own sweep: every active endpoint, once a minute.
+createIndexSafe(
+  db.developer_webhooks,
+  { status: 1 },
+  { name: "dev_webhooks_status_idx", background: true }
+);
+
+// The console's list, and the per-key limit check on create.
+createIndexSafe(
+  db.developer_webhooks,
+  { keyId: 1, createdAt: 1 },
+  { name: "dev_webhooks_key_idx", background: true }
+);
+
+// "Why is my endpoint not receiving anything" — the attempt log, newest first.
+createIndexSafe(
+  db.developer_webhook_deliveries,
+  { webhookId: 1, at: -1, _id: -1 },
+  { name: "dev_webhook_deliveries_recent_idx", background: true }
+);
+createIndexSafe(
+  db.developer_webhook_deliveries,
+  { expiresAt: 1 },
+  { name: "dev_webhook_deliveries_ttl_idx", expireAfterSeconds: 0, background: true }
+);

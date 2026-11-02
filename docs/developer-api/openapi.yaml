@@ -37,6 +37,34 @@ info:
     for the community's own reviewer. Those two are not gaps, a record with
     legal consequences inside a community is a person's decision.
 
+    **Finding out what happened.** Every response carries `X-Request-Id`, and
+    `GET /activity` is this key's own request history, which route, which
+    community, what we answered, and on a refusal which of our error codes we
+    used. Quote a request id in a ticket and we can find it. Send
+    `X-Correlation-Id` and we echo it back so your logs line up with ours,
+    letters, digits and `. _ : -`, up to 128 characters, since it is the one
+    value we reflect; anything else is dropped rather than echoed.
+
+    **Finding out what changed.** `GET /communities/{id}/changes` takes a
+    cursor and returns only what has happened since, so polling costs a request
+    rather than a sweep. The same events can be pushed to you instead: register
+    a webhook in the console and you get them signed, over HTTPS, with a
+    published retry schedule. One event shape serves both, so moving from
+    polling to webhooks does not mean rewriting your handler.
+
+    **Verifying a webhook.** Each delivery carries
+    `X-LPC-Signature: t=<unix>,v1=<hex>`. Recompute it as
+    `HMAC-SHA256(secret, "<t>." + rawBody)` and compare in constant time, then
+    reject anything whose `t` is more than **300 seconds** old, that last step
+    is what stops a captured delivery being replayable. Also sent:
+    `X-LPC-Event-Id` (stable, so a retry is recognisable),
+    `X-LPC-Event-Type`, `X-LPC-Delivery-Id` and `X-LPC-Attempt`. Answer `2xx`
+    quickly and do your work afterwards; a non-2xx is retried after 10s, 30s,
+    2m, 5m and 15m, and an endpoint that fails 20 deliveries in a row is
+    switched off with a reason shown in the console. Nothing is lost when a
+    delivery fails: the event stays readable from the cursor endpoint for its
+    retention window.
+
     **Rate limits.** Every response carries `X-RateLimit-*`, and a 429 carries
     `Retry-After`. Use the bulk status endpoint on a tick rather than looping
     over players: one call per tick stays inside the free limit where a loop
@@ -82,6 +110,14 @@ tags:
       the community's own reviewer.
   - name: Simulated characters
     description: NPC records, and removing them.
+  - name: Activity
+    description: What this key called, and what we answered.
+  - name: Changes
+    description: >-
+      What changed in a community since you last asked. The same events the
+      webhooks deliver.
+  - name: Attachments
+    description: Metadata and a link, never bytes, and never "evidence".
 
 paths:
   /whoami:
@@ -1257,6 +1293,244 @@ paths:
                     description: True when the batch cap was reached. Call again.
         "400": { description: "`confirm_required`, `invalid_source`, `invalid_external_id`." }
 
+  /activity:
+    get:
+      tags: [Activity]
+      summary: What this key called, and what we answered
+      description: |
+        **No scope required**, for the same reason `whoami` needs none: a key
+        that is being refused has to be able to find out why, and gating the
+        diagnostic would withhold it from exactly the keys that need it.
+
+        Every response from this API carries `X-Request-Id`. Quoting one in a
+        support ticket is enough for us to find the row, and if you send
+        `X-Correlation-Id`, we echo it back and record it beside ours, so you
+        can line your logs up against ours.
+
+        A row says which route, which community, what we answered, and which of
+        our `error` codes we used. On a `missing_scope` refusal it names the
+        scope, which is the most common thing this feed exists to explain.
+
+        **What a row does not hold**: no request body, no response body, no
+        header values, no key material and no claim code. The feed is for
+        debugging the shape of an exchange, not its contents.
+
+        Retention is **30 days**, and the response repeats it so a client
+        storing these rows knows how long it has.
+      security: [{ developerKey: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/limit" }
+        - name: communityId
+          in: query
+          schema: { type: string, pattern: "^[a-f0-9]{24}$" }
+        - name: outcome
+          in: query
+          schema:
+            type: string
+            enum: [ok, denied, rate_limited, invalid, error]
+          description: >-
+            Coarser than a status code on purpose. `denied` is what you want
+            when the question is "show me what was refused".
+        - name: requestId
+          in: query
+          schema: { type: string }
+          description: Look one request up by the id we returned for it.
+      responses:
+        "200":
+          description: A page of requests, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ActivityRow" }
+                  totalCount: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  retentionDays: { type: integer, example: 30 }
+
+  /communities/{communityId}/changes:
+    get:
+      tags: [Changes]
+      summary: What changed since you last asked
+      description: |
+        One request instead of a sweep. Without this, finding out whether a call
+        was closed means re-reading every call, on a busy community that is a
+        scan per tick, and it is why polling has a reputation for being
+        expensive.
+
+        **The cursor is an event id, and the events are the same rows the
+        webhooks deliver.** That is deliberate: start on the cursor, move to
+        webhooks later without rewriting the handler that consumes an event,
+        and run both while you migrate, a stable event id makes the duplicate
+        detectable rather than a problem.
+
+        **Call it with no `since` first.** You get no events and a cursor
+        pointing at now (`primed: true`), because replaying a week of history
+        to a client that is about to read current state anyway is not a
+        service. Then poll with that cursor; each response hands you the next
+        one, also in the `X-LPC-Cursor` header so a Lua callback need not parse
+        the body.
+
+        **Pass `excludeSelf=true`** unless you want your own writes back. This
+        is the difference between a working integration and a loop: close a
+        call, receive your own `call.closed`, close it again.
+
+        Events are kept **7 days**: shorter than the activity feed on purpose.
+        A cursor staler than that means you should re-read current state rather
+        than replay a week, and `hasMore` tells you when to call again rather
+        than making you compute a total.
+      security: [{ developerKey: [community:read] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - name: since
+          in: query
+          schema: { type: string }
+          description: >-
+            A cursor from a previous response. Omit it on the first call to get
+            a position without the history.
+        - { $ref: "#/components/parameters/limit" }
+        - name: types
+          in: query
+          schema: { type: string }
+          example: call.created,call.closed
+          description: >-
+            Comma-separated event types. An unknown type is refused rather than
+            silently matching nothing.
+        - name: excludeSelf
+          in: query
+          schema: { type: boolean, default: false }
+          description: Leave out changes this key caused.
+      responses:
+        "200":
+          description: The changes after the cursor.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChangeEvent" }
+                  cursor:
+                    type: string
+                    description: Pass this as `since` next time.
+                  hasMore:
+                    type: boolean
+                    description: Call again. There is no total; you cannot act on one.
+                  primed:
+                    type: boolean
+                    description: True when this call only established a position.
+                  retentionDays: { type: integer, example: 7 }
+        "400": { description: "`invalid_cursor` or `invalid_event_type`." }
+
+  /communities/{communityId}/reports/drafts/{externalId}/attachments:
+    post:
+      tags: [Attachments]
+      summary: Attach metadata and a link to a report draft
+      description: |
+        **Metadata and a link. We host no bytes, and there is no upload
+        endpoint.** Accepting third-party binaries would mean scanning them,
+        storing them, quotas, a takedown path and a legal position on content
+        we host, and none of that is needed for the thing people actually want,
+        which is a reviewer clicking through to the clip your server already
+        recorded.
+
+        **`kind` is never `evidence`.** A link you supply points at something we
+        have not seen, on a server we do not control; calling it evidence inside
+        a system that produces jail time would give it a standing it has not
+        earned. Use `clip`, `screenshot`, `log`, `document` or `other`, and let
+        a person decide what it is. The same applies to a generated narrative.
+
+        We never fetch the URL, so it is a link a person clicks in their own
+        browser rather than a request we make.
+
+        Idempotent on the URL: the same link twice returns the attachment that
+        exists rather than giving a reviewer two of the same thing to look at.
+        Nothing can be attached once a person has reviewed the draft.
+      security: [{ developerKey: [reports:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/externalId" }
+        - name: source
+          in: query
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttachmentWrite" }
+      responses:
+        "200":
+          description: "This link is already attached (`added` is false)."
+        "201":
+          description: Attached.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attachment: { $ref: "#/components/schemas/Attachment" }
+                  added: { type: boolean }
+        "400":
+          description: >-
+            `invalid_attachment`: an unknown kind, no url, credentials in the
+            url, an out-of-range size, or `kind: "evidence"`.
+        "409":
+          description: >-
+            `attachment_limit_reached` (10 per record) or
+            `draft_already_reviewed`.
+
+  /communities/{communityId}/reports/drafts/{externalId}/attachments/{attachmentId}:
+    delete:
+      tags: [Attachments]
+      summary: Detach one
+      description: Only while the draft is still a draft.
+      security: [{ developerKey: [reports:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/externalId" }
+        - name: attachmentId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: source
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: Detached. }
+        "404": { description: "`draft_not_found`" }
+        "409": { description: "`draft_already_reviewed`" }
+
+  /communities/{communityId}/dispatch/calls/{externalId}/attachments:
+    post:
+      tags: [Attachments]
+      summary: Attach metadata and a link to a dispatch call
+      description: |
+        The same shape as a draft attachment, on a call. Useful because the clip
+        usually exists while the call is still open and before anybody has
+        written a report, which is the moment a dispatcher wants to see it.
+      security: [{ developerKey: [calls:write] }]
+      parameters:
+        - { $ref: "#/components/parameters/communityId" }
+        - { $ref: "#/components/parameters/externalId" }
+        - name: source
+          in: query
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttachmentWrite" }
+      responses:
+        "200": { description: "Already attached (`added` is false)." }
+        "201": { description: Attached. }
+        "404": { description: "`call_not_found`" }
+        "409": { description: "`attachment_limit_reached`" }
+
 components:
   securitySchemes:
     developerKey:
@@ -1828,6 +2102,129 @@ components:
         awaitingReview:
           type: boolean
           description: A person has not looked at it yet. Every request starts here.
+
+    ActivityRow:
+      type: object
+      properties:
+        requestId:
+          type: string
+          description: Ours, returned on every response in `X-Request-Id`.
+        correlationId:
+          type: string
+          description: >-
+            Yours, echoed from `X-Correlation-Id` when you sent one. Letters,
+            digits and `. _ : -` only.
+        communityId: { type: string }
+        method: { type: string }
+        route:
+          type: string
+          description: >-
+            The route template, not the path you called, a path carries ids,
+            and a feed keyed on them would have as many values as there are
+            communities.
+          example: /communities/{communityId}/dispatch/calls
+        status: { type: integer }
+        outcome:
+          type: string
+          enum: [ok, denied, rate_limited, invalid, error]
+        errorCode:
+          type: string
+          description: Our own stable code, the same string your code branched on.
+        requiredScope:
+          type: string
+          description: On a `missing_scope` refusal, the scope the route needed.
+        durationMs: { type: integer }
+        at: { type: string, format: date-time }
+
+    ChangeEvent:
+      type: object
+      description: >-
+        One change in a community. The same shape a webhook delivery carries
+        under `event`, so one handler serves both transports.
+      properties:
+        id:
+          type: string
+          description: >-
+            Stable, and also the cursor. Use it to recognise a duplicate if you
+            run polling and webhooks at once.
+        type:
+          type: string
+          enum:
+            - call.created
+            - call.updated
+            - call.closed
+            - call.assigned
+            - unit.status_changed
+            - record.created
+            - report_draft.filed
+            - report_draft.rejected
+            - warrant.requested
+            - warrant.reviewed
+          description: >-
+            Named after what happened in the product, not after the endpoint
+            that caused it, the same change can arrive from the website, the
+            app, the bot or a key, and you care about the change.
+        communityId: { type: string }
+        resourceId:
+          type: string
+          description: Our id for the thing that changed.
+        resourceExternalId:
+          type: string
+          description: >-
+            Your id for it, when you created it. Empty for anything a key did
+            not create, which is most of what the website does.
+        resourceSource: { type: string }
+        actor:
+          type: string
+          enum: [website, developer_api, mobile, bot, system]
+        actorKeyId:
+          type: string
+          description: >-
+            Set when a key caused it, so you can ignore your own writes rather
+            than processing them twice.
+        data:
+          type: object
+          additionalProperties: { type: string }
+          description: >-
+            A small, flat map of ids and short labels, not the changed
+            document. Read the resource itself if you want more.
+        at: { type: string, format: date-time }
+
+    AttachmentWrite:
+      type: object
+      required: [url]
+      properties:
+        kind:
+          type: string
+          enum: [clip, screenshot, log, document, other]
+          default: other
+          description: >-
+            There is no `evidence` kind and there will not be. A link we have
+            not seen is not evidence; let a person decide what it is.
+        label: { type: string, maxLength: 120 }
+        url:
+          type: string
+          format: uri
+          maxLength: 1024
+          description: >-
+            http or https, no credentials in it. We never fetch it, it is a
+            link a person clicks.
+        contentType: { type: string, maxLength: 120 }
+        sizeBytes:
+          type: integer
+          description: >-
+            What you say it is. We host nothing, so this is a number for a
+            reviewer's screen rather than a storage limit, and it is bounded so
+            a typo cannot render "4 PB".
+
+    Attachment:
+      allOf:
+        - $ref: "#/components/schemas/AttachmentWrite"
+        - type: object
+          properties:
+            id: { type: string }
+            addedByKeyId: { type: string }
+            addedAt: { type: string, format: date-time }
 
     UnitStatusResult:
       type: object

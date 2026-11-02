@@ -57,6 +57,11 @@ func (a *App) New() *mux.Router {
 		}
 	}()
 	sessionDB := databases.NewClockSessionDatabase(a.dbHelper)
+	// One event store, shared. The developer surface writes to it and so do
+	// the website's own call and warrant handlers — an integration polling
+	// "what changed in this community" cares about a call a dispatcher closed
+	// in the CAD every bit as much as one it closed itself.
+	devEventDB := databases.NewDeveloperEventDatabase(a.dbHelper)
 	devAPI := DeveloperAPI{
 		AccountDB:   databases.NewDeveloperAccountDatabase(a.dbHelper),
 		KeyDB:       databases.NewDeveloperAPIKeyDatabase(a.dbHelper),
@@ -81,6 +86,11 @@ func (a *App) New() *mux.Router {
 		DeptFormToggleDB: databases.NewDepartmentFormToggleDatabase(a.dbHelper),
 		ArrestReportDB:   databases.NewArrestReportDatabase(a.dbHelper),
 		FormSubmissionDB: databases.NewFormSubmissionDatabase(a.dbHelper),
+
+		ActivityDB:        databases.NewDeveloperActivityDatabase(a.dbHelper),
+		EventDB:           devEventDB,
+		WebhookDB:         databases.NewDeveloperWebhookDatabase(a.dbHelper),
+		WebhookDeliveryDB: databases.NewDeveloperWebhookDeliveryDatabase(a.dbHelper),
 	}
 	social := NewSocialAuth(
 		databases.NewUserDatabase(a.dbHelper),
@@ -100,8 +110,8 @@ func (a *App) New() *mux.Router {
 	e := Ems{DB: databases.NewEmsDatabase(a.dbHelper)}
 
 	pv := PendingVerification{PVDB: databases.NewPendingVerificationDatabase(a.dbHelper), UDB: databases.NewUserDatabase(a.dbHelper)}
-	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper)}
-	call := Call{DB: databases.NewCallDatabase(a.dbHelper)}
+	w := Warrant{DB: databases.NewWarrantDatabase(a.dbHelper), CDB: databases.NewCommunityDatabase(a.dbHelper), EventDB: devEventDB}
+	call := Call{DB: databases.NewCallDatabase(a.dbHelper), EventDB: devEventDB}
 	bolo := Bolo{DB: databases.NewBoloDatabase(a.dbHelper)}
 	arrestReport := ArrestReport{DB: databases.NewArrestReportDatabase(a.dbHelper), CDB: databases.NewCivilianDatabase(a.dbHelper), CommDB: databases.NewCommunityDatabase(a.dbHelper)}
 
@@ -345,6 +355,23 @@ func (a *App) New() *mux.Router {
 	// they need when the integration has stopped answering.
 	devRouter.Handle("/communities/{communityId}/synthetic-records", devAPI.RequireScope(models.ScopePlayersProvision, devAPI.DevCleanupSyntheticRecordsHandler)).Methods("DELETE")
 
+	// This key's own request history. No scope, for the same reason whoami
+	// needs none: a key that is being refused has to be able to find out why,
+	// and gating the diagnostic would withhold it from exactly the keys that
+	// need it. Scoped to the calling key by construction.
+	devRouter.Handle("/activity", http.HandlerFunc(devAPI.DevActivityHandler)).Methods("GET")
+
+	// "What changed since I last asked." One cursor read instead of a sweep,
+	// over the same events the webhooks deliver — so an integration can move
+	// from one to the other without rewriting its handler.
+	devRouter.Handle("/communities/{communityId}/changes", devAPI.RequireScope(models.ScopeCommunityRead, devAPI.DevChangesHandler)).Methods("GET")
+
+	// Attachment metadata: a link to something held elsewhere, never bytes,
+	// and never a kind of "evidence". See developer_api_attachments.go.
+	devRouter.Handle("/communities/{communityId}/reports/drafts/{externalId}/attachments", devAPI.RequireScope(models.ScopeReportsWrite, devAPI.DevAddDraftAttachmentHandler)).Methods("POST")
+	devRouter.Handle("/communities/{communityId}/reports/drafts/{externalId}/attachments/{attachmentId}", devAPI.RequireScope(models.ScopeReportsWrite, devAPI.DevRemoveDraftAttachmentHandler)).Methods("DELETE")
+	devRouter.Handle("/communities/{communityId}/dispatch/calls/{externalId}/attachments", devAPI.RequireScope(models.ScopeCallsWrite, devAPI.DevAddCallAttachmentHandler)).Methods("POST")
+
 	// Developer API management, on the ordinary authenticated surface. A
 	// developer key cannot reach these, so a key can never mint another key,
 	// widen its own scopes, or approve itself into a community.
@@ -370,6 +397,16 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/developer/usage", http.HandlerFunc(devAPI.GetDeveloperUsageHandler)).Methods("GET")
 	apiCreate.Handle("/developer/keys/{keyId}/rotate", http.HandlerFunc(devAPI.RotateDeveloperKeyHandler)).Methods("POST")
 	apiCreate.Handle("/developer/keys/{keyId}/usage", http.HandlerFunc(devAPI.GetDeveloperKeyUsageHandler)).Methods("GET")
+	apiCreate.Handle("/developer/keys/{keyId}/activity", http.HandlerFunc(devAPI.ListDeveloperKeyActivityHandler)).Methods("GET")
+
+	// Webhook endpoints, configured per key. The signing secret is shown once
+	// on create and once on rotate, like the key itself.
+	apiCreate.Handle("/developer/keys/{keyId}/webhooks", http.HandlerFunc(devAPI.ListDeveloperWebhooksHandler)).Methods("GET")
+	apiCreate.Handle("/developer/keys/{keyId}/webhooks", http.HandlerFunc(devAPI.CreateDeveloperWebhookHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys/{keyId}/webhooks/{webhookId}", http.HandlerFunc(devAPI.UpdateDeveloperWebhookHandler)).Methods("PATCH")
+	apiCreate.Handle("/developer/keys/{keyId}/webhooks/{webhookId}", http.HandlerFunc(devAPI.DeleteDeveloperWebhookHandler)).Methods("DELETE")
+	apiCreate.Handle("/developer/keys/{keyId}/webhooks/{webhookId}/rotate", http.HandlerFunc(devAPI.RotateDeveloperWebhookSecretHandler)).Methods("POST")
+	apiCreate.Handle("/developer/keys/{keyId}/webhooks/{webhookId}/deliveries", http.HandlerFunc(devAPI.ListDeveloperWebhookDeliveriesHandler)).Methods("GET")
 
 	// Claiming, on the first-party surface only. A developer key cannot reach
 	// these: a developer minting a code and redeeming it themselves is exactly
@@ -1233,6 +1270,16 @@ func (a *App) New() *mux.Router {
 		databases.NewCourtCaseDatabase(a.dbHelper),
 		databases.NewArrestReportDatabase(a.dbHelper),
 		databases.NewBotHealthDatabase(a.dbHelper),
+	)
+	// Developer API webhook delivery. Wired separately so a deployment without
+	// the Developer API never registers the job.
+	a.Scheduler.WithDeveloperWebhooks(
+		devAPI.WebhookDB,
+		devAPI.WebhookDeliveryDB,
+		devAPI.EventDB,
+		devAPI.GrantDB,
+		devAPI.KeyDB,
+		devAPI.AccountDB,
 	)
 
 	// Re-screen creator applications every 4 hours: resolve each channel, look

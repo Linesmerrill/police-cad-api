@@ -186,6 +186,27 @@ func (d DeveloperAPI) DevUpsertCallHandler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
+		// Two events on one write when the assignment changed, because they
+		// are two different things to a subscriber: "this call was edited" and
+		// "these units are on it". A client that only wants the second should
+		// not have to diff every update to find it.
+		event := devKeyEvent(dc, models.EventCallUpdated, cc.Community.ID.Hex())
+		event.ResourceID = updated.ID
+		event.ResourceExternalID = externalID
+		event.ResourceSource = source
+		event.Data = map[string]string{"title": title, "status": "open"}
+		d.emit(event)
+		if req.AssignedUnits != nil {
+			assignedEvent := devKeyEvent(dc, models.EventCallAssigned, cc.Community.ID.Hex())
+			assignedEvent.ResourceID = updated.ID
+			assignedEvent.ResourceExternalID = externalID
+			assignedEvent.ResourceSource = source
+			assignedEvent.Data = map[string]string{
+				"units": strings.Join(nonNilStringSlice(assigned), ","),
+			}
+			d.emit(assignedEvent)
+		}
+
 		d.RecordOutcome(r, http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -228,6 +249,13 @@ func (d DeveloperAPI) DevUpsertCallHandler(w http.ResponseWriter, r *http.Reques
 	// Tell the live dashboards, the same way the website's own create does, or
 	// a call a game raises sits invisible until somebody refreshes.
 	notifyNodeServer("call_created", cc.Community.ID.Hex(), map[string]interface{}{"callID": callID})
+
+	created := devKeyEvent(dc, models.EventCallCreated, cc.Community.ID.Hex())
+	created.ResourceID = callID
+	created.ResourceExternalID = externalID
+	created.ResourceSource = source
+	created.Data = map[string]string{"title": title, "status": "open"}
+	d.emit(created)
 
 	d.RecordOutcome(r, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
@@ -338,6 +366,16 @@ func (d DeveloperAPI) DevCloseCallByExternalIDHandler(w http.ResponseWriter, r *
 		devError(w, http.StatusInternalServerError, "server_error", "Could not close that call.", nil)
 		return
 	}
+
+	closed := devKeyEvent(dc, models.EventCallClosed, cc.Community.ID.Hex())
+	closed.ResourceID = call.ID
+	closed.ResourceExternalID = externalID
+	closed.ResourceSource = source
+	closed.Data = map[string]string{
+		"status":      "closed",
+		"disposition": truncateShort(req.Disposition),
+	}
+	d.emit(closed)
 
 	d.RecordOutcome(r, http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")

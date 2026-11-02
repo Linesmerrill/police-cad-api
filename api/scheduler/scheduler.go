@@ -37,7 +37,21 @@ type Scheduler struct {
 	ARDB    databases.ArrestReportDatabase
 	// Discord bot liveness: the heartbeat document and its alert state.
 	BotHealthDB databases.BotHealthDatabase
-	instanceID string
+	// Developer API webhooks: the endpoints, the event log they read forward
+	// through, the attempt log, and the grants re-checked per delivery.
+	//
+	// All four nil-checked at the top of the job, so a deployment without the
+	// Developer API simply never registers it.
+	WebhookDB         databases.DeveloperWebhookDatabase
+	WebhookDeliveryDB databases.DeveloperWebhookDeliveryDatabase
+	EventDB           databases.DeveloperEventDatabase
+	GrantDB           databases.DeveloperGrantDatabase
+	// The key and its developer account, re-read before each endpoint's run.
+	// Revoking a key stops its requests on the next call and has to stop its
+	// deliveries too; suspending a developer stops every key they hold.
+	KeyDB        databases.DeveloperAPIKeyDatabase
+	DevAccountDB databases.DeveloperAccountDatabase
+	instanceID   string
 
 	// Per-job run stats for /health/scheduler. Multiple jobs may run in
 	// parallel goroutines, so all access goes through jobStatsMu.
@@ -87,6 +101,29 @@ func NewScheduler(
 	}
 }
 
+// WithDeveloperWebhooks wires the stores the webhook delivery job needs.
+//
+// A setter rather than four more parameters on NewScheduler, which already
+// takes thirteen. Called from main after construction; leaving it uncalled
+// means the job never registers, which is what a deployment without the
+// Developer API wants.
+func (s *Scheduler) WithDeveloperWebhooks(
+	webhookDB databases.DeveloperWebhookDatabase,
+	deliveryDB databases.DeveloperWebhookDeliveryDatabase,
+	eventDB databases.DeveloperEventDatabase,
+	grantDB databases.DeveloperGrantDatabase,
+	keyDB databases.DeveloperAPIKeyDatabase,
+	accountDB databases.DeveloperAccountDatabase,
+) *Scheduler {
+	s.WebhookDB = webhookDB
+	s.WebhookDeliveryDB = deliveryDB
+	s.EventDB = eventDB
+	s.GrantDB = grantDB
+	s.KeyDB = keyDB
+	s.DevAccountDB = accountDB
+	return s
+}
+
 // Start begins the scheduler with all registered jobs
 func (s *Scheduler) Start() {
 	// Process grace period expirations and send reminders daily at 3 AM UTC
@@ -104,6 +141,18 @@ func (s *Scheduler) Start() {
 		zap.S().Errorw("failed to register creator check job", "error", err)
 	} else {
 		s.registerJob("checkAllCreators", checkCreatorsSchedule)
+	}
+
+	// Developer API webhooks: hand queued events to their endpoints every
+	// minute. Registers only when the stores are wired, so a deployment
+	// without the Developer API never runs it.
+	if s.WebhookDB != nil && s.EventDB != nil {
+		const webhookSchedule = "@every 1m"
+		if _, err := s.cron.AddFunc(webhookSchedule, s.deliverDeveloperWebhooks); err != nil {
+			zap.S().Errorw("failed to register developer webhook delivery", "error", err)
+		} else {
+			s.registerJob("deliverDeveloperWebhooks", webhookSchedule)
+		}
 	}
 
 	// Economy: sweep stale clock sessions every minute (only registers if DB present)

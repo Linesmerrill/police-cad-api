@@ -363,6 +363,22 @@ func (d DeveloperAPI) applyUnitStatuses(w http.ResponseWriter, r *http.Request, 
 		result["ok"] = true
 		applied++
 		results = append(results, result)
+
+		// One event per unit that actually changed, not one per bulk call. A
+		// subscriber watching a particular officer needs that officer's row;
+		// collapsing a tick's worth of units into a single event would make
+		// them diff the whole roster to find it.
+		status := devKeyEvent(dc, models.EventUnitStatusChanged, cc.Community.ID.Hex())
+		status.ResourceID = memberKey
+		status.Data = map[string]string{
+			"playerRef": entry.Player,
+			"tenCodeId": tenCodeID,
+			"location":  truncateDevLocation(strings.TrimSpace(entry.Location)),
+		}
+		if dept != nil {
+			status.Data["departmentId"] = departmentID
+		}
+		d.emit(status)
 	}
 
 	return results, applied

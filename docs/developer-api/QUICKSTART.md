@@ -468,6 +468,126 @@ test community running against a live one because a config value was stale. It
 only ever touches synthetic records your own key created, in the community in
 the path. When `more` comes back true, call it again.
 
+## 9. Stop sweeping: ask what changed
+
+```bash
+# First call: no cursor. You get a position, not a week of history.
+CURSOR=$(curl -s "$BASE/communities/$COMMUNITY/changes" \
+  -H "Authorization: Bearer $KEY" | jq -r .cursor)
+
+# Then poll with it. Each response hands you the next one.
+curl -s "$BASE/communities/$COMMUNITY/changes?since=$CURSOR&excludeSelf=true" \
+  -H "Authorization: Bearer $KEY"
+```
+
+This is the difference between one request and a scan. Without it, finding out
+whether a call was closed means re-reading every call, which on a busy
+community is a sweep per tick.
+
+Two things to get right:
+
+- **Pass `excludeSelf=true`** unless you want your own writes back. Close a
+  call, receive your own `call.closed`, close it again: that is the loop this
+  parameter exists to prevent.
+- **Keep the cursor.** Events are kept 7 days. A cursor staler than that means
+  you should re-read current state rather than replay a week, so persist it
+  somewhere that survives a restart, and treat a long outage as a resync rather
+  than a catch-up.
+
+`hasMore` tells you to call again. There is no total, because you cannot act on
+one.
+
+## 10. Or have them pushed to you
+
+Register a webhook in [the console](https://www.linespolice-cad.com/developer).
+You get a signing secret once, and deliveries carry the **same event shape**
+the cursor endpoint returns, so moving from polling to webhooks does not mean
+rewriting your handler, and you can run both while you migrate because the
+event id is stable and the duplicate is recognisable.
+
+Verify every delivery. In Node:
+
+```js
+const crypto = require('crypto');
+
+function verify(rawBody, header, secret) {
+  const parts = Object.fromEntries(
+    header.split(',').map((p) => p.split('='))
+  );
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(`${parts.t}.${rawBody}`)
+    .digest('hex');
+
+  // Constant time, or the comparison itself leaks the signature.
+  const ok = crypto.timingSafeEqual(
+    Buffer.from(expected, 'hex'),
+    Buffer.from(parts.v1, 'hex')
+  );
+  // And check the age. This is the step that stops a captured delivery being
+  // replayable tomorrow; without it the signature alone proves nothing about
+  // when the request was made.
+  const fresh = Math.abs(Date.now() / 1000 - Number(parts.t)) < 300;
+  return ok && fresh;
+}
+```
+
+Use the **raw body**, before any JSON parsing. A re-serialised body will not
+match, and that is the single most common reason a first webhook integration
+rejects everything.
+
+What else arrives with it:
+
+| header | what it is |
+|---|---|
+| `X-LPC-Signature` | `t=<unix>,v1=<hex>`: verify as above |
+| `X-LPC-Event-Id` | stable across retries, so you can recognise a duplicate |
+| `X-LPC-Event-Type` | the same `type` as in the body |
+| `X-LPC-Delivery-Id` | this attempt |
+| `X-LPC-Attempt` | which attempt this is |
+
+**Answer `2xx` quickly and do your work afterwards.** You have 10 seconds. A
+non-2xx is retried after 10s, 30s, 2m, 5m and 15m; an endpoint that fails 20
+deliveries in a row is switched off, with the reason in the console.
+
+Nothing is lost when a delivery fails: the event is still readable from the
+cursor endpoint for its 7 days, which is why webhooks are a transport over the
+event log rather than a second source of truth.
+
+A few rules on the endpoint itself, so there are no surprises when you save it:
+
+- **https only.** An http endpoint would ship the signature and the body in
+  clear.
+- **A public host.** We refuse loopback, private ranges, link-local and the
+  cloud metadata address, checked again immediately before every request.
+- **No redirects.** We will not follow one. If your URL needs to change, change
+  it in the console.
+- **No credentials in the URL.** The signature is how you authenticate us.
+
+Rotating the secret keeps the endpoint and its subscription, so it is not an
+outage, but the next delivery is signed with the new secret, so update your
+receiver first.
+
+## 11. When something is not working
+
+Every response carries `X-Request-Id`. Send `X-Correlation-Id` with your own id
+and we echo it back and record it beside ours, letters, digits and `. _ : -`,
+up to 128 characters, since it is the one value we hand straight back.
+
+```bash
+curl -s "$BASE/activity?outcome=denied" -H "Authorization: Bearer $KEY"
+```
+
+Needs no scope, a key that is being refused has to be able to find out why.
+Each row says which route, which community, what we answered, and on a
+`missing_scope` refusal **which scope was missing**, which is the thing a bare
+403 in your own logs does not tell you.
+
+Rows are kept 30 days. They hold no request body, no response body and no
+header values, so if you need the contents of a call you made, log it your end.
+
+Quote a request id in a ticket and we can find exactly that request.
+
 ## Errors
 
 Every error has a stable `error` code and a message written for a person.
@@ -487,6 +607,10 @@ Every error has a stable `error` code and a message written for a person.
 | 403 | `template_not_permitted` | the community's form gates exclude that officer |
 | 409 | `draft_already_reviewed` | a person has filed or rejected it. Write a new draft with a new `externalId` |
 | 400 | `confirm_required` | a cleanup needs `confirm` set to the community id |
+| 400 | `invalid_cursor` | `since` must be a cursor from a previous response |
+| 400 | `invalid_event_type` | read the type list rather than guessing at it |
+| 400 | `invalid_attachment` | an unknown kind, no url, credentials in the url, or `kind: "evidence"`, which does not exist |
+| 409 | `attachment_limit_reached` | 10 per record |
 | 429 | `rate_limited` | honour `Retry-After` |
 | 429 | `provision_cap_reached` | the daily account or community cap; resets at midnight UTC |
 

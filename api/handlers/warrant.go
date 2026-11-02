@@ -26,6 +26,13 @@ import (
 type Warrant struct {
 	DB  databases.WarrantDatabase
 	CDB databases.CommunityDatabase
+	// EventDB records a review on the Developer API's change feed.
+	//
+	// A key that requested a warrant is waiting to hear what a judge decided,
+	// and the judge decides here rather than through the API. Without this, an
+	// integration would have to poll every warrant it has ever asked for.
+	// Optional: nil means the feed is not wired and nothing is recorded.
+	EventDB databases.DeveloperEventDatabase
 }
 
 // WarrantHandler returns all warrants
@@ -380,6 +387,23 @@ func (v Warrant) ReviewWarrantHandler(w http.ResponseWriter, r *http.Request) {
 		config.ErrorStatus("failed to review warrant", http.StatusInternalServerError, w, err)
 		return
 	}
+
+	// The judge's notes travel with the event. On a denial they are the only
+	// thing that explains the decision to the officer who asked, and the
+	// integration is what tells them.
+	EmitDeveloperEvent(v.EventDB, devEvent{
+		Type:               models.EventWarrantReviewed,
+		CommunityID:        existingWarrant.Details.ActiveCommunityID,
+		ResourceID:         warrantID,
+		ResourceExternalID: existingWarrant.Details.ExternalID,
+		ResourceSource:     existingWarrant.Details.Source,
+		Actor:              models.EventActorWebsite,
+		Data: map[string]string{
+			"status":     status,
+			"judgeName":  reviewData.JudgeName,
+			"judgeNotes": reviewData.JudgeNotes,
+		},
+	})
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{

@@ -410,6 +410,17 @@ func (d DeveloperAPI) DevRequestWarrantHandler(w http.ResponseWriter, r *http.Re
 			"source":     source,
 		})
 
+	requested := devKeyEvent(dc, models.EventWarrantRequested, cc.Community.ID.Hex())
+	requested.ResourceID = warrant.ID.Hex()
+	requested.ResourceExternalID = externalID
+	requested.ResourceSource = source
+	requested.Data = map[string]string{
+		"warrantType": warrantType,
+		"status":      models.WarrantStatusPending,
+		"accusedId":   accused.UserID,
+	}
+	d.emit(requested)
+
 	d.RecordOutcome(r, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
