@@ -131,8 +131,15 @@ func reportBotIncidentOpened(ctx context.Context, instanceID string, lastHeartbe
 		"We are looking into it and will update this incident when the bot is back."
 
 	if _, err := OpenStatusIncident(ctx, botStatusSlug, "Discord bot is not responding", body); err != nil {
+		if githubFailureIsTransient(err) {
+			// GitHub's own trouble. The staff alert has already gone out, the
+			// status repo rebuilds the page on its own schedule, and there is
+			// nothing here for a person to do.
+			zap.S().Warnw("could not open the status page incident for the bot: github is failing", "error", err.Error())
+			return
+		}
 		zap.S().Errorw("failed to open the status page incident for the bot", "error", err)
-		SendCronAlert(instanceID, botHealthJobName, err, map[string]string{"phase": "status_incident_open"})
+		sendCronAlertFn(instanceID, botHealthJobName, err, map[string]string{"phase": "status_incident_open"})
 	}
 }
 
@@ -148,8 +155,12 @@ func reportBotIncidentResolved(ctx context.Context, instanceID string, downFor t
 	body += ". Slash commands and autocomplete are working normally."
 
 	if err := ResolveStatusIncident(ctx, botStatusSlug, body); err != nil {
+		if githubFailureIsTransient(err) {
+			zap.S().Warnw("could not resolve the status page incident for the bot: github is failing", "error", err.Error())
+			return
+		}
 		zap.S().Errorw("failed to resolve the status page incident for the bot", "error", err)
-		SendCronAlert(instanceID, botHealthJobName, err, map[string]string{"phase": "status_incident_resolve"})
+		sendCronAlertFn(instanceID, botHealthJobName, err, map[string]string{"phase": "status_incident_resolve"})
 	}
 }
 
