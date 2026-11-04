@@ -28,6 +28,11 @@ type Scheduler struct {
 	CDB      databases.CommunityDatabase
 	LockDB   databases.SchedulerLockDatabase
 	DBHelper databases.DatabaseHelper
+	// JobStateDB holds what a job must remember between ticks, such as a run
+	// of consecutive GitHub failures. Separate from LockDB because the lock is
+	// deleted when the job finishes and this has to outlive it. Nil falls back
+	// to an in-memory count, which is correct on one dyno.
+	JobStateDB databases.SchedulerJobStateDatabase
 	// Economy
 	SessionDB  databases.ClockSessionDatabase
 	InboxDB    databases.InboxItemDatabase
@@ -81,6 +86,13 @@ func NewScheduler(
 		instanceID = fmt.Sprintf("instance-%d", time.Now().UnixNano())
 	}
 
+	// The job-state store is derived from the same helper rather than being a
+	// fourteenth parameter. Nil only in tests, which fall back to memory.
+	var jobStateDB databases.SchedulerJobStateDatabase
+	if dbHelper != nil {
+		jobStateDB = databases.NewSchedulerJobStateDatabase(dbHelper)
+	}
+
 	return &Scheduler{
 		cron:        cron.New(cron.WithLocation(time.UTC)),
 		CCDB:        ccDB,
@@ -90,6 +102,7 @@ func NewScheduler(
 		CDB:         cDB,
 		LockDB:      lockDB,
 		DBHelper:    dbHelper,
+		JobStateDB:  jobStateDB,
 		SessionDB:   sessionDB,
 		InboxDB:     inboxDB,
 		CivDB:       civDB,

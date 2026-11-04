@@ -206,7 +206,7 @@ func githubJSON(ctx context.Context, token, method, path string, payload interfa
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return fmt.Errorf("github answered %s", res.Status)
+		return newGitHubStatusError(res)
 	}
 	if out == nil {
 		return nil

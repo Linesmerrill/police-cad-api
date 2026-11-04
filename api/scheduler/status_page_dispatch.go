@@ -108,7 +108,8 @@ func (s *Scheduler) dispatchStatusPageWorkflows(ctx context.Context) error {
 	repo, ref := statusDispatchRepo(), statusDispatchRef()
 
 	if err := githubDispatchWorkflow(ctx, token, repo, statusUptimeWorkflow, ref); err != nil {
-		return fmt.Errorf("failed to dispatch %s: %w", statusUptimeWorkflow, err)
+		return s.noteGitHubFailure(ctx, statusDispatchStreakKey, statusDispatchJobName,
+			fmt.Errorf("failed to dispatch %s: %w", statusUptimeWorkflow, err), err)
 	}
 	zap.S().Debugw("status page: dispatched uptime check", "repo", repo, "ref", ref)
 
@@ -118,8 +119,11 @@ func (s *Scheduler) dispatchStatusPageWorkflows(ctx context.Context) error {
 	// minutes rather than the hours it was.
 	head, err := githubHeadSHA(ctx, token, repo, ref)
 	if err != nil {
-		return fmt.Errorf("failed to read %s head: %w", repo, err)
+		return s.noteGitHubFailure(ctx, statusDispatchStreakKey, statusDispatchJobName,
+			fmt.Errorf("failed to read %s head: %w", repo, err), err)
 	}
+	// Both calls answered, so whatever GitHub was doing, it has stopped.
+	s.clearGitHubFailures(ctx, statusDispatchStreakKey)
 
 	statusDispatchState.Lock()
 	first := statusDispatchState.lastSeenSHA == ""
@@ -141,7 +145,8 @@ func (s *Scheduler) dispatchStatusPageWorkflows(ctx context.Context) error {
 		statusDispatchState.Lock()
 		statusDispatchState.lastSiteDispatch = time.Time{}
 		statusDispatchState.Unlock()
-		return fmt.Errorf("failed to dispatch %s: %w", statusSiteWorkflow, err)
+		return s.noteGitHubFailure(ctx, statusDispatchStreakKey, statusDispatchJobName,
+			fmt.Errorf("failed to dispatch %s: %w", statusSiteWorkflow, err), err)
 	}
 	zap.S().Infow("status page: dispatched page rebuild", "repo", repo, "head", head)
 	return nil
@@ -166,7 +171,7 @@ func githubDispatchWorkflow(ctx context.Context, token, repo, workflow, ref stri
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("github answered %s", res.Status)
+		return newGitHubStatusError(res)
 	}
 	return nil
 }
@@ -187,7 +192,7 @@ func githubHeadSHA(ctx context.Context, token, repo, ref string) (string, error)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github answered %s", res.Status)
+		return "", newGitHubStatusError(res)
 	}
 
 	var payload struct {
