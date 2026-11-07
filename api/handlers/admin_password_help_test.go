@@ -9,6 +9,7 @@ package handlers
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/bson"
@@ -275,6 +277,96 @@ func TestAdminUserResetPassword_RejectsANonObjectIDPath(t *testing.T) {
 		assert.Empty(t, rig.updates)
 		assert.Empty(t, rig.sentLink)
 	}
+}
+
+// sendgrid's client.Send returns a nil error for a 4xx or 5xx, so the status
+// is the only thing that says whether the message was accepted.
+func TestSendUserResetEmail_NonSuccessStatusIsAFailure(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 413, 429, 500, 503} {
+		t.Setenv("SENDGRID_API_KEY", "test-key")
+		original := sendGridSendFn
+		sendGridSendFn = func(*mail.SGMailV3) (int, string, error) {
+			return status, `{"errors":[{"message":"does not contain a valid address","field":"personalizations.0.to.0.email"}]}`, nil
+		}
+		err := sendUserResetEmail("member@example.test", "https://example.test/reset/abc")
+		sendGridSendFn = original
+
+		if assert.Error(t, err, "status %d should be a failed send", status) {
+			assert.Contains(t, err.Error(), fmt.Sprintf("status %d", status))
+			assert.Contains(t, err.Error(), "valid address", "the reason should survive into the error")
+		}
+	}
+}
+
+func TestSendUserResetEmail_SuccessStatusesAreAccepted(t *testing.T) {
+	for _, status := range []int{200, 202, 204} {
+		t.Setenv("SENDGRID_API_KEY", "test-key")
+		original := sendGridSendFn
+		sendGridSendFn = func(*mail.SGMailV3) (int, string, error) { return status, "", nil }
+		err := sendUserResetEmail("member@example.test", "https://example.test/reset/abc")
+		sendGridSendFn = original
+
+		assert.NoError(t, err, "status %d should be an accepted send", status)
+	}
+}
+
+// A misconfigured deploy must not look like a sent email.
+func TestSendUserResetEmail_MissingKeyIsAFailure(t *testing.T) {
+	t.Setenv("SENDGRID_API_KEY", "")
+	original := sendGridSendFn
+	called := false
+	sendGridSendFn = func(*mail.SGMailV3) (int, string, error) {
+		called = true
+		return 202, "", nil
+	}
+	defer func() { sendGridSendFn = original }()
+
+	err := sendUserResetEmail("member@example.test", "https://example.test/reset/abc")
+	assert.Error(t, err)
+	assert.False(t, called, "nothing should be sent without a key")
+}
+
+func TestSendUserResetEmail_TransportErrorIsAFailure(t *testing.T) {
+	t.Setenv("SENDGRID_API_KEY", "test-key")
+	original := sendGridSendFn
+	sendGridSendFn = func(*mail.SGMailV3) (int, string, error) { return 0, "", assert.AnError }
+	defer func() { sendGridSendFn = original }()
+
+	assert.Error(t, sendUserResetEmail("member@example.test", "https://example.test/reset/abc"))
+}
+
+// The handler's end of the same rule: a rejected send is a 502, and nothing
+// records that an email went out.
+func TestAdminUserResetPassword_SendGridRejectionIsNotRecordedAsSent(t *testing.T) {
+	memberID := primitive.NewObjectID()
+	admin := staffAdmin()
+	// Let the real sendUserResetEmail run, with SendGrid answering 403.
+	rig := newResetRig(t, memberID, admin, nil)
+	sendUserResetEmailFn = sendUserResetEmail
+	t.Setenv("SENDGRID_API_KEY", "test-key")
+	originalSend := sendGridSendFn
+	sendGridSendFn = func(*mail.SGMailV3) (int, string, error) {
+		return 403, `{"errors":[{"message":"access forbidden"}]}`, nil
+	}
+	t.Cleanup(func() { sendGridSendFn = originalSend })
+
+	rr := rig.call(t, memberID.Hex(), actorBody(admin), true)
+
+	assert.Equal(t, http.StatusBadGateway, rr.Code)
+	assert.Len(t, rig.updates, 1, "only the token write should have happened")
+	for _, set := range rig.updates {
+		assert.NotContains(t, set, "user.lastResetEmailAt")
+		assert.NotContains(t, set, "user.lastResetEmailBy")
+	}
+	rig.aadb.AssertNotCalled(t, "InsertOne", mock.Anything, mock.Anything)
+}
+
+func TestTruncateForLog(t *testing.T) {
+	assert.Equal(t, "(no response body)", truncateForLog("   "))
+	assert.Equal(t, "short", truncateForLog("short"))
+	long := truncateForLog(strings.Repeat("x", 500))
+	assert.Equal(t, 300, len([]rune(long))-1)
+	assert.True(t, strings.HasSuffix(long, "…"))
 }
 
 func TestUserResetLink(t *testing.T) {

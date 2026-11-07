@@ -32,6 +32,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -268,6 +269,13 @@ var sendUserResetEmailFn = sendUserResetEmail
 
 // sendUserResetEmail sends the member the reset link.
 func sendUserResetEmail(toEmail, resetLink string) error {
+	// No key means no email, however the rest of the call behaves. Catching it
+	// here is what keeps a misconfigured deploy from writing lastResetEmailAt
+	// and telling staff the member has a link.
+	if os.Getenv("SENDGRID_API_KEY") == "" {
+		return errors.New("SENDGRID_API_KEY is not set, cannot send the reset email")
+	}
+
 	from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
 	subject := "Password Reset Request"
 	to := mail.NewEmail("", toEmail)
@@ -311,7 +319,47 @@ Lines Police CAD Team`, resetLink)
 </html>`, resetLink, resetLink)
 
 	msg := mail.NewSingleEmail(from, subject, to, plain, html)
-	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
-	_, err := client.Send(msg)
-	return err
+	status, body, err := sendGridSendFn(msg)
+	if err != nil {
+		return fmt.Errorf("could not reach sendgrid: %w", err)
+	}
+	// client.Send returns a nil error for a 4xx or 5xx: the request reached
+	// SendGrid, which is all the transport cared about. A rejected message is
+	// a failed send, and the caller has to hear about it — reporting "sent"
+	// for one is the thing this whole change exists to stop.
+	if status < 200 || status > 299 {
+		return fmt.Errorf("sendgrid rejected the reset email: status %d: %s", status, truncateForLog(body))
+	}
+	return nil
+}
+
+// sendGridSendFn posts a message and reports SendGrid's HTTP status and body.
+// Indirected so a test can hand back a non-2xx without a network call; the
+// int/string signature keeps SendGrid's rest types out of the seam.
+var sendGridSendFn = sendGridSend
+
+func sendGridSend(msg *mail.SGMailV3) (status int, body string, err error) {
+	resp, err := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY")).Send(msg)
+	if err != nil {
+		return 0, "", err
+	}
+	if resp == nil {
+		return 0, "", errors.New("sendgrid returned no response")
+	}
+	return resp.StatusCode, resp.Body, nil
+}
+
+// truncateForLog bounds SendGrid's error body. It names the offending field,
+// which is worth keeping, but it goes into an error string that reaches the
+// logs and does not need to be unbounded.
+func truncateForLog(body string) string {
+	const max = 300
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "(no response body)"
+	}
+	if len(body) > max {
+		return body[:max] + "…"
+	}
+	return body
 }
