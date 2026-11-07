@@ -361,8 +361,15 @@ type AdminUserDetails struct {
 	LastLoginAt          interface{}          `json:"lastLoginAt,omitempty"`
 	Communities          []AdminUserCommunity `json:"communities,omitempty"`
 	CommunitiesCount     int                  `json:"communitiesCount"`
-	ResetPasswordToken   string               `json:"resetPasswordToken,omitempty"`
-	ResetPasswordExpires interface{}          `json:"resetPasswordExpires,omitempty"`
+	// ResetPasswordExpires tells staff whether a reset link is still live.
+	// The token itself is deliberately absent: UserDetails.MarshalJSON
+	// redacts it everywhere else, and the admin response must not be the one
+	// hole in that — a stored hash in staff hands is a step towards the link.
+	ResetPasswordExpires interface{} `json:"resetPasswordExpires,omitempty"`
+	// Password-help facts for the user detail view. All read-only.
+	PasswordChangedAt interface{} `json:"passwordChangedAt,omitempty"`
+	LastResetEmailAt  interface{} `json:"lastResetEmailAt,omitempty"`
+	LastResetEmailBy  string      `json:"lastResetEmailBy,omitempty"`
 	DeactivatedAt        interface{}          `json:"deactivatedAt,omitempty"`
 	DeactivationReason   string               `json:"deactivationReason,omitempty"`
 	DeactivatedByAdminID string               `json:"deactivatedByAdminId,omitempty"`

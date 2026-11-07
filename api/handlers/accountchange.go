@@ -332,8 +332,9 @@ func (pv PendingVerification) ConfirmPasswordChangeHandler(w http.ResponseWriter
 
 	if _, err := pv.UDB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
 		"$set": bson.M{
-			"user.password":  string(hashed),
-			"user.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+			"user.password":          string(hashed),
+			"user.updatedAt":         primitive.NewDateTimeFromTime(time.Now()),
+			"user.passwordChangedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}); err != nil {
 		config.ErrorStatus("failed to update password", http.StatusInternalServerError, w, err)
@@ -499,8 +500,9 @@ func (pv PendingVerification) ForgotPasswordResetHandler(w http.ResponseWriter, 
 
 	if _, err := pv.UDB.UpdateOne(ctx, bson.M{"_id": uID}, bson.M{
 		"$set": bson.M{
-			"user.password":  string(hashed),
-			"user.updatedAt": primitive.NewDateTimeFromTime(time.Now()),
+			"user.password":          string(hashed),
+			"user.updatedAt":         primitive.NewDateTimeFromTime(time.Now()),
+			"user.passwordChangedAt": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}); err != nil {
 		config.ErrorStatus("failed to update password", http.StatusInternalServerError, w, err)
