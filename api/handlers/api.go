@@ -577,6 +577,10 @@ func (a *App) New() *mux.Router {
 	apiCreate.Handle("/admin/subscription/stripe/migrate-to-v2", http.HandlerFunc(adminHandler.AdminStripeMigrateToV2Handler)).Methods("POST")
 	apiCreate.Handle("/admin/subscription/stripe/migrate-to-v2/test-email", http.HandlerFunc(adminHandler.AdminStripeMigrateTestEmailHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/reset-password", http.HandlerFunc(adminHandler.AdminUserResetPasswordHandler)).Methods("POST")
+	// What SendGrid did with the member's last reset email. Its own endpoint
+	// rather than part of the user payload, which the search results fetch
+	// once per row.
+	apiCreate.Handle("/admin/users/{id}/reset-email-delivery", http.HandlerFunc(adminHandler.AdminResetEmailDeliveryHandler)).Methods("GET")
 	apiCreate.Handle("/admin/users/{id}/reactivate", http.HandlerFunc(adminHandler.AdminUserReactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/deactivate", http.HandlerFunc(adminHandler.AdminUserDeactivateHandler)).Methods("POST")
 	apiCreate.Handle("/admin/users/{id}/verify-email", http.HandlerFunc(adminHandler.AdminVerifyEmailHandler)).Methods("POST")
