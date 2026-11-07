@@ -74,6 +74,17 @@ type UserDetails struct {
 	LegalHold *LegalHold `json:"-" bson:"legalHold,omitempty"`
 	ResetPasswordToken       string                `json:"resetPasswordToken" bson:"resetPasswordToken"`
 	ResetPasswordExpires     interface{}           `json:"resetPasswordExpires" bson:"resetPasswordExpires"`
+	// PasswordChangedAt is stamped by every path that writes user.password.
+	// Absent on accounts that have not changed a password since this field
+	// existed, which the admin console shows as not recorded rather than
+	// guessing from updatedAt (any profile edit moves that).
+	PasswordChangedAt interface{} `json:"passwordChangedAt,omitempty" bson:"passwordChangedAt,omitempty"`
+	// LastResetEmailAt / LastResetEmailBy record that a reset email actually
+	// went out, and who asked for it: the member themselves, or the staff
+	// member who pressed the button in the admin console. Written only after
+	// the send succeeds, so an empty value means no email reached SendGrid.
+	LastResetEmailAt interface{} `json:"lastResetEmailAt,omitempty" bson:"lastResetEmailAt,omitempty"`
+	LastResetEmailBy string      `json:"lastResetEmailBy,omitempty" bson:"lastResetEmailBy,omitempty"`
 	EmailVerified            *bool                 `json:"emailVerified" bson:"emailVerified"`
 	EmailVerificationToken   string                `json:"emailVerificationToken" bson:"emailVerificationToken"`
 	EmailVerificationExpires interface{}           `json:"emailVerificationExpires" bson:"emailVerificationExpires"`

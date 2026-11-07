@@ -5818,6 +5818,7 @@ func (u User) UserResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = u.DB.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
 		"$set": bson.M{
 			"user.password":             string(newHash),
+			"user.passwordChangedAt":    primitive.NewDateTimeFromTime(time.Now()),
 			"user.resetPasswordToken":   "",
 			"user.resetPasswordExpires": nil,
 			"updatedAt":                 primitive.NewDateTimeFromTime(time.Now()),
@@ -5951,8 +5952,9 @@ func (u User) SyncPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	// Update user password
 	result, err := u.DB.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
 		"$set": bson.M{
-			"user.password": passwordHash,
-			"updatedAt":     primitive.NewDateTimeFromTime(time.Now()),
+			"user.password":          passwordHash,
+			"user.passwordChangedAt": primitive.NewDateTimeFromTime(time.Now()),
+			"updatedAt":              primitive.NewDateTimeFromTime(time.Now()),
 		},
 	})
 
