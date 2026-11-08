@@ -443,7 +443,8 @@ func sendResetEmail(toEmail, resetLink string) error {
 	to := mail.NewEmail("", toEmail)
 	plain := "Reset your admin password using this link: " + resetLink
 	html := templates.RenderAdminPasswordReset(resetLink)
-	msg := newAccountEmail(from, subject, to, plain, html)
+	msg := mail.NewSingleEmail(from, subject, to, plain, html)
+	msg.SetTrackingSettings(noTrackingSettings())
 	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
 	_, err := client.Send(msg)
 	return err
@@ -2054,7 +2055,8 @@ Lines Police CAD Team`, resetLink)
 
 	html := templates.RenderAdminPasswordReset(resetLink)
 
-	msg := newAccountEmail(from, subject, to, plain, html)
+	msg := mail.NewSingleEmail(from, subject, to, plain, html)
+	msg.SetTrackingSettings(noTrackingSettings())
 	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
 	_, err := client.Send(msg)
 	return err

@@ -5,7 +5,7 @@ package handlers
 // reset link opened a browser security warning and the token went through a
 // third-party redirect. These tests assert the tracking fields in the body
 // that actually goes to api.sendgrid.com, and that the sends which carry a
-// token or an account link are still built the untracked way.
+// token or an account link still turn tracking off.
 
 import (
 	"encoding/json"
@@ -35,11 +35,10 @@ func trackingSettingsOf(t *testing.T, msg *mail.SGMailV3) map[string]interface{}
 
 func assertTrackingOff(t *testing.T, msg *mail.SGMailV3) {
 	t.Helper()
-	settings := trackingSettingsOf(t, msg)
 	assert.Equal(t, map[string]interface{}{
 		"click_tracking": map[string]interface{}{"enable": false, "enable_text": false},
 		"open_tracking":  map[string]interface{}{"enable": false},
-	}, settings)
+	}, trackingSettingsOf(t, msg))
 }
 
 func TestNoTrackingSettings(t *testing.T) {
@@ -59,25 +58,26 @@ func TestNoTrackingSettings(t *testing.T) {
 // A false is only off if it survives omitempty, which it does because
 // sendgrid-go holds these as *bool. A dropped field means SendGrid falls back
 // to the account default, which is tracking on.
-func TestNewAccountEmailPayloadSaysTrackingIsOff(t *testing.T) {
-	msg := newAccountEmail(
+func TestMessagePayloadSaysTrackingIsOff(t *testing.T) {
+	msg := mail.NewSingleEmail(
 		mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com"),
 		"Password Reset Request",
 		mail.NewEmail("", "member@example.test"),
 		"Reset your password: https://www.linespolice-cad.com/reset/abc",
 		`<a href="https://www.linespolice-cad.com/reset/abc">Reset your password</a>`,
 	)
+	msg.SetTrackingSettings(noTrackingSettings())
 
 	t.Logf("POST /v3/mail/send body:\n%s", indentJSON(t, mail.GetRequestBody(msg)))
 
 	assertTrackingOff(t, msg)
 }
 
-// The control: mail.NewSingleEmail, which is what these sends used to call,
-// sends no tracking fields at all, so SendGrid applies the account default and
-// rewrites the links. Without this the assertion above could pass against a
-// payload shape that never reached SendGrid's tracking settings.
-func TestPlainSingleEmailCarriesNoTrackingSettings(t *testing.T) {
+// The control: a message without the settings, which is what these sends used
+// to be, carries no tracking fields at all, so SendGrid applies the account
+// default and rewrites the links. Without this the assertion above could pass
+// against a payload shape that never reached SendGrid's tracking settings.
+func TestMessageWithoutSettingsCarriesNoTrackingSettings(t *testing.T) {
 	msg := mail.NewSingleEmail(
 		mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com"),
 		"Password Reset Request",
@@ -117,9 +117,8 @@ func TestSendUserResetEmailSendsTrackingOff(t *testing.T) {
 }
 
 // untrackedSends are the sends that carry a verification code, a reset token or
-// a link into someone's account. Each must build its message with
-// newAccountEmail; a mail.NewSingleEmail call inside one of these functions is
-// an email going out with tracking on.
+// a link into someone's account. Each must turn tracking off on the message it
+// builds; one that stops doing so is an email going out with tracking on.
 var untrackedSends = map[string][]string{
 	"accountverification.go": {"sendSensitiveEmailAsync"},
 	"admin.go":               {"sendResetEmail", "sendAdminResetEmail"},
@@ -127,7 +126,7 @@ var untrackedSends = map[string][]string{
 	"pendingverification.go": {"CreatePendingVerificationHandler", "sendVerificationEmail"},
 }
 
-func TestAccountEmailsAreBuiltUntracked(t *testing.T) {
+func TestAccountEmailsTurnTrackingOff(t *testing.T) {
 	for file, functions := range untrackedSends {
 		source, err := os.ReadFile(file)
 		require.NoError(t, err, "in-scope file %s has moved; update untrackedSends", file)
@@ -141,10 +140,33 @@ func TestAccountEmailsAreBuiltUntracked(t *testing.T) {
 			require.NotNil(t, decl, "%s: %s has gone; update untrackedSends", file, name)
 
 			body := string(source[fset.Position(decl.Pos()).Offset:fset.Position(decl.End()).Offset])
-			assert.Contains(t, body, "newAccountEmail(",
-				"%s: %s must build its message with newAccountEmail", file, name)
-			assert.NotContains(t, body, "mail.NewSingleEmail(",
+			assert.Contains(t, body, "SetTrackingSettings(noTrackingSettings())",
 				"%s: %s sends an account email with SendGrid tracking left on", file, name)
+		}
+	}
+}
+
+// Every message built in an in-scope function has the settings applied to it:
+// one mail.NewSingleEmail without a matching SetTrackingSettings would be a
+// tracked send hiding behind a sibling that has them.
+func TestEveryAccountMessageIsAccountedFor(t *testing.T) {
+	for file, functions := range untrackedSends {
+		source, err := os.ReadFile(file)
+		require.NoError(t, err)
+
+		fset := token.NewFileSet()
+		parsed, err := parser.ParseFile(fset, file, source, 0)
+		require.NoError(t, err)
+
+		for _, name := range functions {
+			decl := findFunc(parsed, name)
+			require.NotNil(t, decl)
+			body := string(source[fset.Position(decl.Pos()).Offset:fset.Position(decl.End()).Offset])
+
+			built := strings.Count(body, "mail.NewSingleEmail(")
+			untracked := strings.Count(body, "SetTrackingSettings(noTrackingSettings())")
+			assert.Equal(t, built, untracked,
+				"%s: %s builds %d message(s) but turns tracking off on %d", file, name, built, untracked)
 		}
 	}
 }
@@ -161,11 +183,11 @@ func findFunc(file *ast.File, name string) *ast.FuncDecl {
 
 func indentJSON(t *testing.T, raw []byte) string {
 	t.Helper()
-	var out strings.Builder
 	var pretty map[string]interface{}
 	if err := json.Unmarshal(raw, &pretty); err != nil {
 		return string(raw)
 	}
+	var out strings.Builder
 	encoder := json.NewEncoder(&out)
 	encoder.SetIndent("", "  ")
 	require.NoError(t, encoder.Encode(pretty))
