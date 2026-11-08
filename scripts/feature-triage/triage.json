@@ -204,8 +204,8 @@
       ],
       "effort": "M",
       "confidence": "med",
-      "rationale": "Toggle to let police view medical history on servers without EMS/Fire. Staff framed it as a configurable, per-department component under the planned Custom Departments work. Medical history already exists (EMS); this is a permission/visibility toggle + surfacing it to police.",
-      "risks_or_deps": "Ties into Custom Departments plan; privacy toggle default off.",
+      "rationale": "Toggle to let police view medical history on servers without EMS/Fire. Medical history already exists (EMS); this is a permission/visibility toggle + surfacing it to police.",
+      "risks_or_deps": "Privacy toggle default off.",
       "possible_duplicate": "none"
     },
     "6a29d46a69d1034101c666a0": {
@@ -291,7 +291,7 @@
       ],
       "effort": "M",
       "confidence": "med",
-      "rationale": "Restrict weapon-license create/edit/remove to a special 'staff' department (toggleable), so civilians can't self-issue firearm licenses, plus a police 'gun taken' flag. Permissions model exists; this adds a license-permission gate + a field. Fits the Custom Departments direction.",
+      "rationale": "Restrict weapon-license create/edit/remove to a special 'staff' department (toggleable), so civilians can't self-issue firearm licenses, plus a police 'gun taken' flag. Permissions model exists; this adds a license-permission gate + a field.",
       "risks_or_deps": "Overlaps license-permission and DMV requests; unify the permission model.",
       "possible_duplicate": "Restrict who can suspend or revoke licenses; Department Overhaul"
     },
