@@ -319,6 +319,7 @@ Lines Police CAD Team`, resetLink)
 </html>`, resetLink, resetLink)
 
 	msg := mail.NewSingleEmail(from, subject, to, plain, html)
+	msg.SetTrackingSettings(noTrackingSettings())
 	status, body, err := sendGridSendFn(msg)
 	if err != nil {
 		return fmt.Errorf("could not reach sendgrid: %w", err)

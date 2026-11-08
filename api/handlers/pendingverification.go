@@ -102,6 +102,7 @@ func (pv PendingVerification) CreatePendingVerificationHandler(w http.ResponseWr
 		plainTextContent := "Verification code: " + code + ". This code will expire in 24 hours."
 		htmlContent := templates.RenderCode(code)
 		message := mail.NewSingleEmail(from, subject, to, plainTextContent, htmlContent)
+		message.SetTrackingSettings(noTrackingSettings())
 		
 		sendgridAPIKey := os.Getenv("SENDGRID_API_KEY")
 		if sendgridAPIKey == "" {
@@ -383,6 +384,7 @@ func (pv PendingVerification) sendVerificationEmail(email, code string) {
 	plainTextContent := "Verification code: " + code + ". This code will expire in 24 hours."
 	htmlContent := templates.RenderCode(code)
 	message := mail.NewSingleEmail(from, subject, to, plainTextContent, htmlContent)
+	message.SetTrackingSettings(noTrackingSettings())
 	
 	sendgridAPIKey := os.Getenv("SENDGRID_API_KEY")
 	if sendgridAPIKey == "" {
