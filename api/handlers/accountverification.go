@@ -162,7 +162,7 @@ func sendSensitiveEmailAsync(em sensitiveEmail) {
 
 		from := mail.NewEmail("Lines Police CAD", "no-reply@linespolice-cad.com")
 		to := mail.NewEmail("", em.To)
-		message := mail.NewSingleEmail(from, em.Subject, to, em.PlainText, em.HTML)
+		message := newAccountEmail(from, em.Subject, to, em.PlainText, em.HTML)
 
 		client := sendgrid.NewSendClient(apiKey)
 		response, err := client.Send(message)

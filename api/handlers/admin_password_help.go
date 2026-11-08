@@ -318,7 +318,7 @@ Lines Police CAD Team`, resetLink)
 </body>
 </html>`, resetLink, resetLink)
 
-	msg := mail.NewSingleEmail(from, subject, to, plain, html)
+	msg := newAccountEmail(from, subject, to, plain, html)
 	status, body, err := sendGridSendFn(msg)
 	if err != nil {
 		return fmt.Errorf("could not reach sendgrid: %w", err)
