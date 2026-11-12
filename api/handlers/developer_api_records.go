@@ -419,13 +419,15 @@ func (d DeveloperAPI) DevCreateVehicleHandler(w http.ResponseWriter, r *http.Req
 			Image:             strings.TrimSpace(req.Image),
 			LinkedCivilianID:  civilian.ID.Hex(),
 			RegisteredOwner:   civilian.Details.Name,
-			// Registration and insurance default to valid, and stolen to not,
-			// written in the canonical encoding (models/vehicle_flags.go).
-			// These fields carry two historical encodings with opposite
-			// polarity, so the constants are used rather than a literal.
+			// Registration and insurance default to valid, and stolen and
+			// impounded to not, written in the canonical encoding
+			// (models/vehicle_flags.go). These fields carry two historical
+			// encodings with opposite polarity, so the constants are used
+			// rather than a literal.
 			ValidRegistration: models.FlagTrue,
 			ValidInsurance:    models.FlagTrue,
 			IsStolen:          models.FlagFalse,
+			IsImpounded:       models.FlagFalse,
 			ActiveCommunityID: cc.Community.ID.Hex(),
 			UserID:            player.UserID,
 			CreatedAt:         now,
@@ -507,6 +509,7 @@ func (d DeveloperAPI) DevSearchVehiclesHandler(w http.ResponseWriter, r *http.Re
 			// stored values use two encodings with per-field polarity and a
 			// hand-rolled truth test gets them backwards.
 			"stolen":            v.Details.Stolen(),
+			"impounded":         v.Details.Impounded(),
 			"validRegistration": v.Details.RegistrationValid(),
 			"validInsurance":    v.Details.InsuranceValid(),
 		})

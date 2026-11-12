@@ -132,9 +132,11 @@ GET /dev/communities/{id}/vehicles?plate=
 GET /dev/communities/{id}/firearms?serial=
 ```
 
-Vehicle flags come back as resolved booleans (`stolen`, `validRegistration`,
-`validInsurance`), because the stored values use two historical encodings with
-opposite polarity and hand-rolling the truth test gets them backwards.
+Vehicle flags come back as resolved booleans (`stolen`, `impounded`,
+`validRegistration`, `validInsurance`), because the stored values use two
+historical encodings with opposite polarity and hand-rolling the truth test
+gets them backwards. `impounded` is read-only here — only the CAD surfaces
+impound and release.
 
 **NPC separation: available.** Records a key creates carry `source.keyId`, so a
 key's output is findable and removable as a set, and an explicit

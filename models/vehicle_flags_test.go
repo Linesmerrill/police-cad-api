@@ -238,3 +238,125 @@ func TestMarshalJSONThroughVehicleAndSlice(t *testing.T) {
 		t.Errorf("second vehicle = %+v, want registration false and stolen false", out[1].Vehicle)
 	}
 }
+
+// Impounded is deliberately the one flag with no numeric branch. Every other
+// flag has to resolve a legacy select index; IsImpounded was added after that
+// encoding was retired, so "1" and "2" mean nothing here and must not be
+// guessed at. A vehicle whose only numeric-encoded sibling is isStolen must
+// still read as not impounded.
+func TestImpoundedOnlyUnderstandsTheCanonicalEncoding(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{`"true" is impounded`, "true", true},
+		{`"false" is not`, "false", false},
+		{"an absent flag is not", "", false},
+		{`"1" is not impounded — no form ever wrote a select index here`, "1", false},
+		{`"2" is not impounded either`, "2", false},
+		{"an unrecognised value is not impounded", "yes", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := VehicleDetails{IsImpounded: c.value}
+			if got := d.Impounded(); got != c.want {
+				t.Errorf("Impounded() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// Impounded must not be contaminated by the dept-dashboard branch that makes
+// Stolen read "1" as true.
+func TestImpoundedIsIndependentOfTheStolenPolarity(t *testing.T) {
+	deptRecord := VehicleDetails{IsStolen: "1", IsExempt: "2", IsImpounded: "1"}
+	if !deptRecord.Stolen() {
+		t.Fatal("precondition: a dept-dashboard record with isStolen 1 should read as stolen")
+	}
+	if deptRecord.Impounded() {
+		t.Error(`Impounded() = true for isImpounded "1"; the stolen polarity must not leak across`)
+	}
+}
+
+func TestNormalizeFlagsCanonicalizesImpounded(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"true", "true"},
+		{"false", "false"},
+		{"", "false"},
+		{"1", "false"},
+	}
+
+	for _, c := range cases {
+		d := VehicleDetails{IsImpounded: c.in}
+		d.NormalizeFlags()
+		if d.IsImpounded != c.want {
+			t.Errorf("NormalizeFlags() with isImpounded %q gave %q, want %q", c.in, d.IsImpounded, c.want)
+		}
+	}
+}
+
+// Normalizing one flag must not disturb the others — in particular the stolen
+// resolution, which reads IsExempt before IsExempt is rewritten.
+func TestNormalizeFlagsLeavesTheOtherFlagsAlone(t *testing.T) {
+	d := VehicleDetails{
+		ValidRegistration: "1",
+		ValidInsurance:    "2",
+		IsStolen:          "2",
+		IsExempt:          "",
+		IsImpounded:       "true",
+	}
+	d.NormalizeFlags()
+
+	for field, got := range map[string]string{
+		"validRegistration": d.ValidRegistration,
+		"validInsurance":    d.ValidInsurance,
+		"isStolen":          d.IsStolen,
+		"isExempt":          d.IsExempt,
+		"isImpounded":       d.IsImpounded,
+	} {
+		if got != FlagTrue && got != FlagFalse {
+			t.Errorf("%s = %q, want a canonical value", field, got)
+		}
+	}
+
+	if d.ValidRegistration != "true" || d.ValidInsurance != "false" {
+		t.Errorf("registration/insurance = %q/%q, want true/false", d.ValidRegistration, d.ValidInsurance)
+	}
+	if d.IsStolen != "true" {
+		t.Errorf("isStolen = %q, want true", d.IsStolen)
+	}
+	if d.IsExempt != "false" {
+		t.Errorf("isExempt = %q, want false", d.IsExempt)
+	}
+	if d.IsImpounded != "true" {
+		t.Errorf("isImpounded = %q, want true", d.IsImpounded)
+	}
+}
+
+// A read path must always say whether a vehicle is impounded, even for the 2.2M
+// records written before the field existed. A missing key would leave clients
+// guessing, and an absent field is exactly what a stale deploy looks like.
+func TestMarshalJSONAlwaysReportsImpounded(t *testing.T) {
+	b, err := json.Marshal(VehicleDetails{Plate: "28TWQ102"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var out map[string]interface{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	got, present := out["isImpounded"]
+	if !present {
+		t.Fatal("isImpounded missing from the marshalled vehicle")
+	}
+	if got != "false" {
+		t.Errorf("isImpounded = %v, want false", got)
+	}
+}

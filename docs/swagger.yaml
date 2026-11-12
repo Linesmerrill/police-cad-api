@@ -1259,6 +1259,9 @@ definitions:
       image:
         type: string
         x-go-name: Image
+      isImpounded:
+        type: string
+        x-go-name: IsImpounded
       isStolen:
         type: string
         x-go-name: IsStolen
