@@ -968,6 +968,196 @@
       "rationale": "Already built. Admins can create their own report types in Community Settings, then Forms: a form builder with custom sections and fields, per-department toggles, and rank gates (community-forms.ejs, formTemplate.go). The hiring record this asks for is one custom form. This should be closed as a duplicate of the shipped Customizable Reports rather than built, and the requester pointed at where it lives.",
       "risks_or_deps": "Confirm the requester can reach it: administering forms needed owner or administrator until the new 'manage forms' permission shipped, so a non-admin staffer may simply not have seen the page.",
       "possible_duplicate": "Customizable Reports (shipped) - forms builder in Community Settings"
+    },
+    "6ab6090382a024a6bbb07437": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "bot",
+        "website"
+      ],
+      "effort": "L",
+      "confidence": "high",
+      "rationale": "Two asks in one: sync Discord roles to CAD roles, and bind a Discord server to a community. The bot already resolves a guild to a community and gates commands on its own /roles allowlist stored in the DB, so the plumbing exists on one side; the net-new is a mapping between a guild's role ids and CAD roles, plus a reconciler that applies changes in at least one direction. Needs a decision on direction of truth (Discord -> CAD, CAD -> Discord, or both) before it can be scoped properly.",
+      "risks_or_deps": "The bot's role gate is a custom DB allowlist, NOT Discord permissions, so a naive sync would hand community admin to anyone holding a named Discord role. Needs the Manage Roles permission and the guild->community binding to be authenticated, not inferred. Two-way sync invites loops.",
+      "possible_duplicate": "Discord integration cluster; overlaps the bot's existing /roles gate"
+    },
+    "6ade690960e44e7572973d1a": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Civilians can set their own license status today, so a community with a legal system has no approval step. The ask is a pending state plus a review queue for whoever holds the licensing authority. License.status is already a free-form string, so the states exist; the net-new is an opt-in 'licenses need approval' community setting, a pending queue, and a write gate that stops the owner approving their own.",
+      "risks_or_deps": "The licenses collection carries two key sets (legacy ownerID/licenseType vs modern civilianID/type) and legacy CAD dashboards read lowercase <select> values out of `status` — so do NOT bulk-rewrite status, and make any new state additive. Must default to the permissive behaviour communities have now (config over restriction).",
+      "possible_duplicate": "Form per-department rank gates (same read-path/write-path split)"
+    },
+    "6acd9b491b4d4ced17da03d5": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "med",
+      "rationale": "Licenses (wills were the example) that only the Judicial department can see. The Judicial template now exists on both the Departments page and the community template picker, and forms already carry per-department rank gates, so the pattern to copy is there. The net-new is a visibility field on a license type and enforcement on every read path that lists licenses.",
+      "risks_or_deps": "Enforcement has to be on the read path in the API, not in the clients: the website has no API token and relies on a forgeable ?userId=, so a client-side filter is not a control. Four surfaces list licenses (website, mobile, bot, Developer API) and all of them would need the filter.",
+      "possible_duplicate": "Form per-department rank gates; Courts Department Update"
+    },
+    "6acbfa2d90332a95742d39ba": {
+      "category": "probably_not",
+      "scope": [],
+      "effort": "L",
+      "confidence": "high",
+      "rationale": "A DMV department means a custom department, and custom departments are cancelled: the template was removed from every surface in Nov 2026 rather than built. The existing templates (including the new Judicial one) are the supported set.",
+      "risks_or_deps": "None — not being built. A DMV-shaped need is better met by the existing vehicle and license records than by a new department.",
+      "possible_duplicate": "Departments; Custom teams; DMV, guns"
+    },
+    "6ac5ad9a2cbdd36887d368db": {
+      "category": "probably_not",
+      "scope": [],
+      "effort": "L",
+      "confidence": "high",
+      "rationale": "Asks for a customizable department plus a dedicated Department of Transportation. Both are the custom-departments feature, which is cancelled: the Custom template and its Coming Soon notices were removed from every surface in Nov 2026 rather than built.",
+      "risks_or_deps": "None — not being built.",
+      "possible_duplicate": "A DMV Department; Custom teams"
+    },
+    "6adacc2bca4d1e28b2666729": {
+      "category": "quick_win",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "Impound and release a vehicle the way 'marked stolen' already works. Built as a new isImpounded flag on the vehicle, read through the shared per-field flag helper and written through the existing PUT /api/v1/vehicle/{id}, with an Impounded badge wherever the Stolen badge appears and Impound/Release wherever Report Stolen appears. The civilian owner sees the badge on their own vehicle and gets no control to clear it.",
+      "risks_or_deps": "The flag must NOT inherit the legacy select-index polarity that inverted isStolen: isImpounded is new, so only 'true'/'false' are ever written or read. PUT /api/v1/vehicle/{id} has no server-side permission check at all today, so the gate is the same UI-side one Report Stolen has — that debt is unchanged by this, not introduced by it.",
+      "possible_duplicate": "",
+      "prs": [
+        "police-cad-api#299",
+        "police-cad#1071",
+        "police-cad-app@140fdde (production)"
+      ]
+    },
+    "6acb31872fa459b12f5e253e": {
+      "category": "quick_win",
+      "scope": [
+        "website",
+        "mobile"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "This already works. An executed warrant can be deleted from the command and department dashboards' All Warrants panel (the Delete Warrant control is not status-gated, and the status filter offers 'executed'), and from the mobile warrant detail screen for a judge or anyone with delete rights. DELETE /api/v1/warrant/{id} applies no status filter either. Point requesters at the All Warrants panel.",
+      "risks_or_deps": "The police and dispatch dashboards show no action buttons at all on an executed warrant, and no Delete control on any warrant — their Withdraw is restricted to the requesting officer on a pending or denied warrant. Adding Delete there would hand executed-warrant deletion to any requesting officer, which widens who can delete. Separately: DELETE /api/v1/warrant/{id} performs a hard delete with no auth or ownership check whatsoever, and that is worth fixing on its own.",
+      "possible_duplicate": ""
+    },
+    "6ac02551cbdc8899ceeb5af7": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "med",
+      "rationale": "An officer writing a report wants to pull a civilian's existing record into it rather than retype it. Two separable halves: an 'insert from prior record' picker on the report form (search the civilian's arrests, citations and reports, then paste the chosen text into a field), and a download/export of an existing report. The picker is the valuable half and reuses the record lookups the report form already makes.",
+      "risks_or_deps": "Pasting text from another record copies a snapshot, not a link — decide whether an edit to the source should ever reach the copy (it should not). Report fields are community-defined, so the paste target has to be any textarea rather than a named field. Watch the narrative length cap.",
+      "possible_duplicate": "Customizable Reports / report workflows cluster"
+    },
+    "6ab7e37f345c34eb25aff4f7": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "L",
+      "confidence": "low",
+      "rationale": "Property documents, bills and reports for civilians, plus more for civilian jobs to do. The economy already provides jobs per department under the community.economy.enabled master toggle, so the jobs half has somewhere to live; a property record type (deed, lease, bill) is net-new and would need its own collection, its own forms and its own surfaces. Needs narrowing to one concrete record type before it is buildable.",
+      "risks_or_deps": "As written this is three features. Property records touch the economy (bills imply balances) which is a money path, so write gates have to go through the API with the shared secret rather than a forgeable ?userId=.",
+      "possible_duplicate": "Economy/jobs cluster"
+    },
+    "6af3a8a48a5d0aa9972f2ba0": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "high",
+      "rationale": "Let on-duty personnel create a call and assign themselves when no dispatcher is on duty. Calls already exist end to end (v2 GET /api/v2/calls/community/{id}, create-call forms on the dispatch dashboard and the mobile department home), so the net-new is the permission: a community setting for who may create a call and self-assign, optionally unlocking automatically while no dispatcher is clocked in. 'No dispatcher is active' is derivable from the clock sessions the AFK sweeper already reads.",
+      "risks_or_deps": "A new permission is four surfaces: the API list and gate, the website routes plus the roles modal, the mobile roles editor (not just the gated screen), and an explicit bot check. 'No dispatcher on duty' must be computed server-side from clock sessions, since only website shifts are AFK-swept. Default permissive per the config-over-restriction rule.",
+      "possible_duplicate": "Dispatch/calls cluster"
+    },
+    "6af1f23f86582a869732cec2": {
+      "category": "probably_not",
+      "scope": [],
+      "effort": "XL",
+      "confidence": "high",
+      "rationale": "Custom teams with custom names, abbreviations, logos, colours, permissions and ranks is the custom-departments feature, which is cancelled: the Custom template and its Coming Soon notices were removed from every surface in Nov 2026 rather than built. Parts of the ask are already met by the existing templates — per-department ranks, role colours and the roles allowlist all exist today.",
+      "risks_or_deps": "None — not being built. Worth replying with what the existing templates already do, since several of the eight sub-asks are shipped.",
+      "possible_duplicate": "Departments; A DMV Department"
+    },
+    "6ae35136eb9d532d38ef5b5c": {
+      "category": "full_feature",
+      "scope": [
+        "api",
+        "website",
+        "mobile"
+      ],
+      "effort": "M",
+      "confidence": "low",
+      "rationale": "An undercover officer role. Too thin to scope as written: 'undercover' could mean hiding a unit from the public roster and the active-units list, masking its call sign on calls, or a separate identity that civilians cannot look up. Needs the requester to say which before it can be estimated.",
+      "risks_or_deps": "Hiding a unit from rosters means every surface that lists units has to honour it, and a unit hidden from dispatch is a safety problem in roleplay terms. Should be an opt-in community toggle rather than a restriction.",
+      "possible_duplicate": ""
+    },
+    "6ae02125e0615748cc3040bd": {
+      "category": "quick_win",
+      "scope": [
+        "mobile"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "Tablets rotate, phones stay portrait. On iOS this is one Info.plist key: expo's `orientation: \"portrait\"` writes UISupportedInterfaceOrientations for every idiom and no ~ipad variant, so an explicit UISupportedInterfaceOrientations~ipad frees the iPad alone. Android arrived there by itself in 1.30.23: at target API 36 the system ignores android:screenOrientation on displays 600dp and wider, so tablets and unfolded foldables already rotate.",
+      "risks_or_deps": "No screen in the app has any width-based layout logic (no useWindowDimensions, no isTablet anywhere), and the handful of Dimensions.get reads are at module scope so they do not react to rotation — so landscape needs checking screen by screen rather than assuming it reflows. Dropping below target API 36 would silently re-lock Android tablets.",
+      "possible_duplicate": "",
+      "prs": [
+        "police-cad-app@e3acb1f (production)"
+      ]
+    },
+    "6ada3982ca4d1e28b2665969": {
+      "category": "easy",
+      "scope": [
+        "api",
+        "website"
+      ],
+      "effort": "S",
+      "confidence": "med",
+      "rationale": "Half of this already ships: communities can upload custom tone sounds to Cloudinary and assign them (community.customToneSounds, with CRUD at /api/v1/community/{id}/tone-sounds and an editor in the community settings modals). Worth replying to the requester with where that lives. The net-new is the second half — broadcasting a priority-traffic tone to everyone on the CAD rather than attaching a sound to a tone group.",
+      "risks_or_deps": "A broadcast tone plays on other people's devices, so it needs the existing opt-in (user.alertSoundsEnabled) honoured and a rate limit, or it becomes a griefing tool. Tone events already write to tone_logs, so there is an audit trail to extend.",
+      "possible_duplicate": "Dispatch tones cluster"
+    },
+    "6ad8f6a4a38b19cd3ae6cde6": {
+      "category": "quick_win",
+      "scope": [
+        "website",
+        "mobile"
+      ],
+      "effort": "S",
+      "confidence": "high",
+      "rationale": "Long penal code descriptions were cut off because the pickers dropped `explanation` entirely (a Select2 <option> cannot carry it) and the reference tables truncated the cell to a native tooltip. Fixed with a small info control on each row that opens the full text in a scrollable modal, without selecting the charge. Note the data has no separate code field — a violation is { name, jailTime, fine, explanation } — so the modal title is the name.",
+      "risks_or_deps": "The control sits inside something already clickable: Select2 selects on mouseup delegated from its results container, and the command dashboard's rows bind click on the row itself, so the event has to be stopped in the capture phase. The description is author-written text injected into a modal, so it must be escaped and rendered pre-wrap rather than as markup.",
+      "possible_duplicate": "Have Police/CIV Departments able to see and fully read the Penal Code (shipped)",
+      "prs": [
+        "police-cad#1071",
+        "police-cad-app@140fdde (production)"
+      ]
     }
   },
   "unfiled": [
@@ -982,7 +1172,8 @@
       "effort": "M",
       "rationale": "When creating a penal code/violation, prompt whether it has a quantity and what unit: a plain COUNT (scam cards, 'two counts of murder') or a WEIGHT unit (oz/lb/kilo for drugs). When charging, the officer enters the quantity and the CAD multiplies fine and jail time per unit (penalty defined per-unit). Add the count to the report. Data path already exists (ArrestCharge + server-side ComputeArrestTotals); net-new is quantity+unit on the applied charge plus hasQuantity/unit on the penal-code definition.",
       "risks_or_deps": "Multiply in ComputeArrestTotals (server = source of truth); quantity optional + backward-compatible; a 'Life' sentence stays Life regardless of count.",
-      "possible_relation": "Extends the shipped Sentencing Calculator / Arrest Fine and Time Calculation"
+      "possible_relation": "Extends the shipped Sentencing Calculator / Arrest Fine and Time Calculation",
+      "category": "full_feature"
     },
     {
       "title": "Increase report narrative character limit (500 -> 1000)",
@@ -995,7 +1186,12 @@
       "effort": "S",
       "rationale": "The report narrative caps at 500 chars and most reports exceed it. Double to ~1000. Scope to the arrest/police report narrative field specifically (maxlength=500 is reused on ~15 textareas across calls/BOLOs/notes/911 - do NOT blanket-raise) and check for a server-side cap.",
       "risks_or_deps": "Confirm the exact narrative field(s) and verify no server-side validation truncates at 500.",
-      "possible_relation": ""
+      "possible_relation": "",
+      "category": "quick_win",
+      "prs": [
+        "police-cad#1071",
+        "police-cad-app@140fdde (production)"
+      ]
     }
   ]
 }
