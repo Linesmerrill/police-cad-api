@@ -239,8 +239,8 @@ def main():
         w("_Captured from Discord/DMs before a formal request exists — file them "
           "on the site to add upvotes, then move the entry into `triage`._")
         w("")
-        w("| Ask | Source | Effort | Scope | Notes |")
-        w("|---|---|:--:|---|---|")
+        w("| Ask | Source | Effort | Scope | PRs | Notes |")
+        w("|---|---|:--:|---|---|---|")
         for u in unfiled:
             notes = esc(u.get("rationale", ""))
             risks = esc(u.get("risks_or_deps", ""))
@@ -250,7 +250,8 @@ def main():
             if rel:
                 notes += f" _Related: {rel}_"
             w(f"| {esc(u.get('title','(untitled)'))} | {esc(u.get('source',''))} | "
-              f"{u.get('effort','?')} | {scope_str(u.get('scope'))} | {notes} |")
+              f"{u.get('effort','?')} | {scope_str(u.get('scope'))} | "
+              f"{pr_links(u.get('prs')) or '—'} | {notes} |")
         w("")
 
     # ---- Shipped ----------------------------------------------------------

@@ -841,10 +841,10 @@ paths:
       responses:
         "200":
           description: |
-            Matching vehicles. The `stolen`, `validRegistration` and
-            `validInsurance` flags are booleans here: the stored values use two
-            historical encodings with opposite polarity, so they are resolved
-            for you.
+            Matching vehicles. The `stolen`, `impounded`, `validRegistration`
+            and `validInsurance` flags are booleans here: the stored values use
+            two historical encodings with opposite polarity, so they are
+            resolved for you. `impounded` is read-only over this API.
     post:
       tags: [Records]
       summary: Register a vehicle to a character

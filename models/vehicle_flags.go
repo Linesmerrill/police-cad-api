@@ -4,7 +4,8 @@ import "encoding/json"
 
 // Vehicle flag encodings.
 //
-// The four boolean-ish vehicle flags are stored in two different encodings.
+// The original four boolean-ish vehicle flags are stored in two different
+// encodings. (IsImpounded, added later, only ever uses the canonical one.)
 // Newer records use the strings "true"/"false". Older records use a 1-based
 // *select index* left over from the original form — which means the numeric
 // encoding is NOT a boolean, and its polarity depends on the order the options
@@ -95,7 +96,17 @@ func (d VehicleDetails) Exempt() bool {
 	return flagYesIsOne(d.IsExempt)
 }
 
-// NormalizeFlags rewrites the four flags into the canonical "true"/"false"
+// Impounded reports whether the vehicle is impounded.
+//
+// IsImpounded was added in Nov 2026, after the canonical "true"/"false"
+// encoding. No form ever wrote a select index into it, so unlike Stolen there
+// is no numeric polarity to resolve and none should be invented: a value this
+// helper does not recognise means not impounded.
+func (d VehicleDetails) Impounded() bool {
+	return d.IsImpounded == FlagTrue
+}
+
+// NormalizeFlags rewrites the flags into the canonical "true"/"false"
 // encoding. It is idempotent, so it is safe to apply on every read and write.
 func (d *VehicleDetails) NormalizeFlags() {
 	// Resolve stolen first: its numeric polarity is decided by IsExempt, so it
@@ -106,6 +117,7 @@ func (d *VehicleDetails) NormalizeFlags() {
 	d.ValidInsurance = flagString(d.InsuranceValid())
 	d.IsExempt = flagString(d.Exempt())
 	d.IsStolen = flagString(stolen)
+	d.IsImpounded = flagString(d.Impounded())
 }
 
 // MarshalJSON emits the canonical flag encoding on every read path, so clients
