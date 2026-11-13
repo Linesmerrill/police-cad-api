@@ -560,15 +560,20 @@ func (s SocialAuth) verifyOrRefuse(ctx context.Context, w http.ResponseWriter, p
 		config.InfoStatus("that is not a provider we support", http.StatusBadRequest, w, err)
 		return nil, false
 	}
+	// The reason is logged and deliberately not passed to config.InfoStatus,
+	// which copies a non-database error into the response body. Which check
+	// failed is useful to us and useful to nobody else: naming it tells
+	// somebody holding a forged token which part to fix next.
 	checkedNonce, err := safeAuthNonce(nonce)
 	if err != nil {
-		config.InfoStatus("that sign-in could not be verified", http.StatusUnauthorized, w, err)
+		zap.S().Infow("social sign-in refused", "provider", providerName, "reason", err)
+		config.InfoStatus("that sign-in could not be verified", http.StatusUnauthorized, w, nil)
 		return nil, false
 	}
 	identity, err := s.verifier().Verify(ctx, providerName, token, checkedNonce)
 	if err != nil {
 		zap.S().Infow("social sign-in refused", "provider", providerName, "reason", err)
-		config.InfoStatus("that sign-in could not be verified", http.StatusUnauthorized, w, err)
+		config.InfoStatus("that sign-in could not be verified", http.StatusUnauthorized, w, nil)
 		return nil, false
 	}
 	return identity, true

@@ -342,3 +342,22 @@ func TestSocialVerify_RefusesADeactivatedAccount(t *testing.T) {
 		t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestSocialToken_SaysNothingAboutWhichCheckFailed(t *testing.T) {
+	f := newTokenFixture(t)
+
+	// A forged token gets one generic refusal. Naming the failing check — a
+	// bad signature, a wrong audience, a stale nonce — tells whoever sent it
+	// which part to fix next.
+	body := fmt.Sprintf(`{"provider":%q,"idToken":"not-even-a-jwt","nonce":%q}`,
+		models.AuthProviderGoogle, testNonce)
+	rr := f.post(t, f.api.SocialTokenHandler, "/auth/social/token", body, "")
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+	for _, leak := range []string{"malformed", "segments", "signature", "audience", "nonce", "issuer"} {
+		if strings.Contains(strings.ToLower(rr.Body.String()), leak) {
+			t.Errorf("the refusal names the failing check (%q): %s", leak, rr.Body.String())
+		}
+	}
+}
