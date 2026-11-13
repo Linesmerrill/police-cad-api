@@ -49,6 +49,19 @@ type SocialAuth struct {
 	ALDB       databases.AuditLogDatabase
 
 	Verifier *oidcVerifier
+
+	// IssueToken mints the app's bearer session. A field so a test can assert
+	// what the handler does with a token without standing up the token store;
+	// nil means api.IssueBearerToken, which is what production uses.
+	IssueToken func(r *http.Request, email, userID string) (string, error)
+}
+
+// issueToken mints a bearer session for an account.
+func (s SocialAuth) issueToken(r *http.Request, email, userID string) (string, error) {
+	if s.IssueToken != nil {
+		return s.IssueToken(r, email, userID)
+	}
+	return api.IssueBearerToken(r, email, userID)
 }
 
 // NewSocialAuth builds the handler with the default verifier.
@@ -163,77 +176,46 @@ func (s SocialAuth) SocialVerifyHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Already linked: this is a sign-in.
-	existing, err := s.findIdentity(ctx, identity.Provider, identity.Subject)
+	// What this identity means for our accounts — a sign-in, a sign-up, or a
+	// link that has to be proved — is decided in one place and shared with the
+	// app's /auth/social/token (social_auth_session.go).
+	resolved, status, err := s.resolveIdentity(ctx, identity)
 	if err != nil {
-		config.ErrorStatus("could not complete that sign-in", http.StatusInternalServerError, w, err)
+		writeSocialRefusal(w, status, err)
 		return
 	}
-	if existing != nil {
-		user, err := s.loadUser(ctx, existing.UserID)
-		if err != nil {
-			// The identity points at an account that is gone. Refusing is the
-			// only safe answer; silently creating a new one would detach the
-			// person from whatever is left of their old account.
-			config.InfoStatus("that account is no longer available", http.StatusNotFound, w, err)
-			return
-		}
-		if !user.CanAuthenticate() {
-			config.InfoStatus("that account cannot be signed into", http.StatusForbidden, w,
-				fmt.Errorf("account not claimed"))
-			return
-		}
-		s.touchIdentity(ctx, existing, identity)
+
+	switch resolved.Outcome {
+	case socialOutcomeLinkRequired:
+		// Proof required. The account id is deliberately absent: the caller
+		// has not yet shown they own this account, and handing it over here
+		// would be telling them something they have not earned.
+		_ = json.NewEncoder(w).Encode(socialVerifyResponse{
+			Outcome:     socialOutcomeLinkRequired,
+			Provider:    identity.Provider,
+			MaskedEmail: models.MaskEmail(resolved.Owner.Details.Email),
+			Message: fmt.Sprintf("You already have an LPC account for that address. Sign in, or we can email %s a code to connect your %s account.",
+				models.MaskEmail(resolved.Owner.Details.Email), models.AuthProviderLabel(identity.Provider)),
+		})
+	case socialOutcomeSignedUp:
+		_ = json.NewEncoder(w).Encode(socialVerifyResponse{
+			Outcome:     socialOutcomeSignedUp,
+			Provider:    identity.Provider,
+			UserID:      resolved.User.ID,
+			DisplayName: resolved.DisplayName,
+			// Apple sends a name only on the very first authorization, and
+			// nothing guarantees we were the ones who got it. The caller uses
+			// this to decide whether to ask for a username rather than to
+			// invent one.
+			NeedsProfile: resolved.DisplayName == "",
+		})
+	default:
 		_ = json.NewEncoder(w).Encode(socialVerifyResponse{
 			Outcome:  socialOutcomeSignedIn,
 			Provider: identity.Provider,
-			UserID:   user.ID,
+			UserID:   resolved.User.ID,
 		})
-		return
 	}
-
-	// Not linked yet. Does the verified address belong to an account already?
-	//
-	// A relay address never does. Apple mints it per application, so it cannot
-	// be the address another account was registered with, and treating a match
-	// as meaningful would be matching on a value only we ever see.
-	if identity.Email != "" && !identity.PrivateRelay {
-		owner, err := s.findUserByEmail(ctx, identity.Email)
-		if err != nil {
-			config.ErrorStatus("could not complete that sign-in", http.StatusInternalServerError, w, err)
-			return
-		}
-		if owner != nil {
-			// Proof required. The account id is deliberately absent: the caller
-			// has not yet shown they own this account, and handing it over here
-			// would be telling them something they have not earned.
-			_ = json.NewEncoder(w).Encode(socialVerifyResponse{
-				Outcome:     socialOutcomeLinkRequired,
-				Provider:    identity.Provider,
-				MaskedEmail: models.MaskEmail(owner.Details.Email),
-				Message: fmt.Sprintf("You already have an LPC account for that address. Sign in, or we can email %s a code to connect your %s account.",
-					models.MaskEmail(owner.Details.Email), models.AuthProviderLabel(identity.Provider)),
-			})
-			return
-		}
-	}
-
-	// Nothing matches: a new account, owned by this provider subject.
-	user, err := s.createAccount(ctx, identity)
-	if err != nil {
-		config.ErrorStatus("could not create your account", http.StatusInternalServerError, w, err)
-		return
-	}
-	_ = json.NewEncoder(w).Encode(socialVerifyResponse{
-		Outcome:     socialOutcomeSignedUp,
-		Provider:    identity.Provider,
-		UserID:      user.ID,
-		DisplayName: identity.Name,
-		// Apple sends a name only on the very first authorization, and nothing
-		// guarantees we were the ones who got it. The caller uses this to decide
-		// whether to ask for a username rather than to invent one.
-		NeedsProfile: identity.Name == "",
-	})
 }
 
 // socialMaxBodyBytes bounds a request body. An ID token is the only large field

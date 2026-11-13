@@ -11,7 +11,6 @@ import (
 
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/linesmerrill/police-cad-api/databases"
 	"github.com/linesmerrill/police-cad-api/models"
 	"github.com/shaj13/go-guardian/auth"
@@ -186,18 +185,26 @@ func (m MiddlewareDB) CreateToken(w http.ResponseWriter, r *http.Request) {
 		userID = user.ID
 	}
 
-	token := uuid.New().String()
-	authUser := auth.NewDefaultUser(email, userID, nil, nil)
-	tokenStrategy := authenticator.Strategy(bearer.CachedStrategyKey)
-	auth.Append(tokenStrategy, token, authUser, r)
+	// One spelling of "mint a session", shared with the social sign-in. A
+	// store failure is answered with a 503 the app retries rather than with a
+	// token that was never persisted and would 401 on every later request.
+	token, err := IssueBearerToken(r, email, userID)
+	if err != nil {
+		zap.S().Errorw("CreateToken: could not issue a token",
+			"email", email, "userID", userID, "error", err)
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write(unavailableBody(errAuthUnavailable.Error()))
+		return
+	}
 
 	response := map[string]string{
 		"token": token,
 		"_id":   userID,
 	}
 
-	responseBody, err := json.Marshal(response)
-	if err != nil {
+	responseBody, marshalErr := json.Marshal(response)
+	if marshalErr != nil {
 		http.Error(w, "failed to marshal response", http.StatusInternalServerError)
 		return
 	}
@@ -290,36 +297,21 @@ func (m MiddlewareDB) ValidateUser(ctx context.Context, r *http.Request, email, 
 		logins.remember(dbEmailResp.ID, dbEmailResp.Details.Password, password)
 	}
 
-	// Refuse an account a developer integration created that the player has
-	// never claimed.
+	// Whether this account may be signed into at all: an unclaimed shell a
+	// developer integration provisioned, a deactivated account, a suspension
+	// still in force.
 	//
-	// Such an account holds no email and no password hash, so neither of the
-	// checks above could have passed and reaching here should be impossible.
-	// It is checked anyway because the cost of being wrong is somebody else's
-	// account: a developer key knows the id of every account it provisioned,
-	// and one future code path that sets an email on one would otherwise turn
-	// it into a way in. See docs/DEVELOPER_API.md.
-	if !dbEmailResp.CanAuthenticate() {
-		zap.S().Warnw("ValidateUser: refused an unclaimed provisioned account",
-			"userID", dbEmailResp.ID)
-		return nil, fmt.Errorf("invalid credentials")
-	}
-
-	// Check if the user is deactivated
-	if dbEmailResp.Details.IsDeactivated {
-		zap.S().Warnw("ValidateUser: account is deactivated",
+	// Shared with the social sign-in (api/account_gate.go) rather than written
+	// out here, because every way into an account has to refuse the same
+	// accounts. An unclaimed shell holds no email and no password hash, so the
+	// checks above could not have passed and reaching it should be impossible;
+	// it is still checked, because the cost of being wrong is somebody else's
+	// account. See docs/DEVELOPER_API.md.
+	if _, err := AccountSignInError(&dbEmailResp, time.Now()); err != nil {
+		zap.S().Warnw("ValidateUser: account cannot be signed into",
 			"email", email,
-			"userID", dbEmailResp.ID)
-		return nil, fmt.Errorf("account is deactivated. Please contact support to restore access")
-	}
-
-	// Check if the user is serving a moderation suspension. This is the single
-	// enforcement point: expiry is computed here rather than flipped by a cron,
-	// so a suspension lifts itself the moment it elapses.
-	if err := SuspensionLoginError(dbEmailResp.Details.Suspension, time.Now()); err != nil {
-		zap.S().Warnw("ValidateUser: account is suspended",
-			"email", email,
-			"userID", dbEmailResp.ID)
+			"userID", dbEmailResp.ID,
+			"reason", err)
 		return nil, err
 	}
 

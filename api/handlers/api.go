@@ -427,6 +427,10 @@ func (a *App) New() *mux.Router {
 	// is the whole point of it — so it must never read one. It derives the
 	// account from the token and nothing else.
 	apiCreate.Handle("/auth/social/verify", http.HandlerFunc(social.SocialVerifyHandler)).Methods("POST")
+	// The app's own sign-in. Same three outcomes as verify, decided by the
+	// same code, plus the bearer token the app authenticates with — which
+	// /auth/token cannot give an account that has no password.
+	apiCreate.Handle("/auth/social/token", http.HandlerFunc(social.SocialTokenHandler)).Methods("POST")
 	apiCreate.Handle("/auth/social/methods", http.HandlerFunc(social.SocialMethodsHandler)).Methods("GET")
 	apiCreate.Handle("/auth/social/link", http.HandlerFunc(social.SocialLinkHandler)).Methods("POST")
 	apiCreate.Handle("/auth/social/link/request-code", http.HandlerFunc(social.SocialLinkRequestCodeHandler)).Methods("POST")
@@ -487,6 +491,11 @@ func (a *App) New() *mux.Router {
 	ws := r.PathPrefix("/ws").Subrouter()
 
 	apiCreate.Handle("/auth/token", api.Middleware(http.HandlerFunc(m.CreateToken))).Methods("POST")
+	// Renewing a session from the session itself, for an account with no
+	// password to re-authenticate with. api.Middleware resolves the bearer
+	// into the request context; the handler reads the actor from there and
+	// from nowhere else.
+	apiCreate.Handle("/auth/session/refresh", api.Middleware(http.HandlerFunc(m.RefreshToken))).Methods("POST")
 	apiCreate.Handle("/auth/logout", api.Middleware(http.HandlerFunc(api.RevokeToken))).Methods("DELETE")
 	apiCreate.Handle("/admin/login", http.HandlerFunc(adminHandler.AdminLoginHandler)).Methods("POST")
 	// Admin two-factor authentication (admin_mfa.go).
