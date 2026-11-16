@@ -83,6 +83,14 @@ func (h FormSubmission) CreateFormSubmissionHandler(w http.ResponseWriter, r *ht
 		config.ErrorStatus("communityID and formTemplateSlug are required", http.StatusBadRequest, w, fmt.Errorf("missing required fields"))
 		return
 	}
+	// What the officer typed, before auto-fill is merged in below. The cap is on
+	// text a person submits; a prefilled value is a copy of a record that was
+	// already accepted elsewhere, and rejecting it here would block creating a
+	// report from an existing source rather than stopping anyone writing too
+	// much. See narrative_limit.go.
+	if rejectLongNarrativeField(w, body.Data) {
+		return
+	}
 
 	ctx, cancel := api.WithQueryTimeout(r.Context())
 	defer cancel()
@@ -237,6 +245,13 @@ func (h FormSubmission) UpdateFormSubmissionHandler(w http.ResponseWriter, r *ht
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		config.ErrorStatus("failed to decode request body", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// Same cap as on create: an edit that sends the narrative sends the whole
+	// field, so this is the new value. Checked before the lookup so an
+	// over-length body never reaches the database.
+	if rejectLongNarrativeField(w, body.Data) {
 		return
 	}
 

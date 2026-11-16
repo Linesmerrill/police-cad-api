@@ -67,6 +67,12 @@ func (a ArrestReport) CreateArrestReportHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// The forms cap the narrative in the browser and on the phone; this is the
+	// same cap where it cannot be skipped. See narrative_limit.go.
+	if rejectLongNarrative(w, newArrestReport.Details.Narrative) {
+		return
+	}
+
 	newArrestReport.ID = primitive.NewObjectID()
 	newArrestReport.Details.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
 
@@ -108,6 +114,13 @@ func (a ArrestReport) UpdateArrestReportHandler(w http.ResponseWriter, r *http.R
 	bID, err := primitive.ObjectIDFromHex(arrestReportID)
 	if err != nil {
 		config.ErrorStatus("invalid Arrest report ID", http.StatusBadRequest, w, err)
+		return
+	}
+
+	// An edit resubmits the narrative, so the cap applies to the new value the
+	// same way it does on create. A body that omits the field changes nothing
+	// about the stored narrative and is left alone.
+	if rejectLongNarrativeField(w, updatedDetails) {
 		return
 	}
 
